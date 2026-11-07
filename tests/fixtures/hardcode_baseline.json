@@ -73,12 +73,6 @@
   },
   {
     "category": "posix-home",
-    "count": 3,
-    "match": "/home/dev",
-    "path": "docs/TESTING.md"
-  },
-  {
-    "category": "posix-home",
     "count": 2,
     "match": "/home/dev",
     "path": "src/crowley/data/game_target.json"
@@ -348,12 +342,6 @@
     "path": "tests/test_trading_paper.py"
   },
   {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "tests/test_x11_identity_observer.py"
-  },
-  {
     "category": "temporary-path",
     "count": 2,
     "match": "/tmp/ambient",
@@ -370,30 +358,6 @@
     "count": 1,
     "match": "/tmp/crowley-private-xvfb-startup.lock",
     "path": "tests/x11_startup.py"
-  },
-  {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "src/crowley/native/build.py"
-  },
-  {
-    "category": "posix-home",
-    "count": 8,
-    "match": "/home/dev",
-    "path": "tools/gnome-telemetry-region/README.md"
-  },
-  {
-    "category": "posix-home",
-    "count": 2,
-    "match": "/home/dev",
-    "path": "tools/gnome-telemetry-region/manifest.example.json"
-  },
-  {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "tools/gnome-telemetry-region/offline_harness.py"
   },
   {
     "category": "temporary-path",

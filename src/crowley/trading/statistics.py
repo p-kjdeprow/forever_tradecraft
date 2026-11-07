@@ -162,8 +162,14 @@ def _fair_series(books: Sequence[Book]) -> list[FairStatistics]:
     pairs_by_observation: list[list[int]] = [[] for _ in books]
     result: list[FairStatistics] = []
 
+    def log_reference(index: int) -> float:
+        value = log_references[index]
+        if value is None:
+            raise ValueError("fair statistics pair has no reference price")
+        return value
+
     def slope(left: int, right: int) -> float:
-        return (log_references[right] - log_references[left]) * 86400 / (books[right].t - books[left].t)
+        return (log_reference(right) - log_reference(left)) * 86400 / (books[right].t - books[left].t)
 
     for index, book in enumerate(books):
         window_start = book.t - 86400
@@ -172,16 +178,19 @@ def _fair_series(books: Sequence[Book]) -> list[FairStatistics]:
             slopes.remove_many(pairs_by_observation[expired])
             pairs_by_observation[expired].clear()
             reference = references[expired]
+            if reference is None:
+                raise ValueError("fair statistics active observation has no reference price")
             position = bisect_left(sorted_references, reference)
             sorted_references.pop(position)
         prior = index - 1
-        if prior >= 0 and references[prior] is not None and window_start <= books[prior].t < book.t:
+        prior_reference = references[prior] if prior >= 0 else None
+        if prior >= 0 and prior_reference is not None and window_start <= books[prior].t < book.t:
             values = [slope(other, prior) for other in active]
             pair_ids = slopes.add_many(values)
             for other, pair_id in zip(active, pair_ids, strict=True):
                 pairs_by_observation[other].append(pair_id)
             active.append(prior)
-            insort(sorted_references, references[prior])
+            insort(sorted_references, prior_reference)
         if len(sorted_references) < 8:
             result.append(FairStatistics(None, None, None, None, len(sorted_references)))
             continue

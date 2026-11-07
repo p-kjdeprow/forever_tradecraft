@@ -8,15 +8,47 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from re import Pattern
+from typing import TypeGuard, cast
 
 type JsonValue = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
+
+
+def _is_nonempty_string(value: object) -> bool:
+    return isinstance(value, str) and bool(value)
+
+
+def _is_integer(value: object) -> bool:
+    return not isinstance(value, bool) and isinstance(value, int)
+
+
+def _is_bytes(value: object) -> bool:
+    return isinstance(value, bytes)
+
+
+def _all_strings(values: Iterable[object]) -> bool:
+    return all(isinstance(value, str) for value in values)
+
+
+def _is_string_mapping(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    mapping = cast(Mapping[object, object], value)
+    return _all_strings(mapping.keys())
+
+
+def _is_json_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
+def _is_json_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return isinstance(value, dict)
 
 
 class StrictValueError(ValueError):
     """A strict value failed validation at *field*."""
 
     def __init__(self, field: str, message: str) -> None:
-        if not isinstance(field, str) or not field:
+        if not _is_nonempty_string(field):
             raise ValueError("strict validation field must be a non-empty string")
         self.field = field
         self.message = message
@@ -24,7 +56,7 @@ class StrictValueError(ValueError):
 
 
 def _check_bound(value: int | None, *, name: str, field: str) -> None:
-    if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+    if value is not None and not _is_integer(value):
         raise StrictValueError(field, f"{name} must be an integer")
 
 
@@ -100,7 +132,7 @@ def strict_finite_float(value: object, *, field: str) -> float:
 def sha256_hex(data: bytes) -> str:
     """Return the lowercase SHA-256 digest of bytes as hexadecimal text."""
 
-    if not isinstance(data, bytes):
+    if not _is_bytes(data):
         raise TypeError("sha256_hex requires bytes")
     return hashlib.sha256(data).hexdigest()
 
@@ -112,14 +144,12 @@ def exact_keys(
 ) -> dict[str, object]:
     """Require exactly the declared required and optional mapping keys."""
 
-    if not isinstance(mapping, Mapping):
+    if not _is_string_mapping(mapping):
         raise StrictValueError("$", "must be an object")
     required_keys = frozenset(required)
     optional_keys = frozenset(optional)
-    if any(not isinstance(key, str) for key in required_keys | optional_keys):
+    if not _all_strings(required_keys | optional_keys):
         raise StrictValueError("$", "required and optional keys must be strings")
-    if any(not isinstance(key, str) for key in mapping):
-        raise StrictValueError("$", "keys must be strings")
     if not required_keys.isdisjoint(optional_keys):
         raise StrictValueError("$", "required and optional keys must be disjoint")
     actual = set(mapping)
@@ -160,9 +190,9 @@ def _reject_duplicate_keys(pairs: list[tuple[str, JsonValue]]) -> dict[str, Json
 def strict_json_loads(data: bytes, max_bytes: int) -> JsonValue:
     """Decode bounded UTF-8 JSON while rejecting duplicate and non-finite values."""
 
-    if not isinstance(data, bytes):
+    if not _is_bytes(data):
         raise StrictValueError("$", "JSON input must be bytes")
-    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+    if not _is_integer(max_bytes) or max_bytes < 0:
         raise StrictValueError("$", "max_bytes must be a nonnegative integer")
     if len(data) > max_bytes:
         raise StrictValueError("$", "JSON input exceeds its size bound")
@@ -196,7 +226,7 @@ def _validate_json_value(
         return value
     if active_containers is None:
         active_containers = set()
-    if isinstance(value, list):
+    if _is_json_list(value):
         container_id = id(value)
         if container_id in active_containers:
             raise StrictValueError(field, "contains a reference cycle")
@@ -208,7 +238,7 @@ def _validate_json_value(
             ]
         finally:
             active_containers.remove(container_id)
-    if isinstance(value, dict):
+    if _is_json_dict(value):
         container_id = id(value)
         if container_id in active_containers:
             raise StrictValueError(field, "contains a reference cycle")

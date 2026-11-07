@@ -19,11 +19,12 @@ from crowley.trading.api import (
 
 from .common import (
     SECONDS_PER_HOUR,
-    as_fraction,
     ceil_fraction,
     clears_vendor_floor,
     deposit_per_unit,
+    fair_value,
     floor_fraction,
+    fraction_parameter,
     held_quantity,
     item_inventory,
     maximum_purchase_quantity,
@@ -93,18 +94,18 @@ class DipReversionStrategy:
             if facts is not None and trustworthy_fair(
                 snapshot,
                 min_fair_n=int(self.params["min_fair_n"]),
-                max_band_width=self.params["max_band_width"],
+                max_band_width=fraction_parameter(self.params, "max_band_width"),
             ):
                 plans[item_id] = _Plan(item_id, snapshot, facts)
         return plans
 
     def _snipe_target(self, snapshot: ItemSnapshot) -> int:
-        buy_limit = floor_fraction(as_fraction(self.params["snipe_buy_ratio"]) * snapshot.fair)
+        buy_limit = floor_fraction(fraction_parameter(self.params, "snipe_buy_ratio") * fair_value(snapshot))
         return target_sell_price(
             snapshot,
             buy_limit,
-            floor_ratio=self.params["snipe_floor_ratio"],
-            cap_ratio=self.params["snipe_cap_ratio"],
+            floor_ratio=fraction_parameter(self.params, "snipe_floor_ratio"),
+            cap_ratio=fraction_parameter(self.params, "snipe_cap_ratio"),
         )
 
     def decide(self, market: MarketView, account: AccountView) -> Sequence[Intent]:
@@ -128,7 +129,7 @@ class DipReversionStrategy:
             entry_t = self._entry_t.get(item_id, market.t)
             age = market.t - entry_t
             target = (
-                ceil_fraction(as_fraction(self.params["exit_ratio"]) * plan.snapshot.fair)
+                ceil_fraction(fraction_parameter(self.params, "exit_ratio") * fair_value(plan.snapshot))
                 if age <= 48 * SECONDS_PER_HOUR + SECONDS_PER_HOUR
                 else self._snipe_target(plan.snapshot)
             )
@@ -157,7 +158,7 @@ class DipReversionStrategy:
             plan = plans[item_id]
             entry_t = self._entry_t.get(item_id, market.t)
             target = (
-                ceil_fraction(as_fraction(self.params["exit_ratio"]) * plan.snapshot.fair)
+                ceil_fraction(fraction_parameter(self.params, "exit_ratio") * fair_value(plan.snapshot))
                 if market.t - entry_t <= 48 * SECONDS_PER_HOUR + SECONDS_PER_HOUR
                 else self._snipe_target(plan.snapshot)
             )
@@ -181,16 +182,16 @@ class DipReversionStrategy:
             ):
                 continue
             ref20 = _twentieth_price(snapshot.levels)
-            if ref20 is None or ref20 > as_fraction(self.params["dip_ratio"]) * snapshot.fair:
+            if ref20 is None or ref20 > fraction_parameter(self.params, "dip_ratio") * fair_value(snapshot):
                 continue
-            target = ceil_fraction(as_fraction(self.params["exit_ratio"]) * snapshot.fair)
+            target = ceil_fraction(fraction_parameter(self.params, "exit_ratio") * fair_value(snapshot))
             if not clears_vendor_floor(market.rules, target, plan.facts):
                 continue
             deposit = deposit_per_unit(market, item_id, 48)
             net = net_proceeds_per_unit(market.rules, target, deposit)
             effective_limit = min(
-                floor_fraction(as_fraction(self.params["dip_ratio"]) * snapshot.fair),
-                floor_fraction(net / (1 + as_fraction(self.params["min_margin"]))),
+                floor_fraction(fraction_parameter(self.params, "dip_ratio") * fair_value(snapshot)),
+                floor_fraction(net / (1 + fraction_parameter(self.params, "min_margin"))),
             )
             if effective_limit <= 0:
                 continue
@@ -198,9 +199,10 @@ class DipReversionStrategy:
             assert demand is not None
             capacity = max(
                 0,
-                floor_fraction(as_fraction(self.params["capacity_share"]) * demand) - held.get(item_id, 0),
+                floor_fraction(fraction_parameter(self.params, "capacity_share") * demand)
+                - held.get(item_id, 0),
             )
-            budget = floor_fraction(as_fraction(self.params["max_spend_share"]) * projected_cash)
+            budget = floor_fraction(fraction_parameter(self.params, "max_spend_share") * projected_cash)
             quantity = maximum_purchase_quantity(snapshot.levels, effective_limit, budget, capacity)
             if quantity > 0:
                 opportunities.append((quantity * (net - effective_limit), item_id, plan, effective_limit))
@@ -210,10 +212,11 @@ class DipReversionStrategy:
         ):
             demand = plan.snapshot.demand_units_per_day
             assert demand is not None
-            budget = floor_fraction(as_fraction(self.params["max_spend_share"]) * projected_cash)
+            budget = floor_fraction(fraction_parameter(self.params, "max_spend_share") * projected_cash)
             capacity = max(
                 0,
-                floor_fraction(as_fraction(self.params["capacity_share"]) * demand) - held.get(item_id, 0),
+                floor_fraction(fraction_parameter(self.params, "capacity_share") * demand)
+                - held.get(item_id, 0),
             )
             quantity = maximum_purchase_quantity(plan.snapshot.levels, effective_limit, budget, capacity)
             if quantity <= 0:

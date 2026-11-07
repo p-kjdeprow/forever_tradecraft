@@ -527,7 +527,7 @@ def _execute_craft(context: ExecutionContext, account: Account, intent: Craft) -
     clicks = CRAFT_CLICKS
     if not context.charge_clicks(account, clicks, intent):
         return False
-    reagent_cost = 0
+    reagent_cost = Fraction(0)
     for item_id, quantity in recipe.reagents:
         required = quantity * craft_times
         lots = account.lots.get(item_id, [])
@@ -542,7 +542,12 @@ def _execute_craft(context: ExecutionContext, account: Account, intent: Craft) -
     output_units = sum(quantity for _, quantity in recipe.outputs) * craft_times
     output_cost = reagent_cost / output_units if output_units else Fraction(0)
     for item_id, quantity in recipe.outputs:
-        account.add_inventory(item_id, quantity * craft_times, unit_cost=output_cost, t=context.t)
+        account.add_inventory(
+            item_id,
+            quantity * craft_times,
+            unit_cost=output_cost,
+            t=context.t,
+        )
     if recipe.cooldown_group:
         account.cooldowns[recipe.cooldown_group] = context.t + recipe.cooldown_seconds
     account.add_count("crafted", output_units)

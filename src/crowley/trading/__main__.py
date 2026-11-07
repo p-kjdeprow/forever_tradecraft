@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 from contextlib import nullcontext
+from datetime import datetime
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
@@ -94,7 +95,8 @@ def _capabilities(
         if not isinstance(loaded, dict):
             raise ValueError("--capabilities-file must contain a JSON object")
         parsed = capabilities_from_mapping(loaded)
-        values = parsed.canonical
+        values.clear()
+        values.update(parsed.canonical)
     overrides = {
         "tool_item_ids": _capability_ids(tool_item_ids, "--tool-item-ids"),
         "tool_category_ids": _capability_ids(tool_category_ids, "--tool-category-ids"),
@@ -142,7 +144,12 @@ def _select_sweeps(
             timestamp = step_times[sweep_id]
         else:
             started_at = row.started_at
-            timestamp = started_at.timestamp() if hasattr(started_at, "timestamp") else float(started_at)
+            if isinstance(started_at, datetime):
+                timestamp = started_at.timestamp()
+            elif isinstance(started_at, (int, float)):
+                timestamp = float(started_at)
+            else:
+                raise RuntimeError(f"sweep {row.id} has an invalid start timestamp")
         if (start is None or timestamp >= start) and (end is None or timestamp <= end):
             window_rows.append(row)
     selected = []
@@ -289,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.spell_focus_ids,
             )
             run_id = create_run(
-                args.database_url or os.environ.get("CROWLEY_DATABASE_URL"),
+                database_url(args.database_url),
                 name=args.name,
                 house=args.house,
                 start=args.start,
@@ -306,7 +313,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "paper-step":
         try:
-            output = step_run(args.database_url or os.environ.get("CROWLEY_DATABASE_URL"), args.name)
+            output = step_run(database_url(args.database_url), args.name)
         except (PaperError, RuntimeError, ValueError, psycopg.Error) as exc:
             parser.error(str(exc))
         print(output)
@@ -314,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "paper-status":
         try:
             output = status_run(
-                args.database_url or os.environ.get("CROWLEY_DATABASE_URL"),
+                database_url(args.database_url),
                 args.name,
                 args.last_intents,
             )
@@ -348,10 +355,15 @@ def main(argv: list[str] | None = None) -> int:
                     excluded_without_books,
                 ) = _select_sweeps(conn, args.house, args.start, args.end, args.build, all_books)
                 selected_ids = {row.id for row in selected_sweeps}
-                books = {
-                    item_id: [book for book in item_books if int(book.sweep_id) in selected_ids]
-                    for item_id, item_books in all_books.items()
-                }
+                books = {}
+                for item_id, item_books in all_books.items():
+                    selected_books = []
+                    for book in item_books:
+                        if book.sweep_id is None:
+                            raise RuntimeError(f"book for item {item_id} has no sweep id")
+                        if int(book.sweep_id) in selected_ids:
+                            selected_books.append(book)
+                    books[item_id] = selected_books
                 books = {item_id: item_books for item_id, item_books in books.items() if item_books}
                 facts, recipes = load_client_data(loader_connection, args.house, client_build)
                 represented_sweeps = len(all_sweeps) - excluded_without_books

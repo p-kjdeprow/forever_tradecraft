@@ -31,7 +31,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from functools import wraps
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from crowley.core.game_target import packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
@@ -3707,6 +3707,8 @@ class X11Backend:
             if rate_reservation is not None and not isinstance(rate_reservation, RateReservation):
                 raise DriverError("native pointer action has a malformed broker rate reservation")
             if rate_reservation is None:
+                if not isinstance(click_rate_permit, RatePermit):
+                    raise DriverError("native pointer action has a malformed legacy rate permit")
                 try:
                     rate_reservation = self.input_broker.adopt_permit_for_tests(click_rate_permit)
                 except InputBrokerError as exc:
@@ -8394,6 +8396,7 @@ class DesktopDriver:
                 )
                 if live_admission_check is not None:
                     live_admission_check()
+                x11_backend = cast(X11Backend, self.backend)
                 recorded_press = self.input_broker.emit_button_gesture(
                     admitted_gesture,
                     emitted_chain=click_argv,
@@ -8403,7 +8406,7 @@ class DesktopDriver:
                     target_identity=f"{identity.fingerprint}:{target_name}",
                     guardian_admission_id=f"world-click:{selected_action_generation}:{id(action)}",
                     semantic_authorization="world_click",
-                    emit=lambda: self.backend._run(
+                    emit=lambda: x11_backend._run(
                         click_argv,
                         generation=generation,
                         held_buttons={1},
@@ -8655,6 +8658,7 @@ class DesktopDriver:
                 reservation=rate_reservation,
             )
             require_live_admission()
+            x11_backend = cast(X11Backend, self.backend)
             self.input_broker.emit_button_gesture(
                 admitted_gesture,
                 emitted_chain=chain,
@@ -8664,7 +8668,7 @@ class DesktopDriver:
                 target_identity=identity.fingerprint,
                 guardian_admission_id=f"camera-drag:{selected_action_generation}:{id(action)}",
                 semantic_authorization="camera_drag",
-                emit=lambda: self.backend._run(
+                emit=lambda: x11_backend._run(
                     chain,
                     timeout=TAKEOVER_DRILL_HOVER_COMMAND_TIMEOUT_SECONDS,
                     generation=generation,

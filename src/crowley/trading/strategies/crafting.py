@@ -13,6 +13,8 @@ from crowley.trading.api import (
     Cancel,
     Craft,
     Intent,
+    ItemFacts,
+    ItemSnapshot,
     MarketView,
     Post,
     Recipe,
@@ -25,7 +27,9 @@ from ..requirements import recipe_available
 from .common import (
     as_fraction,
     clears_vendor_floor,
+    fair_value,
     floor_fraction,
+    fraction_parameter,
     held_quantity,
     item_inventory,
     marginal_purchase,
@@ -193,7 +197,7 @@ class CraftingStrategy:
                 or not trustworthy_fair(
                     snapshot,
                     min_fair_n=int(self.params["min_fair_n"]),
-                    max_band_width=self.params["max_band_width"],
+                    max_band_width=fraction_parameter(self.params, "max_band_width"),
                 )
             ):
                 continue
@@ -204,9 +208,9 @@ class CraftingStrategy:
                 continue
             target = target_sell_price(
                 snapshot,
-                floor_fraction(as_fraction(self.params["buy_ratio"]) * snapshot.fair),
-                floor_ratio=self.params["floor_ratio"],
-                cap_ratio=self.params["cap_ratio"],
+                floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
+                floor_ratio=fraction_parameter(self.params, "floor_ratio"),
+                cap_ratio=fraction_parameter(self.params, "cap_ratio"),
             )
             if not (
                 target < listing.unit_price
@@ -232,8 +236,10 @@ class CraftingStrategy:
             projected_cash -= replacement_deposit
         return intents, projected_cash
 
-    def _trusted_outputs(self, recipe: Recipe, market: MarketView):
-        outputs: dict[int, tuple[object, object, int]] = {}
+    def _trusted_outputs(
+        self, recipe: Recipe, market: MarketView
+    ) -> dict[int, tuple[ItemSnapshot, ItemFacts, int]] | None:
+        outputs: dict[int, tuple[ItemSnapshot, ItemFacts, int]] = {}
         for item_id, quantity in recipe.outputs:
             snapshot = market.items().get(item_id)
             facts = market.facts(item_id)
@@ -244,7 +250,7 @@ class CraftingStrategy:
                 or not trustworthy_fair(
                     snapshot,
                     min_fair_n=int(self.params["min_fair_n"]),
-                    max_band_width=self.params["max_band_width"],
+                    max_band_width=fraction_parameter(self.params, "max_band_width"),
                 )
             ):
                 return None
@@ -308,13 +314,16 @@ class CraftingStrategy:
         for snapshot, _facts, quantity in outputs.values():
             max_times = min(
                 max_times,
-                _projected_capacity(snapshot, held, self.params["capacity_share"]) // quantity,
+                _projected_capacity(snapshot, held, fraction_parameter(self.params, "capacity_share"))
+                // quantity,
             )
         if max_times <= 0:
             return None
 
         best: _Candidate | None = None
-        spend_limit = floor_fraction(as_fraction(self.params["max_spend_share"]) * max(0, projected_cash))
+        spend_limit = floor_fraction(
+            fraction_parameter(self.params, "max_spend_share") * max(0, projected_cash)
+        )
         for times in range(1, max_times + 1):
             sources: list[_Source] = []
             for item_id, quantity in _requirements(recipe, times).items():
@@ -335,16 +344,16 @@ class CraftingStrategy:
             for item_id, (snapshot, _facts, quantity) in outputs.items():
                 target = target_sell_price(
                     snapshot,
-                    floor_fraction(as_fraction(self.params["buy_ratio"]) * snapshot.fair),
-                    floor_ratio=self.params["floor_ratio"],
-                    cap_ratio=self.params["cap_ratio"],
+                    floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
+                    floor_ratio=fraction_parameter(self.params, "floor_ratio"),
+                    cap_ratio=fraction_parameter(self.params, "cap_ratio"),
                 )
                 value += quantity * times * target * (1 - market.rules.seller_cut) - market.deposit(
                     item_id, quantity * times, self._listing_duration_hours
                 )
             cost = sum((source.full_cost for source in sources), Fraction(0))
             profit = value - cost
-            if profit < cost * as_fraction(self.params["min_margin"]):
+            if profit < cost * fraction_parameter(self.params, "min_margin"):
                 continue
             candidate = _Candidate(recipe, times, cost, value, profit, tuple(sources))
             if best is None or (candidate.profit, candidate.times) > (best.profit, best.times):
@@ -386,7 +395,8 @@ class CraftingStrategy:
                 break
             available = min(
                 available,
-                _projected_capacity(snapshot, held, self.params["capacity_share"]) // quantity,
+                _projected_capacity(snapshot, held, fraction_parameter(self.params, "capacity_share"))
+                // quantity,
             )
         times = min(planned_times, available)
         if times <= 0:
@@ -476,15 +486,15 @@ class CraftingStrategy:
                 or not trustworthy_fair(
                     snapshot,
                     min_fair_n=int(self.params["min_fair_n"]),
-                    max_band_width=self.params["max_band_width"],
+                    max_band_width=fraction_parameter(self.params, "max_band_width"),
                 )
             ):
                 continue
             target = target_sell_price(
                 snapshot,
-                floor_fraction(as_fraction(self.params["buy_ratio"]) * snapshot.fair),
-                floor_ratio=self.params["floor_ratio"],
-                cap_ratio=self.params["cap_ratio"],
+                floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
+                floor_ratio=fraction_parameter(self.params, "floor_ratio"),
+                cap_ratio=fraction_parameter(self.params, "cap_ratio"),
             )
             if not clears_vendor_floor(market.rules, target, facts):
                 vendor_exits.append((item_id, quantity))
@@ -492,7 +502,7 @@ class CraftingStrategy:
             post_limit = _post_horizon_limit(
                 snapshot,
                 account,
-                self.params["capacity_share"],
+                fraction_parameter(self.params, "capacity_share"),
                 self._post_horizon_hours,
             )
             if post_limit is not None:
@@ -528,9 +538,9 @@ class CraftingStrategy:
             snapshot = market.items()[item_id]
             target = target_sell_price(
                 snapshot,
-                floor_fraction(as_fraction(self.params["buy_ratio"]) * snapshot.fair),
-                floor_ratio=self.params["floor_ratio"],
-                cap_ratio=self.params["cap_ratio"],
+                floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
+                floor_ratio=fraction_parameter(self.params, "floor_ratio"),
+                cap_ratio=fraction_parameter(self.params, "cap_ratio"),
             )
             intents.append(Post(item_id, target, quantity, self._listing_duration_hours))
             projected_cash -= deposit

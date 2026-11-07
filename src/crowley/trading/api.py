@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Protocol
+from typing import Protocol, cast
 
 from crowley.core.auction_rules import AuctionHouseRules
 
@@ -132,9 +132,9 @@ class CraftingCapabilities:
         spell_focus_ids: Sequence[int] = (),
     ) -> CraftingCapabilities:
         return cls(
-            tool_item_ids,
-            tool_category_ids,
-            spell_focus_ids,
+            cast(frozenset[int], tool_item_ids),
+            cast(frozenset[int], tool_category_ids),
+            cast(frozenset[int], spell_focus_ids),
         )
 
     def as_dict(self) -> dict[str, list[int]]:

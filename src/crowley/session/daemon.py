@@ -9921,10 +9921,14 @@ class SessionDaemon:
                 continue
             if hover.hover_kind not in {"unit", "object"} or hover.hover_name != target_name:
                 continue
+
+            def check_motion_authority() -> None:
+                self._require_motion_interaction(generation)
+
             try:
                 rate_reservation = self.driver.input_broker.reserve_button_rate(
                     deadline_monotonic=deadline,
-                    cancellation_check=lambda: self._require_motion_interaction(generation),
+                    cancellation_check=check_motion_authority,
                 )
             except (InputBrokerError, DriverError, GuardianError) as exc:
                 raise DriverError(f"world click rate admission failed: {exc}") from exc

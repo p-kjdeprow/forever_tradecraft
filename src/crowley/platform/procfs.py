@@ -29,9 +29,14 @@ class ProcessIdentity:
     boot_id: str
 
 
-def _validate_pid(pid: int) -> None:
+def _validate_pid(pid: object) -> None:
     if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
         raise ProcfsError("process pid must be a positive integer")
+
+
+def _validate_signal(sig: object) -> None:
+    if isinstance(sig, bool) or not isinstance(sig, int):
+        raise ProcfsError("signal must be an integer")
 
 
 def _boot_id() -> str:
@@ -84,8 +89,7 @@ def still_same(identity: ProcessIdentity) -> bool:
 def signal_group(identity: ProcessIdentity, sig: int) -> None:
     """Re-read *identity* immediately before signaling its process group."""
 
-    if isinstance(sig, bool) or not isinstance(sig, int):
-        raise ProcfsError("signal must be an integer")
+    _validate_signal(sig)
     try:
         current = read_identity(identity.pid)
     except ProcfsError as exc:

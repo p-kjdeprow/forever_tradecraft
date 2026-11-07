@@ -54,6 +54,8 @@ def ensure_house(conn: psycopg.Connection, house: House) -> int:
         " ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key RETURNING id",
         (house.key, house.region, house.ruleset, house.faction),
     ).fetchone()
+    if row is None:
+        raise RuntimeError("house upsert did not return an id")
     return row[0]
 
 
@@ -273,7 +275,7 @@ def ingest_market_sweep(conn: psycopg.Connection, raw: dict[str, Any], data_dir:
             """,
             (decoded["planHash"], decoded["planJSON"], json.dumps(plan)),
         )
-        sweep_id = conn.execute(
+        sweep_row = conn.execute(
             """
             INSERT INTO market_sweeps
               (sweep_uid, house_id, plan_hash, started_at, finished_at, character,
@@ -300,7 +302,10 @@ def ingest_market_sweep(conn: psycopg.Connection, raw: dict[str, Any], data_dir:
                 digest,
                 str(path),
             ),
-        ).fetchone()[0]
+        ).fetchone()
+        if sweep_row is None:
+            raise RuntimeError("sweep insert did not return an id")
+        sweep_id = sweep_row[0]
         for item_key, observation in normalized_observations.items():
             conn.execute(
                 """

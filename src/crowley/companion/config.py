@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
 from pydantic import SecretStr, model_validator
 from pydantic_settings import (
@@ -32,6 +34,10 @@ def state_path() -> Path:
 
 class CompanionSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CROWLEY_", extra="forbid")
+
+    def __init__(self, **values: object) -> None:
+        initializer = cast(Callable[..., None], super().__init__)
+        initializer(**values)
 
     # The game-flavor folder containing WTF/ and Interface/, e.g.
     # ~/.wine/drive_c/Program Files (x86)/World of Warcraft/_forever_

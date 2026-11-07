@@ -869,6 +869,10 @@ def _write_region_config(tmp_path: Path, *, target: GameTarget, telemetry: str =
     saved.write_text("", encoding="utf-8")
     companion.write_text("{}", encoding="utf-8")
     data.write_text("", encoding="utf-8")
+    socket_dir = tmp_path / "session-runtime"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o700)
+    socket = socket_dir / "session.sock"
     plan = target_scan_plan(load_catalog(), target)
     plan_json = plan["planJSON"]
     plan_hash = plan["planHash"]
@@ -887,6 +891,7 @@ def _write_region_config(tmp_path: Path, *, target: GameTarget, telemetry: str =
         "plan_hash = '" + plan_hash + "'\n"
         "plan_json = '" + plan_json + "'\n"
         "[session]\n"
+        "socket = '" + str(socket) + "'\n"
         "saved_variables = '" + str(saved) + "'\n"
         "companion_state = '" + str(companion) + "'\n"
         "data_lua = '" + str(data) + "'\n" + telemetry,

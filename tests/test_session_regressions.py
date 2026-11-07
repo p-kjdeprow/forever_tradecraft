@@ -381,6 +381,10 @@ def test_session_config_accepts_canonical_short_build_and_rejects_previous_build
     data.parent.mkdir(parents=True)
     for path in (saved, companion, data):
         path.write_text("", encoding="utf-8")
+    socket_dir = tmp_path / "session-runtime"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o700)
+    socket = socket_dir / "session.sock"
 
     def write_config(path: Path, client_build: str) -> None:
         path.write_text(
@@ -399,6 +403,7 @@ def test_session_config_accepts_canonical_short_build_and_rejects_previous_build
                     f"plan_json = {json.dumps(plan['planJSON'])}",
                     "",
                     "[session]",
+                    f'socket = "{socket}"',
                     f'saved_variables = "{saved}"',
                     f'companion_state = "{companion}"',
                     f'data_lua = "{data}"',
@@ -444,6 +449,10 @@ def test_session_config_rejects_stale_packaged_identity(tmp_path: Path, field: s
     data.parent.mkdir(parents=True)
     for path in (saved, data, companion):
         path.write_text("", encoding="utf-8")
+    socket_dir = tmp_path / "session-runtime"
+    socket_dir.mkdir(mode=0o700)
+    socket_dir.chmod(0o700)
+    socket = socket_dir / "session.sock"
     plan = target_scan_plan(load_catalog(), target)
     values = {
         "wine_prefix": target.wine_prefix,
@@ -465,6 +474,7 @@ def test_session_config_rejects_stale_packaged_identity(tmp_path: Path, field: s
                 f"plan_json = {json.dumps(plan['planJSON'])}",
                 "",
                 "[session]",
+                f'socket = "{socket}"',
                 f'saved_variables = "{saved}"',
                 f'companion_state = "{companion}"',
                 f'data_lua = "{data}"',

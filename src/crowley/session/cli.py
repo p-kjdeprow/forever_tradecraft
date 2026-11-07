@@ -15,11 +15,14 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from .config import load_config
+from .config import (
+    MAX_RELOAD_DEADLINE_SECONDS,
+    load_client_config,
+)
+from .config import load_config as load_daemon_config
 from .controller import Controller, ControllerState, SessionMode
 from .daemon import SessionDaemon
 from .driver import DriverError
-from .journal import Journal
 from .motion import (
     DEFAULT_MOVEMENT_CALIBRATION_PULSE_SECONDS,
     MAX_WAYPOINT_SECONDS,
@@ -35,6 +38,22 @@ from .startup import (
 
 _IPC_REQUEST_MAX_BYTES = 4096
 _IPC_RESPONSE_MAX_BYTES = 524288
+
+# Keep this table next to dispatch so adding a command that reads host state
+# requires an explicit review.  IPC commands not listed here are socket-only
+# clients and must use load_client_config; motion-profile exits before IPC.
+_FULL_CONFIG_COMMANDS: dict[str, str] = {
+    "daemon": "constructs the input-capable daemon and validates its local files",
+}
+
+CLIENT_NATIVE_CONSTRUCTION_CLEANUP_MARGIN_SECONDS = MOTION_TRANSPORT_MARGIN_SECONDS
+CLIENT_NATIVE_CONSTRUCTION_TIMEOUT_SECONDS = (
+    float(MAX_RELOAD_DEADLINE_SECONDS) + CLIENT_NATIVE_CONSTRUCTION_CLEANUP_MARGIN_SECONDS
+)
+
+# Existing tests and downstream callers patch this module-level seam.  It now
+# deliberately names the minimal loader; daemon startup uses load_daemon_config.
+load_config = load_client_config
 
 
 def _parse_hint(value: str) -> tuple[float, float]:
@@ -1186,13 +1205,15 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError) as exc:
             print(f"error: {exc}", file=os.sys.stderr)
             return 1
-    if args.command == "daemon":
-        config = load_config(Path(args.config).expanduser())
-        if args.journal or args.socket:
+    if args.command in _FULL_CONFIG_COMMANDS:
+        config = load_daemon_config(
+            Path(args.config).expanduser(),
+            socket_override=args.socket if args.socket else None,
+        )
+        if args.journal:
             config = replace(
                 config,
-                journal=Path(args.journal).expanduser() if args.journal else config.journal,
-                socket=Path(args.socket).expanduser() if args.socket else config.socket,
+                journal=Path(args.journal).expanduser(),
             )
         # Take ownership before constructing the controller, journal, or
         # input-capable driver.  A competing service therefore cannot read or
@@ -1218,15 +1239,13 @@ def main(argv: list[str] | None = None) -> int:
                 fcntl.flock(lease_fd, fcntl.LOCK_UN)
                 os.close(lease_fd)
         return 0
-    # The config file is the one authority for the daemon's IPC and journal
-    # paths.  CLI defaults are only retained for parser compatibility.
-    config = load_config(Path(args.config).expanduser())
-    if args.journal or args.socket:
-        config = replace(
-            config,
-            journal=Path(args.journal).expanduser() if args.journal else config.journal,
-            socket=Path(args.socket).expanduser() if args.socket else config.socket,
-        )
+    # IPC clients intentionally do not inspect daemon profile, route, game,
+    # executable, or SavedVariables settings.
+    client_config = (
+        load_config(Path(args.config).expanduser(), socket_override=args.socket)
+        if args.socket
+        else load_config(Path(args.config).expanduser())
+    )
     request = {"command": args.command.replace("-", "_")}
     if hasattr(args, "mode"):
         request["mode"] = args.mode
@@ -1286,10 +1305,9 @@ def main(argv: list[str] | None = None) -> int:
         # timeout must leave room for its final observation/release cleanup;
         # a client timeout must never outlive the daemon's ownership decision.
         if args.command.startswith("native-construction-"):
-            # Prepare/recovery captures are bounded by the configured reload
-            # deadline (1..600s); keep the existing transport margin explicit
-            # rather than timing out at an unrelated fixed 60 seconds.
-            operation_timeout = float(config.reload_deadline_seconds)
+            # This bound covers the daemon's maximum accepted reload deadline
+            # and the cleanup margin without loading daemon configuration.
+            operation_timeout = CLIENT_NATIVE_CONSTRUCTION_TIMEOUT_SECONDS
         elif args.command == "takeover-drill":
             operation_timeout = TAKEOVER_DRILL_OPERATION_TIMEOUT_SECONDS
         elif args.command in {"start", "resume"}:
@@ -1306,26 +1324,25 @@ def main(argv: list[str] | None = None) -> int:
             operation_timeout = 60.0
         else:
             operation_timeout = 5.0
-        request_timeout = (
-            operation_timeout + MOTION_TRANSPORT_MARGIN_SECONDS
-            if args.command.startswith(("motion-", "native-construction-"))
-            or args.command in {"route-walk", "world-click", "executor-click"}
-            else operation_timeout
-        )
+        if args.command.startswith("native-construction-"):
+            request_timeout = CLIENT_NATIVE_CONSTRUCTION_TIMEOUT_SECONDS
+        else:
+            request_timeout = (
+                operation_timeout + MOTION_TRANSPORT_MARGIN_SECONDS
+                if args.command.startswith("motion-")
+                or args.command in {"route-walk", "world-click", "executor-click"}
+                else operation_timeout
+            )
         if args.command == "takeover-drill":
             request_timeout += TAKEOVER_DRILL_TRANSPORT_MARGIN_SECONDS
-        response = _socket_request(config.socket, request, timeout=request_timeout)
+        response = _socket_request(client_config.socket, request, timeout=request_timeout)
     except TimeoutError:
         response = {
             "ok": False,
             "error": "IPC operation timed out; its completion and input-release state are indeterminate",
         }
     except (ConnectionRefusedError, FileNotFoundError, json.JSONDecodeError):
-        if args.command != "status":
-            response = {"ok": False, "error": "session daemon is not running"}
-        else:
-            controller = Controller(Journal(config.journal), recover_on_restart=False)
-            response = SessionIPC(controller).dispatch(request)
+        response = {"ok": False, "error": "session daemon is not running"}
     except OSError as exc:
         response = {"ok": False, "error": f"IPC transport failed; operation state is indeterminate: {exc}"}
     print(json.dumps(response, sort_keys=True))

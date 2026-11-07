@@ -22,6 +22,8 @@ import tarfile
 import tempfile
 import time
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
@@ -33,19 +35,30 @@ DEFAULT_ROOT = Path.home() / ".local/state/crowley/market-backups"
 COMPOSE = Path("deploy/docker-compose.yml")
 ENV_FILE = Path("deploy/.env")
 MIGRATIONS = Path("src/crowley/server/migrations")
-APP_TABLES = (
-    "houses",
-    "scans",
-    "items",
-    "listings",
-    "item_stats",
-    "client_probes",
-    "market_plans",
-    "market_sweeps",
-    "market_observations",
-    "market_captured_rows",
-    "owned_observations",
-    "own_sale_evidence",
+NEW_BACKUP_ID_PREFIX = "crowley-"
+HISTORICAL_BACKUP_ID_PREFIX = "beta-"
+BACKUP_ID_RE = re.compile(
+    rf"^(?:{re.escape(NEW_BACKUP_ID_PREFIX)}|{re.escape(HISTORICAL_BACKUP_ID_PREFIX)})"
+    r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$"
+)
+TIMESCALE_INTERNAL_SCHEMAS = frozenset(
+    {
+        "_timescaledb_cache",
+        "_timescaledb_catalog",
+        "_timescaledb_config",
+        "_timescaledb_functions",
+        "_timescaledb_internal",
+        "timescaledb_experimental",
+        "timescaledb_information",
+    }
+)
+REFERENCE_MIGRATION_SCRIPT = (
+    "import os, psycopg\n"
+    "from crowley.server.db import migrate\n"
+    "database_url = ('postgresql://crowley:' + os.environ['CROWLEY_DB_PASSWORD']\n"
+    "                + '@db:5432/' + os.environ['CROWLEY_REFERENCE_DATABASE'])\n"
+    "with psycopg.connect(database_url, autocommit=True) as conn:\n"
+    "    migrate(conn)\n"
 )
 OPERATIONS = (
     "validate_snapshot",
@@ -66,6 +79,55 @@ OPERATIONS = (
 )
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$")
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class TableInventory:
+    schema: str
+    name: str
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class ColumnInventory:
+    schema: str
+    table: str
+    name: str
+    data_type: str
+    nullable: bool
+    default_expression: str | None
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class ConstraintInventory:
+    schema: str
+    table: str
+    name: str
+    constraint_type: str
+    definition: str
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class IndexInventory:
+    schema: str
+    table: str
+    name: str
+    definition: str
+
+
+@dataclass(frozen=True, slots=True, order=True)
+class ViewInventory:
+    schema: str
+    name: str
+    definition: str
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaInventory:
+    tables: tuple[TableInventory, ...]
+    columns: tuple[ColumnInventory, ...]
+    constraints: tuple[ConstraintInventory, ...]
+    indexes: tuple[IndexInventory, ...]
+    views: tuple[ViewInventory, ...]
 
 
 class BackupError(RuntimeError):
@@ -148,9 +210,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     )
     if top["schema"] != SCHEMA or type(top["schema_version"]) is not int or top["schema_version"] != 1:
         raise BackupError("unsupported manifest schema")
-    if not isinstance(top["backup_id"], str) or not re.fullmatch(
-        r"beta-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}", top["backup_id"]
-    ):
+    if not isinstance(top["backup_id"], str) or not BACKUP_ID_RE.fullmatch(top["backup_id"]):
         raise BackupError("invalid backup id")
     created = _string(top["created_at_utc"], "created_at_utc")
     try:
@@ -898,7 +958,7 @@ def snapshot(repo: Path, root: Path) -> Path:
     server_image = _image_identity(server["image_id"])
     postgres_version, timescale_version = _local_version(database["id"])
     now = dt.datetime.now(dt.UTC).replace(microsecond=0)
-    backup_id = f"beta-{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}"
+    backup_id = f"{NEW_BACKUP_ID_PREFIX}{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}"
     out = root / backup_id
     out.mkdir(mode=0o700)
     _fsync_dir(root)
@@ -1035,16 +1095,6 @@ def validate_compose_isolation(
             or mounts[0].get("target") != destination
         ):
             raise BackupError("restore service mounts are not the expected isolated volumes")
-
-
-def db_count_provenance(counts: dict[str, int], source: str) -> dict[str, Any]:
-    if source != "restored_dump":
-        raise BackupError("acceptance counts must come from the restored dump")
-    if set(counts) != set(APP_TABLES) | {"schema_migrations"}:
-        raise BackupError("restored table count set is incomplete")
-    if any(type(value) is not int or value < 0 for value in counts.values()):
-        raise BackupError("invalid restored row count")
-    return {"source": source, "tables": dict(sorted(counts.items()))}
 
 
 def raw_reference_path(raw_path: str, inventory: set[str]) -> str:
@@ -1266,6 +1316,7 @@ def _guard_current(
     }
     target_now = _target_ids(repo, project, override, credentials)
     _target_guard(target_now, project, source, external, expected=expected)
+    target_membership = {network["name"]: network["id"] for network in target_now["networks"]}
     for helper in helpers:
         current = _inspect_container(helper["id"])
         service = helper["labels"].get("com.docker.compose.service")
@@ -1273,7 +1324,11 @@ def _guard_current(
             current["id"] != helper["id"]
             or not _labels_ok(current["labels"], project, service)
             or current["mounts"] != helper["mounts"]
-            or not _helper_uses_only_none_network(current, source["none_network_id"])
+            or (
+                not _target_network_attachment_matches(current, target_membership)
+                if service == "reference-migration-helper"
+                else not _helper_uses_only_none_network(current, source["none_network_id"])
+            )
         ):
             raise BackupError("disposable helper identity changed")
         helper.update(current)
@@ -1441,25 +1496,369 @@ def _json_sql(container_id: str, sql: str, db: str = "crowley") -> Any:
         raise BackupError("restored database returned invalid metadata JSON") from exc
 
 
-def _count_restored(
-    container_id: str, repo: Path, expected_migrations: list[dict[str, str]]
-) -> dict[str, Any]:
-    parsed_tables: set[str] = set()
-    for migration in expected_migrations:
-        source = (repo / migration["path"]).read_text(encoding="utf-8")
-        parsed_tables.update(
-            m.group(1).lower()
-            for m in re.finditer(
-                r"(?im)^\s*CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([a-z_][a-z0-9_]*)\s*\(", source
-            )
+def _schema_filter(alias: str) -> str:
+    excluded = ", ".join(f"'{name}'" for name in sorted(TIMESCALE_INTERNAL_SCHEMAS))
+    return (
+        f"{alias}.nspname NOT LIKE 'pg_%' "
+        f"AND {alias}.nspname <> 'information_schema' "
+        f"AND {alias}.nspname NOT IN ({excluded})"
+    )
+
+
+def _catalog_queries() -> tuple[str, ...]:
+    schema_filter = _schema_filter("n")
+    return (
+        "SELECT coalesce(json_agg(json_build_object('schema', n.nspname, 'name', c.relname) "
+        f"ORDER BY n.nspname, c.relname), '[]'::json) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace "
+        f"WHERE c.relkind IN ('r', 'p') AND {schema_filter}",
+        "SELECT coalesce(json_agg(json_build_object("
+        "'schema', n.nspname, 'table', c.relname, 'name', a.attname, "
+        "'data_type', format_type(a.atttypid, a.atttypmod), 'nullable', NOT a.attnotnull, "
+        "'default_expression', pg_get_expr(d.adbin, d.adrelid)) "
+        f"ORDER BY n.nspname, c.relname, a.attnum), '[]'::json) FROM pg_attribute a "
+        "JOIN pg_class c ON c.oid=a.attrelid "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace "
+        "LEFT JOIN pg_attrdef d ON d.adrelid=a.attrelid AND d.adnum=a.attnum "
+        f"WHERE c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped AND {schema_filter}",
+        "SELECT coalesce(json_agg(json_build_object("
+        "'schema', n.nspname, 'table', c.relname, 'name', con.conname, "
+        "'constraint_type', con.contype, 'definition', pg_get_constraintdef(con.oid, true)) "
+        f"ORDER BY n.nspname, c.relname, con.conname), '[]'::json) FROM pg_constraint con "
+        "JOIN pg_class c ON c.oid=con.conrelid "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace "
+        f"WHERE c.relkind IN ('r', 'p') AND {schema_filter}",
+        "SELECT coalesce(json_agg(json_build_object("
+        "'schema', n.nspname, 'table', table_class.relname, 'name', index_class.relname, "
+        "'definition', pg_get_indexdef(index_class.oid)) "
+        f"ORDER BY n.nspname, table_class.relname, index_class.relname), '[]'::json) "
+        "FROM pg_index index_info "
+        "JOIN pg_class index_class ON index_class.oid=index_info.indexrelid "
+        "JOIN pg_class table_class ON table_class.oid=index_info.indrelid "
+        "JOIN pg_namespace n ON n.oid=table_class.relnamespace "
+        f"WHERE table_class.relkind IN ('r', 'p') AND {schema_filter}",
+        "SELECT coalesce(json_agg(json_build_object("
+        "'schema', n.nspname, 'name', c.relname, 'definition', pg_get_viewdef(c.oid, true)) "
+        f"ORDER BY n.nspname, c.relname), '[]'::json) FROM pg_class c "
+        "JOIN pg_namespace n ON n.oid=c.relnamespace "
+        f"WHERE c.relkind='v' AND {schema_filter}",
+    )
+
+
+def _catalog_rows(value: object, category: str) -> list[dict[str, object]]:
+    if not isinstance(value, list) or any(not isinstance(row, dict) for row in value):
+        raise BackupError(f"invalid catalog {category} inventory")
+    return [row for row in value if isinstance(row, dict)]
+
+
+def _row_text(row: dict[str, object], key: str, category: str) -> str:
+    value = row.get(key)
+    if not isinstance(value, str) or not value:
+        raise BackupError(f"invalid catalog {category} {key}")
+    return value
+
+
+def _row_nullable(row: dict[str, object], category: str) -> bool:
+    value = row.get("nullable")
+    if type(value) is not bool:
+        raise BackupError(f"invalid catalog {category} nullable")
+    return value
+
+
+def _row_default(row: dict[str, object], category: str) -> str | None:
+    value = row.get("default_expression")
+    if value is not None and not isinstance(value, str):
+        raise BackupError(f"invalid catalog {category} default expression")
+    return value
+
+
+def catalog_inventory(query: Callable[[str], object]) -> SchemaInventory:
+    """Build an application-schema inventory from catalog JSON query results."""
+    tables, columns, constraints, indexes, views = (
+        _catalog_rows(query(sql), category)
+        for sql, category in zip(
+            _catalog_queries(),
+            ("tables", "columns", "constraints", "indexes", "views"),
+            strict=True,
         )
-    if parsed_tables != set(APP_TABLES):
-        raise BackupError("migration table set differs from pinned plan")
-    counts = {
-        table: int(_db_sql(container_id, f"SELECT count(*) FROM public.{table}"))
-        for table in (*APP_TABLES, "schema_migrations")
+    )
+    return SchemaInventory(
+        tables=tuple(
+            sorted(
+                TableInventory(_row_text(row, "schema", "tables"), _row_text(row, "name", "tables"))
+                for row in tables
+            )
+        ),
+        columns=tuple(
+            sorted(
+                ColumnInventory(
+                    _row_text(row, "schema", "columns"),
+                    _row_text(row, "table", "columns"),
+                    _row_text(row, "name", "columns"),
+                    _row_text(row, "data_type", "columns"),
+                    _row_nullable(row, "columns"),
+                    _row_default(row, "columns"),
+                )
+                for row in columns
+            )
+        ),
+        constraints=tuple(
+            sorted(
+                ConstraintInventory(
+                    _row_text(row, "schema", "constraints"),
+                    _row_text(row, "table", "constraints"),
+                    _row_text(row, "name", "constraints"),
+                    _row_text(row, "constraint_type", "constraints"),
+                    _row_text(row, "definition", "constraints"),
+                )
+                for row in constraints
+            )
+        ),
+        indexes=tuple(
+            sorted(
+                IndexInventory(
+                    _row_text(row, "schema", "indexes"),
+                    _row_text(row, "table", "indexes"),
+                    _row_text(row, "name", "indexes"),
+                    _row_text(row, "definition", "indexes"),
+                )
+                for row in indexes
+            )
+        ),
+        views=tuple(
+            sorted(
+                ViewInventory(
+                    _row_text(row, "schema", "views"),
+                    _row_text(row, "name", "views"),
+                    _row_text(row, "definition", "views"),
+                )
+                for row in views
+            )
+        ),
+    )
+
+
+def _catalog_inventory(container_id: str, database: str) -> SchemaInventory:
+    return catalog_inventory(lambda sql: _json_sql(container_id, sql, database))
+
+
+def _inventory_category_difference[InventoryRecord](
+    category: str,
+    reference: tuple[InventoryRecord, ...],
+    restored: tuple[InventoryRecord, ...],
+    key: Callable[[InventoryRecord], tuple[str, ...]],
+) -> str | None:
+    reference_by_key = {key(item): item for item in reference}
+    restored_by_key = {key(item): item for item in restored}
+    missing = sorted(set(reference_by_key) - set(restored_by_key))
+    if missing:
+        return f"missing {category} {'.'.join(missing[0])}"
+    extra = sorted(set(restored_by_key) - set(reference_by_key))
+    if extra:
+        return f"extra {category} {'.'.join(extra[0])}"
+    for item_key in sorted(reference_by_key):
+        if reference_by_key[item_key] != restored_by_key[item_key]:
+            return (
+                f"changed {category} {'.'.join(item_key)}: "
+                f"reference={reference_by_key[item_key]!r}; restored={restored_by_key[item_key]!r}"
+            )
+    return None
+
+
+def compare_schema_inventories(reference: SchemaInventory, restored: SchemaInventory) -> None:
+    category_difference = _inventory_category_difference(
+        "table", reference.tables, restored.tables, lambda item: (item.schema, item.name)
+    )
+    if category_difference is None:
+        category_difference = _inventory_category_difference(
+            "column", reference.columns, restored.columns, lambda item: (item.schema, item.table, item.name)
+        )
+    if category_difference is None:
+        category_difference = _inventory_category_difference(
+            "constraint",
+            reference.constraints,
+            restored.constraints,
+            lambda item: (item.schema, item.table, item.name),
+        )
+    if category_difference is None:
+        category_difference = _inventory_category_difference(
+            "index", reference.indexes, restored.indexes, lambda item: (item.schema, item.table, item.name)
+        )
+    if category_difference is None:
+        category_difference = _inventory_category_difference(
+            "view", reference.views, restored.views, lambda item: (item.schema, item.name)
+        )
+    if category_difference is not None:
+        raise BackupError(f"restore schema mismatch: {category_difference}")
+
+
+def _table_count_key(table: TableInventory) -> str:
+    return table.name if table.schema == "public" else f"{table.schema}.{table.name}"
+
+
+def db_count_provenance(
+    counts: dict[str, int], source: str, reference_table_keys: tuple[str, ...]
+) -> dict[str, Any]:
+    if source != "restored_dump":
+        raise BackupError("acceptance counts must come from the restored dump")
+    if not counts or any(not isinstance(table, str) or not table for table in counts):
+        raise BackupError("restored table count set is incomplete")
+    if any(type(value) is not int or value < 0 for value in counts.values()):
+        raise BackupError("invalid restored row count")
+    if not reference_table_keys or reference_table_keys != tuple(sorted(set(reference_table_keys))):
+        raise BackupError("reference table-key list is incomplete or unsorted")
+    if set(counts) != set(reference_table_keys):
+        raise BackupError("restored table counts do not match reference table-key list")
+    return {
+        "source": source,
+        "reference_table_keys": list(reference_table_keys),
+        "tables": dict(sorted(counts.items())),
     }
-    count_proof = db_count_provenance(counts, "restored_dump")
+
+
+def _sql_identifier(value: str) -> str:
+    return '"' + value.replace('"', '""') + '"'
+
+
+def build_reference_inventory(
+    database_name: str,
+    create_database: Callable[[str], None],
+    prepare_migration: Callable[[str], None],
+    migrate_database: Callable[[str], None],
+    inventory_database: Callable[[str], SchemaInventory],
+    drop_database: Callable[[str], None],
+) -> SchemaInventory:
+    """Create, migrate, inspect, and always remove one disposable database."""
+    if not database_name:
+        raise BackupError("reference database name is empty")
+    created = False
+    try:
+        create_database(database_name)
+        created = True
+        prepare_migration(database_name)
+        migrate_database(database_name)
+        return inventory_database(database_name)
+    finally:
+        if created:
+            drop_database(database_name)
+
+
+def _make_reference_migration_helper(
+    project: str,
+    database_name: str,
+    network_name: str,
+    image_id: str,
+    credentials: Path,
+) -> tuple[str, dict[str, Any]]:
+    name = f"{project}-reference-migration"
+    helper_id = _docker(
+        [
+            "create",
+            "--name",
+            name,
+            "--label",
+            f"com.docker.compose.project={project}",
+            "--label",
+            "com.docker.compose.service=reference-migration-helper",
+            "--network",
+            network_name,
+            "--env-file",
+            str(credentials),
+            "--env",
+            f"CROWLEY_REFERENCE_DATABASE={database_name}",
+            "--entrypoint",
+            "uv",
+            image_id,
+            "run",
+            "--no-sync",
+            "python",
+            "-c",
+            REFERENCE_MIGRATION_SCRIPT,
+        ]
+    ).stdout.strip()
+    if not helper_id:
+        raise BackupError("reference migration helper creation failed")
+    info = _inspect_container(helper_id)
+    if (
+        not _labels_ok(info["labels"], project, "reference-migration-helper")
+        or info["state"] != "created"
+        or info["mounts"]
+        or info["ports"] not in (None, {})
+        or set(info["networks"]) != {network_name}
+    ):
+        raise BackupError("reference migration helper identity is not safe")
+    return helper_id, info
+
+
+def _reference_database_inventory(
+    db_id: str,
+    server_image_id: str,
+    network_name: str,
+    credentials: Path,
+    project: str,
+    register_helper: Callable[[dict[str, Any]], None],
+    expected_migrations: list[dict[str, str]],
+) -> SchemaInventory:
+    reference_database = f"crowley_reference_{uuid.uuid4().hex[:16]}"
+    migration_helper_id: str | None = None
+
+    def create_database(database_name: str) -> None:
+        _db_sql(db_id, f"CREATE DATABASE {_sql_identifier(database_name)}", "postgres")
+
+    def prepare_migration(database_name: str) -> None:
+        nonlocal migration_helper_id
+        migration_helper_id, helper = _make_reference_migration_helper(
+            project,
+            database_name,
+            network_name,
+            server_image_id,
+            credentials,
+        )
+        register_helper(helper)
+
+    def migrate_database(database_name: str) -> None:
+        if migration_helper_id is None:
+            raise BackupError("reference migration helper was not created")
+        result = _docker(["start", "-a", migration_helper_id], check=False)
+        if result.returncode:
+            raise BackupError("reference database migration failed")
+        applied = _json_sql(
+            db_id,
+            "SELECT coalesce(json_agg(name ORDER BY name),'[]'::json) FROM schema_migrations",
+            database_name,
+        )
+        expected_names = sorted(Path(item["path"]).name for item in expected_migrations)
+        if applied != expected_names:
+            raise BackupError("reference database migration manifest differs from packaged manifest")
+
+    def inventory_database(database_name: str) -> SchemaInventory:
+        return _catalog_inventory(db_id, database_name)
+
+    def drop_database(database_name: str) -> None:
+        _db_sql(db_id, f"DROP DATABASE {_sql_identifier(database_name)}", "postgres")
+
+    return build_reference_inventory(
+        reference_database,
+        create_database,
+        prepare_migration,
+        migrate_database,
+        inventory_database,
+        drop_database,
+    )
+
+
+def _count_restored(
+    container_id: str, reference: SchemaInventory, expected_migrations: list[dict[str, str]]
+) -> dict[str, Any]:
+    counts: dict[str, int] = {}
+    reference_table_keys = tuple(sorted(_table_count_key(table) for table in reference.tables))
+    for table in reference.tables:
+        key = _table_count_key(table)
+        if key in counts:
+            raise BackupError(f"duplicate application table count key: {key}")
+        qualified = f"{_sql_identifier(table.schema)}.{_sql_identifier(table.name)}"
+        counts[key] = int(_db_sql(container_id, f"SELECT count(*) FROM {qualified}"))
+    count_proof = db_count_provenance(counts, "restored_dump", reference_table_keys)
     groups = {
         "scans": _json_sql(
             container_id,
@@ -2083,12 +2482,31 @@ def _receipt_migrations(value: Any, where: str) -> dict[str, Any]:
 
 def _receipt_counts(value: Any) -> dict[str, Any]:
     counts = _exact_keys(value, {"provenance", "groups", "houses", "market_plans", "migrations"}, "counts")
-    proof = _exact_keys(counts["provenance"], {"source", "tables"}, "count provenance")
+    proof = _exact_keys(
+        counts["provenance"], {"source", "reference_table_keys", "tables"}, "count provenance"
+    )
     if proof["source"] != "restored_dump":
         raise BackupError("receipt counts are not restored-dump-derived")
+    reference_table_keys = proof["reference_table_keys"]
+    if not isinstance(reference_table_keys, list) or any(
+        not isinstance(table, str) or not table for table in reference_table_keys
+    ):
+        raise BackupError("invalid reference table-key list")
+    if reference_table_keys != sorted(set(reference_table_keys)):
+        raise BackupError("reference table-key list is unsorted or duplicated")
     table_counts = proof["tables"]
-    if not isinstance(table_counts, dict) or set(table_counts) != set(APP_TABLES) | {"schema_migrations"}:
+    if (
+        not isinstance(table_counts, dict)
+        or not table_counts
+        or any(not isinstance(table, str) or not table for table in table_counts)
+    ):
         raise BackupError("invalid receipt table counts")
+    required_tables = {"houses", "market_sweeps", "market_plans", "scans", "schema_migrations"}
+    missing_tables = sorted(required_tables - set(table_counts))
+    if missing_tables:
+        raise BackupError(f"invalid receipt table counts: missing {', '.join(missing_tables)}")
+    if set(table_counts) != set(reference_table_keys):
+        raise BackupError("receipt table counts differ from reference table-key list")
     for table, count in table_counts.items():
         _integer(count, f"{table} row count")
 
@@ -2257,7 +2675,12 @@ def _validate_verified_target(target: dict[str, Any]) -> set[str]:
 
     helper_ids: set[str] = set()
     helper_names = {helper["service"] for helper in target["helpers"]}
-    if helper_names != {"raw-restore-helper", "raw-verify-helper"} or len(target["helpers"]) != 2:
+    expected_helper_names = {
+        "raw-restore-helper",
+        "raw-verify-helper",
+        "reference-migration-helper",
+    }
+    if helper_names != expected_helper_names or len(target["helpers"]) != len(expected_helper_names):
         raise BackupError("verified receipt helper inventory is incomplete")
     raw_volume_name = services["server"]["mounts"][0]["Name"]
     raw_volume = volume_by_name[raw_volume_name]
@@ -2268,22 +2691,26 @@ def _validate_verified_target(target: dict[str, Any]) -> set[str]:
             or helper["labels"].get("com.docker.compose.project") != project
             or helper["labels"].get("com.docker.compose.service") != name
             or helper["image_id"] != services["server"]["image_id"]
-            or len(helper["mounts"]) != 1
-            or helper["networks"].keys() != {"none"}
         ):
             raise BackupError("verified receipt helper identity is incomplete")
         helper_ids.add(helper["id"])
-        mount = helper["mounts"][0]
-        expected_rw = name == "raw-restore-helper"
-        if (
-            mount["Type"] != "volume"
-            or mount["Name"] != raw_volume_name
-            or mount["Source"] != raw_volume["mountpoint"]
-            or mount["Destination"] != "/data"
-            or mount["RW"] is not expected_rw
-        ):
-            raise BackupError("verified receipt helper mount is invalid")
-        _string(helper["networks"]["none"]["NetworkID"], "verified helper none network ID")
+        if name == "reference-migration-helper":
+            if helper["mounts"] or helper["networks"] != {network["name"]: {"NetworkID": network_id}}:
+                raise BackupError("verified receipt migration helper inventory is invalid")
+        else:
+            if len(helper["mounts"]) != 1 or helper["networks"].keys() != {"none"}:
+                raise BackupError("verified receipt helper inventory is incomplete")
+            mount = helper["mounts"][0]
+            expected_rw = name == "raw-restore-helper"
+            if (
+                mount["Type"] != "volume"
+                or mount["Name"] != raw_volume_name
+                or mount["Source"] != raw_volume["mountpoint"]
+                or mount["Destination"] != "/data"
+                or mount["RW"] is not expected_rw
+            ):
+                raise BackupError("verified receipt helper mount is invalid")
+            _string(helper["networks"]["none"]["NetworkID"], "verified helper none network ID")
     return service_ids | helper_ids | set(volume_names) | {network_id}
 
 
@@ -2318,7 +2745,7 @@ def validate_receipt(receipt: Any) -> dict[str, Any]:
     ):
         raise BackupError("invalid receipt schema")
     backup_id = _string(result["backup_id"], "receipt backup_id")
-    if not re.fullmatch(r"beta-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}", backup_id):
+    if not BACKUP_ID_RE.fullmatch(backup_id):
         raise BackupError("invalid receipt backup ID")
     _sha(result["manifest_sha256"], "receipt manifest")
     if not isinstance(result["result"], str) or result["result"] not in {
@@ -2618,6 +3045,9 @@ def _remove_owned(
             if expected_service in {"db", "server"}:
                 if not _target_network_attachment_matches(cur, expected_membership):
                     return {"verified": False, "removed": removed}
+            elif expected_service == "reference-migration-helper":
+                if not _target_network_attachment_matches(cur, expected_membership):
+                    return {"verified": False, "removed": removed}
             elif not _helper_uses_only_none_network(cur, source["none_network_id"]):
                 return {"verified": False, "removed": removed}
         for volume in target.get("volumes", []):
@@ -2642,9 +3072,13 @@ def _remove_owned(
         # All cleanup identities have been checked before the first removal.
         ordered = sorted(
             containers,
-            key=lambda c: {"server": 0, "raw-restore-helper": 1, "raw-verify-helper": 1, "db": 2}.get(
-                c["labels"].get("com.docker.compose.service"), 1
-            ),
+            key=lambda c: {
+                "server": 0,
+                "reference-migration-helper": 1,
+                "raw-restore-helper": 1,
+                "raw-verify-helper": 1,
+                "db": 2,
+            }.get(c["labels"].get("com.docker.compose.service"), 1),
         )
         for old in ordered:
             _docker(["rm", "-f", old["id"]])
@@ -2735,10 +3169,12 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
     credentials = receipt_dir / "credentials.env"
     receipt_path = receipt_dir / "receipt.json"
     _write_override(override, project)
+    database_password = uuid.uuid4().hex + uuid.uuid4().hex
+    api_token = uuid.uuid4().hex + uuid.uuid4().hex
     env = "\n".join(
         (
-            f"CROWLEY_DB_PASSWORD={uuid.uuid4().hex}{uuid.uuid4().hex}",
-            f"CROWLEY_API_TOKEN={uuid.uuid4().hex}{uuid.uuid4().hex}",
+            f"CROWLEY_DB_PASSWORD={database_password}",
+            f"CROWLEY_API_TOKEN={api_token}",
             f"MARKET_BACKUP_DB_IMAGE={src['containers']['database']['image_id']}",
             f"MARKET_BACKUP_SERVER_IMAGE={src['containers']['server']['image_id']}",
             "",
@@ -2871,9 +3307,36 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         }
         if not receipt["target_versions"]["match"]:
             raise BackupError("target database versions differ from snapshot")
-        receipt["counts"] = _count_restored(db_id, repo, src["migrations"])
+        failure_stage = "count_restored_tables"
+        network_names = {network["name"] for network in target["networks"]}
+        if len(network_names) != 1:
+            raise BackupError("disposable database network is not unique")
+
+        def register_reference_helper(helper: dict[str, Any]) -> None:
+            if helper["id"] in live_before["containers"] or helper["id"] in {
+                container["id"] for container in source["containers"].values()
+            }:
+                raise BackupError("reference migration helper identity collides with source")
+            helpers.append(helper)
+            _guard_current(repo, project, override, credentials, source, target, helpers)
+
+        _guard_current(repo, project, override, credentials, source, target, helpers)
+        reference_inventory = _reference_database_inventory(
+            db_id,
+            src["containers"]["server"]["image_id"],
+            next(iter(network_names)),
+            credentials,
+            project,
+            register_reference_helper,
+            src["migrations"],
+        )
+        _guard_current(repo, project, override, credentials, source, target, helpers)
+        restored_inventory = _catalog_inventory(db_id, "crowley")
+        compare_schema_inventories(reference_inventory, restored_inventory)
+        receipt["counts"] = _count_restored(db_id, reference_inventory, src["migrations"])
         receipt["migrations"] = receipt["counts"]["migrations"]
         _mark(receipt, "count_restored_tables", "passed")
+        failure_stage = None
         raw_volume = next(
             m["Name"] for m in target["containers"]["server"]["mounts"] if m["Destination"] == "/data"
         )

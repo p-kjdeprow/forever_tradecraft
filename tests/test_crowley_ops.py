@@ -21,6 +21,13 @@ GOOD_DIGEST = "a" * 64
 BACKUP_NAME = "beta-20261019T200000Z-012345abcdef"
 
 
+def test_backup_id_validator_is_shared_with_market_backup() -> None:
+    assert ops.BACKUP_ID_RE is ops.market_backup.BACKUP_ID_RE
+    assert ops._safe_backup_name("crowley-20261107T061327Z-012345abcdef").startswith("crowley-")
+    with pytest.raises(ops.OperationsError, match="invalid backup name"):
+        ops._safe_backup_name("other-20261107T061327Z-012345abcdef")
+
+
 def _config(tmp_path: Path) -> Path:
     path = tmp_path / "session.toml"
     path.write_text("[profile]\n", encoding="utf-8")

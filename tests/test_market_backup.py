@@ -7,12 +7,17 @@ import json
 import os
 import runpy
 import tarfile
+import uuid
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+import psycopg
 import pytest
+from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from crowley.server.db import migrate
 from crowley.server.ingest import _logical_digest
 from tools import market_backup as backup
 
@@ -139,6 +144,102 @@ def test_snapshot_manifest_and_complete_marker_validate(tmp_path: Path):
         {"path": "raw/format2/aa/example", "size_bytes": 3, "sha256": hashlib.sha256(b"abc").hexdigest()}
     ]
     assert {p.name for p in snapshot.iterdir()} == {"database.dump", "raw.tar", "manifest.json", "COMPLETE"}
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "crowley-20261107T061327Z-012345abcdef",
+        "beta-20261017T061327Z-012345abcdef",
+    ],
+)
+def test_backup_id_formats_accept_new_and_named_historical_prefix(value: str) -> None:
+    assert backup.BACKUP_ID_RE.fullmatch(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "alpha-20261107T061327Z-012345abcdef",
+        "crowley-20261107T061327Z-012345ABCDEf",
+        "crowley-20261107T061327Z-0123456789ab0",
+        "beta-20261107T061327Z-0123456789ab-extra",
+    ],
+)
+def test_backup_id_formats_reject_unknown_prefix_or_shape(value: str) -> None:
+    assert backup.BACKUP_ID_RE.fullmatch(value) is None
+
+
+def _inventory_fixture() -> backup.SchemaInventory:
+    return backup.SchemaInventory(
+        tables=(backup.TableInventory("public", "orders"),),
+        columns=(
+            backup.ColumnInventory(
+                "public", "orders", "id", "integer", False, "nextval('orders_id_seq'::regclass)"
+            ),
+        ),
+        constraints=(backup.ConstraintInventory("public", "orders", "orders_pkey", "p", "PRIMARY KEY (id)"),),
+        indexes=(
+            backup.IndexInventory(
+                "public",
+                "orders",
+                "orders_pkey",
+                "CREATE UNIQUE INDEX orders_pkey ON public.orders USING btree (id)",
+            ),
+        ),
+        views=(backup.ViewInventory("public", "order_view", " SELECT id FROM public.orders;"),),
+    )
+
+
+def test_schema_inventory_comparison_accepts_identical_inventories() -> None:
+    inventory = _inventory_fixture()
+    backup.compare_schema_inventories(inventory, inventory)
+
+
+@pytest.mark.parametrize(
+    ("attribute", "message"),
+    [
+        ("tables", "missing table public.orders"),
+        ("columns", "missing column public.orders.id"),
+        ("indexes", "missing index public.orders.orders_pkey"),
+        ("constraints", "missing constraint public.orders.orders_pkey"),
+    ],
+)
+def test_schema_inventory_comparison_reports_missing_objects(attribute: str, message: str) -> None:
+    reference = _inventory_fixture()
+    restored = replace(_inventory_fixture(), **{attribute: tuple()})
+    with pytest.raises(backup.BackupError, match=message):
+        backup.compare_schema_inventories(reference, restored)
+
+
+def test_schema_inventory_comparison_reports_extra_object() -> None:
+    reference = _inventory_fixture()
+    restored = backup.SchemaInventory(
+        tables=reference.tables + (backup.TableInventory("public", "extra"),),
+        columns=reference.columns,
+        constraints=reference.constraints,
+        indexes=reference.indexes,
+        views=reference.views,
+    )
+    with pytest.raises(backup.BackupError, match="extra table public.extra"):
+        backup.compare_schema_inventories(reference, restored)
+
+
+def test_schema_inventory_comparison_reports_column_type_change() -> None:
+    reference = _inventory_fixture()
+    restored = backup.SchemaInventory(
+        tables=reference.tables,
+        columns=(
+            backup.ColumnInventory(
+                "public", "orders", "id", "bigint", False, "nextval('orders_id_seq'::regclass)"
+            ),
+        ),
+        constraints=reference.constraints,
+        indexes=reference.indexes,
+        views=reference.views,
+    )
+    with pytest.raises(backup.BackupError, match="changed column public.orders.id"):
+        backup.compare_schema_inventories(reference, restored)
 
 
 def test_incomplete_published_states_and_changed_bytes_fail_closed(tmp_path: Path):
@@ -326,11 +427,12 @@ def test_orphans_are_classified_only_after_reference_set_is_known():
 
 
 def test_acceptance_counts_must_be_derived_from_restored_dump():
-    counts = {table: 0 for table in (*backup.APP_TABLES, "schema_migrations")}
-    proof = backup.db_count_provenance(counts, "restored_dump")
+    counts = {"houses": 0, "market_sweeps": 0, "schema_migrations": 0}
+    reference_table_keys = tuple(sorted(counts))
+    proof = backup.db_count_provenance(counts, "restored_dump", reference_table_keys)
     assert proof["source"] == "restored_dump"
     with pytest.raises(backup.BackupError, match="restored dump"):
-        backup.db_count_provenance(counts, "live_database")
+        backup.db_count_provenance(counts, "live_database", reference_table_keys)
 
 
 def test_migration_inventory_uses_repository_relative_paths(tmp_path: Path):
@@ -343,6 +445,101 @@ def test_migration_inventory_uses_repository_relative_paths(tmp_path: Path):
         "src/crowley/server/migrations/001_first.sql",
         "src/crowley/server/migrations/002_second.sql",
     ]
+
+
+def test_reference_inventory_lifecycle_drops_database_after_inventory() -> None:
+    events: list[str] = []
+    expected = _inventory_fixture()
+
+    def create(database_name: str) -> None:
+        events.append(f"create:{database_name}")
+
+    def migrate_database(database_name: str) -> None:
+        events.append(f"migrate:{database_name}")
+
+    def inventory(database_name: str) -> backup.SchemaInventory:
+        events.append(f"inventory:{database_name}")
+        return expected
+
+    def drop(database_name: str) -> None:
+        events.append(f"drop:{database_name}")
+
+    def prepare(database_name: str) -> None:
+        events.append(f"prepare:{database_name}")
+
+    assert (
+        backup.build_reference_inventory("reference", create, prepare, migrate_database, inventory, drop)
+        == expected
+    )
+    assert events == [
+        "create:reference",
+        "prepare:reference",
+        "migrate:reference",
+        "inventory:reference",
+        "drop:reference",
+    ]
+
+    events.clear()
+
+    def failing_migrate(database_name: str) -> None:
+        events.append(f"migrate:{database_name}")
+        raise backup.BackupError("migration failed")
+
+    with pytest.raises(backup.BackupError, match="migration failed"):
+        backup.build_reference_inventory("reference", create, prepare, failing_migrate, inventory, drop)
+    assert events == ["create:reference", "prepare:reference", "migrate:reference", "drop:reference"]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("CROWLEY_TEST_DATABASE_URL"), reason="CROWLEY_TEST_DATABASE_URL not set"
+)
+def test_catalog_inventory_builds_from_real_packaged_migrations() -> None:
+    database_url = os.environ["CROWLEY_TEST_DATABASE_URL"]
+    repository = Path(__file__).parents[1]
+    expected_manifest = backup._migration_inventory(repository)
+    maintenance_options = conninfo_to_dict(database_url)
+    maintenance_options["dbname"] = "postgres"
+    maintenance_url = make_conninfo(**maintenance_options)
+
+    def create_database(database_name: str) -> None:
+        with psycopg.connect(maintenance_url, autocommit=True) as connection:
+            connection.execute(f"CREATE DATABASE {backup._sql_identifier(database_name)}")
+
+    def reference_url(database_name: str) -> str:
+        target_options = conninfo_to_dict(database_url)
+        target_options["dbname"] = database_name
+        return make_conninfo(**target_options)
+
+    def migrate_database(database_name: str) -> None:
+        with psycopg.connect(reference_url(database_name)) as connection:
+            assert migrate(connection) == [Path(item["path"]).name for item in expected_manifest]
+
+    def prepare(database_name: str) -> None:
+        del database_name
+
+    def inventory_database(database_name: str) -> backup.SchemaInventory:
+        with psycopg.connect(reference_url(database_name)) as connection:
+
+            def query(sql: str) -> object:
+                value = connection.execute(sql).fetchone()[0]
+                return json.loads(value) if isinstance(value, str) else value
+
+            return backup.catalog_inventory(query)
+
+    def drop_database(database_name: str) -> None:
+        with psycopg.connect(maintenance_url, autocommit=True) as connection:
+            connection.execute(f"DROP DATABASE {backup._sql_identifier(database_name)}")
+
+    inventory = backup.build_reference_inventory(
+        f"crowley_reference_test_{uuid.uuid4().hex[:16]}",
+        create_database,
+        prepare,
+        migrate_database,
+        inventory_database,
+        drop_database,
+    )
+    assert any(table.name == "schema_migrations" for table in inventory.tables)
+    assert all(table.schema not in backup.TIMESCALE_INTERNAL_SCHEMAS for table in inventory.tables)
 
 
 def _compatibility_facts(source: dict) -> dict:
@@ -1103,6 +1300,17 @@ def _verified_receipt():
             ],
             "networks": {"none": {"NetworkID": "builtin-none-network-id"}},
         },
+        {
+            "id": "reference-migration-helper-id",
+            "service": "reference-migration-helper",
+            "labels": {
+                "com.docker.compose.project": project,
+                "com.docker.compose.service": "reference-migration-helper",
+            },
+            "image_id": server_image,
+            "mounts": [],
+            "networks": {net_name: {"NetworkID": net_id}},
+        },
     ]
     receipt["result"] = "restore_verified"
     receipt["target_versions"] = {
@@ -1113,9 +1321,18 @@ def _verified_receipt():
     receipt["counts"] = {
         "provenance": {
             "source": "restored_dump",
+            "reference_table_keys": [
+                "houses",
+                "items",
+                "market_plans",
+                "market_sweeps",
+                "scans",
+                "schema_migrations",
+            ],
             "tables": {
-                **{table: 0 for table in backup.APP_TABLES},
+                "scans": 0,
                 "houses": 1,
+                "items": 0,
                 "market_sweeps": 1,
                 "market_plans": 1,
                 "schema_migrations": 2,
@@ -1169,6 +1386,7 @@ def _verified_receipt():
                 "container:server-container-id",
                 "container:raw-restore-helper-id",
                 "container:raw-verify-helper-id",
+                "container:reference-migration-helper-id",
                 f"volume:{db_volume}",
                 f"volume:{raw_volume}",
                 f"network:{net_id}",
@@ -1181,6 +1399,13 @@ def _verified_receipt():
 def test_complete_restore_verified_receipt_is_accepted():
     receipt = _verified_receipt()
     assert backup.validate_receipt(receipt)["result"] == "restore_verified"
+
+
+def test_verified_receipt_rejects_missing_non_core_reference_table_count() -> None:
+    receipt = _verified_receipt()
+    del receipt["counts"]["provenance"]["tables"]["items"]
+    with pytest.raises(backup.BackupError, match="reference table-key list"):
+        backup.validate_receipt(receipt)
 
 
 def test_partial_blocked_receipt_is_accepted_but_must_remain_partial():

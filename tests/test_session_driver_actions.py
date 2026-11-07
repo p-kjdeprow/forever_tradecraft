@@ -38,8 +38,10 @@ from crowley.session.executor import (
     Rect,
     plan_pointer_curve,
 )
+from crowley.session.input_broker import InputBroker, InputBrokerError, RateReservation
 from crowley.session.input_events import EventClass, XI2Event
 from crowley.session.input_tool import PinnedInputTool
+from crowley.session.pointer_execution import PointerExecutionError
 from crowley.session.process_admission import AdmissionGate
 from tests.test_session_input_tool import fixture_input_tool
 
@@ -935,6 +937,397 @@ def test_run_camera_drag_allows_press_at_start_without_positioning_trace(
     try:
         driver.run_camera_drag(plan, generation=generation)
         assert driver.guardian.armed
+    finally:
+        driver.close()
+
+
+def _camera_failure_plan(driver: DesktopDriver, generation: int) -> CameraDragPlan:
+    driver.backend.pointer_position = lambda **_kwargs: (100, 100, 0x101)  # type: ignore[method-assign]
+    binding = BindingMetadata("identity", "capture", 1, generation, 4, (4,), boot="boot")
+    return CameraDragPlan(
+        PointerButton.RIGHT,
+        (PointerSample(0.0, Point(100, 100)), PointerSample(0.05, Point(130, 100))),
+        0.05,
+        Point(30, 0),
+        binding,
+    )
+
+
+def _arm_camera_failure_driver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[DesktopDriver, CameraDragPlan, int]:
+    driver = _driver(tmp_path, monkeypatch)
+    generation = driver.guardian.arm(driver._input_evidence)
+    driver.backend.activate_generation(generation)
+    return driver, _camera_failure_plan(driver, generation), generation
+
+
+def test_camera_drag_broker_mint_failure_revokes_guardian_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    driver, plan, generation = _arm_camera_failure_driver(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        driver.input_broker,
+        "mint_admitted_gesture",
+        lambda **_kwargs: (_ for _ in ()).throw(InputBrokerError("mint failed")),
+    )
+    try:
+        with pytest.raises(DriverError, match="mint failed"):
+            driver.run_camera_drag(plan, generation=generation, action_generation=generation + 1)
+        assert driver.guardian.action is None
+        assert not driver.guardian.armed
+    finally:
+        driver.close()
+
+
+def test_camera_drag_broker_precommit_failure_revokes_without_emission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    driver, plan, generation = _arm_camera_failure_driver(tmp_path, monkeypatch)
+    emitted: list[list[str]] = []
+
+    class FailingPrecommitPermit:
+        def __init__(self) -> None:
+            self.is_open = True
+            self.acquired_monotonic = 0.0
+            self.closed = False
+
+        def precommit(self, *, deadline_monotonic: float | None = None) -> int:
+            del deadline_monotonic
+            raise PointerExecutionError("precommit failed before physical drag")
+
+        def record_press(self) -> int:
+            raise AssertionError("record_press must not run after precommit failure")
+
+        def close(self) -> None:
+            self.closed = True
+            self.is_open = False
+
+    permit = FailingPrecommitPermit()
+    reservation = RateReservation(permit)
+    monkeypatch.setattr(
+        driver.input_broker,
+        "reserve_button_rate",
+        lambda **_kwargs: reservation,
+    )
+    driver.backend._run = (  # type: ignore[method-assign]
+        lambda args, **_kwargs: emitted.append(list(args))
+    )
+    try:
+        with pytest.raises(DriverError, match="precommit failed"):
+            driver.run_camera_drag(plan, generation=generation, action_generation=generation + 1)
+        assert emitted == []
+        assert permit.closed
+        assert not reservation.is_open
+        assert driver.guardian.action is None
+        assert not driver.guardian.armed
+    finally:
+        driver.close()
+
+
+def test_camera_drag_live_action_authority_change_blocks_native_emission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    driver, plan, generation = _arm_camera_failure_driver(tmp_path, monkeypatch)
+    emitted: list[list[str]] = []
+    live_action_generation = [generation]
+
+    class Permit:
+        def __init__(self) -> None:
+            self.is_open = True
+            self.acquired_monotonic = 0.0
+            self.closed = False
+
+        def precommit(self, *, deadline_monotonic: float | None = None) -> int:
+            del deadline_monotonic
+            return 1
+
+        def record_press(self) -> int:
+            return 2
+
+        def close(self) -> None:
+            self.closed = True
+            self.is_open = False
+
+    permit = Permit()
+
+    def acquire(**kwargs: object) -> Permit:
+        cancellation_check = kwargs.get("cancellation_check")
+        assert callable(cancellation_check)
+        cancellation_check()
+        live_action_generation[0] = generation + 1
+        return permit
+
+    broker = InputBroker.for_tests(clock=time.monotonic, permit_factory=acquire)
+    driver.input_broker = broker
+    assert isinstance(driver.backend, X11Backend)
+    driver.backend.input_broker = broker
+    driver.backend._run = (  # type: ignore[method-assign]
+        lambda args, **_kwargs: emitted.append(list(args))
+    )
+
+    def require_live_action() -> None:
+        if live_action_generation[0] != generation:
+            raise DriverError("action generation changed while camera drag was waiting")
+
+    try:
+        with pytest.raises(DriverError, match="action generation changed"):
+            driver.run_camera_drag(
+                plan,
+                generation=generation,
+                action_generation=generation,
+                live_admission_check=require_live_action,
+            )
+        assert emitted == []
+        assert permit.closed
+        assert driver.guardian.action is None
+        assert not driver.guardian.armed
+    finally:
+        driver.close()
+
+
+def test_camera_drag_broker_record_failure_revokes_after_physical_emission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    driver, plan, generation = _arm_camera_failure_driver(tmp_path, monkeypatch)
+    emitted: list[list[str]] = []
+
+    class FailingRecordPermit:
+        is_open = True
+        acquired_monotonic = 0.0
+
+        def precommit(self, *, deadline_monotonic: float | None = None) -> int:
+            del deadline_monotonic
+            return 1
+
+        def record_press(self) -> int:
+            raise PointerExecutionError("record failed after physical drag")
+
+        def close(self) -> None:
+            self.is_open = False
+
+    monkeypatch.setattr(
+        driver.input_broker,
+        "reserve_button_rate",
+        lambda **_kwargs: RateReservation(FailingRecordPermit()),
+    )
+    driver.backend._run = (  # type: ignore[method-assign]
+        lambda args, **_kwargs: emitted.append(list(args))
+    )
+    try:
+        with pytest.raises(DriverError, match="record failed"):
+            driver.run_camera_drag(plan, generation=generation, action_generation=generation + 1)
+        assert emitted and emitted[0][1:3] == ["mousedown", "3"]
+        assert driver.guardian.action is None
+        assert not driver.guardian.armed
+    finally:
+        driver.close()
+
+
+def test_camera_drag_admission_cancellation_revokes_open_action(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    driver, plan, generation = _arm_camera_failure_driver(tmp_path, monkeypatch)
+
+    def cancel_while_waiting(**kwargs: object) -> RateReservation:
+        driver.revoke("test camera admission cancellation")
+        callback = kwargs.get("cancellation_check")
+        assert callable(callback)
+        callback()
+        raise AssertionError("cancellation callback did not stop admission")
+
+    monkeypatch.setattr(driver.input_broker, "reserve_button_rate", cancel_while_waiting)
+    try:
+        with pytest.raises(DriverError, match="cancelled|revoked"):
+            driver.run_camera_drag(plan, generation=generation, action_generation=generation + 1)
+        assert driver.guardian.action is None
+    finally:
+        driver.close()
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [("click", "camera"), ("camera", "click")],
+)
+def test_production_click_and_camera_drag_entrypoints_share_the_rate_gate(
+    first: str, second: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The native click and camera paths consume one shared button-down gate."""
+
+    driver = _driver(tmp_path, monkeypatch)
+    backend = driver.backend
+    assert isinstance(backend, X11Backend)
+    identity = _identity()
+    clock = [0.0]
+    next_allowed = [0.0]
+    emitted: list[tuple[str, list[str]]] = []
+
+    class Permit:
+        def __init__(self, acquired_monotonic: float) -> None:
+            self.is_open = True
+            self.acquired_monotonic = acquired_monotonic
+
+        def precommit(self, *, deadline_monotonic: float | None = None) -> int:
+            del deadline_monotonic
+            return 1
+
+        def record_press(self) -> int:
+            next_allowed[0] = clock[0] + 1.0
+            return 2
+
+        def close(self) -> None:
+            self.is_open = False
+
+    def acquire(**_kwargs: object) -> Permit:
+        if clock[0] < next_allowed[0]:
+            raise PointerExecutionError("click spacing wait cannot fit before its deadline")
+        return Permit(clock[0])
+
+    broker = InputBroker.for_tests(clock=lambda: clock[0], permit_factory=acquire)
+    driver.input_broker = broker
+    backend.input_broker = broker
+    generation = driver.guardian.arm(driver._input_evidence)
+    backend.activate_generation(generation)
+    backend.resolve_identity = lambda **_kwargs: identity  # type: ignore[method-assign]
+    backend._focus = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    pointer = [20, 20, identity.child_xid]
+
+    def run_native(args, *, input_schema=None, **_kwargs):  # type: ignore[no-untyped-def]
+        emitted.append((str(input_schema), list(args)))
+        if input_schema == "pointer-motion":
+            for index, value in enumerate(args[:-2]):
+                if value == "mousemove":
+                    pointer[0] = int(args[index + 1])
+                    pointer[1] = int(args[index + 2])
+
+    backend.pointer_position = lambda **_kwargs: tuple(pointer)  # type: ignore[method-assign]
+    backend._run = run_native  # type: ignore[method-assign]
+
+    anchor = MeasuredAnchor(
+        action="logout",
+        x=100,
+        y=100,
+        identity_fingerprint=identity.fingerprint,
+        target_xid=identity.child_xid,
+        capture_id="click-capture-one",
+        capture_sequence=1,
+        source="native-visual",
+        observed_monotonic=time.monotonic(),
+        capture_monotonic=time.monotonic(),
+        facts=(
+            ("capture", "click-capture-one"),
+            ("control", "world"),
+            ("target", str(identity.child_xid)),
+        ),
+        generation=generation,
+        bounds=(80, 80, 60, 40),
+        target_ancestry=(identity.child_xid,),
+    ).with_hash()
+    backend._measured_anchors["logout"] = anchor
+    backend._consumed_anchor_seals.add(anchor.evidence_hash)
+    binding = BindingMetadata(
+        identity.fingerprint,
+        anchor.capture_id,
+        anchor.capture_sequence,
+        generation,
+        anchor.target_xid,
+        anchor.target_ancestry,
+        source=anchor.source,
+    )
+    click_gesture = pointer_execution.plan_human_pointer(
+        Point(pointer[0], pointer[1]),
+        PointerTarget("world", Rect(*anchor.bounds), binding, padding=1),
+        Rect(0, 0, identity.child_geometry[2], identity.child_geometry[3]),
+        seed=0x1234,
+        button=PointerButton.LEFT,
+        profile=driver.pointer_motion_profile,
+    )
+
+    def refresh_anchor(_identity: WindowIdentity, _previous: MeasuredAnchor) -> MeasuredAnchor:
+        return replace(
+            anchor,
+            capture_id="click-capture-two",
+            capture_sequence=2,
+            observed_monotonic=time.monotonic(),
+            capture_monotonic=time.monotonic(),
+            facts=(
+                ("capture", "click-capture-two"),
+                ("control", "world"),
+                ("target", str(identity.child_xid)),
+            ),
+        ).with_hash()
+
+    evidence = SimpleNamespace(xtest_profile=None, synthetic_echo_proof=())
+    driver._motion_input_context = lambda *_args, **_kwargs: (  # type: ignore[method-assign]
+        identity,
+        evidence,
+        4,
+        2,
+        (0, 0, 0),
+        {},
+    )
+    driver._verify_current_xtest_profile = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    class CompleteAction:
+        complete = True
+
+    monkeypatch.setattr(
+        driver.guardian,
+        "begin_action",
+        lambda *_args, **_kwargs: CompleteAction(),
+    )
+    monkeypatch.setattr(driver.guardian, "dispatch_admission", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(driver.guardian, "check", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(driver.guardian, "finish_action", lambda *_args, **_kwargs: None)
+
+    class CompleteMonitor:
+        def wait_for_event(self, predicate, *, timeout: float) -> None:  # type: ignore[no-untyped-def]
+            del timeout
+            assert predicate(())
+
+        def stop(self) -> None:
+            return None
+
+    driver._monitor = CompleteMonitor()  # type: ignore[assignment]
+    camera_plan = CameraDragPlan(
+        PointerButton.RIGHT,
+        (PointerSample(0.0, Point(100, 100)), PointerSample(0.05, Point(130, 100))),
+        0.05,
+        Point(30, 0),
+        BindingMetadata("identity", "camera-capture", 1, generation, 4, (4,), boot="boot"),
+    )
+
+    def run_click() -> None:
+        reservation = broker.reserve_button_rate(deadline_monotonic=10.0)
+        try:
+            backend.action(
+                "logout",
+                generation=generation,
+                _admitted_anchor=anchor,
+                _pointer_plan=click_gesture.trajectory,
+                _click_plan=click_gesture.click,
+                _gesture_plan=click_gesture,
+                _rate_reservation=reservation,
+                _refresh_anchor=refresh_anchor,
+                _guardian_admission_id="production-click",
+                _action_generation=generation + 1,
+            )
+        finally:
+            broker.release_reservation(reservation)
+
+    try:
+        if first == "click":
+            run_click()
+            clock[0] = 0.5
+            with pytest.raises(DriverError, match="click spacing"):
+                driver.run_camera_drag(camera_plan, generation=generation, action_generation=generation + 2)
+            assert any(schema == "single-click" for schema, _args in emitted)
+        else:
+            driver.run_camera_drag(camera_plan, generation=generation, action_generation=generation + 2)
+            clock[0] = 0.5
+            with pytest.raises(InputBrokerError, match="click spacing"):
+                run_click()
+            assert any(schema == "camera-drag" for schema, _args in emitted)
     finally:
         driver.close()
 

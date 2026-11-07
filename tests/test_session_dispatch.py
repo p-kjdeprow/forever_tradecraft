@@ -2600,9 +2600,17 @@ def test_production_camera_drag_entrypoint_seals_press_motion_release_contract(
             return ""
 
     driver._monitor = Monitor()  # type: ignore[assignment]
+    original_mint = driver.input_broker.mint_admitted_gesture
+
+    def record_generations(**kwargs: object):
+        captured["actionGeneration"] = kwargs["action_generation"]
+        captured["leaseGeneration"] = kwargs["lease_generation"]
+        return original_mint(**kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(driver.input_broker, "mint_admitted_gesture", record_generations)
     try:
         assert driver.guardian.arm(evidence) == 1
-        driver.run_camera_drag(plan, generation=1)
+        driver.run_camera_drag(plan, generation=1, action_generation=7)
     finally:
         driver.close()
 
@@ -2624,6 +2632,8 @@ def test_production_camera_drag_entrypoint_seals_press_motion_release_contract(
     assert chain[-2:] == ["mouseup", "3"]
     assert captured["runKwargs"]["input_schema"] == "camera-drag"
     assert captured["runKwargs"]["expected_argv"] == tuple(chain)
+    assert captured["actionGeneration"] == 7
+    assert captured["leaseGeneration"] == 1
     assert call_order == ["begin", "dispatch", "check", "finish", "close"]
 
 

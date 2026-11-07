@@ -19,6 +19,7 @@ from crowley.session.daemon import SessionDaemon
 from crowley.session.driver import DesktopDriver, DriverError, DriverProfile, X11Backend
 from crowley.session.executor import BindingMetadata, Point, PointerTarget, Rect
 from crowley.session.guardian import GuardianError, InputGuardian
+from crowley.session.input_broker import InputBroker, RateReservation
 from crowley.session.motion import MAX_FRAME_AGE
 from crowley.session.route_walk import KeyEvent, Kinematics, Pose, Route, RouteFile, Style, simulate
 from tests.test_session_input_tool import fixture_input_tool
@@ -1052,9 +1053,18 @@ def test_world_click_retakes_hover_proof_after_permit_and_uses_release_boundary(
             self.is_open = False
 
     permit = Permit()
-    monkeypatch.setattr(daemon_module, "acquire_click_rate_permit", lambda **_kwargs: permit)
 
     class Driver:
+        class Broker:
+            def reserve_button_rate(self, **_kwargs: object) -> object:
+                return permit
+
+            def release_reservation(self, reservation: object) -> None:
+                assert reservation is permit
+                permit.close()
+
+        input_broker = Broker()
+
         def run_pointer_motion(self, _point: object, *, generation: int, **_kwargs: object) -> object:
             assert generation == 44
             clock[0] = 10.05
@@ -1065,7 +1075,7 @@ def test_world_click_retakes_hover_proof_after_permit_and_uses_release_boundary(
         ) -> None:
             assert generation == 44
             assert frame is proof
-            assert kwargs["click_rate_permit"] is permit
+            assert kwargs["rate_reservation"] is permit
             clicked.append((generation, frame.hover_name))
 
     daemon.driver = Driver()
@@ -1108,6 +1118,7 @@ def _click_driver_fixture(
     assert gesture.endpoint == point
     clicks: list[int] = []
     driver = object.__new__(DesktopDriver)
+    driver.input_broker = InputBroker()
     driver._motion_input_context = lambda *_args, **_kwargs: (
         identity,
         SimpleNamespace(xtest_profile=None),
@@ -1331,18 +1342,20 @@ def _world_click_daemon(
     backend = SimpleNamespace(_run=lambda *_args, **_kwargs: press_times.append(time.monotonic_ns()))
 
     class Driver:
+        input_broker = InputBroker()
+
         def run_pointer_motion(self, _point: object, *, generation: int, **_kwargs: object) -> object:
             assert generation == 44
             clock[0] += 0.01
             return SimpleNamespace()
 
         def run_hover_click(
-            self, _point: object, _frame: object, *, click_rate_permit: object, **_kwargs: object
+            self, _point: object, _frame: object, *, rate_reservation: object, **_kwargs: object
         ) -> None:
-            assert isinstance(click_rate_permit, pointer_execution.ClickRatePermit)
-            click_rate_permit.precommit()
+            assert isinstance(rate_reservation, RateReservation)
+            rate_reservation._permit.precommit()  # type: ignore[attr-defined]
             backend._run()
-            click_rate_permit.record_press()
+            rate_reservation._permit.record_press()  # type: ignore[attr-defined]
             clicks.append(1)
 
     daemon.driver = Driver()

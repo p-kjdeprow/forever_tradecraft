@@ -125,10 +125,10 @@ def _retain_driver_receipts(driver: object) -> list[dict[str, object]]:
         returned = original_run(*args, **kwargs)
         assert isinstance(returned, dict)
         # X11Backend pointer admission recursively re-enters DesktopDriver.run
-        # with the acquired permit. The inner invocation is the physical
+        # with the broker reservation. The inner invocation is the physical
         # call-local receipt that the daemon archives; the outer invocation is
-        # only the one-use permit wrapper.
-        if kwargs.get("_click_rate_permit") is not None:
+        # only the one-use rate wrapper.
+        if kwargs.get("_rate_reservation") is not None:
             receipts.append(copy.deepcopy(returned))
         return returned
 

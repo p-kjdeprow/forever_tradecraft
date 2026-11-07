@@ -52,6 +52,12 @@ from .executor import (
     plan_pointer_curve,
 )
 from .guardian import GuardianError, InputGuardian
+from .input_broker import (
+    InputBroker,
+    InputBrokerError,
+    RatePermit,
+    RateReservation,
+)
 from .input_events import (
     EventClass,
     InputEventError,
@@ -62,10 +68,8 @@ from .input_events import (
 )
 from .input_tool import InputToolError, PinnedInputTool, verify_artifact
 from .pointer_execution import (
-    ClickRatePermit,
     HumanPointerPlan,
     PointerExecutionError,
-    acquire_click_rate_permit,
     plan_human_pointer,
 )
 from .pointer_execution import (
@@ -1733,6 +1737,7 @@ class X11Backend:
         profile.validate()
         _validate_x11_display_screen(profile.display)
         self.profile = profile
+        self.input_broker = InputBroker()
         try:
             self.input_tool = input_tool or PinnedInputTool.load()
         except InputToolError as exc:
@@ -3664,7 +3669,12 @@ class X11Backend:
         pointer_plan = kwargs.pop("_pointer_plan", None)
         click_plan = kwargs.pop("_click_plan", None)
         gesture_plan = kwargs.pop("_gesture_plan", None)
+        rate_reservation = kwargs.pop("_rate_reservation", None)
         click_rate_permit = kwargs.pop("_click_rate_permit", None)
+        guardian_admission_id = kwargs.pop("_guardian_admission_id", None)
+        action_generation = kwargs.pop("_action_generation", generation)
+        if isinstance(action_generation, bool) or not isinstance(action_generation, int):
+            raise DriverError("native pointer action generation is malformed")
         refresh_anchor = kwargs.pop("_refresh_anchor", None)
         final_admission = kwargs.pop("_final_admission", None)
         deadline_monotonic = kwargs.get("deadline_monotonic", getattr(self, "_active_action_deadline", None))
@@ -3690,8 +3700,17 @@ class X11Backend:
                 or gesture_plan.click is not click_plan
             ):
                 raise DriverError("native pointer action requires a validated planned gesture")
-            if not isinstance(click_rate_permit, ClickRatePermit):
-                raise DriverError("native pointer action has no canonical click rate permit")
+            if rate_reservation is None and click_rate_permit is None:
+                raise DriverError("native pointer action has no broker rate reservation")
+            if rate_reservation is not None and click_rate_permit is not None:
+                raise DriverError("native pointer action received both broker reservation and legacy permit")
+            if rate_reservation is not None and not isinstance(rate_reservation, RateReservation):
+                raise DriverError("native pointer action has a malformed broker rate reservation")
+            if rate_reservation is None:
+                try:
+                    rate_reservation = self.input_broker.adopt_permit_for_tests(click_rate_permit)
+                except InputBrokerError as exc:
+                    raise DriverError(str(exc)) from exc
             if anchor_record is None:
                 raise DriverError(f"action anchor for {name} has not passed live calibration")
             if (
@@ -3889,32 +3908,61 @@ class X11Backend:
                     final_admission()
                 if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
                     raise DriverError("native pointer deadline expired before click rate precommit")
-                try:
-                    execution["clickPrecommitMonotonicNs"] = (
-                        click_rate_permit.precommit()
-                        if deadline_monotonic is None
-                        else click_rate_permit.precommit(deadline_monotonic=deadline_monotonic)
-                    )
-                except PointerExecutionError as exc:
-                    raise DriverError(str(exc)) from exc
-                if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
-                    raise DriverError("native pointer deadline expired before click dispatch")
-                execution["clickDispatchStartedMonotonicNs"] = time.monotonic_ns()
-                execution["phase"] = "click_dispatched"
-                self._run(
-                    click_argv,
-                    generation=generation,
-                    held_buttons={native_button},
-                    input_schema="single-click",
-                    expected_argv=tuple(click_argv),
-                    deadline_monotonic=deadline_monotonic,
+                if not isinstance(rate_reservation, RateReservation):
+                    raise DriverError("native pointer action lost its broker rate reservation")
+                chain_for_digest = tuple(chain) if pointer_plan is not None else ()
+                emitted_chain = (*chain_for_digest, *click_argv)
+                admission_id = (
+                    guardian_admission_id
+                    if isinstance(guardian_admission_id, str) and guardian_admission_id
+                    else f"{name}:{action_generation}:{generation}:{anchor_record.evidence_hash}"
                 )
-                execution["pressReleaseMonotonicNs"] = time.monotonic_ns()
-                execution["clickAckMonotonicNs"] = time.monotonic_ns()
                 try:
-                    execution["rateRecordMonotonicNs"] = click_rate_permit.record_press()
-                except PointerExecutionError as exc:
+                    admitted_gesture = self.input_broker.mint_admitted_gesture(
+                        action_generation=action_generation,
+                        lease_generation=generation,
+                        button=click_button,
+                        emitted_chain=emitted_chain,
+                        destination_anchor=anchor_record.evidence_hash,
+                        target_identity=identity.fingerprint,
+                        guardian_admission_id=admission_id,
+                        semantic_authorization=name,
+                        deadline_monotonic=deadline_monotonic,
+                        reservation=rate_reservation,
+                    )
+                except InputBrokerError as exc:
                     raise DriverError(str(exc)) from exc
+
+                def emit_click() -> None:
+                    execution["clickDispatchStartedMonotonicNs"] = time.monotonic_ns()
+                    execution["phase"] = "click_dispatched"
+                    self._run(
+                        click_argv,
+                        generation=generation,
+                        held_buttons={native_button},
+                        input_schema="single-click",
+                        expected_argv=tuple(click_argv),
+                        deadline_monotonic=deadline_monotonic,
+                    )
+                    execution["pressReleaseMonotonicNs"] = time.monotonic_ns()
+                    execution["clickAckMonotonicNs"] = time.monotonic_ns()
+
+                try:
+                    recorded_press = self.input_broker.emit_button_gesture(
+                        admitted_gesture,
+                        emitted_chain=emitted_chain,
+                        action_generation=action_generation,
+                        lease_generation=generation,
+                        destination_anchor=anchor_record.evidence_hash,
+                        target_identity=identity.fingerprint,
+                        guardian_admission_id=admission_id,
+                        semantic_authorization=name,
+                        emit=emit_click,
+                    )
+                except InputBrokerError as exc:
+                    raise DriverError(str(exc)) from exc
+                execution["clickPrecommitMonotonicNs"] = admitted_gesture.precommit_monotonic_ns
+                execution["rateRecordMonotonicNs"] = recorded_press
                 execution["phase"] = "click_released_and_rate_recorded"
                 if click_plan is not None:
                     final_x, final_y, final_window = self.pointer_position(
@@ -5308,6 +5356,9 @@ class DesktopDriver:
         if self.move_motion_profile.role is not DemonstrationRole.MOVE:
             raise DriverError("move motion profile has the wrong role")
         self.backend = backend or X11Backend.production(self.profile)
+        self.input_broker = InputBroker()
+        if isinstance(self.backend, X11Backend):
+            self.backend.input_broker = self.input_broker
         if isinstance(self.backend, X11Backend):
             try:
                 self.profile.validate()
@@ -8171,7 +8222,11 @@ class DesktopDriver:
         gesture_ended_monotonic: float,
         generation: int,
         deadline_monotonic: float | None = None,
-        click_rate_permit: ClickRatePermit | None = None,
+        action_generation: int | None = None,
+        lease_generation: int | None = None,
+        rate_reservation: RateReservation | None = None,
+        click_rate_permit: RatePermit | None = None,
+        live_admission_check: Callable[[], None] | None = None,
         target_name: str,
     ) -> None:
         """Click one pointer endpoint only after a matching fresh hover frame."""
@@ -8184,8 +8239,23 @@ class DesktopDriver:
             or not math.isfinite(float(gesture_ended_monotonic))
         ):
             raise DriverError("world click gesture timestamp is malformed")
-        if not isinstance(click_rate_permit, ClickRatePermit) or not click_rate_permit.is_open:
-            raise DriverError("world click requires a held post-hover rate permit")
+        if rate_reservation is not None and click_rate_permit is not None:
+            raise DriverError("world click received both broker reservation and legacy permit")
+        if rate_reservation is None:
+            if not isinstance(click_rate_permit, RatePermit) or not click_rate_permit.is_open:
+                raise DriverError("world click requires a held post-hover rate permit")
+            try:
+                rate_reservation = self.input_broker.adopt_permit_for_tests(click_rate_permit)
+            except InputBrokerError as exc:
+                raise DriverError(str(exc)) from exc
+        if not isinstance(rate_reservation, RateReservation) or not rate_reservation.is_open:
+            raise DriverError("world click requires an open broker rate reservation")
+        selected_action_generation = generation if action_generation is None else action_generation
+        if isinstance(selected_action_generation, bool) or not isinstance(selected_action_generation, int):
+            raise DriverError("world click action generation is malformed")
+        selected_lease_generation = generation if lease_generation is None else lease_generation
+        if isinstance(selected_lease_generation, bool) or not isinstance(selected_lease_generation, int):
+            raise DriverError("world click lease generation is malformed")
         if not isinstance(target_name, str) or not target_name or len(target_name.encode("utf-8")) > 48:
             raise DriverError("world click target name is malformed")
         from .motion import MAX_FRAME_AGE
@@ -8205,7 +8275,7 @@ class DesktopDriver:
             isinstance(capture_monotonic, bool)
             or not isinstance(capture_monotonic, (int, float))
             or capture_monotonic <= float(gesture_ended_monotonic)
-            or capture_monotonic <= click_rate_permit.acquired_monotonic
+            or capture_monotonic <= rate_reservation.acquired_monotonic
             or frame_age < 0.0
             or frame_age > MAX_FRAME_AGE
         ):
@@ -8298,6 +8368,8 @@ class DesktopDriver:
             self.guardian.dispatch_admission(generation, lambda: None)
             self._held_input = True
             try:
+                if live_admission_check is not None:
+                    live_admission_check()
                 self.last_pointer_execution = {
                     "action": "world-click",
                     "generation": generation,
@@ -8308,32 +8380,46 @@ class DesktopDriver:
                 }
                 if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
                     raise DriverError("world click deadline expired before click rate precommit")
-                self.last_pointer_execution["clickPrecommitMonotonicNs"] = (
-                    click_rate_permit.precommit()
-                    if deadline_monotonic is None
-                    else click_rate_permit.precommit(deadline_monotonic=deadline_monotonic)
+                admitted_gesture = self.input_broker.mint_admitted_gesture(
+                    action_generation=selected_action_generation,
+                    lease_generation=selected_lease_generation,
+                    button=PointerButton.LEFT,
+                    emitted_chain=click_argv,
+                    destination_anchor=f"{endpoint.x}:{endpoint.y}",
+                    target_identity=f"{identity.fingerprint}:{target_name}",
+                    guardian_admission_id=f"world-click:{selected_action_generation}:{id(action)}",
+                    semantic_authorization="world_click",
+                    deadline_monotonic=deadline_monotonic,
+                    reservation=rate_reservation,
                 )
-                if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
-                    raise DriverError("world click deadline expired before click dispatch")
-            except PointerExecutionError as exc:
+                if live_admission_check is not None:
+                    live_admission_check()
+                recorded_press = self.input_broker.emit_button_gesture(
+                    admitted_gesture,
+                    emitted_chain=click_argv,
+                    action_generation=selected_action_generation,
+                    lease_generation=selected_lease_generation,
+                    destination_anchor=f"{endpoint.x}:{endpoint.y}",
+                    target_identity=f"{identity.fingerprint}:{target_name}",
+                    guardian_admission_id=f"world-click:{selected_action_generation}:{id(action)}",
+                    semantic_authorization="world_click",
+                    emit=lambda: self.backend._run(
+                        click_argv,
+                        generation=generation,
+                        held_buttons={1},
+                        input_schema="single-click",
+                        expected_argv=tuple(click_argv),
+                        deadline_monotonic=deadline_monotonic,
+                    ),
+                )
+                self.last_pointer_execution["clickPrecommitMonotonicNs"] = (
+                    admitted_gesture.precommit_monotonic_ns
+                )
+            except InputBrokerError as exc:
                 raise DriverError(str(exc)) from exc
-            self.backend._run(
-                click_argv,
-                generation=generation,
-                held_buttons={1},
-                input_schema="single-click",
-                expected_argv=tuple(click_argv),
-                deadline_monotonic=deadline_monotonic,
-            )
-            # Once the native press/release wrapper has returned, the durable
-            # rate record is unconditional even if Guardian observation later
-            # reaches the operation deadline.  The precommit reservation has
-            # already fenced the next click; recording the actual press keeps
-            # its one-second spacing proof intact.
-            try:
-                self.last_pointer_execution["rateRecordMonotonicNs"] = click_rate_permit.record_press()
-            except PointerExecutionError as exc:
-                raise DriverError(str(exc)) from exc
+            # The broker records immediately after the native wrapper returns;
+            # later Guardian observation cannot erase the durable reservation.
+            self.last_pointer_execution["rateRecordMonotonicNs"] = recorded_press
             self.guardian.check(generation)
             if self._monitor is None:
                 raise DriverError("world click completion requires the live XI2 observer")
@@ -8366,7 +8452,9 @@ class DesktopDriver:
         plan: CameraDragPlan,
         *,
         generation: int,
+        action_generation: int | None = None,
         deadline_monotonic: float | None = None,
+        live_admission_check: Callable[[], None] | None = None,
     ) -> None:
         """Dispatch one bounded right-button drag while the button is held."""
 
@@ -8378,6 +8466,9 @@ class DesktopDriver:
             or not math.isfinite(float(deadline_monotonic))
         ):
             raise DriverError("camera drag deadline is malformed")
+        selected_action_generation = generation if action_generation is None else action_generation
+        if isinstance(selected_action_generation, bool) or not isinstance(selected_action_generation, int):
+            raise DriverError("camera drag action generation is malformed")
         identity, evidence, source, master, modifiers, _keymap = self._motion_input_context(
             generation, pointer=True, deadline_monotonic=deadline_monotonic
         )
@@ -8449,6 +8540,13 @@ class DesktopDriver:
             raise DriverError("camera drag has no native motion trace")
         echo = getattr(evidence, "synthetic_echo_proof", ())
         action = None
+        rate_reservation: RateReservation | None = None
+
+        def require_live_admission() -> None:
+            self._require_camera_admission_current(generation)
+            if live_admission_check is not None:
+                live_admission_check()
+
         try:
             action_timeout = 10.0
             if deadline_monotonic is not None:
@@ -8536,15 +8634,45 @@ class DesktopDriver:
             )
             self.guardian.dispatch_admission(generation, lambda: None)
             self._held_input = True
+            try:
+                rate_reservation = self.input_broker.reserve_button_rate(
+                    deadline_monotonic=deadline_monotonic,
+                    cancellation_check=require_live_admission,
+                )
+            except InputBrokerError as exc:
+                raise DriverError(f"camera drag rate admission failed: {exc}") from exc
             chain = build_camera_drag_chain(plan, identity.child_geometry, positioning)
-            self.backend._run(
-                chain,
-                timeout=TAKEOVER_DRILL_HOVER_COMMAND_TIMEOUT_SECONDS,
-                generation=generation,
-                held_buttons={3},
-                input_schema="camera-drag",
-                expected_argv=tuple(chain),
+            admitted_gesture = self.input_broker.mint_admitted_gesture(
+                action_generation=selected_action_generation,
+                lease_generation=generation,
+                button=PointerButton.RIGHT,
+                emitted_chain=chain,
+                destination_anchor=f"{identity.fingerprint}:{start.x}:{start.y}",
+                target_identity=identity.fingerprint,
+                guardian_admission_id=f"camera-drag:{selected_action_generation}:{id(action)}",
+                semantic_authorization="camera_drag",
                 deadline_monotonic=deadline_monotonic,
+                reservation=rate_reservation,
+            )
+            require_live_admission()
+            self.input_broker.emit_button_gesture(
+                admitted_gesture,
+                emitted_chain=chain,
+                action_generation=selected_action_generation,
+                lease_generation=generation,
+                destination_anchor=f"{identity.fingerprint}:{start.x}:{start.y}",
+                target_identity=identity.fingerprint,
+                guardian_admission_id=f"camera-drag:{selected_action_generation}:{id(action)}",
+                semantic_authorization="camera_drag",
+                emit=lambda: self.backend._run(
+                    chain,
+                    timeout=TAKEOVER_DRILL_HOVER_COMMAND_TIMEOUT_SECONDS,
+                    generation=generation,
+                    held_buttons={3},
+                    input_schema="camera-drag",
+                    expected_argv=tuple(chain),
+                    deadline_monotonic=deadline_monotonic,
+                ),
             )
             self.guardian.check(generation)
             if self._monitor is None:
@@ -8567,14 +8695,22 @@ class DesktopDriver:
                 if (final_x, final_y) != (left + int(endpoint.x), top + int(endpoint.y)):
                     raise DriverError("camera drag postcondition endpoint changed")
             self.guardian.finish_action(generation, action)
-        except GuardianError as exc:
+        except (GuardianError, InputBrokerError) as exc:
+            if self.guardian.armed and self.guardian.generation == generation:
+                self.revoke(f"camera drag admission failed: {exc}")
             raise DriverError(str(exc)) from exc
         except Exception as exc:
             if self.guardian.armed and self.guardian.generation == generation:
                 self.revoke(f"camera drag failed: {exc}")
             raise
         finally:
+            if rate_reservation is not None:
+                self.input_broker.release_reservation(rate_reservation)
             self._held_input = False
+
+    def _require_camera_admission_current(self, generation: int) -> None:
+        if not self.guardian.armed or self.guardian.generation != generation:
+            raise GuardianError("camera drag admission was cancelled")
 
     def run(
         self,
@@ -8584,6 +8720,7 @@ class DesktopDriver:
         precondition: Callable[[WindowIdentity], bool] | None = None,
         postcondition: Callable[[WindowIdentity], bool] | None = None,
         deadline_monotonic: float | None = None,
+        action_generation: int | None = None,
         **kwargs: Any,
     ) -> dict[str, Any] | None:
         deadline_monotonic = self._validate_deadline(deadline_monotonic)
@@ -8591,6 +8728,9 @@ class DesktopDriver:
             raise DriverError("desktop action deadline expired before admission")
         if name not in self.ACTIONS:
             raise DriverError(f"action {name!r} is not allowlisted")
+        selected_action_generation = generation if action_generation is None else action_generation
+        if isinstance(selected_action_generation, bool) or not isinstance(selected_action_generation, int):
+            raise DriverError("desktop action generation is malformed")
         premeasured_anchor = kwargs.pop("_premeasured_anchor", None)
         if name == "executor_click" and not callable(kwargs.get("_final_admission")):
             raise DriverError("executor click requires a final admission callback")
@@ -8599,17 +8739,30 @@ class DesktopDriver:
         except GuardianError as exc:
             raise DriverError(str(exc)) from exc
         if self._is_pointer_action(name) and isinstance(self.backend, X11Backend):
-            supplied_permit = kwargs.get("_click_rate_permit")
-            if not isinstance(supplied_permit, ClickRatePermit) or not supplied_permit.is_open:
+            supplied_reservation = kwargs.get("_rate_reservation")
+            if supplied_reservation is None:
+                supplied_legacy_permit = kwargs.get("_click_rate_permit")
+                if supplied_legacy_permit is not None:
+                    try:
+                        reservation = self.input_broker.adopt_permit_for_tests(supplied_legacy_permit)
+                    except InputBrokerError as exc:
+                        raise DriverError(str(exc)) from exc
+                    reservation_owned = False
+                else:
+                    try:
+                        reservation = self.input_broker.reserve_button_rate(
+                            deadline_monotonic=deadline_monotonic,
+                            cancellation_check=lambda: self.guardian.check(generation),
+                        )
+                    except (InputBrokerError, GuardianError) as exc:
+                        raise DriverError(f"pointer click admission failed: {exc}") from exc
+                    reservation_owned = True
                 try:
-                    permit = acquire_click_rate_permit(
-                        deadline_monotonic=deadline_monotonic,
-                        cancellation_check=lambda: self.guardian.check(generation),
-                    )
-                except (PointerExecutionError, GuardianError) as exc:
-                    raise DriverError(f"pointer click admission failed: {exc}") from exc
-                try:
-                    forwarded = {key: value for key, value in kwargs.items() if key != "_click_rate_permit"}
+                    forwarded = {
+                        key: value
+                        for key, value in kwargs.items()
+                        if key not in {"_rate_reservation", "_click_rate_permit"}
+                    }
                     if premeasured_anchor is not None:
                         forwarded["_premeasured_anchor"] = premeasured_anchor
                     result = self.run(
@@ -8617,13 +8770,17 @@ class DesktopDriver:
                         generation,
                         precondition=precondition,
                         postcondition=postcondition,
-                        _click_rate_permit=permit,
+                        action_generation=selected_action_generation,
+                        _rate_reservation=reservation,
                         deadline_monotonic=deadline_monotonic,
                         **forwarded,
                     )
                 finally:
-                    permit.close()
+                    if reservation_owned:
+                        self.input_broker.release_reservation(reservation)
                 return result
+            if not isinstance(supplied_reservation, RateReservation) or not supplied_reservation.is_open:
+                raise DriverError("pointer action has a malformed or closed broker rate reservation")
         if name == "type_allowlisted_command" and kwargs.get("command") not in self.COMMANDS:
             raise DriverError("command is not allowlisted")
         identity = (
@@ -9088,6 +9245,10 @@ class DesktopDriver:
                         "_pointer_plan": pointer_plan,
                         "_click_plan": click_plan,
                         "_gesture_plan": gesture_plan,
+                        "_guardian_admission_id": (
+                            f"{name}:{selected_action_generation}:{generation}:{id(self.guardian.action)}"
+                        ),
+                        "_action_generation": selected_action_generation,
                     }
                     if pointer_plan is not None:
                         if deadline_monotonic is None:

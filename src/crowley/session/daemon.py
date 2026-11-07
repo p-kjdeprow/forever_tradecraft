@@ -82,6 +82,7 @@ from .executor import (
     plan_context_wait,
 )
 from .guardian import GuardianError
+from .input_broker import InputBrokerError
 from .journal import Journal, JournalError, stable_file
 from .mail_loop import (
     MailBudget,
@@ -127,7 +128,6 @@ from .motion import (
     normalize_angle,
     waypoint_heading_error,
 )
-from .pointer_execution import PointerExecutionError, acquire_click_rate_permit
 from .preferences import load_motion_profile
 from .protocol import ProtocolError, unsigned_delta
 from .route_walk import KINEMATICS_PROVENANCE, Pose, RouteFile, check_fix, plan_segment, walk_budget
@@ -8447,7 +8447,13 @@ class SessionDaemon:
         self.driver.run_camera_drag(
             plan,
             generation=lease_generation,
+            action_generation=generation,
             deadline_monotonic=operation_deadline,
+            live_admission_check=lambda: self._require_live_button_action_authority(
+                action_generation=generation,
+                lease_generation=lease_generation,
+                failure_message="camera calibration action authority changed before physical drag",
+            ),
         )
         after = self._observe_motion(generation, previous=confirmed, after_release=True)
         self._require_native_gate(after, matching=confirmed)
@@ -9304,6 +9310,28 @@ class SessionDaemon:
             return status in {"dry_run", "succeeded", "skipped"}
         return False
 
+    def _require_live_button_action_authority(
+        self,
+        *,
+        action_generation: int,
+        lease_generation: int,
+        failure_message: str,
+    ) -> None:
+        """Re-read controller and Guardian authority at a button-down boundary."""
+
+        with self.controller.lock:
+            status = self.controller.status()
+        if (
+            status.generation != action_generation
+            or status.lease_generation != lease_generation
+            or status.stop_requested
+        ):
+            raise DriverError(failure_message)
+        try:
+            self.driver.guardian.check(lease_generation)
+        except Exception as exc:
+            raise DriverError(failure_message) from exc
+
     def _executor_final_admission(
         self,
         *,
@@ -9317,19 +9345,14 @@ class SessionDaemon:
         """Re-read semantic state at the one-use pre-press boundary."""
 
         with self.controller.lock:
-            status = self.controller.status()
             checkpoint = self.controller.executor_click_checkpoint()
-        if (
-            status.generation != generation
-            or status.lease_generation != attempt["leaseGeneration"]
-            or checkpoint is None
-            or checkpoint.get("intent", {}).get("attemptId") != attempt.get("attemptId")
-        ):
+        if checkpoint is None or checkpoint.get("intent", {}).get("attemptId") != attempt.get("attemptId"):
             raise DriverError("executor final admission lost its durable attempt")
-        try:
-            self.driver.guardian.check(attempt["leaseGeneration"])
-        except Exception as exc:
-            raise DriverError("executor Guardian lease changed before blocking capture") from exc
+        self._require_live_button_action_authority(
+            action_generation=generation,
+            lease_generation=attempt["leaseGeneration"],
+            failure_message="executor Guardian or controller authority changed before blocking capture",
+        )
         current = self._observe_motion(
             generation,
             previous=pre_frame,
@@ -9341,9 +9364,7 @@ class SessionDaemon:
             checkpoint_after_capture = self.controller.executor_click_checkpoint()
         guardian = self.driver.guardian
         if (
-            status_after_capture.generation != generation
-            or status_after_capture.lease_generation != attempt["leaseGeneration"]
-            or status_after_capture.mode.value != "interaction"
+            status_after_capture.mode.value != "interaction"
             or status_after_capture.state is not ControllerState.READY
             or status_after_capture.stop_requested
             or checkpoint_after_capture is None
@@ -9352,10 +9373,11 @@ class SessionDaemon:
             or getattr(guardian, "generation", 0) != attempt["leaseGeneration"]
         ):
             raise DriverError("executor final admission changed after blocking capture")
-        try:
-            guardian.check(attempt["leaseGeneration"])
-        except Exception as exc:
-            raise DriverError("executor Guardian lease changed after blocking capture") from exc
+        self._require_live_button_action_authority(
+            action_generation=generation,
+            lease_generation=attempt["leaseGeneration"],
+            failure_message="executor Guardian or controller authority changed after blocking capture",
+        )
         current_executor = self._executor_snapshot_for_frame(current)
         self._validate_executor_frame(
             current_executor,
@@ -9572,6 +9594,7 @@ class SessionDaemon:
             receipt = self.driver.run(
                 "executor_click",
                 lease_generation,
+                action_generation=generation,
                 deadline_monotonic=deadline,
                 precondition=lambda identity: identity.fingerprint == initial.identity_fingerprint,
                 postcondition=lambda identity: identity.fingerprint == initial.identity_fingerprint,
@@ -9899,11 +9922,11 @@ class SessionDaemon:
             if hover.hover_kind not in {"unit", "object"} or hover.hover_name != target_name:
                 continue
             try:
-                permit = acquire_click_rate_permit(
+                rate_reservation = self.driver.input_broker.reserve_button_rate(
                     deadline_monotonic=deadline,
                     cancellation_check=lambda: self._require_motion_interaction(generation),
                 )
-            except (PointerExecutionError, DriverError, GuardianError) as exc:
+            except (InputBrokerError, DriverError, GuardianError) as exc:
                 raise DriverError(f"world click rate admission failed: {exc}") from exc
             try:
                 lease_generation = self._require_motion_interaction(generation)
@@ -9929,18 +9952,31 @@ class SessionDaemon:
                 proof_snapshot = snapshots.get((proof.boot, proof.sequence, proof.identity_fingerprint))
                 if not isinstance(proof_snapshot, dict) or not self._blocking_ui_is_clear(proof_snapshot):
                     raise DriverError("world click is refused while blocking UI is shown")
+
+                def check_world_click_authority(
+                    captured_lease_generation: int = lease_generation,
+                ) -> None:
+                    self._require_live_button_action_authority(
+                        action_generation=generation,
+                        lease_generation=captured_lease_generation,
+                        failure_message="world click action authority changed before physical click",
+                    )
+
                 self.driver.run_hover_click(
                     probe,
                     proof,
                     gesture=gesture,
                     gesture_ended_monotonic=gesture_end,
                     generation=lease_generation,
+                    action_generation=generation,
+                    lease_generation=lease_generation,
                     deadline_monotonic=deadline,
-                    click_rate_permit=permit,
+                    rate_reservation=rate_reservation,
+                    live_admission_check=check_world_click_authority,
                     target_name=target_name,
                 )
             finally:
-                permit.close()
+                self.driver.input_broker.release_reservation(rate_reservation)
             expect_deadline = self._native_clock() + 3.0
             if deadline is not None:
                 expect_deadline = min(expect_deadline, deadline)
@@ -10284,7 +10320,13 @@ class SessionDaemon:
         self.driver.run_camera_drag(
             plan,
             generation=lease_generation,
+            action_generation=generation,
             deadline_monotonic=operation_deadline,
+            live_admission_check=lambda: self._require_live_button_action_authority(
+                action_generation=generation,
+                lease_generation=lease_generation,
+                failure_message="camera action authority changed before physical drag",
+            ),
         )
         after = self._observe_motion(generation, previous=confirmed, after_release=True)
         self._require_native_gate(after, matching=confirmed)

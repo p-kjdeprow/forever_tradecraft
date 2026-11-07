@@ -17,6 +17,7 @@
 - **Human-speed automated clicks.** Buying, posting and cancelling need a hardware event, which
   the session input driver can supply. Automated clicks are hard-capped at one per second
   (at least 1.0 s between consecutive clicks), enforced in code and not configurable.
+  Every automated button-down, including right-button camera drags, is rate-gated; release-only cleanup is exempt.
 - **One assumed path, no fallbacks.** Each unknown about the Forever client has one assumed
   answer, written below. If an assumption is wrong, the code fails loudly and we fix that
   one path rather than carrying alternatives.

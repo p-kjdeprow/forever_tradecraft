@@ -20,6 +20,8 @@ from psycopg.types.json import Jsonb
 
 from crowley.core.queue import build_queue
 from crowley.core.scanformat import decode_json_payload, encode_json_payload, validate_envelope
+from crowley.trading.api import CraftingCapabilities
+from crowley.trading.requirements import capabilities_hash
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
@@ -97,6 +99,57 @@ def _encode_native_payload(value: dict) -> str:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     _reset_public_schema()
+    monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
+    monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
+    monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
+    from crowley.server.app import app
+    from crowley.server.config import get_settings
+
+    get_settings.cache_clear()
+    with TestClient(app, headers={"Authorization": f"Bearer {TOKEN}"}) as test_client:
+        yield test_client
+    get_settings.cache_clear()
+
+
+def _install_legacy_scan_before_010() -> None:
+    """Prepare the legacy UID-collision row before migration 010 write guards."""
+
+    migration_dir = Path(__file__).parents[1] / "src" / "crowley" / "server" / "migrations"
+    _reset_public_schema()
+    with psycopg.connect(DB_URL, autocommit=True) as conn:
+        conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+        conn.execute(
+            "CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
+        )
+        for path in sorted(migration_dir.glob("*.sql"))[:9]:
+            sql = path.read_text(encoding="utf-8")
+            if path.name == "001_init.sql":
+                sql = sql.replace("CREATE EXTENSION IF NOT EXISTS timescaledb;\n\n", "")
+            conn.execute(sql)
+            conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (path.name,))
+        house_id = conn.execute(
+            """
+            INSERT INTO houses (key, region, ruleset, faction)
+            VALUES ('us-normal-horde', 'us', 'normal', 'horde')
+            RETURNING id
+            """
+        ).fetchone()[0]
+        at = datetime(2026, 1, 1, tzinfo=UTC)
+        conn.execute(
+            """
+            INSERT INTO scans
+              (scan_uid, house_id, house_source, started_at, scanned_at, character,
+               client_build, interface, num_listings, num_items, skipped, context, raw_path)
+            VALUES ('legacy-uid', %s, 'auto', %s, %s, 'Legacy', 'old', 16001,
+                    0, 0, 0, %s, 'legacy.json.gz')
+            """,
+            (house_id, at, at, json.dumps({})),
+        )
+
+
+@pytest.fixture
+def legacy_client(tmp_path, monkeypatch):
+    _install_legacy_scan_before_010()
     monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
@@ -1004,41 +1057,9 @@ def test_concurrent_connections_claim_one_uid_and_archive(client):
     assert all(archive.parent.parent == data_dir / "raw" / "format2" for archive in archives)
 
 
-def test_legacy_uid_collision_is_409(client):
-    from crowley.core.house import House
-
+def test_legacy_uid_collision_is_409(legacy_client):
     raw = scan("legacy-uid", "horde")
-    at = datetime.fromtimestamp(raw["finishedAt"], tz=UTC)
-    with psycopg.connect(DB_URL, autocommit=True) as conn:
-        house = House("us", "normal", "horde")
-        house_id = conn.execute(
-            "INSERT INTO houses (key, region, ruleset, faction) VALUES (%s,%s,%s,%s) RETURNING id",
-            (house.key, house.region, house.ruleset, house.faction),
-        ).fetchone()[0]
-        conn.execute(
-            """
-            INSERT INTO scans
-              (scan_uid, house_id, house_source, started_at, scanned_at, character,
-               client_build, interface, num_listings, num_items, skipped, context, raw_path)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (
-                raw["id"],
-                house_id,
-                "auto",
-                at,
-                at,
-                "Legacy",
-                "old",
-                16001,
-                0,
-                0,
-                0,
-                json.dumps({}),
-                "legacy.json.gz",
-            ),
-        )
-    assert client.post("/v1/scans", json=raw).status_code == 409
+    assert legacy_client.post("/v1/scans", json=raw).status_code == 409
 
 
 def test_unstorable_timestamp_is_422_without_archive(client):
@@ -1097,12 +1118,13 @@ def test_paper_run_api_and_dashboard(client):
                 """,
                 (house_key, suffix),
             ).fetchone()[0]
+            capabilities = CraftingCapabilities()
             run_id = conn.execute(
                 """
                 INSERT INTO paper_runs
                     (name, house_id, client_build, start_t, capital_copper, strategies,
-                     weights, demand_share, engine_digest)
-                VALUES (%s, %s, '1.60.1.70450', 100, 9007199254740993, %s, %s, '1/2', %s)
+                     weights, demand_share, engine_digest, capabilities, capabilities_hash)
+                VALUES (%s, %s, '1.60.1.70450', 100, 9007199254740993, %s, %s, '1/2', %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1111,6 +1133,8 @@ def test_paper_run_api_and_dashboard(client):
                     Jsonb(["alpha", "beta"]),
                     Jsonb(["1", "2"]),
                     "0" * 64,
+                    Jsonb(capabilities.canonical),
+                    capabilities_hash(capabilities),
                 ),
             ).fetchone()[0]
             steps = [

@@ -49,7 +49,7 @@ Make gold on the WoW Forever auction house with several concurrent, independentl
   https://github.com/p-kjdeprow/forever_tradecraft.
 - **Privacy:** raw frames, receipts, SavedVariables, recordings and backups stay private under
   `~/.local/state/crowley` (dirs 0700, files 0600). Never edit game SavedVariables. Secrets live only in the
-  untracked `deploy/.env`. Stage explicit files only; never `git add .`.
+ the private `$XDG_CONFIG_HOME/crowley/secrets.env`. Stage explicit files only; never `git add .`.
 
 ## Components
 
@@ -57,7 +57,7 @@ Make gold on the WoW Forever auction house with several concurrent, independentl
 |---|---|---|
 | Addon (scanner, telemetry HUD schema 6, account capture, executor, reference) | `addon/Crowley`, `addon/Crowley_Data` | [ARCHITECTURE](ARCHITECTURE.md), [EXECUTOR_CONTRACT](EXECUTOR_CONTRACT.md) |
 | Companion (SavedVariables ↔ server, Queue.lua) | `src/crowley/companion` | — |
-| Server + TimescaleDB | `src/crowley/server`, `deploy/docker-compose.yml` | [MARKET_RECOVERY](MARKET_RECOVERY.md) |
+| Server + TimescaleDB | `src/crowley/server`, package-owned Compose resource | [MARKET_RECOVERY](MARKET_RECOVERY.md) |
 | Session daemon (collection driver, guarded input, route walking) | `src/crowley/session` | [REPEATING_SCANS](REPEATING_SCANS.md), [RUNTIME_PERFORMANCE](RUNTIME_PERFORMANCE.md) |
 | Analysis and client data | `src/crowley/analysis`, `src/crowley/core/client_data.py`, `tools/client_data*` | [ANALYSIS](ANALYSIS.md) |
 | Trading engine, paper trading, queues | `src/crowley/trading`, `src/crowley/core/queue.py` | [TRADING](TRADING.md), [LIVE_TRADING_TEST](LIVE_TRADING_TEST.md) |

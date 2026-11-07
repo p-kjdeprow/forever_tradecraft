@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+umask 077
+
+# Rendered by crowley-ops from the selected packaged target.  The placeholders
+# are target facts; CROWLEY_WINE remains a host-provided Wine binary path.
+GAME_ROOT={{GAME_ROOT}}
+PRODUCT_DIR={{PRODUCT_DIR}}
+EXECUTABLE={{EXECUTABLE}}
+PREFIX={{WINE_PREFIX}}
+WINE="${CROWLEY_WINE:?set CROWLEY_WINE to the reviewed Wine executable}"
+
+DISPLAY_VALUE="${DISPLAY:-:0}"
+XAUTHORITY_VALUE="${XAUTHORITY:-}"
+if [ -z "$XAUTHORITY_VALUE" ]; then
+    : "${XDG_RUNTIME_DIR:?set XDG_RUNTIME_DIR in the authenticated graphical session}"
+    AUTH_PREFIX=".mutter-Xway"
+    AUTH_SUFFIX="landauth"
+    for candidate in "$XDG_RUNTIME_DIR"/"$AUTH_PREFIX$AUTH_SUFFIX".*; do
+        [ -r "$candidate" ] || continue
+        XAUTHORITY_VALUE=$candidate
+        break
+    done
+fi
+[ -r "$XAUTHORITY_VALUE" ] || { printf '%s\n' 'No readable Xauthority for the active desktop.' >&2; exit 1; }
+
+BATTLE_NET="$PREFIX/drive_c/Program Files (x86)/Battle.net/Battle.net.exe"
+
+OWNER_UID=$(id -u)
+EXPECTED_ARGV0={{EXPECTED_ARGV0}}
+for proc in /proc/[0-9]*; do
+    [ -r "$proc/comm" ] || continue
+    [ "$(sed -n '1p' "$proc/comm")" = "$EXECUTABLE" ] || continue
+    [ -r "$proc/status" ] || continue
+    [ "$(sed -n 's/^Uid:[[:space:]]*\([0-9]*\).*/\1/p' "$proc/status" | sed -n '1p')" = "$OWNER_UID" ] || continue
+    [ -r "$proc/cmdline" ] || continue
+    argv0=$(tr '\000' '\n' < "$proc/cmdline" | sed -n '1p')
+    [ "$argv0" = "$EXPECTED_ARGV0" ] || continue
+    [ -r "$proc/environ" ] || continue
+    tr '\000' '\n' < "$proc/environ" 2>/dev/null | grep -Fqx "WINEPREFIX=$PREFIX" || continue
+    printf '%s\n' 'Owned WoW client already running; launch refused.' >&2
+    exit 0
+done
+
+LOGDIR="${XDG_STATE_HOME:-$HOME/.local/state}/crowley/executor-evidence"
+mkdir -p -m 0700 "$LOGDIR"
+chmod 700 "$LOGDIR"
+exec env DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" \
+    WINEPREFIX="$PREFIX" WINEARCH=win64 WINEESYNC=1 STAGING_SHARED_MEMORY=1 \
+    DXVK_CONFIG_FILE="$PREFIX/dxvk.conf" DXVK_HUD=compiler \
+    DXVK_STATE_CACHE_PATH="$PREFIX" __GL_DXVK_OPTIMIZATIONS=1 \
+    __GL_SHADER_DISK_CACHE=1 __GL_SHADER_DISK_CACHE_PATH="$PREFIX" WINEDEBUG=-all \
+    "$WINE" "$BATTLE_NET" --exec='launch WoW' --exec='focus play'

@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: crowley
-      POSTGRES_PASSWORD: ${CROWLEY_DB_PASSWORD:-crowley}
+      POSTGRES_PASSWORD: ${CROWLEY_DB_PASSWORD:?set CROWLEY_DB_PASSWORD in secrets.env}
       POSTGRES_DB: crowley
     volumes:
       - crowley-db:/var/lib/postgresql/data
@@ -16,28 +16,27 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U crowley -d crowley"]
       interval: 5s
+      timeout: 5s
       retries: 20
 
   server:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
+    image: crowley-server:${CROWLEY_IMAGE_VERSION:?set CROWLEY_IMAGE_VERSION in secrets.env}
     restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
+    env_file:
+      - ${XDG_CONFIG_HOME:?set XDG_CONFIG_HOME}/crowley/secrets.env
     environment:
-      CROWLEY_DATABASE_URL: postgresql://crowley:${CROWLEY_DB_PASSWORD:-crowley}@db:5432/crowley
-      CROWLEY_API_TOKEN: ${CROWLEY_API_TOKEN:?set CROWLEY_API_TOKEN in deploy/.env}
+      CROWLEY_DATABASE_URL: postgresql://crowley:${CROWLEY_DB_PASSWORD:?set CROWLEY_DB_PASSWORD in secrets.env}@db:5432/crowley
+      CROWLEY_API_TOKEN: ${CROWLEY_API_TOKEN:?set CROWLEY_API_TOKEN in secrets.env}
       CROWLEY_DATA_DIR: /data
       CROWLEY_HOST: 0.0.0.0
       CROWLEY_PORT: "8080"
     volumes:
       - crowley-raw:/data
     ports:
-      # Default: reachable from this machine only. To serve the game over Tailscale, set
-      # CROWLEY_BIND to this machine's Tailscale IP (tailscale ip -4) in deploy/.env.
-      - "${CROWLEY_BIND:-127.0.0.1}:8080:8080"
+      - "${CROWLEY_BIND:?set CROWLEY_BIND in secrets.env}:8080:8080"
 
 volumes:
   crowley-db:

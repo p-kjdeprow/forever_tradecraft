@@ -288,7 +288,8 @@ Game, companion, API and database run on Linux host `3080servermach`; the reposi
 Lutris/Wine. `Crowley` is a repo
 symlink and generated `Crowley_Data` has the curated 428-active-ID, 900-second, 20-level plan.
 The house is `beta-normal-alliance`; Sunshine and the fullscreen watcher are disabled. The
-companion is active. Compose needs `--env-file deploy/.env` from the repo root.
+companion is active. Compose uses the package-owned file from
+`crowley-ops compose-file` and `--env-file "$XDG_CONFIG_HOME/crowley/secrets.env"`.
 
 The database contains six accepted sweeps, 2,568 observations and 5,726 captured price rows.
 Full native verification sweep `beta-normal-alliance-1792040351-Arthur-6643` ran from

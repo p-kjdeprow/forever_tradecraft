@@ -934,14 +934,20 @@ def test_bounded_status_accepts_actual_pending_shape_only() -> None:
 
 
 def test_systemd_units_are_bounded_and_minute_aligned() -> None:
-    backup_service = Path("deploy/crowley-market-backup.service").read_text(encoding="utf-8")
-    backup_timer = Path("deploy/crowley-market-backup.timer").read_text(encoding="utf-8")
-    health_service = Path("deploy/crowley-health.service").read_text(encoding="utf-8")
-    health_timer = Path("deploy/crowley-health.timer").read_text(encoding="utf-8")
+    backup_service = Path("deploy/systemd/crowley-market-backup.service.in").read_text(encoding="utf-8")
+    backup_timer = Path("deploy/systemd/crowley-market-backup.timer").read_text(encoding="utf-8")
+    health_service = Path("deploy/systemd/crowley-health.service.in").read_text(encoding="utf-8")
+    health_timer = Path("deploy/systemd/crowley-health.timer").read_text(encoding="utf-8")
     assert "Type=oneshot" in backup_service and "UMask=0077" in backup_service
-    assert "WorkingDirectory=%h/repos/pegasus" in backup_service
+    assert "ExecStart=%h/.local/bin/crowley-ops backup" in backup_service
+    assert "--repo" not in backup_service
+    assert "EnvironmentFile=%E/crowley/secrets.env" in backup_service
+    assert "TimeoutStartSec=4500" in backup_service
     assert "OnCalendar=*-*-* *:12:00" in backup_timer and "Persistent=true" in backup_timer
     assert "TimeoutStartSec=30s" in health_service
+    assert "ExecStart=%h/.local/bin/crowley-ops health" in health_service
+    assert "--repo" not in health_service
+    assert "EnvironmentFile=%E/crowley/secrets.env" in health_service
     assert "OnUnitActiveSec=2min" in health_timer and "Persistent=true" not in health_timer
     assert "PrivateTmp=true" not in backup_service + health_service
     assert "After=network-online.target" not in backup_service + health_service

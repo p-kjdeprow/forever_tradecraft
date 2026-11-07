@@ -270,13 +270,13 @@ def test_step_log_records_actual_craft_times():
 
 def test_paper_timer_and_service_have_required_guards():
     root = Path(__file__).parents[1]
-    service = (root / "deploy/crowley-paper-trading.service").read_text()
-    timer = (root / "deploy/crowley-paper-trading.timer").read_text()
-    assert "EnvironmentFile=%h/.config/crowley/paper.env" in service
+    service = (root / "deploy/systemd/crowley-paper-trading.service.in").read_text()
+    timer = (root / "deploy/systemd/crowley-paper-trading.timer").read_text()
+    assert "EnvironmentFile=%E/crowley/secrets.env" in service
     assert "UMask=0077" in service
     assert "NoNewPrivileges=true" in service
     assert "TimeoutStartSec=14min" in service
-    assert "paper-step --name ${CROWLEY_PAPER_RUN}" in service
+    assert "ExecStart=%h/.local/bin/crowley-paper-step" in service
     assert "OnCalendar=*:0/15" in timer
     assert "Persistent=true" in timer
 

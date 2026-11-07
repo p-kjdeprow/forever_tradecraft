@@ -1,15 +1,15 @@
 # Local WoW setup
 
-The existing game is installed in `/home/dev/Games/world-of-warcraft`.
-The beta client is `_classic_beta_/WowB.exe` inside that Wine prefix.
-Keep its account data, WTF, Interface and registry files when repairing the runtime.
+Keep the selected client's account data, WTF, Interface and registry files when
+repairing the runtime. Record the configured game root and product directory in
+the host configuration; do not put machine paths in tracked files.
 
 ## Start the game
 
-Use the **World of Warcraft** desktop entry or run:
+Use the desktop entry for the selected client or run the rendered launcher:
 
 ```sh
-/home/dev/.local/bin/crowley-world-of-warcraft
+~/.local/bin/crowley-world-of-warcraft
 ```
 
 This starts the cached Battle.net installation with the restored Wine runtime.
@@ -18,17 +18,16 @@ it invokes the wrapper directly rather than depending on the deleted Lutris game
 registration. It checks exact process identity, owner and prefix to avoid a
 second beta client. Startup still requires the authenticated desktop session.
 
-The reviewed recovery copies are [the wrapper](../.archive/executor-review/wow-restored-launcher-20261020.sh)
-and [the desktop entry](../.archive/executor-review/wow-restored-20261020.desktop).
-They document this machine's paths; preserve executable mode0700 on the installed
-wrapper. Recovery evidence is linked below.
+The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).
+Render it from the selected target and preserve executable mode 0700 on the
+installed wrapper. Keep recovery evidence private under the XDG state directory.
 
 ## Required runtime files
 
-The Wine runtime is:
+The Wine runtime is selected by the host configuration:
 
 ```text
-~/.local/share/lutris/runners/wine/wine-11.16-staging-amd64-x86_64/
+`$XDG_DATA_HOME` or the configured host runtime directory.
 ```
 
 Its matching [maintainer release](https://github.com/Kron4ek/Wine-Builds/releases/tag/11.16)
@@ -44,18 +43,33 @@ The prefix also references these directories under `~/.local/share/lutris/runtim
 - `vkd3d/v2.14/`
 - `dxvk-nvapi/v0.9.0/`
 
+## Install the addon and units
+
+Install a non-editable package. The installer renders `companion.toml`,
+`session.toml`, and `secrets.env` into the XDG config directory; edit the
+account and secrets before starting services:
+
+```sh
+uv tool install .
+crowley-ops install --game-root "/path/to/World of Warcraft" --dry-run
+crowley-ops install --game-root "/path/to/World of Warcraft"
+# Set wtf_account in companion.toml and secrets in secrets.env.
+crowley-ops doctor
+```
+
+The game root is explicit; the installer appends the packaged target's
+`productDir` and copies both addon directories into that flavor. Use
+`--dev-addon-from` only when deliberately testing a checkout symlink.
+
 Those are active game dependencies even though startup now uses Wine directly.
-Deleting Lutris's data directory removes the runtime and leaves dangling DLL
-links in the existing prefix. Check both `windows/system32` and `windows/syswow64`
-after a repair. The system Wine9 installation is a different runtime.
+Deleting a launcher/runtime data directory can leave dangling DLL links in the
+existing prefix. Check both `windows/system32` and `windows/syswow64` after a repair.
 
 ## Verified recovery
 
-The [2026-10-20 recovery proof](../.archive/executor-review/wow-runtime-restoration-parent-verification.json)
-records the matching runtime checksum, resolved DLL links, cached Battle.net login,
-Arthur in-world beside Auctioneer Buckler, five advancing normal HUD frames with
-zero speed, and the tested desktop-entry duplicate guard. Registry, addon and
-saved-variable backups remain private under Crowley's executor-evidence directory.
+Keep runtime checksums, resolved DLL links, duplicate-process receipts, registry,
+addon and SavedVariables backups private under Crowley's executor-evidence
+directory in the XDG state directory.
 
 A new game process invalidates Crowley's old native/input calibration bindings.
 Keep scans paused until fresh native and deliberate human input calibration pass.

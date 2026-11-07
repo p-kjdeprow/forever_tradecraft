@@ -1,18 +1,27 @@
 # Deployed configuration
 
-These files are the live configuration; `~/.config/crowley/` and `~/.config/systemd/user/crowley-*` are symlinks
-into this repository.
+These files are reviewable configuration templates. `crowley-ops install` renders
+the target-specific paths into the user's XDG config directory; it does not create
+links into this repository.
 
 | File | Used by | Linked from |
 |---|---|---|
-| `session.toml` | `crowley-session` (daemon and CLI) | `~/.config/crowley/session.toml` |
-| `companion.toml` | `crowley-companion` | `~/.config/crowley/companion.toml` |
-| `paper.env` | `crowley-paper-trading.service` | `~/.config/crowley/paper.env` |
+| `session.toml` | `crowley-session` (daemon and CLI) | `$XDG_CONFIG_HOME/crowley/session.toml` |
+| `companion.toml` | `crowley-companion` | `$XDG_CONFIG_HOME/crowley/companion.toml` |
+| `secrets.env` | all installed units and Compose | `$XDG_CONFIG_HOME/crowley/secrets.env` |
 | `routes/stormwind.json` | route walker (`routes_file` in `session.toml`) | — |
 
-Secrets never live here. `CROWLEY_API_TOKEN`, `CROWLEY_DB_PASSWORD` and `CROWLEY_DATABASE_URL` are in the untracked
-`deploy/.env` (see `deploy/.env.example`), which the systemd units load with `EnvironmentFile=`.
+Secrets never live in the TOML templates. Put `CROWLEY_API_TOKEN`,
+`CROWLEY_DB_PASSWORD`, `CROWLEY_IMAGE_VERSION`, `CROWLEY_DATABASE_URL`, `CROWLEY_BIND` and
+`CROWLEY_PAPER_RUN` in
+`$XDG_CONFIG_HOME/crowley/secrets.env` with mode 0600. Installed units load it
+with `EnvironmentFile=%E/crowley/secrets.env`.
 
-`routes/stormwind.json` was built from private hand-walked recordings with
-`python -m crowley.session.route_walk build ... --start=-8812.6,663.0 --end=-8812.8,651.0 --radius 3
---start-target Auctioneer --end-target Mailbox`.
+`routes/stormwind.json` is built from private hand-walked recordings. Keep source
+evidence under the XDG state directory and review route provenance before use.
+
+```sh
+uv tool install .
+crowley-ops install --game-root "/path/to/World of Warcraft"
+crowley-ops doctor
+```

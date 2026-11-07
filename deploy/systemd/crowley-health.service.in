@@ -1,0 +1,11 @@
+[Unit]
+Description=Crowley read-only collection health check
+
+[Service]
+Type=oneshot
+# The installed package owns its provenance and runtime paths; %E is XDG_CONFIG_HOME.
+ExecStart=%h/.local/bin/crowley-ops health
+EnvironmentFile=%E/crowley/secrets.env
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=30s

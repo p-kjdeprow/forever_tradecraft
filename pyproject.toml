@@ -29,6 +29,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "lupa>=2.8",
+    "pyright>=1.1.414",
     "pytest>=9.1.1",
     "pytest-xdist>=3.8.0",
     "ruff>=0.17.0",
@@ -56,3 +57,10 @@ markers = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E501"]
+
+[tool.pyright]
+include = ["src/crowley"]
+exclude = ["tests", ".archive"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+strict = ["src/crowley/platform", "src/crowley/core/auction_rules.py"]

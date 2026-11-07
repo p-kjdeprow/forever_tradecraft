@@ -8,12 +8,14 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
 
-from crowley.analysis.books import Group, Interval
+from crowley.analysis.books import Group
 from crowley.core.auction_rules import AuctionHouseRules
 
 from .accounts import Account, LedgerEvent, Listing, Mail
 from .api import Buy, Cancel, Craft, Intent, Post, VendorBuy, VendorSell
+from .fees import deposit
 from .market import Market
+from .numbers import as_fraction
 from .requirements import recipe_gate
 
 # All realism constants live in this module so the engine has one auditable source.
@@ -21,9 +23,6 @@ MAIL_DELAY_SECONDS = 3600
 TIE_SHARE = Fraction(0)
 PLANNED_CADENCE_SECONDS = 900
 TIME_BUDGET = math.floor(0.5 * PLANNED_CADENCE_SECONDS)
-# Kept as a compatibility name for callers that imported the old constant.  It
-# now denotes the shared seconds budget, not a count of free clicks.
-CLICK_BUDGET = TIME_BUDGET
 BUY_CLICKS = 3
 POST_CLICKS = 3
 CANCEL_CLICKS = 2
@@ -41,7 +40,6 @@ class ExecutionContext:
     sweep_index: int
     rules: AuctionHouseRules = field(kw_only=True)
     purchased: dict[tuple[int, Any], int] = field(default_factory=dict)
-    clicks_used: int = 0
     next_listing_id: int = 1
     time_used: int = 0
     wind_down: bool = False
@@ -64,30 +62,9 @@ class ExecutionContext:
         if self.time_used + amount > TIME_BUDGET:
             self.reject(account, "time_budget", intent)
             return False
-        self.clicks_used += amount
         self.time_used += amount
         account.clicks += amount
         return True
-
-
-def deposit(
-    sell_price: int,
-    quantity: int,
-    duration_hours: int,
-    rules: AuctionHouseRules,
-) -> int:
-    """Return the house-specific deposit for a listing."""
-
-    return rules.deposit_policy.calculate(sell_price, quantity, duration_hours)
-
-
-def _interval_for(market: Market, item_id: int, index: int) -> Interval | None:
-    return market.interval(item_id, index)
-
-
-def _future_interval(market: Market, item_id: int, index: int) -> Interval | None:
-    future = market.next_interval(item_id, index)
-    return None if future is None else future[1]
 
 
 def obtainable_units(context: ExecutionContext, item_id: int) -> list[tuple[Group, int]]:
@@ -202,7 +179,7 @@ def settle_fills(context: ExecutionContext) -> None:
     """Allocate each valid previous interval's bottom walk to own listings."""
 
     for item_id, _index in sorted(context.market.books_at(context.sweep_index).items()):
-        interval = _interval_for(context.market, item_id, context.sweep_index)
+        interval = context.market.interval(item_id, context.sweep_index)
         if interval is None or interval.reached_ceiling:
             continue
         interval_start = context.market.interval_start_step(item_id, context.sweep_index)
@@ -307,7 +284,7 @@ def _execute_buy(context: ExecutionContext, account: Account, intent: Buy) -> bo
     for group, available in obtainable_units(context, intent.item_id):
         if group.unit > intent.max_unit_price or remaining <= 0:
             continue
-        by_cash = math.floor(Fraction(cash, 1) / group.unit)
+        by_cash = math.floor(as_fraction(cash) / group.unit)
         take = min(available, remaining, by_cash)
         if take <= 0:
             continue
@@ -613,7 +590,6 @@ def execute_intent(context: ExecutionContext, account: Account, intent: Intent) 
 __all__ = [
     "BUY_CLICKS",
     "CANCEL_CLICKS",
-    "CLICK_BUDGET",
     "CRAFT_CLICKS",
     "CRAFT_SECONDS",
     "ExecutionContext",

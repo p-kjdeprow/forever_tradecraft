@@ -38,6 +38,7 @@ from pathlib import Path
 from typing import Any
 
 from .game_target import packaged_game_target
+from .watchlist import Catalog, load_catalog
 
 EXPECTED_CLIENT_BUILD = packaged_game_target().full_build
 PROFESSION_SKILL_LINES: dict[int, str] = {
@@ -702,11 +703,15 @@ def _recipe_rows(export_dir: Path) -> tuple[list[Recipe], set[int]]:
 
 def _catalog_item_ids(catalog_path: Path | None) -> set[int]:
     if catalog_path is None:
-        catalog_path = Path(__file__).resolve().parents[1] / "data" / "first_run.json"
-    if not catalog_path.exists():
-        raise ClientDataError(f"catalog does not exist: {catalog_path}")
-    data = json.loads(catalog_path.read_text(encoding="utf-8"))
-    return {_int(item["item_id"]) for item in data.get("items", [])}
+        catalog = load_catalog()
+    else:
+        if not catalog_path.exists():
+            raise ClientDataError(f"catalog does not exist: {catalog_path}")
+        try:
+            catalog = Catalog.model_validate_json(catalog_path.read_text(encoding="utf-8"))
+        except ValueError as exc:
+            raise ClientDataError(f"catalog is invalid: {catalog_path}") from exc
+    return {item.item_id for item in catalog.items}
 
 
 def _item_facts(export_dir: Path, item_ids: set[int]) -> tuple[ItemFact, ...]:
@@ -773,17 +778,6 @@ def normalize_export(
     catalog_ids = _catalog_item_ids(Path(catalog_path) if catalog_path is not None else None)
     items = _item_facts(directory, referenced_items | catalog_ids)
     return NormalizedExport(manifest_value, tuple(sorted(recipes, key=lambda recipe: recipe.spell_id)), items)
-
-
-def normalize(*args: Any, **kwargs: Any) -> NormalizedExport:
-    """American-spelling alias for :func:`normalize_export`."""
-
-    return normalize_export(*args, **kwargs)
-
-
-RecipeReagent = Reagent
-RecipeOutput = Output
-normalize_client_data = normalize_export
 
 
 class _RecipeIDParser(HTMLParser):
@@ -856,8 +850,6 @@ __all__ = [
     "ItemFact",
     "NormalizedExport",
     "Output",
-    "RecipeOutput",
-    "RecipeReagent",
     "PROFESSION_NAMES",
     "PROFESSION_SKILL_LINES",
     "ProfessionPageComparison",
@@ -867,7 +859,5 @@ __all__ = [
     "ClientDataError",
     "compare_profession_pages",
     "manifest_sha256",
-    "normalize",
-    "normalize_client_data",
     "normalize_export",
 ]

@@ -9,6 +9,7 @@ from contextlib import nullcontext
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
+from typing import NamedTuple
 
 import httpx
 import psycopg
@@ -18,8 +19,9 @@ from crowley.core.house import House
 from crowley.core.queue import QueueFormatError
 
 from .api import CraftingCapabilities
-from .data import load_client_data, load_commodity_books, precompute_statistics
+from .data import load_client_data, load_commodity_books
 from .engine import run_backtest
+from .numbers import as_fraction
 from .paper import DEFAULT_STRATEGIES, PaperError, create_run, database_url, status_run, step_run
 from .queue_cli import (
     QueueCLIError,
@@ -33,6 +35,8 @@ from .queue_cli import (
 )
 from .report import text_summary, write_report
 from .requirements import capabilities_from_mapping, capabilities_hash
+from .statistics import precompute_statistics
+from .steps import sweep_step_times
 from .strategies import build
 
 
@@ -55,7 +59,7 @@ def _weights(value: str | None) -> list[Fraction] | None:
     parts = [part.strip() for part in value.split(",")]
     if not parts or any(not part for part in parts):
         raise ValueError("--weights must be a comma-separated list")
-    return [Fraction(part) for part in parts]
+    return [as_fraction(part) for part in parts]
 
 
 def _capability_ids(value: str | None, label: str) -> list[int] | None:
@@ -100,21 +104,11 @@ def _capabilities(
     return capabilities_from_mapping(values)
 
 
-def _row_value(row, key: str, index: int):
-    return row[key] if hasattr(row, "keys") else row[index]
-
-
-def _sweep_step_times(books) -> dict[int, int]:
-    times: dict[int, int] = {}
-    for item_books in books.values():
-        for book in item_books:
-            if book.sweep_id is None:
-                continue
-            if book.t != int(book.t):
-                raise ValueError(f"book time must be whole seconds, got {book.t!r}")
-            sweep_id = int(book.sweep_id)
-            times[sweep_id] = max(times.get(sweep_id, int(book.t)), int(book.t))
-    return times
+class _SweepRow(NamedTuple):
+    id: int
+    started_at: object
+    client_version: str
+    client_build: int | str
 
 
 def _select_sweeps(
@@ -125,7 +119,7 @@ def _select_sweeps(
     build: str | None,
     books=None,
 ):
-    rows = conn.execute(
+    raw_rows = conn.execute(
         """
         SELECT ms.id, ms.started_at, ms.client_version, ms.client_build
         FROM market_sweeps AS ms
@@ -135,32 +129,31 @@ def _select_sweeps(
         """,
         (house,),
     ).fetchall()
+    rows = tuple(_SweepRow(*row) for row in raw_rows)
     if not rows:
         raise RuntimeError(f"no market sweeps found for house {house!r}")
-    step_times = _sweep_step_times(books) if books is not None else {}
-    represented_rows = [row for row in rows if books is None or int(_row_value(row, "id", 0)) in step_times]
+    step_times = sweep_step_times(books) if books is not None else {}
+    represented_rows = [row for row in rows if books is None or row.id in step_times]
     excluded_without_books = len(rows) - len(represented_rows)
     window_rows = []
     for row in represented_rows:
-        sweep_id = int(_row_value(row, "id", 0))
+        sweep_id = row.id
         if books is not None:
             timestamp = step_times[sweep_id]
         else:
-            started_at = _row_value(row, "started_at", 1)
+            started_at = row.started_at
             timestamp = started_at.timestamp() if hasattr(started_at, "timestamp") else float(started_at)
         if (start is None or timestamp >= start) and (end is None or timestamp <= end):
             window_rows.append(row)
     selected = []
     for row in window_rows:
-        full_build = f"{_row_value(row, 'client_version', 2)}.{_row_value(row, 'client_build', 3)}"
+        full_build = f"{row.client_version}.{row.client_build}"
         if build is None or full_build == build:
             selected.append(row)
     if not selected:
         qualifier = f" and build {build!r}" if build else ""
         raise RuntimeError(f"no market sweeps match house {house!r}{qualifier}")
-    builds = {
-        f"{_row_value(row, 'client_version', 2)}.{_row_value(row, 'client_build', 3)}" for row in selected
-    }
+    builds = {f"{row.client_version}.{row.client_build}" for row in selected}
     if len(builds) != 1:
         joined = ", ".join(sorted(builds))
         raise RuntimeError(
@@ -354,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                     client_build,
                     excluded_without_books,
                 ) = _select_sweeps(conn, args.house, args.start, args.end, args.build, all_books)
-                selected_ids = {int(_row_value(row, "id", 0)) for row in selected_sweeps}
+                selected_ids = {row.id for row in selected_sweeps}
                 books = {
                     item_id: [book for book in item_books if int(book.sweep_id) in selected_ids]
                     for item_id, item_books in all_books.items()

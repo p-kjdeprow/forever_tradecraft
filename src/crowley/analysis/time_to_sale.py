@@ -10,12 +10,15 @@ from fractions import Fraction
 from statistics import median
 from typing import Any
 
+from crowley.trading.numbers import as_fraction
+
 from .books import (
     EXPIRY_SLACK,
     MAX_GAP,
     Book,
     Group,
     Interval,
+    common_ceiling,
     valid_intervals,
 )
 
@@ -142,7 +145,7 @@ def _price_index(
             fills.append(Fraction(0))
             breaks.append("stop")
             continue
-        common = _common_ceiling(books[index].ceiling, books[index + 1].ceiling)
+        common = common_ceiling(books[index].ceiling, books[index + 1].ceiling)
         if common is not None and (price > common or prepared.reached_ceiling):
             fills.append(Fraction(0))
             breaks.append("unobservable")
@@ -228,16 +231,8 @@ def _fast_replay(index: _PriceIndex, start_index: int, quantity: int) -> ReplayR
     )
 
 
-def _as_fraction(value: Fraction | int | float | str) -> Fraction:
-    if isinstance(value, Fraction):
-        return value
-    if isinstance(value, float):
-        return Fraction(str(value))
-    return Fraction(value)
-
-
 def _as_tie_share(value: Fraction | int | float | str) -> Fraction:
-    result = _as_fraction(value)
+    result = as_fraction(value)
     if result < 0 or result > 1:
         raise ValueError("tie_share must be between 0 and 1")
     return result
@@ -330,8 +325,8 @@ def _replay_prepared(
             observed_until = float(HORIZON)
             _put_checkpoint_values(fractions, observed_until, float(filled / quantity))
             break
-        common_ceiling = _common_ceiling(books[index].ceiling, books[index + 1].ceiling)
-        if common_ceiling is not None and (price > common_ceiling or prepared.reached_ceiling):
+        ceiling = common_ceiling(books[index].ceiling, books[index + 1].ceiling)
+        if ceiling is not None and (price > ceiling or prepared.reached_ceiling):
             observed_until = max(0.0, elapsed)
             _put_checkpoint_values(fractions, observed_until, float(filled / quantity))
             break
@@ -375,14 +370,6 @@ def _replay_prepared(
     )
 
 
-def _common_ceiling(left: Fraction | None, right: Fraction | None) -> Fraction | None:
-    if left is None:
-        return right
-    if right is None:
-        return left
-    return min(left, right)
-
-
 def replay_listing(
     books: Sequence[Book],
     start_index: int | None = None,
@@ -415,7 +402,7 @@ def replay_listing(
         filtered,
         prepared,
         start_index,
-        _as_fraction(price),
+        as_fraction(price),
         int(quantity),
         tie_share=_as_tie_share(tie_share),
         stop_t=stop_t,

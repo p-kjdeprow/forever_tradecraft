@@ -209,19 +209,10 @@ class _AccountView:
         return self._account.cooldowns.get(cooldown_group, 0) <= self._now
 
 
-def account_view(account: Account, now: float) -> AccountView:
-    return account.account_view(now)
-
-
-AccountViewImpl = _AccountView
-
-
 __all__ = [
     "Account",
-    "AccountViewImpl",
     "LedgerEvent",
     "Listing",
     "Lot",
     "Mail",
-    "account_view",
 ]

@@ -12,20 +12,19 @@ from crowley.core.auction_rules import AuctionHouseRules
 
 from .accounts import Account
 from .api import CraftingCapabilities, ItemFacts, Recipe, Strategy
-from .data import validate_recipes
-from .execution import ExecutionContext, release_mail, settle_expiry, settle_fills
+from .execution import ExecutionContext, execute_intent, release_mail, settle_expiry, settle_fills
 from .market import Market
+from .numbers import as_fraction
+from .recipes import validate_recipes
+from .report import build_report, text_summary
 from .requirements import EMPTY_CAPABILITIES, capabilities_hash, recipe_gate_counts
-
-
-def _as_fraction(value: Any) -> Fraction:
-    return value if isinstance(value, Fraction) else Fraction(str(value))
+from .statistics import StatisticsPoint, precompute_statistics
 
 
 def _allocate_capital(capital: int, weights: Sequence[Any]) -> list[int]:
-    if not weights or any(_as_fraction(weight) <= 0 for weight in weights):
+    if not weights or any(as_fraction(weight) <= 0 for weight in weights):
         raise ValueError("weights must be positive")
-    fractions = [_as_fraction(weight) for weight in weights]
+    fractions = [as_fraction(weight) for weight in weights]
     total = sum(fractions, Fraction(0))
     shares = [int(Fraction(capital) * weight / total) for weight in fractions]
     remainder = capital - sum(shares)
@@ -49,34 +48,20 @@ class BacktestResult:
     cash_curves: dict[str, list[tuple[float, int]]] = field(default_factory=dict)
     stale_mark_counts: dict[str, int] = field(default_factory=dict)
 
-    @property
-    def strategies(self) -> dict[str, Account]:
-        return self.accounts
-
-    @property
-    def total(self) -> list[tuple[float, Fraction]]:
-        return self.total_equity_curve
-
     def report(self) -> dict[str, Any]:
-        from .report import build_report
-
         return build_report(self)
 
     def summary(self) -> str:
-        from .report import text_summary
-
         return text_summary(self.report())
 
 
 def _mark_equity_details(
     account: Account,
     market: Market,
-    t: float,
     sweep_index: int,
     snapshots: Mapping[int, Any] | None = None,
     snapshot_history: Mapping[int, tuple[int, Any]] | None = None,
 ) -> tuple[Fraction, int]:
-    del t
     snapshots = market.view().items() if snapshots is None else snapshots
     snapshot_history = {} if snapshot_history is None else snapshot_history
     holdings: dict[int, int] = {}
@@ -114,31 +99,10 @@ def _mark_equity_details(
     return equity, stale_mark_count
 
 
-def _mark_equity(
-    account: Account,
-    market: Market,
-    t: float,
-    sweep_index: int,
-    snapshots: Mapping[int, Any] | None = None,
-    snapshot_history: Mapping[int, tuple[int, Any]] | None = None,
-) -> Fraction:
-    """Mark holdings using the current or latest earlier observed snapshot."""
-
-    equity, _stale_mark_count = _mark_equity_details(
-        account,
-        market,
-        t,
-        sweep_index,
-        snapshots=snapshots,
-        snapshot_history=snapshot_history,
-    )
-    return equity
-
-
 def _strategy_capacity_share(strategy: Strategy) -> Fraction:
     params = getattr(strategy, "params", {})
     value = params.get("capacity_share", Fraction(1, 4)) if isinstance(params, Mapping) else Fraction(1, 4)
-    return _as_fraction(value)
+    return as_fraction(value)
 
 
 def _serialize_intent(intent: Any) -> dict[str, Any]:
@@ -214,7 +178,7 @@ def _record_capacity_observations(
 
 def run_backtest(
     books: Mapping[int, Sequence[Book]] | Sequence[Book],
-    statistics: Mapping[Any, Any] | None,
+    statistics: Mapping[int, Sequence[StatisticsPoint]] | None,
     facts: Mapping[int, ItemFacts],
     recipes: Sequence[Recipe],
     strategies: Sequence[Strategy] | Mapping[str, Strategy],
@@ -241,10 +205,10 @@ def run_backtest(
         raise ValueError("strategy names must be unique")
     if capital_copper < 0:
         raise ValueError("capital_copper cannot be negative")
-    wind_down_hours = _as_fraction(wind_down_hours)
+    wind_down_hours = as_fraction(wind_down_hours)
     if wind_down_hours < 0:
         raise ValueError("wind_down_hours cannot be negative")
-    demand_share = _as_fraction(demand_share)
+    demand_share = as_fraction(demand_share)
     if not 0 < demand_share <= 1:
         raise ValueError("demand_share must be in (0, 1]")
     recipes = validate_recipes(recipes)
@@ -254,8 +218,6 @@ def run_backtest(
         raise TypeError("capabilities must be CraftingCapabilities")
     if not isinstance(rules, AuctionHouseRules):
         raise TypeError("rules must be AuctionHouseRules")
-    from .data import precompute_statistics
-
     indexed_statistics = precompute_statistics(books) if not statistics else statistics
     market = Market(books, indexed_statistics, facts, recipes, rules=rules)
     all_times = market.times
@@ -275,7 +237,7 @@ def run_backtest(
         weight_values = list(weights)
         if len(weight_values) != len(strategy_list):
             raise ValueError("weights must have one value per strategy")
-    weight_values = [_as_fraction(weight) for weight in weight_values]
+    weight_values = [as_fraction(weight) for weight in weight_values]
     if any(weight <= 0 for weight in weight_values):
         raise ValueError("weights must be positive")
     capital_shares = _allocate_capital(capital_copper, weight_values)
@@ -367,13 +329,12 @@ def run_backtest(
                 name: {
                     "realized": Fraction(account.cash_balance + account.pending_cash())
                     - account.start_capital,
-                    "equity": _mark_equity(
+                    "equity": _mark_equity_details(
                         account,
                         market,
-                        t,
                         step,
                         snapshot_history=snapshot_history,
-                    ),
+                    )[0],
                 }
                 for name, account in accounts.items()
             }
@@ -394,8 +355,6 @@ def run_backtest(
             if intents is None:
                 continue
             for intent in intents:
-                from .execution import execute_intent
-
                 before_counts = dict(account.counts)
                 execute_intent(context, account, intent)
                 step_decisions["strategies"][strategy.name].append(
@@ -409,7 +368,6 @@ def run_backtest(
             equity, stale_mark_count = _mark_equity_details(
                 account,
                 market,
-                t,
                 step,
                 snapshots=current_snapshots,
                 snapshot_history=snapshot_history,

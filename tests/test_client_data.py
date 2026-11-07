@@ -16,10 +16,42 @@ import psycopg
 import pytest
 
 from crowley.core.client_data import ClientDataError, compare_profession_pages, normalize_export
+from crowley.core.watchlist import Catalog, CatalogItem
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 
 FIXTURE = Path(__file__).parent / "fixtures" / "client_data"
+
+
+def _write_valid_fixture_catalog(path: Path, item_ids: tuple[int, ...] = (999,)) -> Path:
+    catalog = Catalog(
+        schema_version=1,
+        id="first-run",
+        revision=1,
+        client_build="1.60.1.70450",
+        reviewed_on="2026-11-07",
+        initial_price_levels=1,
+        items=[
+            CatalogItem(
+                item_id=item_id,
+                name=f"Fixture item {item_id}",
+                category="trade_goods",
+                tags=["fixture"],
+                professions=["alchemy"],
+                roles=["input"],
+                status="active",
+                pool="core",
+                reason="Synthetic fixture item",
+                evidence="client_data",
+                auction_eligibility="client_tradeable",
+                binding="none_in_tooltip",
+                source_urls=[f"https://example.com/items/{item_id}"],
+            )
+            for item_id in item_ids
+        ],
+    )
+    path.write_text(catalog.model_dump_json() + "\n")
+    return path
 
 
 def _fixture_export(tmp_path: Path, suffix: str = "b") -> Path:
@@ -51,8 +83,8 @@ def _refresh_manifest(export: Path) -> None:
     (export / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
 
 
-def test_normalizer_preserves_recipe_facts_and_item_coverage() -> None:
-    data = normalize_export(FIXTURE, catalog_path=FIXTURE / "catalog.json")
+def test_normalizer_preserves_recipe_facts_and_item_coverage(tmp_path: Path) -> None:
+    data = normalize_export(FIXTURE, catalog_path=_write_valid_fixture_catalog(tmp_path / "catalog.json"))
     by_spell = {recipe.spell_id: recipe for recipe in data.recipes}
 
     assert set(by_spell) == {100, 101, 102}
@@ -89,6 +121,7 @@ def test_normalizer_preserves_recipe_facts_and_item_coverage() -> None:
 def test_recipe_selection_rejects_non_profession_and_non_create_rows(tmp_path: Path) -> None:
     broken = tmp_path / "export"
     shutil.copytree(FIXTURE, broken)
+    _write_valid_fixture_catalog(broken / "catalog.json")
     ability = broken / "csv" / "SkillLineAbility.csv"
     ability.write_text(
         ability.read_text()
@@ -145,7 +178,7 @@ def test_export_tables_require_exact_real_schema(tmp_path: Path) -> None:
 
 
 def test_saved_profession_pages_are_a_report_only(tmp_path: Path) -> None:
-    data = normalize_export(FIXTURE, catalog_path=FIXTURE / "catalog.json")
+    data = normalize_export(FIXTURE, catalog_path=_write_valid_fixture_catalog(tmp_path / "catalog.json"))
     page = tmp_path / "prof-alchemy.html"
     page.write_text('<ul><li class="rc" id="r-100"></li><li class="rc" id="r-999"></li></ul>')
     comparison = compare_profession_pages(data, {"alchemy": page})[0]

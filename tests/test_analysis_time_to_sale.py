@@ -352,23 +352,23 @@ class FakeConnection:
 
 
 def loader_row(seconds=100):
-    return {
-        "id": 1,
-        "started_at": 100,
-        "item_id": 7,
-        "kind": "commodity",
-        "coverage": "full",
-        "cutoff": {"kind": "unbounded"},
-        "query": {"kind": "queried", "startedAt": 100},
-        "result_id": 1,
-        "quantity": 2,
-        "unit_numerator": 5,
-        "unit_denominator": 1,
-        "row_data": {
+    return (
+        1,
+        100,
+        7,
+        "commodity",
+        "full",
+        {"kind": "unbounded"},
+        {"kind": "queried", "startedAt": 100},
+        1,
+        2,
+        5,
+        1,
+        {
             "timeLeft": {"kind": "exact", "seconds": seconds},
             "owners": {"totalNumberOfOwners": "1"},
         },
-    }
+    )
 
 
 def test_loader_requires_migration_and_corrected_time_left():
@@ -381,12 +381,12 @@ def test_loader_requires_migration_and_corrected_time_left():
 
 
 def test_loader_requires_query_started_at_and_matching_cutoff():
-    missing_started_at = loader_row()
-    missing_started_at["query"] = {"kind": "queried"}
+    missing_started_at = list(loader_row())
+    missing_started_at[6] = {"kind": "queried"}
     with pytest.raises(ValueError, match="startedAt"):
-        load_commodity_books(FakeConnection(True, [missing_started_at]), "house")
+        load_commodity_books(FakeConnection(True, [tuple(missing_started_at)]), "house")
 
-    mismatch = loader_row()
-    mismatch["coverage"] = "bounded"
+    mismatch = list(loader_row())
+    mismatch[4] = "bounded"
     with pytest.raises(ValueError, match="price cutoff"):
-        load_commodity_books(FakeConnection(True, [mismatch]), "house")
+        load_commodity_books(FakeConnection(True, [tuple(mismatch)]), "house")

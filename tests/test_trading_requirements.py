@@ -14,10 +14,11 @@ from crowley.trading import __main__ as cli
 from crowley.trading import paper
 from crowley.trading.accounts import Account
 from crowley.trading.api import Craft, CraftingCapabilities, ItemFacts, ItemSnapshot, Level, Recipe
-from crowley.trading.data import load_recipes, validate_recipes
+from crowley.trading.data import load_recipes
 from crowley.trading.engine import run_backtest
 from crowley.trading.execution import ExecutionContext, execute_intent
 from crowley.trading.market import Market
+from crowley.trading.recipes import validate_recipes
 from crowley.trading.requirements import (
     capabilities_from_mapping,
     capabilities_hash,
@@ -346,6 +347,9 @@ def test_stored_capabilities_must_be_canonical_even_when_hash_matches() -> None:
         "a" * 64,
         raw,
         capabilities_hash(capabilities),
+        "us",
+        "normal",
+        "alliance",
     )
     with pytest.raises(paper.PaperError, match="canonical"):
         paper._run_from_row(row)

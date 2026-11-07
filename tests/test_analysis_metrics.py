@@ -244,45 +244,45 @@ class FakeConnection:
 
 
 def test_loader_rejects_invalid_owner_count():
-    row = {
-        "id": 1,
-        "started_at": 100,
-        "item_id": 7,
-        "kind": "commodity",
-        "coverage": "full",
-        "cutoff": {"kind": "unbounded"},
-        "query": {"kind": "queried", "startedAt": 100},
-        "result_id": 1,
-        "quantity": 2,
-        "unit_numerator": 5,
-        "unit_denominator": 1,
-        "row_data": {
+    row = (
+        1,
+        100,
+        7,
+        "commodity",
+        "full",
+        {"kind": "unbounded"},
+        {"kind": "queried", "startedAt": 100},
+        1,
+        2,
+        5,
+        1,
+        {
             "timeLeft": {"kind": "exact", "seconds": 100},
             "owners": {"totalNumberOfOwners": "-1"},
         },
-    }
+    )
     with pytest.raises(ValueError, match="totalNumberOfOwners"):
         load_commodity_books(FakeConnection([row]), "house")
 
 
 def test_loader_parses_positive_owner_count():
-    row = {
-        "id": 1,
-        "started_at": 100,
-        "item_id": 7,
-        "kind": "commodity",
-        "coverage": "full",
-        "cutoff": {"kind": "unbounded"},
-        "query": {"kind": "queried", "startedAt": 100},
-        "result_id": 1,
-        "quantity": 2,
-        "unit_numerator": 5,
-        "unit_denominator": 1,
-        "row_data": {
+    row = (
+        1,
+        100,
+        7,
+        "commodity",
+        "full",
+        {"kind": "unbounded"},
+        {"kind": "queried", "startedAt": 100},
+        1,
+        2,
+        5,
+        1,
+        {
             "timeLeft": {"kind": "exact", "seconds": 100},
             "owners": {"totalNumberOfOwners": "3"},
         },
-    }
+    )
     loaded = load_commodity_books(FakeConnection([row]), "house")
     assert loaded[7][0].groups[0].owners == 3
 

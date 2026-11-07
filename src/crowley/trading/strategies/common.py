@@ -7,27 +7,18 @@ from fractions import Fraction
 from math import ceil, floor
 
 from crowley.core.auction_rules import AuctionHouseRules
-from crowley.trading.api import AccountView, ItemFacts, ItemSnapshot, Level, MarketView
+from crowley.trading.api import AccountView, ItemFacts, ItemSnapshot, Level, MarketView, VendorSell
+from crowley.trading.numbers import FractionInput, as_fraction
 
 SECONDS_PER_HOUR = 3_600
 MIN_DEMAND_ELIGIBLE_SECONDS = 6 * SECONDS_PER_HOUR
 
 
-def as_fraction(value: Fraction | int | float) -> Fraction:
-    """Convert a numeric strategy parameter without introducing float rounding."""
-
-    if isinstance(value, Fraction):
-        return value
-    if isinstance(value, float):
-        return Fraction(str(value))
-    return Fraction(value)
-
-
-def floor_fraction(value: Fraction | int | float) -> int:
+def floor_fraction(value: FractionInput) -> int:
     return floor(as_fraction(value))
 
 
-def ceil_fraction(value: Fraction | int | float) -> int:
+def ceil_fraction(value: FractionInput) -> int:
     return ceil(as_fraction(value))
 
 
@@ -35,7 +26,7 @@ def trustworthy_fair(
     snapshot: ItemSnapshot,
     *,
     min_fair_n: int = 16,
-    max_band_width: Fraction | int | float = 0.35,
+    max_band_width: FractionInput = 0.35,
 ) -> bool:
     """Return whether the snapshot has enough history for a price decision."""
 
@@ -63,9 +54,7 @@ def held_quantity(account: AccountView, item_id: int) -> int:
     return inventory + listed + transit
 
 
-def capacity_limit(
-    snapshot: ItemSnapshot, account: AccountView, capacity_share: Fraction | int | float
-) -> int:
+def capacity_limit(snapshot: ItemSnapshot, account: AccountView, capacity_share: FractionInput) -> int:
     """Remaining units allowed by the demand-based capacity cap."""
 
     assert snapshot.demand_units_per_day is not None
@@ -81,8 +70,8 @@ def deposit_per_unit(market: MarketView, item_id: int, duration_hours: int) -> F
 
 def net_proceeds_per_unit(
     rules: AuctionHouseRules,
-    sale_price: int | Fraction,
-    deposit: int | Fraction = 0,
+    sale_price: FractionInput,
+    deposit: FractionInput = 0,
 ) -> Fraction:
     """Sale proceeds after the auction cut and a per-unit deposit."""
 
@@ -91,10 +80,10 @@ def net_proceeds_per_unit(
 
 def margin_clears(
     rules: AuctionHouseRules,
-    sale_price: int | Fraction,
-    buy_price: int | Fraction,
-    deposit: int | Fraction,
-    minimum_margin: Fraction | int | float,
+    sale_price: FractionInput,
+    buy_price: FractionInput,
+    deposit: FractionInput,
+    minimum_margin: FractionInput,
 ) -> bool:
     """Whether net proceeds meet the requested profit as a fraction of cost."""
 
@@ -171,8 +160,8 @@ def target_sell_price(
     snapshot: ItemSnapshot,
     buy_limit: int,
     *,
-    floor_ratio: Fraction | int | float = 0.9,
-    cap_ratio: Fraction | int | float = 1.1,
+    floor_ratio: FractionInput = 0.9,
+    cap_ratio: FractionInput = 1.1,
 ) -> int:
     """Compute the integer undercut target described by the strategy contract."""
 
@@ -207,6 +196,12 @@ def vendor_purchase(facts: ItemFacts, quantity: int) -> tuple[int, int] | None:
         return None
     bundles = (quantity + size - 1) // size
     return bundles * size, bundles * price
+
+
+def vendor_sell(item_id: int, quantity: int) -> VendorSell | None:
+    """Create a vendor-sale intent only when it has positive quantity."""
+
+    return VendorSell(item_id, quantity) if quantity > 0 else None
 
 
 def item_inventory(inventory: Mapping[int, int], item_id: int) -> int:
@@ -249,5 +244,6 @@ __all__ = [
     "target_sell_price",
     "trustworthy_fair",
     "vendor_purchase",
+    "vendor_sell",
     "vendor_floor",
 ]

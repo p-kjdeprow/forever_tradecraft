@@ -7,10 +7,12 @@ from collections.abc import Mapping
 from fractions import Fraction
 from math import floor
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .accounts import Account
-from .engine import BacktestResult
+
+if TYPE_CHECKING:
+    from .engine import BacktestResult
 
 COUNT_KEYS = (
     "units_bought",

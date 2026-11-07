@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -68,6 +69,18 @@ def test_capabilities_are_canonical_immutable_and_fail_closed() -> None:
     assert capabilities_hash(complete) == capabilities_hash(
         CraftingCapabilities.from_values([3938], [162], [1])
     )
+
+
+def test_migration_009_hash_literal_matches_runtime_capabilities_hash() -> None:
+    migration = (
+        Path(__file__).parents[1] / "src" / "crowley" / "server" / "migrations" / "009_paper_capabilities.sql"
+    ).read_text(encoding="utf-8")
+    match = re.search(
+        r"capabilities_hash\s+text\s+NOT NULL\s+DEFAULT\s+'([0-9a-f]{64})'",
+        migration,
+    )
+    assert match is not None, "migration 009 must declare the capabilities hash literal"
+    assert match.group(1) == capabilities_hash(CraftingCapabilities())
 
 
 @pytest.mark.parametrize(

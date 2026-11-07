@@ -1,32 +1,8 @@
 [
   {
-    "category": "checkout-path",
-    "count": 1,
-    "match": "repos/pegasus",
-    "path": "README.md"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "http://127.0.0.1:8080",
-    "path": "README.md"
-  },
-  {
     "category": "machine-url",
     "count": 1,
     "match": "localhost:8080/healthz",
-    "path": "README.md"
-  },
-  {
-    "category": "posix-home",
-    "count": 3,
-    "match": "/home/dev",
-    "path": "README.md"
-  },
-  {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/you",
     "path": "README.md"
   },
   {
@@ -49,12 +25,6 @@
   },
   {
     "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "deploy/config/companion.toml"
-  },
-  {
-    "category": "posix-home",
     "count": 4,
     "match": "/home/dev",
     "path": "deploy/config/routes/stormwind.json"
@@ -63,102 +33,6 @@
     "category": "checkout-path",
     "count": 1,
     "match": "repos/pegasus",
-    "path": "deploy/config/session.toml"
-  },
-  {
-    "category": "mutter-auth",
-    "count": 1,
-    "match": ".mutter-Xwaylandauth",
-    "path": "deploy/config/session.toml"
-  },
-  {
-    "category": "posix-home",
-    "count": 9,
-    "match": "/home/dev",
-    "path": "deploy/config/session.toml"
-  },
-  {
-    "category": "runtime-dir",
-    "count": 3,
-    "match": "/run/user/1000",
-    "path": "deploy/config/session.toml"
-  },
-  {
-    "category": "checkout-path",
-    "count": 3,
-    "match": "repos/pegasus",
-    "path": "deploy/crowley-companion.service"
-  },
-  {
-    "category": "posix-home",
-    "count": 3,
-    "match": "/home/dev",
-    "path": "deploy/crowley-companion.service"
-  },
-  {
-    "category": "systemd-absolute-path",
-    "count": 1,
-    "match": "/home/dev/.local/bin/uv",
-    "path": "deploy/crowley-companion.service"
-  },
-  {
-    "category": "systemd-absolute-path",
-    "count": 1,
-    "match": "/home/dev/repos/pegasus",
-    "path": "deploy/crowley-companion.service"
-  },
-  {
-    "category": "systemd-absolute-path",
-    "count": 1,
-    "match": "/home/dev/repos/pegasus/deploy/.env",
-    "path": "deploy/crowley-companion.service"
-  },
-  {
-    "category": "checkout-path",
-    "count": 2,
-    "match": "repos/pegasus",
-    "path": "deploy/crowley-health.service"
-  },
-  {
-    "category": "checkout-path",
-    "count": 2,
-    "match": "repos/pegasus",
-    "path": "deploy/crowley-market-backup.service"
-  },
-  {
-    "category": "checkout-path",
-    "count": 3,
-    "match": "repos/pegasus",
-    "path": "deploy/crowley-paper-trading.service"
-  },
-  {
-    "category": "posix-home",
-    "count": 2,
-    "match": "/home/dev",
-    "path": "deploy/crowley-session.example.toml"
-  },
-  {
-    "category": "runtime-dir",
-    "count": 1,
-    "match": "/run/user/1000",
-    "path": "deploy/crowley-session.example.toml"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "127.0.0.1:5432",
-    "path": "deploy/docker-compose.yml"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "Localhost",
-    "path": "deploy/docker-compose.yml"
-  },
-  {
-    "category": "checkout-path",
-    "count": 1,
-    "match": "repos/pegasus",
     "path": "docs/ARCHITECTURE.md"
   },
   {
@@ -166,12 +40,6 @@
     "count": 1,
     "match": "/home/dev",
     "path": "docs/ARCHITECTURE.md"
-  },
-  {
-    "category": "posix-home",
-    "count": 2,
-    "match": "/home/dev",
-    "path": "docs/GAME_SETUP.md"
   },
   {
     "category": "checkout-path",
@@ -184,18 +52,6 @@
     "count": 1,
     "match": "/home/dev",
     "path": "docs/HANDOFF.md"
-  },
-  {
-    "category": "checkout-path",
-    "count": 1,
-    "match": "repos/pegasus",
-    "path": "docs/REPEATING_SCANS.md"
-  },
-  {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "docs/REPEATING_SCANS.md"
   },
   {
     "category": "temporary-path",
@@ -226,18 +82,6 @@
     "count": 2,
     "match": "/home/dev",
     "path": "src/crowley/data/game_target.json"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "127.0.0.1:5432",
-    "path": "src/crowley/ops/resources/docker-compose.yml"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "Localhost",
-    "path": "src/crowley/ops/resources/docker-compose.yml"
   },
   {
     "category": "machine-url",
@@ -322,12 +166,6 @@
     "count": 1,
     "match": "/tmp/object",
     "path": "tests/ops/test_backup.py"
-  },
-  {
-    "category": "checkout-path",
-    "count": 1,
-    "match": "repos/pegasus",
-    "path": "tests/ops/test_health.py"
   },
   {
     "category": "temporary-path",

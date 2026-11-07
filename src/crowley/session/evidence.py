@@ -323,7 +323,7 @@ def read_data_acknowledged_ids(
     except (OSError, UnicodeError, ValueError, JournalError) as exc:
         raise EvidenceError(f"Data.lua is malformed: {exc}") from exc
     value = root.get("CROWLEY_DATA")
-    allowed = {"generatedAt", "ackedScans", "scanPlan", "referenceItemIDs", "shoppingLists"}
+    allowed = {"generatedAt", "ackedScans", "scanPlan", "referenceItemIDs"}
     if not isinstance(value, dict) or set(value) != allowed:
         raise EvidenceError("CROWLEY_DATA is malformed")
     generated_at = value.get("generatedAt", 0)
@@ -456,43 +456,6 @@ def read_data_acknowledged_ids(
         or scan_plan != pinned
     ):
         raise EvidenceError("CROWLEY_DATA.scanPlan.planJSON values are invalid")
-    shopping_lists = value["shoppingLists"]
-    if isinstance(shopping_lists, dict):
-        if shopping_lists:
-            raise EvidenceError("CROWLEY_DATA.shoppingLists must be an array")
-        shopping_lists = []
-    elif not isinstance(shopping_lists, list):
-        raise EvidenceError("CROWLEY_DATA.shoppingLists is invalid")
-    for index, shopping_list in enumerate(shopping_lists):
-        if not isinstance(shopping_list, dict) or set(shopping_list) != {"name", "house", "items"}:
-            raise EvidenceError(f"CROWLEY_DATA.shoppingLists[{index}] shape is invalid")
-        if (
-            not isinstance(shopping_list["name"], str)
-            or not shopping_list["name"]
-            or not isinstance(shopping_list["house"], str)
-            or not shopping_list["house"]
-            or not isinstance(shopping_list["items"], list)
-            or not shopping_list["items"]
-        ):
-            raise EvidenceError(f"CROWLEY_DATA.shoppingLists[{index}] values are invalid")
-        for item_index, item in enumerate(shopping_list["items"]):
-            if not isinstance(item, dict) or set(item) != {"name", "maxPrice", "quantity"}:
-                raise EvidenceError(
-                    f"CROWLEY_DATA.shoppingLists[{index}].items[{item_index}] shape is invalid"
-                )
-            if (
-                not isinstance(item["name"], str)
-                or not item["name"]
-                or isinstance(item["maxPrice"], bool)
-                or not isinstance(item["maxPrice"], int)
-                or item["maxPrice"] < 0
-                or isinstance(item["quantity"], bool)
-                or not isinstance(item["quantity"], int)
-                or item["quantity"] <= 0
-            ):
-                raise EvidenceError(
-                    f"CROWLEY_DATA.shoppingLists[{index}].items[{item_index}] values are invalid"
-                )
     return tuple(sorted(set(ids), key=lambda item: item.encode()))
 
 

@@ -68,8 +68,7 @@ pools. Lower-frequency discovery scans are a future scheduling change, not imple
 behavior. Use category, profession and tag views to review memberships; do not maintain
 separate hand-edited copies of the item list.
 
-Scan watchlists are separate from Auctionator shopping lists. The former describe what
-to observe; the strategy engine will produce the latter with specific purchase limits.
+Scan watchlists describe what to observe; they are not a generic market-inventory list.
 
 ## Evidence and admission
 
@@ -177,5 +176,5 @@ Loading the installed package requires no network or archive directory.
 Coverage includes the eight crafting professions plus Mining. The initial Mining
 and Cooking records remain blocked: output quantities, server learnability and
 other requirements still need evidence. This is a recipe-data foundation, not a
-complete recipe graph or a producer of crafting margins or shopping lists. The
+complete recipe graph or a producer of crafting margins. The
 544-item watchlist remains the independent scan catalog.

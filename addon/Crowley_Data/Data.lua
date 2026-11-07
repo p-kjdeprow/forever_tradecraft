@@ -5,5 +5,5 @@ CROWLEY_DATA = {
   ["generatedAt"] = 0,
   ["ackedScans"] = {},
   ["scanPlan"] = false,
-  ["shoppingLists"] = {},
+  ["referenceItemIDs"] = {},
 }

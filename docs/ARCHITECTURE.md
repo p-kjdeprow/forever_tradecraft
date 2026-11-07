@@ -51,7 +51,7 @@ until genuinely remeasured. Cadence remains the explicit 900-second policy.
 | Full source-complete coverage at exactly N retained levels uses an unbounded cutoff and unknown witness; bounded coverage needs a strictly higher N+1 witness | `Scanner.lua` | The earlier producer defect was rejected with HTTP 422; the correction is accepted by strict validation in sweep 4 |
 | Non-commodity search results group identical one-unit auctions; `buyoutAmount` is one auction's buyout and `quantity` is units available in that result | `Scanner.lua`, `scanformat.py` | Item unit prices use the per-auction buyout; grouped quantity is retained as availability |
 | Exact `timeLeftSeconds` in the uint32 window `2^32-300..2^32-1` decodes as `seconds - 2^32`; format 3 exact seconds are `[-300,172800]` | `Scanner.lua`, `scanformat.py` | Values outside the understood window fail through the existing incomplete/numeric-range path |
-| Auctionator is installed (hard dependency) | `Crowley.toc` | Addon doesn't load |
+| Crowley has no external addon dependencies; the bundled `Crowley_Data` addon supplies companion data | `Crowley.toc`, `Crowley_Data/Data.lua` | Crowley loads without optional AH UI integrations |
 | **Assumption:** after `ITEM_DATA_LOAD_RESULT`, `C_Item.GetItemInfo` returns sell price, stack size, binding and class; `C_AuctionHouse.CalculateCommodityDeposit` returns integer copper for a commodity while the AH is open and nil for a non-commodity | `Reference.lua` | Per-item `invalid_native` or `deposit.kind = "error"`; never coerced |
 | **Assumption (client data A1):** hotfix-cache status-3 entries are deletes | `client_data.py` | 38 base Item rows would reappear |
 | **Assumption (A2):** a create-item effect quantity of 0 means 1 | `client_data.py` | Yields of 107 recipes (e.g. Transmute: Arcanite) would be wrong |
@@ -66,9 +66,13 @@ until genuinely remeasured. Cadence remains the explicit 900-second policy.
 | **Live observed:** bindings JUMP=SPACE, TURNLEFT=Q, TURNRIGHT=E (arrows are secondary); there is no usable interact key for world objects | `Agent.lua` telemetry | Unbound actions fail telemetry construction |
 | **Live observed:** hovering an NPC sets `UnitName("mouseover")`; hovering a world object shows a `UIParent`-owned `GameTooltip` whose first line is its name ("Mailbox"); a left click on the hovered mailbox or auctioneer opens it | `Agent.lua`, `daemon.py` world click | Hover-confirmed clicks refuse |
 | **Live observed:** `MAIL_SHOW` fires on open but `MAIL_CLOSED` did not fire when the mail frame closed via Escape; `MailFrame:IsShown()` is reliable; `C_PlayerInteractionManager` exists (`MailInfo` = 17) | `Agent.lua` (`mailOpen`) | Mail state would stick open |
+| Executor registers only events listed in the WoW Forever source: `AUCTION_HOUSE_SHOW`, `AUCTION_HOUSE_CLOSED`, `MERCHANT_SHOW`, `MERCHANT_CLOSED`, `MERCHANT_UPDATE`, `MAIL_SHOW`, `MAIL_CLOSED`, `MAIL_INBOX_UPDATE`, `TRADE_SKILL_SHOW`, `TRADE_SKILL_CLOSE`, `COMMODITY_PRICE_UPDATED`, `COMMODITY_PURCHASE_SUCCEEDED`, `COMMODITY_PURCHASE_FAILED`, `AUCTION_HOUSE_AUCTION_CREATED`, `AUCTION_CANCELED`, `UI_ERROR_MESSAGE`, `BAG_UPDATE` and `BAG_UPDATE_DELAYED` | `Executor.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/{AuctionHouseDocumentation,MerchantFrameDocumentation,MailInfoDocumentation,TradeSkillUIDocumentation,ContainerDocumentation,SystemDocumentation}.lua` | Source verification does not yet prove event delivery on the launch client; qualify the pinned set at runtime before arming the executor |
+| `MERCHANT_CLOSE` is not a WoW Forever event; the event catalog names `MERCHANT_CLOSED`, and the merchant implementation uses that spelling | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/MerchantFrameDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_UIPanels_Game/{Mainline,Vanilla}/MerchantFrame.lua` | The removed alias must not be registered |
+| `PROFESSION_SHOW` and `PROFESSION_CLOSE` are not WoW Forever events; the profession API and frame use `TRADE_SKILL_SHOW` and `TRADE_SKILL_CLOSE` | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/TradeSkillUIDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_Professions/Blizzard_ProfessionsFrame.lua` | The removed aliases must not be registered |
+| `MAIL_UPDATE` and `TRADE_SKILL_UPDATE` are not present in the Forever event catalog or FrameXML usage; only `MAIL_INBOX_UPDATE`, `MERCHANT_UPDATE` and the trade-skill show/close events are registered here | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/MailInfoDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/TradeSkillUIDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_MailFrame/MailFrame.lua` | Update notifications remain unmodeled until a source-verified event is identified |
 
 `/crowley probe` saves the client's API surface for checking these. The scanner uses the
-client's `hooksecurefunc` callbacks to flag an Auctionator or user search that overlaps an
+client's `hooksecurefunc` callbacks to flag an external or user search that overlaps an
 active Crowley request. The Auction House result events have no request identifier, so a
 foreign same-key query is conservatively recorded as incomplete rather than attributed to
 Crowley; this correlation limit remains a live-client beta assumption.
@@ -82,8 +86,8 @@ WoW (Wine) ── /crowley scan ──▶ CrowleyDB.scans (SavedVariables, compr
      │                     crowley-companion (poll, parse, POST /v1/scans)
      │                                │                     ▲
      │  Crowley_Data/Data.lua ◀───────┘ POST /v1/addon-data │ HTTP over Tailscale
-     │  (acked scan ids, shopping lists)                    │
-     └─ next /reload: prune acked scans, sync lists ──▶ crowley-server ──▶ TimescaleDB
+     │  (acked scan ids)                                     │
+     └─ next /reload: prune acked scans ─────────────────▶ crowley-server ──▶ TimescaleDB
 ```
 
 The addon keeps at most 6 unacknowledged sweeps. The companion acknowledges uploaded sweeps
@@ -281,7 +285,7 @@ top of [HANDOFF.md](HANDOFF.md).
 
 Game, companion, API and database run on Linux host `3080servermach`; the repository is at
 `/home/dev/repos/pegasus`. WoW 1.60.1 build 70374/interface 16001 runs locally through
-Lutris/Wine. Auctionator 341 is installed with full autoscan disabled. `Crowley` is a repo
+Lutris/Wine. `Crowley` is a repo
 symlink and generated `Crowley_Data` has the curated 428-active-ID, 900-second, 20-level plan.
 The house is `beta-normal-alliance`; Sunshine and the fullscreen watcher are disabled. The
 companion is active. Compose needs `--env-file deploy/.env` from the repo root.
@@ -325,7 +329,7 @@ ingested as legacy whole-market statistics.
    keep real scans as test fixtures. Commodity retained-price ingestion is verified.
 2. **Pre-launch:** inferred sales (listings that disappear before expiring), the strategy
    engine (vendor flips, deals below market, faction-vs-neutral arbitrage, crafting
-   margins), and strategy output in Data.lua and Auctionator lists.
+   margins), and strategy output in Data.lua.
 3. **Launch week:** continuous scanning, an automated trade executor (within strategy limits
    and the one-click-per-second cap), and a dashboard.
 4. **Weeks 2–4:** demand ranking, anomaly detection, price forecasting once there is

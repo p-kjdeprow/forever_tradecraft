@@ -5,11 +5,10 @@ The addon, Python package, configuration paths and `/crowley` commands currently
 the Crowley name.
 
 Auction house data platform and addon for **WoW Forever**. Scan the AH in game, store the
-retained observation history per house on a server, compute gold-making strategies, and push the results
-back into the game (and into Auctionator shopping lists).
+retained observation history per house on a server, and compute gold-making strategies.
 
 ```
-addon/Crowley        in-game scanner, Auctionator bridge, /crowley commands (Lua)
+addon/Crowley        in-game scanner, /crowley commands (Lua)
 addon/Crowley_Data   data file the companion writes; loaded at login or /reload
 src/crowley/core     shared: SavedVariables parser, scan format, stats, Lua writer
 src/crowley/companion  watches the game folder, uploads scans, writes Crowley_Data
@@ -53,7 +52,7 @@ systemctl --user daemon-reload
 systemctl --user enable --now crowley-companion
 ```
 
-The addon requires Auctionator. In game:
+In game:
 
 | Command | What it does |
 |---|---|
@@ -61,7 +60,6 @@ The addon requires Auctionator. In game:
 | `/crowley status` | Current house, next due time, loaded plan, cursor, stored sweeps and failures |
 | `/crowley scan` | Targeted watchlist sweep (AH must be open; starts are 15 minutes apart) |
 | `/crowley set faction neutral` | Override house detection (`region`/`ruleset`/`faction`, or `auto`) |
-| `/crowley lists` | Push Crowley shopping lists into Auctionator |
 
 Sweeps reach the server after `/reload` or logout, because that is when WoW writes SavedVariables.
 At six pending sweeps the addon pauses and never evicts unacknowledged evidence. The first
@@ -84,7 +82,7 @@ confirmed sale. Confirmed own sales are recorded separately only after a full ow
 
 The game, companion, API and database run on Linux host `3080servermach`; the repository is
 at `/home/dev/repos/pegasus`. WoW 1.60.1 build 70374/interface 16001 runs locally through
-Lutris/Wine. Auctionator 341 is installed with full autoscan disabled. Crowley is a repo
+Lutris/Wine. Crowley is a repo
 symlink and generated `Crowley_Data` has the 428-active-ID, 900-second, 20-level plan. The
 verified house is `beta-normal-alliance`; Moonlight/Sunshine and the fullscreen watcher are
 disabled. The companion is active. The database has six accepted sweeps, 2,568 observations

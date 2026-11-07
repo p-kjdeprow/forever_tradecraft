@@ -127,7 +127,7 @@ def test_retries_failed_file_without_reuploading_successful_scans(companion, fai
         else:
             return httpx.Response(
                 200,
-                json={"generatedAt": 1, "ackedScans": uploaded.copy(), "shoppingLists": [], "scanPlan": plan},
+                json={"generatedAt": 1, "ackedScans": uploaded.copy(), "scanPlan": plan},
             )
         attempts.append(target)
         if target == failure and not failed:
@@ -156,6 +156,7 @@ def test_retries_failed_file_without_reuploading_successful_scans(companion, fai
     data = savedvars.load_file(instance.settings.data_lua)["CROWLEY_DATA"]
     assert data["ackedScans"] == ["s1", "s2"]
     assert data["scanPlan"] == plan
+    assert "shoppingLists" not in data
 
     instance.tick()
     assert len(attempts) == 4  # Completed files stay processed.
@@ -174,7 +175,7 @@ def test_changed_file_waits_for_stability_after_failed_upload(companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 2, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.tick()
@@ -206,7 +207,7 @@ def test_unknown_native_marker_fixture_preserves_scan_wire_and_is_not_uploaded(c
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -269,7 +270,7 @@ def test_item_reference_upload_is_remembered_and_retried_on_error(companion):
         if request.url.path == "/v1/item-reference":
             calls.append(json.loads(request.content))
             return httpx.Response(200, json={"status": "created", "items": 1})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -283,7 +284,7 @@ def test_item_reference_upload_is_remembered_and_retried_on_error(companion):
             lambda request: (
                 httpx.Response(302, text="redirect")
                 if request.url.path == "/v1/item-reference"
-                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
             )
         ),
     )
@@ -301,7 +302,7 @@ def test_item_reference_upload_is_remembered_and_retried_on_error(companion):
         if request.url.path == "/v1/item-reference":
             successful_calls.append(json.loads(request.content)["id"])
             return httpx.Response(200, json={"status": "created", "items": 1})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client.close()
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(succeed))
@@ -330,7 +331,7 @@ def test_account_upload_is_remembered_and_retried_on_error(companion):
                 failed = True
                 raise httpx.ConnectError("temporary outage", request=request)
             return httpx.Response(200, json={"status": "created", "items": 0})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     with pytest.raises(httpx.ConnectError):
@@ -358,7 +359,7 @@ def test_account_upload_permanent_rejection_waits_for_operator_retry(companion):
             if attempts == 1:
                 return httpx.Response(422, text="malformed account")
             return httpx.Response(200, json={"status": "created", "items": 0})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -462,7 +463,7 @@ def test_execution_upload_retries_then_is_remembered(companion):
             if attempts == 1:
                 raise httpx.ConnectError("temporary outage", request=request)
             return httpx.Response(200, json={"status": "created"})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     with pytest.raises(httpx.ConnectError):
@@ -625,7 +626,7 @@ def test_transient_http_rejection_is_retried(status, companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     with pytest.raises(UploadResponseError) as failure:
@@ -649,7 +650,7 @@ def test_rejection_is_retried_when_configuration_changes(companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -678,7 +679,7 @@ def test_rejection_is_retried_when_contract_version_changes(companion, monkeypat
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -703,7 +704,7 @@ def test_permanent_rejection_skips_same_digest_retries_changed_digest_and_operat
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -727,7 +728,7 @@ def test_permanent_rejection_skips_same_digest_retries_changed_digest_and_operat
             lambda request: (
                 httpx.Response(422, json={"code": "bad_scan", "detail": "invalid contract"})
                 if request.url.path == "/v1/scans"
-                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
             )
         ),
     )
@@ -740,7 +741,7 @@ def test_permanent_rejection_skips_same_digest_retries_changed_digest_and_operat
             lambda request: (
                 httpx.Response(200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"})
                 if request.url.path == "/v1/scans"
-                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
             )
         ),
     )
@@ -763,7 +764,7 @@ def test_permanent_rejection_does_not_block_other_records(companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -828,7 +829,7 @@ def test_companion_ledger_full_persists_first_rejection_and_leaves_signature_pen
 
     def fill_ledger(request):
         if request.url.path == "/v1/addon-data":
-            return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+            return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
         if request.url.path != "/v1/scans":
             raise AssertionError(f"unexpected request {request.url}")
         scan_id = json.loads(request.content)["id"]
@@ -856,7 +857,7 @@ def test_companion_ledger_full_persists_first_rejection_and_leaves_signature_pen
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": [], "shoppingLists": []})
+        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
 
     replacement = Companion(instance.settings)
     replacement.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(retry_second))

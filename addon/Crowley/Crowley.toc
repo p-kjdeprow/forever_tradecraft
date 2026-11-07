@@ -4,7 +4,7 @@
 ## Author: Kyle DeProw
 ## Version: 0.2.0
 ## SavedVariables: CrowleyDB
-## Dependencies: Auctionator, Crowley_Data
+## Dependencies: Crowley_Data
 
 GeneratedTarget.lua
 Util.lua
@@ -16,5 +16,4 @@ Reference.lua
 Executor.lua
 Scanner.lua
 Agent.lua
-Bridge.lua
 Commands.lua

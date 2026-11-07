@@ -92,7 +92,6 @@ def _render_data_lua(client: WowClient, path: Path) -> None:
         "ackedScans": [UID],
         "scanPlan": plan,
         "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-        "shoppingLists": [],
     }
     path.write_bytes(client.lua.globals()._serialize("CROWLEY_DATA", client._to_lua(value)).encode("latin-1"))
     client.run_file(path)

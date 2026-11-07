@@ -24,6 +24,8 @@ _CANONICAL_CLIENT_BUILD = _TARGET.native_build
 _CANONICAL_INTERFACE = _TARGET.interface
 _CANONICAL_FACTION = _TARGET.faction
 _CANONICAL_LOCALE = _TARGET.locale
+DEFAULT_RELOAD_DEADLINE_SECONDS = 45
+MAX_RELOAD_DEADLINE_SECONDS = 600
 
 
 def _private_group_error(gid: int) -> str | None:
@@ -99,6 +101,13 @@ def open_routes_descriptor(path: Path) -> int:
 
 
 @dataclass(frozen=True)
+class ClientConfig:
+    """Strict configuration required by a session IPC client."""
+
+    socket: Path
+
+
+@dataclass(frozen=True)
 class SessionConfig:
     profile: DriverProfile
     journal: Path
@@ -106,7 +115,7 @@ class SessionConfig:
     cadence_seconds: int = _TARGET.cadence_seconds
     sweep_cap_seconds: int = _TARGET.sweep_cap_seconds
     quiet_margin_seconds: int = 15
-    reload_deadline_seconds: int = 45
+    reload_deadline_seconds: int = DEFAULT_RELOAD_DEADLINE_SECONDS
     ack_deadline_seconds: int = 60
     upload_deadline_seconds: int = 60
     model: str = "gpt-6-luna"
@@ -137,10 +146,73 @@ class SessionConfig:
     routes_file: Path | None = None
 
 
-def load_config(path: str | Path, *, expected_target: GameTarget | None = None) -> SessionConfig:
+def _load_raw_config(path: Path) -> dict[str, Any]:
+    with path.open("rb") as handle:
+        raw = tomllib.load(handle)
+    if not isinstance(raw, dict):
+        raise ValueError("session configuration must be a TOML table")
+    return raw
+
+
+def _validate_socket_path(value: object) -> Path:
+    if not isinstance(value, (str, Path)) or not value:
+        raise ValueError("session.socket must be a non-empty string")
+    try:
+        socket_path = Path(value).expanduser()
+    except (RuntimeError, ValueError) as exc:
+        raise ValueError("session.socket must be a valid path") from exc
+    if not socket_path.is_absolute():
+        raise ValueError("session.socket must be an absolute path")
+
+    try:
+        parent_metadata = os.lstat(socket_path.parent)
+    except OSError as exc:
+        raise ValueError(f"session.socket parent directory is unavailable: {socket_path.parent}") from exc
+    if not stat.S_ISDIR(parent_metadata.st_mode):
+        raise ValueError("session.socket parent must be a directory")
+    if parent_metadata.st_uid != os.getuid():
+        raise ValueError("session.socket parent directory must be owned by the current user")
+    if parent_metadata.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+        raise ValueError("session.socket parent directory must be private")
+
+    try:
+        socket_metadata = os.lstat(socket_path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise ValueError(f"session.socket cannot be inspected: {socket_path}") from exc
+    else:
+        if stat.S_ISLNK(socket_metadata.st_mode):
+            raise ValueError("session.socket must not be a symlink")
+    return socket_path
+
+
+def _client_config_from_raw(raw: dict[str, Any]) -> ClientConfig:
+    session = raw.get("session")
+    if not isinstance(session, dict):
+        raise ValueError("session table is required")
+    if "socket" not in session:
+        raise ValueError("session.socket is required")
+    return ClientConfig(socket=_validate_socket_path(session["socket"]))
+
+
+def load_client_config(path: str | Path, *, socket_override: str | Path | None = None) -> ClientConfig:
+    """Load only the socket configuration needed by an IPC client."""
+
+    if socket_override is not None:
+        return ClientConfig(socket=_validate_socket_path(socket_override))
+    raw = _load_raw_config(Path(path))
+    return _client_config_from_raw(raw)
+
+
+def load_config(
+    path: str | Path,
+    *,
+    expected_target: GameTarget | None = None,
+    socket_override: str | Path | None = None,
+) -> SessionConfig:
     target = Path(path)
-    with target.open("rb") as handle:
-        raw: dict[str, Any] = tomllib.load(handle)
+    raw = _load_raw_config(target)
     launch_target = expected_target or _TARGET
     canonical_plan = target_scan_plan(load_catalog(), launch_target)
     canonical_client_version = launch_target.client_version
@@ -151,6 +223,15 @@ def load_config(path: str | Path, *, expected_target: GameTarget | None = None) 
     canonical_wow_root = Path(launch_target.game_root) / launch_target.product_dir
     profile = raw.get("profile", {})
     session = raw.get("session", {})
+    if not isinstance(profile, dict) or not isinstance(session, dict):
+        raise ValueError("profile and session must be TOML tables")
+    if "socket" not in session:
+        raise ValueError("session.socket is required")
+    client_config = (
+        ClientConfig(socket=_validate_socket_path(socket_override))
+        if socket_override is not None
+        else _client_config_from_raw(raw)
+    )
 
     def required_profile_string(name: str, expected: str) -> str:
         value = profile.get(name)
@@ -304,19 +385,19 @@ def load_config(path: str | Path, *, expected_target: GameTarget | None = None) 
     ):
         raise ValueError("model_crop must be a separately verified game-client crop")
     quiet_margin = int(session.get("quiet_margin_seconds", 15))
-    reload_deadline = int(session.get("reload_deadline_seconds", 45))
+    reload_deadline = int(session.get("reload_deadline_seconds", DEFAULT_RELOAD_DEADLINE_SECONDS))
     ack_deadline = int(session.get("ack_deadline_seconds", 60))
     upload_deadline = int(session.get("upload_deadline_seconds", 60))
     if (
         not 0 < quiet_margin < 900
-        or not 1 <= reload_deadline <= 600
-        or not 1 <= ack_deadline <= 600
+        or not 1 <= reload_deadline <= MAX_RELOAD_DEADLINE_SECONDS
+        or not 1 <= ack_deadline <= MAX_RELOAD_DEADLINE_SECONDS
         or not 1 <= upload_deadline <= 60
     ):
         raise ValueError("session deadlines are outside the pinned bounds")
     state_home = Path(os.environ.get("XDG_STATE_HOME") or "~/.local/state").expanduser()
     journal_path = Path(session.get("journal", state_home / "crowley" / "session.json")).expanduser()
-    socket_path = Path(session.get("socket", "/run/user/1000/crowley/session.sock")).expanduser()
+    socket_path = client_config.socket
     saved_path = Path(session["saved_variables"]).expanduser() if session.get("saved_variables") else None
     companion_path = Path(session["companion_state"]).expanduser() if session.get("companion_state") else None
     data_path = Path(session["data_lua"]).expanduser() if session.get("data_lua") else None
@@ -405,4 +486,12 @@ def load_config(path: str | Path, *, expected_target: GameTarget | None = None) 
     )
 
 
-__all__ = ["SessionConfig", "load_config", "open_routes_descriptor"]
+__all__ = [
+    "ClientConfig",
+    "DEFAULT_RELOAD_DEADLINE_SECONDS",
+    "MAX_RELOAD_DEADLINE_SECONDS",
+    "SessionConfig",
+    "load_client_config",
+    "load_config",
+    "open_routes_descriptor",
+]

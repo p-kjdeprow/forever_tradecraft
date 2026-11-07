@@ -41,6 +41,7 @@ from crowley.session.decoder import PixelDecoder, Sample
 from crowley.session.driver import (
     DriverError,
     DriverProfile,
+    SyntheticPointerProbe,
     WindowIdentity,
     X11Backend,
     _proc_start,
@@ -2521,15 +2522,14 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
 
         driver.input_hierarchy = lambda **_kwargs: hierarchy  # type: ignore[method-assign]
 
-        def synthetic_target_key_click(_window):
-            backend._last_synthetic_motion_query = (1, 1, 0x600119, 2, 2, 2, 2, 0x600119)
-
-        driver.synthetic_target_key_click = synthetic_target_key_click  # type: ignore[method-assign]
         driver.synthetic_target_keyboard_profile = (  # type: ignore[method-assign]
-            lambda _window, *, operations, calibration_ticket: setattr(
-                backend,
-                "_last_synthetic_motion_query",
-                (1, 1, 0x600119, 2, 2, 2, 2, 0x600119),
+            lambda _window, *, operations, calibration_ticket: SyntheticPointerProbe(
+                origin=(1, 1, 0x600119),
+                requested_endpoint=(2, 2),
+                final_observed=(2, 2, 0x600119),
+                emitted_transitions=((2, 2),),
+                seed=17,
+                plan=((0.0, 1, 1), (0.1, 2, 2)),
             )
         )
 
@@ -2757,7 +2757,14 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
             assert operations
             assert calibration_ticket is not None
             calibration_trace.append("synthetic")
-            backend._last_synthetic_motion_query = (1, 1, 0x600119, 2, 2, 2, 2, 0x600119)
+            return SyntheticPointerProbe(
+                origin=(1, 1, 0x600119),
+                requested_endpoint=(2, 2),
+                final_observed=(2, 2, 0x600119),
+                emitted_transitions=((2, 2),),
+                seed=17,
+                plan=((0.0, 1, 1), (0.1, 2, 2)),
+            )
 
         driver.issue_calibration_ticket = issue_ticket  # type: ignore[method-assign]
         driver.focus_calibration_target = focus_target  # type: ignore[method-assign]

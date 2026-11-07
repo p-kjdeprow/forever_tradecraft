@@ -509,7 +509,7 @@ def test_unarmed_lua_button_click_composes_through_daemon_and_records_dry_run(
     backend.activate_generation(generation)
     click_dispatch_count = 0
 
-    def run_action(args, *, input_schema=None, **_kwargs):
+    def run_action(args, *, input_schema=None, **kwargs):
         nonlocal click_dispatch_count
         commands.append(list(args))
         if input_schema == "pointer-motion":
@@ -519,6 +519,13 @@ def test_unarmed_lua_button_click_composes_through_daemon_and_records_dry_run(
                     pointer[1] = int(args[index + 2])
                     pointer[2] = identity.child_xid
         elif input_schema == "single-click":
+            driver.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
             # Model the delivered button callback at physical dispatch; Lua
             # bytes are captured only by the subsequent daemon observations.
             if final_mutation != "delayed-publication":

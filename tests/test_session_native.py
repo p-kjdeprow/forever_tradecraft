@@ -68,6 +68,7 @@ from crowley.session.driver import (
     DriverProfile,
     NamedStateObservation,
     RecordingBackend,
+    SyntheticPointerProbe,
     WindowIdentity,
     X11Backend,
     XI2Observer,
@@ -2567,6 +2568,8 @@ def _evidence() -> InputCalibrationEvidence:
             ),
         ),
         synthetic_motion_query=(1, 1, 0x600119, 2, 2, 2, 2, 0x600119),
+        synthetic_motion_seed=0,
+        synthetic_motion_plan=((0.0, 1, 1), (0.5, 2, 2)),
         keyboard_keymap=(("Return", 9),),
         keyboard_profile=keyboard_profile,
         event_proof=proof,
@@ -3815,6 +3818,14 @@ def test_workflow_built_native_evidence_arms_and_accepts_endpoint_echo(
     profile = base.xtest_profile
     assert profile is not None
     transitions = InputCalibrationWorkflow._canonical_motion_transitions(records, window, profile)
+    probe = SyntheticPointerProbe(
+        origin=(1, 1, 0x600119),
+        requested_endpoint=(20, 30),
+        final_observed=(20, 30, 0x600119),
+        emitted_transitions=((20, 30),),
+        seed=0,
+        plan=((0.0, 1, 1), (0.5, 20, 30)),
+    )
     driver = DesktopDriver(
         profile=DriverProfile(display=":test", xauthority="/tmp/Xauthority"),
         backend=RecordingBackend(),
@@ -3852,15 +3863,17 @@ def test_workflow_built_native_evidence_arms_and_accepts_endpoint_echo(
                 xtest_profile=profile,
                 synthetic_motion_transitions=supplied_transitions,
                 synthetic_motion_query=query,
+                synthetic_motion_seed=probe.seed,
+                synthetic_motion_plan=probe.plan,
+                synthetic_motion_probe=probe,
                 synthetic_prefix_records=prefix_records,
             )
 
         with pytest.raises(CalibrationError, match="caller-supplied"):
             build(
                 supplied_transitions=((*transitions[0][:10], (21, 31), (21, 31), *transitions[0][12:]),),
-                query=(1, 1, 0x600119, 21, 31, 21, 31, 0x600119),
             )
-        with pytest.raises(CalibrationError, match="nonzero displacement"):
+        with pytest.raises(CalibrationError, match="typed probe"):
             build(query=(1, 1, 0x600119, 1, 1, 1, 1, 0x600119))
         zero_prefix = [
             replace(
@@ -3871,7 +3884,7 @@ def test_workflow_built_native_evidence_arms_and_accepts_endpoint_echo(
             else event
             for event in records
         ]
-        with pytest.raises(CalibrationError, match="nonzero displacement"):
+        with pytest.raises(CalibrationError, match="sequence differs"):
             build(prefix_records=zero_prefix)
         evidence = build()
         evidence.verify_seal()
@@ -3925,10 +3938,14 @@ def test_real_x11_producer_result_reaches_arm_and_guardian_max_to_zero_echo(
     """Keep the producer, parser, native arm checks, and Guardian proof connected."""
 
     from crowley.session import driver as driver_module
+    from crowley.session import pointer_execution as pointer_execution_module
     from crowley.session.calibration import KeyboardProbeOperation, KeyboardProbeStep, xinput_hierarchy
     from tests.test_session_native_regressions import _render_events as render_native_events
 
     capture = json.loads(NATIVE_PROFILE_CAPTURE.read_text(encoding="utf-8"))
+    rate_directory = tmp_path / "pointer-click-rate"
+    rate_directory.mkdir(mode=0o700)
+    monkeypatch.setattr(pointer_execution_module, "_session_state_directory", lambda: rate_directory)
     outputs = {entry["name"]: entry["stdout"] for entry in capture["commands"]}
     xinput_script = tmp_path / "xinput-fixture"
     xinput_script.write_text(
@@ -3979,18 +3996,29 @@ int main(int argc, char **argv) {
         printf("X=%d\nY=%d\nSCREEN=0\nWINDOW=0x600119\n", x, y);
         return 0;
     }
-    if (strcmp(argv[1], "mousemove") == 0) {
-        const char *x = argc > 2 && strcmp(argv[2], "--screen") == 0 ? argv[4] : argv[2];
-        const char *y = argc > 2 && strcmp(argv[2], "--screen") == 0 ? argv[5] : argv[3];
-        FILE *stream = fopen(pointer, "w");
-        if (stream == NULL || x == NULL || y == NULL) return 97;
-        fprintf(stream, "%s %s\n", x, y);
-        fclose(stream);
-        return 0;
-    }
     if (strcmp(argv[1], "windowactivate") == 0 || strcmp(argv[1], "key") == 0 ||
-        strcmp(argv[1], "click") == 0) return 0;
-    return 97;
+        strcmp(argv[1], "keydown") == 0 || strcmp(argv[1], "keyup") == 0) return 0;
+    for (int index = 1; index < argc; ++index) {
+        if (strcmp(argv[index], "sleep") == 0) {
+            if (++index >= argc) return 97;
+            continue;
+        }
+        if (strcmp(argv[index], "mousemove") == 0) {
+            if (index + 2 >= argc) return 97;
+            FILE *stream = fopen(pointer, "w");
+            if (stream == NULL) return 97;
+            fprintf(stream, "%s %s\n", argv[index + 1], argv[index + 2]);
+            fclose(stream);
+            index += 2;
+            continue;
+        }
+        if (strcmp(argv[index], "mousedown") == 0 || strcmp(argv[index], "mouseup") == 0) {
+            if (++index >= argc) return 97;
+            continue;
+        }
+        return 97;
+    }
+    return 0;
 }
 """,
         encoding="utf-8",
@@ -4041,6 +4069,11 @@ int main(int argc, char **argv) {
         target_event_xids=frozenset({0x600118, 0x600119}),
     )
     backend.resolve_identity = lambda **_kwargs: identity  # type: ignore[method-assign]
+    keyboard_operation = KeyboardProbeOperation(
+        "open_chat", "", (KeyboardProbeStep("press", "Return"), KeyboardProbeStep("release", "Return"))
+    )
+    driver.calibration_keyboard_operations = lambda: (keyboard_operation,)  # type: ignore[method-assign]
+    driver.calibration_keyboard_keymap = lambda: {"Return": 36}  # type: ignore[method-assign]
     hierarchy = xinput_hierarchy(outputs["xinput_list_short"])
     window = OwnedWindow(
         os.getpid(),
@@ -4059,9 +4092,15 @@ int main(int argc, char **argv) {
         driver.begin_calibration_operation()
         ticket = driver.issue_calibration_ticket(window)
         driver.focus_calibration_target(window, calibration_ticket=ticket)
-        backend.synthetic_calibration("0x600119", 20, 30, calibration_ticket=ticket)
-        query = backend._last_synthetic_motion_query
-        assert query == (1, 1, 0x600119, 20, 30, 20, 30, 0x600119)
+        probe = driver.synthetic_target_keyboard_profile(
+            window,
+            operations=(keyboard_operation,),
+            calibration_ticket=ticket,
+        )
+        query = (*probe.origin, *probe.requested_endpoint, *probe.final_observed)
+        assert query[:3] == (1, 1, 0x600119)
+        assert query[3:5] == query[5:7]
+        endpoint_x, endpoint_y = probe.requested_endpoint
 
         base = _evidence()
         profile_capture = backend.xtest_input_profile(hierarchy)
@@ -4105,15 +4144,29 @@ int main(int argc, char **argv) {
                 record[5],  # type: ignore[arg-type]
                 record[6],  # type: ignore[arg-type]
                 record[7],  # type: ignore[arg-type]
-                (1.0, 1.0) if source4_motion and event_class is EventClass.MOTION else record[8],  # type: ignore[arg-type]
-                (1.0, 1.0) if source4_motion and event_class is EventClass.MOTION else record[9],  # type: ignore[arg-type]
+                probe.origin[:2] if source4_motion and event_class is EventClass.MOTION else record[8],  # type: ignore[arg-type]
+                probe.origin[:2] if source4_motion and event_class is EventClass.MOTION else record[9],  # type: ignore[arg-type]
                 record[10],  # type: ignore[arg-type]
                 modifier_effective=record[11],  # type: ignore[arg-type]
-                valuators=((0, 20.0, 20.0), (1, 30.0, 30.0)) if source4_motion else (),
+                valuators=(
+                    (0, float(endpoint_x), float(endpoint_x)),
+                    (1, float(endpoint_y), float(endpoint_y)),
+                )
+                if source4_motion
+                else (),
             )
 
         records = [from_proof(record) for record in base.event_proof]
-        forwarded_zero = XI2Event(
+        source4_motion_indices = [
+            index
+            for index, event in enumerate(records)
+            if event.source_device == 4 and event.event_class in {EventClass.RAW_MOTION, EventClass.MOTION}
+        ]
+        if len(source4_motion_indices) != 2:
+            raise AssertionError("native producer fixture must contain one source-4 motion pair")
+        raw_template = records[source4_motion_indices[0]]
+        primary_template = records[source4_motion_indices[1]]
+        forwarded_template = XI2Event(
             6,
             EventClass.MOTION,
             7,
@@ -4123,22 +4176,59 @@ int main(int argc, char **argv) {
             0x374,
             0x374,
             0x600119,
-            (20.0, 30.0),
-            (20.0, 30.0),
+            (float(endpoint_x), float(endpoint_y)),
+            (float(endpoint_x), float(endpoint_y)),
             (0, 0, 0),
             modifier_effective=0,
         )
-        records.insert(
-            next(index for index, event in enumerate(records) if event.source_device == 7), forwarded_zero
-        )
+        first_motion_index = source4_motion_indices[0]
+        records = [
+            event
+            for event in records
+            if not (
+                event.source_device == 4 and event.event_class in {EventClass.RAW_MOTION, EventClass.MOTION}
+            )
+            and not (event.source_device == 7 and event.event_class is EventClass.MOTION)
+        ]
+        planned_motion: list[XI2Event] = []
+        prior_endpoint = probe.origin[:2]
+        for endpoint_x, endpoint_y in probe.emitted_transitions:
+            endpoint = (float(endpoint_x), float(endpoint_y))
+            planned_motion.extend(
+                (
+                    replace(
+                        raw_template,
+                        timestamp_ms=XI2_TIMESTAMP_MASK,
+                        valuators=((0, endpoint[0], endpoint[0]), (1, endpoint[1], endpoint[1])),
+                    ),
+                    replace(
+                        primary_template,
+                        timestamp_ms=XI2_TIMESTAMP_MASK,
+                        root_xy=prior_endpoint,
+                        event_xy=prior_endpoint,
+                        valuators=((0, endpoint[0], endpoint[0]), (1, endpoint[1], endpoint[1])),
+                    ),
+                    replace(
+                        forwarded_template,
+                        timestamp_ms=0,
+                        root_xy=endpoint,
+                        event_xy=endpoint,
+                    ),
+                )
+            )
+            prior_endpoint = endpoint
+        records[first_motion_index:first_motion_index] = planned_motion
+        requested_endpoint = tuple(float(value) for value in probe.requested_endpoint)
         for index, event in enumerate(records):
             if event.source_device == 4 and event.event_class in {
                 EventClass.BUTTON_PRESS,
                 EventClass.BUTTON_RELEASE,
             }:
-                records[index] = replace(event, root_xy=(20.0, 30.0), event_xy=(20.0, 30.0))
-            elif event.source_device == 7 and event.event_class is EventClass.MOTION:
-                records[index] = replace(event, timestamp_ms=0, root_xy=(20.0, 30.0), event_xy=(20.0, 30.0))
+                records[index] = replace(
+                    event,
+                    root_xy=requested_endpoint,
+                    event_xy=requested_endpoint,
+                )
         rendered_trace = render_native_events(records)
         records = list(parse_xi2_records(rendered_trace, require_event=True))
         transitions = InputCalibrationWorkflow._canonical_motion_transitions(records, window, profile_capture)
@@ -4164,6 +4254,9 @@ int main(int argc, char **argv) {
             xtest_profile=profile_capture,
             synthetic_motion_transitions=transitions,
             synthetic_motion_query=query,
+            synthetic_motion_seed=probe.seed,
+            synthetic_motion_plan=probe.plan,
+            synthetic_motion_probe=probe,
             synthetic_prefix_records=records,
         )
         evidence.verify_seal()
@@ -4265,7 +4358,9 @@ int main(int argc, char **argv) {
             device_by_class={EventClass.RAW_MOTION.value: 2, EventClass.MOTION.value: 4},
             optional_classes={EventClass.RAW_MOTION.value, EventClass.MOTION.value},
             expected_modifiers=(0, 0, 0),
-            expected_motion_trace=((20, 30, 20, 30),),
+            expected_motion_trace=tuple(
+                (point[0], point[1], point[0], point[1]) for point in probe.emitted_transitions
+            ),
             initial_origin=(1, 1, 1, 1),
             expected_root_xid=0x374,
             expected_event_xid=0x374,
@@ -4274,16 +4369,23 @@ int main(int argc, char **argv) {
             echo_proof=evidence.synthetic_echo_proof,
             required_sequence=(),
         )
-        baseline_raw = next(event for event in records if event.event_class is EventClass.RAW_MOTION)
-        baseline_primary = next(
+        baseline_raw = [
+            event
+            for event in records
+            if event.event_class is EventClass.RAW_MOTION and event.source_device == 4
+        ]
+        baseline_primary = [
             event for event in records if event.event_class is EventClass.MOTION and event.source_device == 4
-        )
-        forwarded = next(
+        ]
+        forwarded = [
             event for event in records if event.event_class is EventClass.MOTION and event.source_device == 7
-        )
-        monitor._record_event(baseline_raw)
-        monitor._record_event(baseline_primary)
-        monitor._record_event(forwarded)
+        ]
+        for raw_event, primary_event, forwarded_event in zip(
+            baseline_raw, baseline_primary, forwarded, strict=True
+        ):
+            assert driver.guardian.observe(raw_event)
+            assert driver.guardian.observe(primary_event)
+            assert driver.guardian.observe(forwarded_event)
         assert action.complete
         driver.guardian.finish_action(generation, action)
     finally:
@@ -6769,6 +6871,14 @@ def test_owned_input_evidence_rejects_foreign_forwarded_target() -> None:
         (0, 0, 500, 260),
         frozenset({0x600118, 0x600119}),
     )
+    probe = SyntheticPointerProbe(
+        origin=(987, 595, 0x600119),
+        requested_endpoint=(10, 20),
+        final_observed=(10, 20, 0x600119),
+        emitted_transitions=((10, 20),),
+        seed=0,
+        plan=((0.0, 987, 595), (0.5, 10, 20)),
+    )
     with pytest.raises(CalibrationError, match="unrelated|outside"):
         InputCalibrationWorkflow._build_evidence(
             [*records, human, click, foreign_motion],
@@ -6777,6 +6887,9 @@ def test_owned_input_evidence_rejects_foreign_forwarded_target() -> None:
             hierarchy=((4, 2, "slave", "pointer:test"),),
             xtest_profile=_xtest_profile(((4, 2, "slave", "pointer:test"),)),
             synthetic_motion_query=(987, 595, 0x600119, 10, 20, 10, 20, 0x600119),
+            synthetic_motion_seed=probe.seed,
+            synthetic_motion_plan=probe.plan,
+            synthetic_motion_probe=probe,
             display=":test",
             xauthority="/tmp/Xauthority",
             game_identity_fingerprint="game-test-identity",
@@ -7007,16 +7120,6 @@ def test_owned_input_workflow_revokes_on_first_human_event_and_cancels_queue(
             self.backend.profile = DriverProfile(display=":test", xauthority="/tmp/Xauthority")
             self.backend.xauthority = "/tmp/Xauthority"
             self.backend.pointer_position = lambda **_kwargs: (1, 1, 0x600119)  # type: ignore[method-assign]
-            self.backend._last_synthetic_motion_query = (
-                1,
-                1,
-                0x600119,
-                2,
-                2,
-                2,
-                2,
-                0x600119,
-            )
 
         def begin_calibration_operation(self) -> int:
             return 1
@@ -7079,10 +7182,18 @@ def test_owned_input_workflow_revokes_on_first_human_event_and_cancels_queue(
 
         def synthetic_target_keyboard_profile(
             self, window: OwnedWindow, *, operations: object, calibration_ticket: object
-        ) -> None:
+        ) -> SyntheticPointerProbe:
             assert calibration_ticket is self.ticket
             assert window.xid == 0x600119
             assert operations
+            return SyntheticPointerProbe(
+                origin=(1, 1, 0x600119),
+                requested_endpoint=(2, 2),
+                final_observed=(2, 2, 0x600119),
+                emitted_transitions=((2, 2),),
+                seed=17,
+                plan=((0.0, 1, 1), (0.1, 2, 2)),
+            )
 
         def queue_delayed_calibration_action(
             self,

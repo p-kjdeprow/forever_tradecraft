@@ -554,7 +554,7 @@ def test_runtime_pointer_gesture_seed_and_emission_timing_reach_driver_receipt(
     seed = 0x123456789
     now = time.monotonic()
 
-    def run_action(args, *, input_schema=None, **_kwargs):
+    def run_action(args, *, input_schema=None, **kwargs):
         commands.append(list(args))
         if input_schema == "pointer-motion":
             for index, value in enumerate(args[:-2]):
@@ -562,6 +562,14 @@ def test_runtime_pointer_gesture_seed_and_emission_timing_reach_driver_receipt(
                     pointer[0] = int(args[index + 1])
                     pointer[1] = int(args[index + 2])
                     pointer[2] = identity.child_xid
+        elif input_schema == "single-click":
+            driver.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
 
     backend = driver.backend
     backend.resolve_identity = lambda **_kwargs: identity  # type: ignore[method-assign]
@@ -706,6 +714,13 @@ def test_executor_receipt_is_call_local_across_backend_substitution(
                     pointer[1] = int(args[index + 2])
                     pointer[2] = identity.child_xid
         elif input_schema == "single-click":
+            driver.input_broker.redeem_button_emission_claim(
+                _kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT,
+                action_generation=_kwargs["emission_action_generation"],
+                lease_generation=_kwargs["emission_lease_generation"],
+            )
             # A later action could replace mutable backend history while this
             # call is still finalizing.  The returned receipt must not change.
             backend.last_pointer_execution = {"action": "substituted"}
@@ -916,7 +931,11 @@ def test_run_camera_drag_allows_press_at_start_without_positioning_trace(
     binding = BindingMetadata("identity", "capture", 1, 1, 4, (4,), boot="boot")
     plan = CameraDragPlan(
         PointerButton.RIGHT,
-        (PointerSample(0.0, Point(100, 100)), PointerSample(0.05, Point(130, 100))),
+        (
+            PointerSample(0.0, Point(100, 100)),
+            PointerSample(0.025, Point(115, 100)),
+            PointerSample(0.05, Point(130, 100)),
+        ),
         0.05,
         Point(30, 0),
         replace(binding, generation=1),
@@ -924,9 +943,10 @@ def test_run_camera_drag_allows_press_at_start_without_positioning_trace(
     events = [
         _event(EventClass.RAW_BUTTON_PRESS, 1, detail=3),
         _event(EventClass.BUTTON_PRESS, 2, detail=3, root=(100, 100), event_xy=(100, 100)),
-        *_motion_pair(3, (100, 100), (130, 100)),
-        _event(EventClass.RAW_BUTTON_RELEASE, 4, detail=3),
-        _event(EventClass.BUTTON_RELEASE, 5, detail=3, root=(130, 100), event_xy=(130, 100)),
+        *_motion_pair(3, (100, 100), (115, 100)),
+        *_motion_pair(4, (115, 100), (130, 100)),
+        _event(EventClass.RAW_BUTTON_RELEASE, 5, detail=3),
+        _event(EventClass.BUTTON_RELEASE, 6, detail=3, root=(130, 100), event_xy=(130, 100)),
     ]
     monitor = _EventMonitor(events)
     monitor.set_callback(driver.guardian.observe)
@@ -1111,9 +1131,18 @@ def test_camera_drag_broker_record_failure_revokes_after_physical_emission(
         "reserve_button_rate",
         lambda **_kwargs: RateReservation(FailingRecordPermit()),
     )
-    driver.backend._run = (  # type: ignore[method-assign]
-        lambda args, **_kwargs: emitted.append(list(args))
-    )
+
+    def emit_and_fail_record(args, **kwargs):  # type: ignore[no-untyped-def]
+        driver.input_broker.redeem_button_emission_claim(
+            kwargs["button_emission_claim"],
+            emitted_chain=tuple(args),
+            button=PointerButton.RIGHT,
+            action_generation=kwargs["emission_action_generation"],
+            lease_generation=kwargs["emission_lease_generation"],
+        )
+        emitted.append(list(args))
+
+    driver.backend._run = emit_and_fail_record  # type: ignore[method-assign]
     try:
         with pytest.raises(DriverError, match="record failed"):
             driver.run_camera_drag(plan, generation=generation, action_generation=generation + 1)
@@ -1192,13 +1221,29 @@ def test_production_click_and_camera_drag_entrypoints_share_the_rate_gate(
     backend._focus = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
     pointer = [20, 20, identity.child_xid]
 
-    def run_native(args, *, input_schema=None, **_kwargs):  # type: ignore[no-untyped-def]
+    def run_native(args, *, input_schema=None, **kwargs):  # type: ignore[no-untyped-def]
         emitted.append((str(input_schema), list(args)))
         if input_schema == "pointer-motion":
             for index, value in enumerate(args[:-2]):
                 if value == "mousemove":
                     pointer[0] = int(args[index + 1])
                     pointer[1] = int(args[index + 2])
+        elif input_schema == "single-click":
+            driver.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
+        elif input_schema == "camera-drag":
+            driver.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.RIGHT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
 
     backend.pointer_position = lambda **_kwargs: tuple(pointer)  # type: ignore[method-assign]
     backend._run = run_native  # type: ignore[method-assign]
@@ -1432,9 +1477,20 @@ def test_run_hover_click_canonical_origin_uses_fresh_pointer_measurement(
     observed = actual if pointer_matches else (actual[0] + 1, actual[1])
     backend.pointer_position = lambda **_kwargs: (*observed, identity.child_xid)  # type: ignore[method-assign]
     commands: list[list[str]] = []
-    backend._run = lambda args, **_kwargs: (  # type: ignore[method-assign]
-        commands.append(list(args)) or subprocess.CompletedProcess(args, 0, "", "")
-    )
+
+    def run_hover_command(args, **kwargs):  # type: ignore[no-untyped-def]
+        if kwargs.get("input_schema") == "single-click":
+            driver.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
+        commands.append(list(args))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run_hover_command  # type: ignore[method-assign]
     permit = pointer_execution.acquire_click_rate_permit()
     hover = SimpleNamespace(
         identity_fingerprint=identity.fingerprint,
@@ -1516,7 +1572,11 @@ def test_run_camera_drag_rejects_invalid_native_phase_trace(
     binding = BindingMetadata("identity", "capture", 1, 1, 4, (4,), boot="boot")
     plan = CameraDragPlan(
         PointerButton.RIGHT,
-        (PointerSample(0.0, Point(100, 100)), PointerSample(0.05, Point(130, 100))),
+        (
+            PointerSample(0.0, Point(100, 100)),
+            PointerSample(0.025, Point(115, 100)),
+            PointerSample(0.05, Point(130, 100)),
+        ),
         0.05,
         Point(30, 0),
         binding,
@@ -1640,7 +1700,11 @@ def test_run_camera_drag_cancels_after_admitted_held_process(
     binding = BindingMetadata("identity", "capture", 1, 1, 4, (4,), boot="boot")
     plan = CameraDragPlan(
         PointerButton.RIGHT,
-        (PointerSample(0.0, Point(100, 100)), PointerSample(0.05, Point(130, 100))),
+        (
+            PointerSample(0.0, Point(100, 100)),
+            PointerSample(0.025, Point(115, 100)),
+            PointerSample(0.05, Point(130, 100)),
+        ),
         0.05,
         Point(30, 0),
         binding,
@@ -2923,9 +2987,20 @@ def test_world_click_deadline_after_durable_precommit_refuses_press(
     identity = _identity()
     backend.resolve_identity = lambda **_kwargs: identity  # type: ignore[method-assign]
     commands: list[list[str]] = []
-    backend._run = lambda args, **_kwargs: (  # type: ignore[method-assign]
-        commands.append(list(args)) or subprocess.CompletedProcess(args, 0, "", "")
-    )
+
+    def run_deadline_command(args, **kwargs):  # type: ignore[no-untyped-def]
+        if kwargs.get("input_schema") == "single-click":
+            driver.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
+        commands.append(list(args))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run_deadline_command  # type: ignore[method-assign]
     release_calls: list[list[str]] = []
     backend._release_command = lambda args: release_calls.append(list(args)) or True  # type: ignore[method-assign]
     # Exercise the same world-click admission without requiring a canonical
@@ -3008,9 +3083,20 @@ def test_world_click_guardian_wait_expiry_retains_actual_press_rate_record(
     identity = _identity()
     backend.resolve_identity = lambda **_kwargs: identity  # type: ignore[method-assign]
     commands: list[list[str]] = []
-    backend._run = lambda args, **_kwargs: (  # type: ignore[method-assign]
-        commands.append(list(args)) or subprocess.CompletedProcess(args, 0, "", "")
-    )
+
+    def run_wait_expiry_command(args, **kwargs):  # type: ignore[no-untyped-def]
+        if kwargs.get("input_schema") == "single-click":
+            driver.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
+        commands.append(list(args))
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    backend._run = run_wait_expiry_command  # type: ignore[method-assign]
     driver._input_evidence.xtest_profile = None
     generation = driver.guardian.arm(driver._input_evidence)
     backend.activate_generation(generation)

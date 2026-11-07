@@ -24,6 +24,7 @@ import pytest
 
 from crowley.session import calibration as calibration_module
 from crowley.session import driver as driver_module
+from crowley.session import pointer_execution as pointer_execution_module
 from crowley.session.calibration import InputCalibrationWorkflow, OwnedGtkCalibrationWindow
 from crowley.session.driver import DesktopDriver, DriverProfile, WindowIdentity, X11Backend
 from tests.x11_startup import start_private_xvfb
@@ -255,6 +256,9 @@ def _private_native_processes(
     tmp_path.chmod(0o700)
     runtime_dir = tmp_path / "runtime"
     runtime_dir.mkdir(mode=0o700)
+    pointer_rate_dir = tmp_path / "pointer-rate"
+    pointer_rate_dir.mkdir(mode=0o700)
+    monkeypatch.setattr(pointer_execution_module, "_session_state_directory", lambda: pointer_rate_dir)
     xdg_data_home = tmp_path / "xdg-data"
     xdg_data_home.mkdir(mode=0o700)
     try:

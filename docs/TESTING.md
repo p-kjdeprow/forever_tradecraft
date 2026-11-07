@@ -9,9 +9,15 @@ Run the default suite with the pinned Rust toolchain and the machine-wide test
 lock:
 
 ```sh
-export CARGO=/home/dev/.cache/crowley/rust-toolchain-1.85.1/toolchain/bin/cargo
-flock /home/dev/.cache/r-pg.lock uv run pytest
+export CROWLEY_RUST_TOOLCHAIN=/path/to/rust-toolchain-1.85.1/toolchain/bin
+export CROWLEY_TEST_LOCK=/path/to/r-pg.lock
+flock "$CROWLEY_TEST_LOCK" uv run pytest
 ```
+
+Native builds require that same `CROWLEY_RUST_TOOLCHAIN` directory; they fail
+if it is unset or any pinned binary version differs. The X11 observer also
+requires `pkg-config --static --libs x11` to resolve its static library inputs.
+Use `uv run crowley-native verify` before a native build.
 
 Independent final verification on 2026-10-24: bare `uv run pytest` passed with
 **2,455 passed, 25 database-gated skips and 33 warnings in 153.78 seconds** of
@@ -34,7 +40,7 @@ the database coverage.
 
 ```sh
 CROWLEY_TEST_DATABASE_URL='postgresql://crowley:testonly@127.0.0.1:55471/<fresh_test_database>' \
-  flock /home/dev/.cache/r-pg.lock uv run pytest -n0 tests/test_server.py tests/test_client_data.py tests/test_trading_paper.py
+  flock "$CROWLEY_TEST_LOCK" uv run pytest -n0 tests/test_server.py tests/test_client_data.py tests/test_trading_paper.py
 ```
 
 Replace `<fresh_test_database>` with your disposable database name. The launch

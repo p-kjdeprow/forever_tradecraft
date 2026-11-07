@@ -3,12 +3,14 @@
 The closure starts at the session safety roots, follows every statically
 declared import whose module belongs to the installed ``crowley`` package,
 and includes each package initializer on those import paths.  This boundary
-deliberately includes non-session Crowley modules such as ``crowley.core`` and
-``crowley.platform`` because their source executes as part of the safety
-runtime.  The explicitly listed ``crowley.data`` package is a resource
-loader boundary: ``importlib.resources.files`` imports it by package name
-without a Python import edge in the caller.  Third-party dependencies and
-non-source resource files are outside the boundary.
+deliberately includes non-session Crowley modules such as ``crowley.core``,
+``crowley.platform``, and the native helper modules because their source
+executes as part of the safety runtime; in particular, ``session.input_tool``
+imports the native pins that govern its helper artifacts.  The explicitly
+listed ``crowley.data`` package is a resource loader boundary:
+``importlib.resources.files`` imports it by package name without a Python
+import edge in the caller.  Third-party dependencies and non-source resource
+files are outside the boundary.
 """
 
 from __future__ import annotations
@@ -69,7 +71,11 @@ SAFETY_MODULES = frozenset(
         "crowley.core.watchlist",
         "crowley.data",
         "crowley.platform",
+        "crowley.platform.paths",
         "crowley.platform.privfs",
+        "crowley.native",
+        "crowley.native.matcher",
+        "crowley.native.pins",
         "crowley.session",
         "crowley.session.calibration",
         "crowley.session.cli",

@@ -22,10 +22,14 @@ crowley-companion = "crowley.companion.__main__:main"
 crowley-watchlist = "crowley.core.watchlist:main"
 crowley-session = "crowley.session.cli:main"
 crowley-ops = "crowley.ops.cli:main"
+crowley-native = "crowley.native.build:main"
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+source-include = ["src/crowley/native/resources/**", "vendor/**"]
 
 [dependency-groups]
 dev = [

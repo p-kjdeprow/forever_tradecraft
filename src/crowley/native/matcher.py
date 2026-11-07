@@ -6,7 +6,7 @@ desktop input.  The helper can inject :class:`TemplateMatcherRuntime` later.
 
 The focused tests require the retained private release fixture.  Configure
 ``CROWLEY_TEMPLATE_MATCHER_ARTIFACT_ROOT`` for that release, or install it at
-:data:`DEFAULT_ARTIFACT_ROOT`.
+the root returned by :func:`default_artifact_root`.
 """
 
 from __future__ import annotations
@@ -25,29 +25,35 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from types import TracebackType
+from typing import Any, Protocol
 
-MAGIC = b"CRWTM001"
-PROTOCOL = "CRWTM001"
-ARTIFACT_NAME = "template_matcher-v1"
-MANIFEST_NAME = f"{ARTIFACT_NAME}.manifest.json"
-DEFAULT_ARTIFACT_ROOT = Path.home() / ".cache" / "crowley" / "template-matcher" / "v1"
-TARGET = "x86_64-unknown-linux-gnu"
+from crowley.platform.paths import XdgDirs
 
-EXPECTED_ARTIFACT_SHA256 = "75b18bd04cc3a9248f99ecdca3a1cdebe6e0d89c4d33eaebd600788177bcd80c"
-EXPECTED_SOURCE_HASHES = {
-    "Cargo.toml": "3307fd9c7503479a443bbd23554958cda94343596985f9772ceba4187aeb7cd8",
-    "Cargo.lock": "ea23646a59c8a3956ede087e8fea60643cbd016771f435fe84c24c467861a9b2",
-    "src/main.rs": "bb3647dc12804670d391170563284799fce7b931a07f663726767e95402b47a3",
-}
-EXPECTED_SOURCE_SHA256 = "2d9cb05b6a27fdfa79ab05e184c724f115b29661769b7c1b057a71bd7abedd56"
-MAX_INPUT_BYTES = 64 * 1024 * 1024
-MAX_FRAME_DIM = 4096
-MAX_TEMPLATE_DIM = 512
-MAX_COMPARISON_BYTES = 1 << 31
-MAX_OUTPUT_BYTES = 64 * 1024
+from . import pins
+
+MAGIC = pins.MATCHER_MAGIC
+PROTOCOL = pins.MATCHER_PROTOCOL
+ARTIFACT_NAME = pins.MATCHER_ARTIFACT_NAME
+MANIFEST_NAME = pins.MATCHER_MANIFEST_NAME
+TARGET = pins.TARGET_TRIPLE
+
+EXPECTED_ARTIFACT_SHA256 = pins.MATCHER_ARTIFACT_SHA256
+EXPECTED_SOURCE_HASHES = pins.MATCHER_SOURCE_HASHES
+EXPECTED_SOURCE_SHA256 = pins.MATCHER_SOURCE_SHA256
+MAX_INPUT_BYTES = pins.MATCHER_MAX_INPUT_BYTES
+MAX_FRAME_DIM = pins.MATCHER_MAX_FRAME_DIM
+MAX_TEMPLATE_DIM = pins.MATCHER_MAX_TEMPLATE_DIM
+MAX_COMPARISON_BYTES = pins.MATCHER_MAX_COMPARISON_BYTES
+MAX_OUTPUT_BYTES = pins.MATCHER_MAX_OUTPUT_BYTES
 MIN_SPAWN_REMAINING = 0.001
 PROCESS_REAP_TIMEOUT = 0.5
+
+
+def default_artifact_root() -> Path:
+    """Return the reviewed matcher publication root for the current environment."""
+
+    return XdgDirs.from_environ(os.environ).crowley_cache / "template-matcher" / "v1"
 
 
 class MatcherError(RuntimeError):
@@ -85,6 +91,13 @@ class CancellationToken:
 
     def is_set(self) -> bool:
         return self._event.is_set()
+
+
+class CancellationSource(Protocol):
+    """The cancellation interface accepted by the matcher runtime."""
+
+    def is_set(self) -> bool:
+        """Return whether the current invocation has been cancelled."""
 
 
 @dataclass(frozen=True)
@@ -188,6 +201,9 @@ def _sha256_path(path: Path) -> str:
     flags = os.O_RDONLY | os.O_CLOEXEC | getattr(os, "O_NOFOLLOW", 0)
     descriptor: int | None = None
     try:
+        path_before = path.lstat()
+        if stat.S_ISLNK(path_before.st_mode) or not stat.S_ISREG(path_before.st_mode):
+            raise ArtifactError("runtime adapter source is not a regular file")
         descriptor = os.open(path, flags)
         info = os.fstat(descriptor)
     except OSError as error:
@@ -198,9 +214,17 @@ def _sha256_path(path: Path) -> str:
                 pass
         raise ArtifactError(f"runtime adapter source is unavailable: {path}") from error
     try:
-        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid():
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_uid != os.getuid()
+            or _identity(path_before) != _identity(info)
+        ):
             raise ArtifactError("runtime adapter source is not a user-owned regular file")
-        return _sha256(_read_descriptor_stable(descriptor))
+        data = _read_descriptor_stable(descriptor)
+        path_after = path.lstat()
+        if stat.S_ISLNK(path_after.st_mode) or _identity(path_after) != _identity(info):
+            raise ArtifactError("runtime adapter source path changed during verification")
+        return _sha256(data)
     finally:
         os.close(descriptor)
 
@@ -256,6 +280,8 @@ def _verify_manifest(manifest: dict[str, Any], artifact_digest: str) -> dict[str
         raise ArtifactError("matcher combined source pin is not reviewed")
     if manifest.get("source_snapshot_sha256") != EXPECTED_SOURCE_SHA256:
         raise ArtifactError("matcher source snapshot pin is not reviewed")
+    if manifest.get("workspace_sha256") != pins.MATCHER_WORKSPACE_SHA256:
+        raise ArtifactError("matcher workspace source pin is not reviewed")
     return dict(EXPECTED_SOURCE_HASHES)
 
 
@@ -293,13 +319,10 @@ def _validate_deadline(deadline_monotonic: float, clock: Callable[[], float]) ->
     return deadline
 
 
-def _cancelled(cancel_event: Any) -> bool:
+def _cancelled(cancel_event: CancellationSource | None) -> bool:
     if cancel_event is None:
         return False
-    method = getattr(cancel_event, "is_set", None)
-    if callable(method):
-        return bool(method())
-    return bool(getattr(cancel_event, "cancelled", False))
+    return cancel_event.is_set()
 
 
 def _terminate_and_reap(process: subprocess.Popen[bytes]) -> None:
@@ -333,8 +356,13 @@ def _terminate_and_reap(process: subprocess.Popen[bytes]) -> None:
 class TemplateMatcherRuntime:
     """Verified, bounded access to the reviewed native matcher release."""
 
-    def __init__(self, artifact_root: Path | os.PathLike[str] | None = None, *, clock=time.monotonic) -> None:
-        root = Path(artifact_root) if artifact_root is not None else DEFAULT_ARTIFACT_ROOT
+    def __init__(
+        self,
+        artifact_root: Path | os.PathLike[str] | None = None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        root = Path(artifact_root) if artifact_root is not None else default_artifact_root()
         root = root.expanduser()
         _private_root(root)
         self._root = root
@@ -400,11 +428,19 @@ class TemplateMatcherRuntime:
     def __enter__(self) -> TemplateMatcherRuntime:
         return self
 
-    def __exit__(self, _type: Any, _value: Any, _traceback: Any) -> None:
+    def __exit__(
+        self,
+        _type: type[BaseException] | None,
+        _value: BaseException | None,
+        _traceback: TracebackType | None,
+    ) -> None:
         self.close()
 
     def __del__(self) -> None:
-        descriptor = getattr(self, "_binary_fd", None)
+        try:
+            descriptor = self._binary_fd
+        except AttributeError:
+            return
         if descriptor is not None:
             try:
                 os.close(descriptor)
@@ -421,7 +457,7 @@ class TemplateMatcherRuntime:
         region: tuple[int, int, int, int],
         *,
         deadline_monotonic: float,
-        cancel_event: Any = None,
+        cancel_event: CancellationSource | None = None,
     ) -> MatcherResult:
         request = self._request(1, frame, frame_size, template, template_size, region)
         return self._invoke(request, deadline_monotonic=deadline_monotonic, cancel_event=cancel_event)
@@ -435,7 +471,7 @@ class TemplateMatcherRuntime:
         box: tuple[int, int, int, int],
         *,
         deadline_monotonic: float,
-        cancel_event: Any = None,
+        cancel_event: CancellationSource | None = None,
     ) -> MatcherResult:
         request = self._request(2, frame, frame_size, template, template_size, box)
         return self._invoke(request, deadline_monotonic=deadline_monotonic, cancel_event=cancel_event)
@@ -499,7 +535,13 @@ class TemplateMatcherRuntime:
             payload,
         )
 
-    def _invoke(self, request: _Request, *, deadline_monotonic: float, cancel_event: Any) -> MatcherResult:
+    def _invoke(
+        self,
+        request: _Request,
+        *,
+        deadline_monotonic: float,
+        cancel_event: CancellationSource | None,
+    ) -> MatcherResult:
         if self._closed or self._binary_fd is None:
             raise MatcherError("matcher runtime is closed")
         deadline = _validate_deadline(deadline_monotonic, self._clock)
@@ -544,7 +586,7 @@ class TemplateMatcherRuntime:
         process: subprocess.Popen[bytes],
         payload: bytes,
         deadline: float,
-        cancel_event: Any,
+        cancel_event: CancellationSource | None,
     ) -> tuple[bytes, bytes]:
         if process.stdin is None or process.stdout is None or process.stderr is None:
             raise MatcherError("matcher pipes are unavailable")
@@ -640,8 +682,9 @@ class TemplateMatcherRuntime:
 __all__ = [
     "ARTIFACT_NAME",
     "ArtifactError",
+    "CancellationSource",
     "CancellationToken",
-    "DEFAULT_ARTIFACT_ROOT",
+    "default_artifact_root",
     "EXPECTED_ARTIFACT_SHA256",
     "EXPECTED_SOURCE_HASHES",
     "EXPECTED_SOURCE_SHA256",

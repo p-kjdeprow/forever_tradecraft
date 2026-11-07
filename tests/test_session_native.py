@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -27,6 +28,7 @@ import pytest
 from PIL import Image
 
 import crowley.session.daemon as daemon_module
+import crowley.session.input_tool as input_tool_module
 import crowley.session.source_binding as source_binding_module
 import tools.session_performance as session_performance
 from crowley.core.game_target import GameTarget, packaged_game_target, target_scan_plan
@@ -228,6 +230,14 @@ def _install_private_shell_compositor_bus(monkeypatch: pytest.MonkeyPatch, tmp_p
 
     monkeypatch.setattr(subprocess, "Popen", PrivateSessionPopen)
     return config_path
+
+
+def _copy_pinned_xdotool_to_composed_cache(source_root: Path, cache_home: Path) -> None:
+    """Provide the private xdotool release in a composed XDG cache fixture."""
+
+    destination = cache_home / "crowley" / "xdotool"
+    destination.parent.mkdir(mode=0o700)
+    shutil.copytree(source_root, destination, copy_function=shutil.copy2)
 
 
 def test_identity_latency_sidecar_rejects_untrusted_descriptors_and_manifest(
@@ -1257,6 +1267,7 @@ def test_compiled_private_owner_guardian_generation_revoke_orders(
     codex_path.write_text(f"#!/bin/sh\nprintf '{CLI_VERSION}\\n'\n", encoding="ascii")
     codex_path.chmod(0o700)
     _install_private_shell_compositor_bus(monkeypatch, tmp_path)
+    pinned_xdotool_root = input_tool_module.private_tool_root()
     with harness.private_shell_compositor(
         payloads=[
             png_bytes(first_status),
@@ -1268,6 +1279,7 @@ def test_compiled_private_owner_guardian_generation_revoke_orders(
         rectangle=rectangle,
         allow_area_gate=True,
     ) as compositor:
+        _copy_pinned_xdotool_to_composed_cache(pinned_xdotool_root, Path(os.environ["XDG_CACHE_HOME"]))
 
         def wait_for(predicate: Callable[[], bool], *, timeout: float = 5.0) -> bool:
             deadline = time.monotonic() + timeout

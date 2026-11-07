@@ -2,12 +2,5 @@
 name = "x11_identity_observer"
 version = "1.0.0"
 edition = "2021"
+publish = false
 description = "Pinned bounded X11 and proc identity observer"
-
-[profile.release]
-codegen-units = 1
-debug = false
-lto = "thin"
-opt-level = 3
-panic = "abort"
-strip = "symbols"

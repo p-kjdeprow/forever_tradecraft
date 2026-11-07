@@ -19,17 +19,19 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
+from crowley.native import pins
+from crowley.platform.paths import XdgDirs
+
 
 class InputToolError(RuntimeError):
     """The private input tool is absent, untrusted, or could not be pinned."""
 
 
-PINNED_COMMIT = "14ca26a2c95035f9c635a6a11d075e8d7d0d6529"
-PINNED_ARCHIVE_SHA256 = "d0ba12e37419bfe12651abea7625ba95b6858e44ba8fc79997bfb84112f64dc3"
-PRIVATE_TOOL_ROOT = Path.home() / ".cache" / "crowley" / "xdotool"
-PRIVATE_TOOL_BASENAME = "crowley-xdotool"
-MANIFEST_BASENAME = "manifest.json"
-ARCHIVE_BASENAME = "source.tar.gz"
+PINNED_COMMIT = pins.XDOTOOL_COMMIT
+PINNED_ARCHIVE_SHA256 = pins.XDOTOOL_ARCHIVE_SHA256
+PRIVATE_TOOL_BASENAME = pins.XDOTOOL_ARTIFACT_NAME
+MANIFEST_BASENAME = pins.XDOTOOL_MANIFEST_NAME
+ARCHIVE_BASENAME = pins.XDOTOOL_ARCHIVE_NAME
 _ELF_MAGIC = b"\x7fELF"
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
@@ -38,6 +40,12 @@ _F_SEAL_SEAL = getattr(fcntl, "F_SEAL_SEAL", 0x0001)
 _F_SEAL_SHRINK = getattr(fcntl, "F_SEAL_SHRINK", 0x0002)
 _F_SEAL_GROW = getattr(fcntl, "F_SEAL_GROW", 0x0004)
 _F_SEAL_WRITE = getattr(fcntl, "F_SEAL_WRITE", 0x0008)
+
+
+def private_tool_root() -> Path:
+    """Return the pinned xdotool publication root for the current environment."""
+
+    return XdgDirs.from_environ(os.environ).crowley_cache / "xdotool"
 
 
 def _memfd_create() -> int:
@@ -141,12 +149,11 @@ class NativeReleaseSpec:
 def verify_artifact(root: str | os.PathLike[str] | None = None) -> ArtifactIdentity:
     """Verify a complete private artifact manifest and return its identity.
 
-    ``root`` exists as an explicit test/build injection.  Production callers
-    use the fixed private root by omitting it; no environment or PATH lookup
-    is consulted.
+    ``root`` exists as an explicit test/build injection. Production callers
+    resolve the private root from the current XDG environment by omitting it.
     """
 
-    artifact_root = Path(root) if root is not None else PRIVATE_TOOL_ROOT
+    artifact_root = Path(root) if root is not None else private_tool_root()
     try:
         root_stat = artifact_root.lstat()
     except OSError as exc:
@@ -169,9 +176,25 @@ def verify_artifact(root: str | os.PathLike[str] | None = None) -> ArtifactIdent
         raise InputToolError("private xdotool manifest is malformed") from exc
     if not isinstance(manifest, dict):
         raise InputToolError("private xdotool manifest is not an object")
-    required = {"commit", "archive_sha256", "executable", "executable_sha256"}
-    if set(manifest) != required:
+    if set(manifest) != pins.XDOTOOL_MANIFEST_KEYS:
         raise InputToolError("private xdotool manifest fields are not canonical")
+    build_inputs = manifest[pins.XDOTOOL_BUILD_INPUTS_KEY]
+    if not isinstance(build_inputs, dict) or set(build_inputs) != {"compiler", "linker"}:
+        raise InputToolError("private xdotool build inputs are malformed")
+    for name in ("compiler", "linker"):
+        record = build_inputs[name]
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"name", "sha256", "version"}
+            or not isinstance(record["name"], str)
+            or not record["name"]
+            or not isinstance(record["sha256"], str)
+            or len(record["sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in record["sha256"])
+            or not isinstance(record["version"], str)
+            or not record["version"]
+        ):
+            raise InputToolError("private xdotool build inputs are malformed")
     if manifest["commit"] != PINNED_COMMIT or manifest["archive_sha256"] != PINNED_ARCHIVE_SHA256:
         raise InputToolError("private xdotool source provenance is not pinned")
     executable_name = manifest["executable"]
@@ -319,8 +342,8 @@ __all__ = [
     "PINNED_ARCHIVE_SHA256",
     "PINNED_COMMIT",
     "PRIVATE_TOOL_BASENAME",
-    "PRIVATE_TOOL_ROOT",
     "PinnedInputImage",
     "PinnedInputTool",
+    "private_tool_root",
     "verify_artifact",
 ]

@@ -292,3 +292,68 @@ fn main() {
         std::process::exit(1);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_request, HEADER_LEN, MAGIC, SEARCH};
+
+    fn request(
+        frame_width: u32,
+        frame_height: u32,
+        template_width: u32,
+        template_height: u32,
+    ) -> Vec<u8> {
+        let mut payload = Vec::from(*MAGIC);
+        for value in [
+            SEARCH,
+            0,
+            frame_width,
+            frame_height,
+            template_width,
+            template_height,
+            0,
+            0,
+            frame_width,
+            frame_height,
+        ] {
+            payload.extend_from_slice(&value.to_le_bytes());
+        }
+        payload.extend(std::iter::repeat_n(
+            0,
+            (frame_width * frame_height * 3) as usize,
+        ));
+        payload.extend(std::iter::repeat_n(
+            0,
+            (template_width * template_height * 3) as usize,
+        ));
+        payload
+    }
+
+    #[test]
+    fn parses_a_bounded_request() {
+        let payload = request(2, 2, 1, 1);
+        let parsed = parse_request(&payload).expect("valid request");
+        assert_eq!(parsed.frame.len(), 12);
+        assert_eq!(parsed.template.len(), 3);
+    }
+
+    #[test]
+    fn rejects_trailing_bytes() {
+        let mut payload = request(2, 2, 1, 1);
+        payload.push(0);
+        assert_eq!(
+            parse_request(&payload).err().as_deref(),
+            Some("input has trailing bytes")
+        );
+    }
+
+    #[test]
+    fn rejects_dimensions_above_fixed_bounds() {
+        let payload = request(4097, 1, 1, 1);
+        assert_eq!(
+            parse_request(&payload).err().as_deref(),
+            Some("frame dimensions are outside the fixed bounds")
+        );
+        assert_eq!(HEADER_LEN, 48);
+    }
+}

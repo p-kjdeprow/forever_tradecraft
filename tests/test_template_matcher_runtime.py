@@ -20,15 +20,15 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
+from crowley.native import matcher as runtime
 from tools import native_calibration_operator as operator
-from tools import template_matcher_runtime as runtime
 
 _ARTIFACT_ROOT_ENV = "CROWLEY_TEMPLATE_MATCHER_ARTIFACT_ROOT"
 
 
 def _release_paths() -> tuple[Path, Path, Path]:
     configured = os.environ.get(_ARTIFACT_ROOT_ENV)
-    root = Path(configured).expanduser() if configured else runtime.DEFAULT_ARTIFACT_ROOT
+    root = Path(configured).expanduser() if configured else runtime.default_artifact_root()
     artifact = root / runtime.ARTIFACT_NAME
     manifest = root / runtime.MANIFEST_NAME
     if not artifact.is_file() or not manifest.is_file():

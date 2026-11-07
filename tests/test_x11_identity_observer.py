@@ -11,15 +11,15 @@ from pathlib import Path
 
 import pytest
 
+from crowley.native import build as builder
+from crowley.native import pins
 from crowley.session.driver import DriverError, DriverProfile, X11Backend
 from tests.test_session_input_tool import fixture_input_tool
 from tests.x11_startup import start_private_xvfb
-from tools import build_crowley_xdotool
-from tools import build_x11_identity_observer as builder
 
 ROOT = Path(__file__).resolve().parents[1]
-TOOLCHAIN = Path("/home/dev/.cache/crowley/rust-toolchain-1.85.1/toolchain/bin")
-SOURCE = ROOT / "native" / "x11_identity_observer"
+TOOLCHAIN = Path(os.environ.get("CROWLEY_RUST_TOOLCHAIN", ""))
+SOURCE = builder.NATIVE_ROOT / "x11_identity_observer"
 
 
 def _process_has_x_socket(pid: int) -> bool:
@@ -39,8 +39,12 @@ def _process_has_x_socket(pid: int) -> bool:
 
 
 def _build(tmp_path: Path) -> Path:
+    if not os.environ.get("CROWLEY_RUST_TOOLCHAIN"):
+        pytest.fail("CROWLEY_RUST_TOOLCHAIN is required for native build tests")
+    if not (TOOLCHAIN / "cargo").is_file() or not (TOOLCHAIN / "rustc").is_file():
+        pytest.fail("CROWLEY_RUST_TOOLCHAIN must contain cargo and rustc")
     target = tmp_path / "target"
-    env = {"RUSTC": str(TOOLCHAIN / "rustc"), "PATH": f"{TOOLCHAIN}:/usr/bin:/bin", "LC_ALL": "C"}
+    env = {"RUSTC": str(TOOLCHAIN / "rustc"), "PATH": f"{TOOLCHAIN}:{os.defpath}", "LC_ALL": "C"}
     subprocess.run(
         [
             str(TOOLCHAIN / "cargo"),
@@ -91,7 +95,15 @@ def test_cargo_offline_build_and_binary_is_deterministic(tmp_path: Path) -> None
 def test_hermetic_builder_publishes_binary_manifest(tmp_path: Path) -> None:
     output = tmp_path / "published" / "observer"
     result = subprocess.run(
-        [sys.executable, str(ROOT / "tools" / "build_x11_identity_observer.py"), "--output", str(output)],
+        [
+            sys.executable,
+            "-m",
+            "crowley.native.build",
+            "build",
+            "observer",
+            "--output",
+            str(output),
+        ],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -107,11 +119,14 @@ def test_hermetic_builder_publishes_binary_manifest(tmp_path: Path) -> None:
         "native/x11_identity_observer/src/main.rs",
     }
     assert len(manifest["static_inputs"]) == 4
-    assert manifest["linker"]["driver"]["path"] == "/usr/bin/cc"
-    assert manifest["linker"]["driver"]["version"]
-    assert manifest["linker"]["driver"]["sha256"]
-    assert manifest["linker"]["ld"]["realpath"].endswith("ld.bfd")
-    assert manifest["linker"]["ld"]["version"].startswith("GNU ld")
+    driver = manifest["linker"]["driver"]
+    assert driver["name"] == "cc"
+    assert driver["version"]
+    assert len(driver["sha256"]) == 64
+    linker = manifest["linker"]["ld"]
+    assert linker["name"] == "ld"
+    assert linker["version"].startswith("GNU ld")
+    assert len(linker["sha256"]) == 64
 
 
 def test_hermetic_builder_rejects_unreviewed_source_inputs(tmp_path: Path) -> None:
@@ -120,22 +135,22 @@ def test_hermetic_builder_rejects_unreviewed_source_inputs(tmp_path: Path) -> No
     for relative in ("Cargo.toml", "Cargo.lock", "src/main.rs"):
         path = source / relative
         path.write_text("reviewed\n", encoding="utf-8")
-    builder.validate_source_tree(source)
+    builder._validate_source_tree(source)
     (source / "build.rs").write_text("fn main() {}\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="reviewed three-file set"):
-        builder.validate_source_tree(source)
+        builder._validate_source_tree(source)
     (source / "build.rs").unlink()
     (source / ".cargo").mkdir()
     with pytest.raises(RuntimeError, match="reviewed layout"):
-        builder.validate_source_tree(source)
+        builder._validate_source_tree(source)
     (source / ".cargo").rmdir()
     (source / "src" / "extra.rs").write_text("\n", encoding="utf-8")
     with pytest.raises(RuntimeError, match="reviewed three-file set"):
-        builder.validate_source_tree(source)
+        builder._validate_source_tree(source)
     (source / "src" / "extra.rs").unlink()
     (source / "src" / "link.rs").symlink_to(source / "src" / "main.rs")
     with pytest.raises(RuntimeError, match="symlink"):
-        builder.validate_source_tree(source)
+        builder._validate_source_tree(source)
 
 
 def test_hermetic_builder_rejects_ambient_ancestor_cargo_configuration(tmp_path: Path) -> None:
@@ -147,8 +162,8 @@ def test_hermetic_builder_rejects_ambient_ancestor_cargo_configuration(tmp_path:
     (source.parents[2] / ".cargo" / "config.toml").write_text(
         "[build]\ntarget-dir = '/tmp/ambient'\n", encoding="utf-8"
     )
-    with pytest.raises(RuntimeError, match="ambient Cargo configuration"):
-        builder.refuse_ambient_cargo_configuration(source)
+    with pytest.raises(RuntimeError, match="ancestor Cargo config"):
+        builder._refuse_ancestor_build_inputs(source.parent)
 
 
 @pytest.mark.parametrize("config_name", ["config", "config.toml"])
@@ -170,21 +185,21 @@ def test_hermetic_build_rejects_configuration_above_actual_build_cwd(
         raise AssertionError("Cargo must not run with ambient configuration")
 
     monkeypatch.setattr(builder.subprocess, "run", unexpected_cargo)
-    with pytest.raises(RuntimeError, match="ambient Cargo configuration"):
-        builder.build_once(source, build_root / "target-a", tmp_path / "cargo-home")
+    with pytest.raises(RuntimeError, match="ancestor Cargo config"):
+        builder._refuse_ancestor_build_inputs(source)
     assert not called
 
 
 def test_private_publication_refuses_different_bytes_and_sets_mode_before_replace(tmp_path: Path) -> None:
     output = tmp_path / "published" / "observer"
     output.parent.mkdir(mode=0o700)
-    builder._atomic_private_publish(output, b"first", 0o700)
+    builder._atomic_publish(output, b"first", 0o700)
     assert output.read_bytes() == b"first"
     assert output.stat().st_mode & 0o777 == 0o700
     with pytest.raises(RuntimeError, match="different published artifact"):
-        builder._atomic_private_publish(output, b"second", 0o700)
+        builder._atomic_publish(output, b"second", 0o700)
     manifest = output.with_suffix(".manifest.json")
-    builder._atomic_private_publish(manifest, b"manifest", 0o600)
+    builder._atomic_publish(manifest, b"manifest", 0o600)
     assert manifest.stat().st_mode & 0o777 == 0o600
 
 
@@ -273,7 +288,7 @@ def test_protocol_inputs_are_bounded_and_explicit(tmp_path: Path, mutation: str)
 )
 def test_observer_reads_real_xvfb_process_and_window_tree(tmp_path: Path) -> None:
     published = tmp_path / "published" / "observer"
-    builder.publish(published)
+    builder.build_observer(published)
     binary = published
     source = tmp_path / "wine_preloader.c"
     source.write_text(
@@ -752,10 +767,8 @@ int main(int argc, char **argv) {
     query_wrapper = tmp_path / "fixture-x-query-wrapper"
     subprocess.run(["cc", str(query_wrapper_source), "-o", str(query_wrapper)], check=True)
     query_wrapper.chmod(0o700)
-    pinned_xdotool_root = build_crowley_xdotool.build(
-        build_crowley_xdotool.VENDORED_SOURCE_ARCHIVE, tmp_path / "pinned-xdotool"
-    )
-    pinned_xdotool = pinned_xdotool_root / build_crowley_xdotool.PRIVATE_TOOL_BASENAME
+    pinned_xdotool_root = builder.build_xdotool(builder.VENDORED_SOURCE_ARCHIVE, tmp_path / "pinned-xdotool")
+    pinned_xdotool = pinned_xdotool_root / pins.XDOTOOL_ARTIFACT_NAME
     gate_source = tmp_path / "fixture_x_gate.c"
     gate_source.write_text(
         r"""

@@ -19,13 +19,21 @@ from typing import Any
 from PIL import Image
 from PIL import __version__ as PILLOW_VERSION
 
-ROOT = Path(__file__).resolve().parents[1]
-SOURCE_FILES = ("Cargo.toml", "Cargo.lock", "src/main.rs")
-MAGIC = b"CRWTM001"
+from crowley.native import pins
+from crowley.native.build import NATIVE_ROOT
+
+ROOT = NATIVE_ROOT
+SOURCE_FILES = pins.MATCHER_SOURCE_FILES
+SOURCE_PATHS = {
+    "Cargo.toml": "template_matcher/Cargo.toml",
+    "Cargo.lock": "template_matcher/Cargo.lock",
+    "src/main.rs": "template_matcher/src/main.rs",
+}
+MAGIC = pins.MATCHER_MAGIC
 SEARCH = 1
 SCORE_AT = 2
-ARTIFACT_NAME = "template_matcher-v1"
-MANIFEST_NAME = f"{ARTIFACT_NAME}.manifest.json"
+ARTIFACT_NAME = pins.MATCHER_ARTIFACT_NAME
+MANIFEST_NAME = pins.MATCHER_MANIFEST_NAME
 
 
 class BenchmarkError(RuntimeError):
@@ -77,7 +85,7 @@ def _source_binding(source_root: Path, binary: Path) -> tuple[dict[str, str], st
         raise BenchmarkError("binary manifest is malformed") from error
     if not isinstance(manifest, dict):
         raise BenchmarkError("binary manifest is not an object")
-    source_hashes = {name: _file_sha256(source_root / name) for name in SOURCE_FILES}
+    source_hashes = {name: _file_sha256(source_root / SOURCE_PATHS[name]) for name in SOURCE_FILES}
     digest = hashlib.sha256()
     for name in SOURCE_FILES:
         digest.update(name.encode("utf-8"))
@@ -92,7 +100,8 @@ def _source_binding(source_root: Path, binary: Path) -> tuple[dict[str, str], st
         or manifest.get("source_hashes") != source_hashes
         or manifest.get("source_sha256") != source_pin
         or manifest.get("source_snapshot_sha256") != source_pin
-        or manifest.get("target") != "x86_64-unknown-linux-gnu"
+        or manifest.get("target") != pins.TARGET_TRIPLE
+        or manifest.get("workspace_sha256") != pins.MATCHER_WORKSPACE_SHA256
         or manifest.get("artifact_sha256") != _file_sha256(binary)
     ):
         raise BenchmarkError("binary publication does not match current source pins and digest")
@@ -505,7 +514,7 @@ def main() -> int:
     parser.add_argument("--construct", type=Path, required=True)
     parser.add_argument("--restore", type=Path, required=True)
     parser.add_argument("--region", type=int, nargs=4, metavar=("X", "Y", "WIDTH", "HEIGHT"), required=True)
-    parser.add_argument("--source-root", type=Path, default=ROOT / "native" / "template_matcher")
+    parser.add_argument("--source-root", type=Path, default=ROOT)
     parser.add_argument("--samples", type=int, default=8)
     parser.add_argument("--warmups", type=int, default=2)
     parser.add_argument("--output", type=Path)

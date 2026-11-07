@@ -39,6 +39,9 @@ if not __package__:
     if str(_PROJECT_ROOT) not in sys.path:
         sys.path.insert(0, str(_PROJECT_ROOT))
 
+from crowley.native import build as native_build
+from crowley.native import pins
+from crowley.native.matcher import MatcherError, TemplateMatcherRuntime
 from crowley.session.cli import _socket_request
 from crowley.session.config import load_config
 from crowley.session.decoder import PixelDecoder
@@ -55,7 +58,6 @@ from crowley.session.pointer_execution import (
     plan_human_pointer,
     pointer_action_timeout,
 )
-from tools.template_matcher_runtime import MatcherError, TemplateMatcherRuntime
 
 MODE_CONTROL_PREFLIGHT = "control-preflight"
 MODE_MEASURE_DEFERRED = "measure-deferred"
@@ -5103,35 +5105,72 @@ def _verify_observer_manifest(screen: X11Screen, observer: Path, digest: str) ->
         raise OperatorError("configured identity observer is unavailable") from exc
     manifest_path = observer.with_suffix(".manifest.json")
     manifest = _read_private_json(manifest_path, label="configured identity observer manifest")
-    expected_keys = {
-        "schema",
-        "target",
-        "binary",
-        "binary_sha256",
-        "source_sha256",
-        "static_inputs",
-        "toolchain",
-        "linker",
-    }
-    if set(manifest) != expected_keys or manifest.get("schema") != "crowley.x11-identity-observer.v1":
+    if set(manifest) != pins.OBSERVER_MANIFEST_KEYS:
         raise OperatorError("configured identity observer source manifest schema is malformed")
-    if manifest.get("binary") != str(observer) or manifest.get("binary_sha256") != digest:
+    if manifest["schema"] != pins.OBSERVER_MANIFEST_SCHEMA:
+        raise OperatorError("configured identity observer source manifest schema is malformed")
+    if manifest["target"] != pins.TARGET_TRIPLE:
+        raise OperatorError("configured identity observer target is not pinned")
+    if manifest["binary"] != pins.OBSERVER_ARTIFACT_NAME:
         raise OperatorError("configured identity observer manifest is not bound to the binary")
-    source_hashes = manifest.get("source_sha256")
-    expected_sources = {
-        "native/x11_identity_observer/Cargo.toml",
-        "native/x11_identity_observer/Cargo.lock",
-        "native/x11_identity_observer/src/main.rs",
-    }
+    if manifest["binary_sha256"] != digest:
+        raise OperatorError("configured identity observer manifest is not bound to the binary")
+    if manifest["workspace_sha256"] != pins.OBSERVER_WORKSPACE_SHA256:
+        raise OperatorError("configured identity observer workspace pin is stale")
+    if manifest["static_library_resolution"] != {
+        "mechanism": "pkg-config",
+        "package": "x11",
+        "mode": "static",
+        "libraries": [f"lib{name}.a" for name in pins.OBSERVER_STATIC_LIBRARY_NAMES],
+    }:
+        raise OperatorError("configured identity observer library resolution is not canonical")
+    static_inputs = manifest["static_inputs"]
+    expected_static_inputs = {f"lib{name}.a" for name in pins.OBSERVER_STATIC_LIBRARY_NAMES}
+    if (
+        not isinstance(static_inputs, dict)
+        or set(static_inputs) != expected_static_inputs
+        or any(
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            for value in static_inputs.values()
+        )
+    ):
+        raise OperatorError("configured identity observer static inputs are malformed")
+    toolchain = manifest["toolchain"]
+    if toolchain != {
+        "rustc": pins.EXPECTED_RUSTC,
+        "cargo": pins.EXPECTED_CARGO,
+        "rustfmt": pins.EXPECTED_RUSTFMT,
+    }:
+        raise OperatorError("configured identity observer toolchain is not pinned")
+    linker = manifest["linker"]
+    if not isinstance(linker, dict) or set(linker) != {"driver", "ld"}:
+        raise OperatorError("configured identity observer linker metadata is malformed")
+    for name in ("driver", "ld"):
+        record = linker[name]
+        expected_name = "cc" if name == "driver" else "ld"
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"name", "sha256", "version"}
+            or record["name"] != expected_name
+            or not isinstance(record["sha256"], str)
+            or len(record["sha256"]) != 64
+            or any(character not in "0123456789abcdef" for character in record["sha256"])
+            or not isinstance(record["version"], str)
+            or not record["version"]
+        ):
+            raise OperatorError("configured identity observer linker metadata is malformed")
+    source_hashes = manifest["source_sha256"]
+    expected_sources = set(pins.OBSERVER_SOURCE_MANIFEST_FILES)
     if not isinstance(source_hashes, dict) or set(source_hashes) != expected_sources:
         raise OperatorError("configured identity observer source set is malformed")
-    repository_root = Path(__file__).resolve().parents[1]
     bindings: dict[str, str] = {
         "identity-observer-binary": digest,
         f"identity-observer-{observer.name}": digest,
     }
     for source_name in sorted(expected_sources):
-        source_path = repository_root / source_name
+        source_path = native_build.NATIVE_ROOT / source_name.removeprefix("native/")
         try:
             source_info = source_path.lstat()
             if not stat.S_ISREG(source_info.st_mode) or source_info.st_uid != os.getuid():

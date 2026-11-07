@@ -264,7 +264,7 @@ This report cannot establish a live bottleneck or authorize a Rust rewrite.
 The retained WoW control benchmark measured the pure Python matcher at about
 2.55 seconds for Construct and 2.52 seconds for Restore on a 220x84 region
 with 98x27 RGB templates. The independent native preparation lives under
-native/template_matcher and is not integrated into the calibration helper. It
+src/crowley/native/resources/native/template_matcher and is not integrated into the calibration helper. It
 preserves the existing acceptance rule (SAD <= 5 * RGB byte count), the best
 (SAD, x, y) ordering, and ambiguity relative to the best candidate.
 
@@ -280,7 +280,7 @@ matched, rejected, or ambiguous; SCORE_AT returns matched or rejected. Results
 contain exact integer sad, byte count, and absolute [x, y, width, height] box
 values.
 
-tools/build_template_matcher.py performs two independent offline release
+`crowley-native build matcher` performs two independent offline release
 builds with the pinned x86_64 toolchain, fixed release flags, and remapped
 source paths. It requires byte-identical outputs before atomically publishing
 the versioned executable and digest manifest into a caller-supplied private
@@ -302,7 +302,7 @@ reported separately. These retained-frame timings are computation evidence
 only and do not qualify fresh desktop capture, input ownership, scan cadence,
 or helper integration.
 
-The public tools/benchmark_template_matcher.py runner takes explicit
+The archived `.archive/executor-review/benchmark_template_matcher.py` runner takes explicit
 --binary, --frame, --construct, --restore, and --region arguments. It verifies
 the private publication's binary digest and current native source pins, retains
 only source and input digests in its JSON report, checks exact Python reference

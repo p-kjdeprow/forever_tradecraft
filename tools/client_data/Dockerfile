@@ -1,16 +1,16 @@
 # Build-time network is only for the pinned source repositories and NuGet.
 # Runtime extraction is offline and mounts the game installation read-only.
 FROM mcr.microsoft.com/dotnet/sdk@sha256:747cbade5bfd918a175ac32f8f1d931edec2c7d0d5397a3de72eaef1ac1f66d2 AS build
-ARG TACTSHARP_SHA=d89204e07fa062ccc8f2738ebd0209782912da48
-ARG DBCD_SHA=e732093f8864240fc5884bd1bba6b02f3dfc0d56
-ARG WOWDBDEFS_SHA=7eaa562b62037d12327543fe22719a59870bb905
+ARG TACTSHARP_SHA
+ARG DBCD_SHA
+ARG WOWDBDEFS_SHA
 WORKDIR /src
 RUN for r in TACTSharp:$TACTSHARP_SHA DBCD:$DBCD_SHA WoWDBDefs:$WOWDBDEFS_SHA; do \
-      n=${r%%:*}; s=${r##*:}; git init -q $n && git -C $n fetch -q --depth 1 https://github.com/wowdev/$n.git $s && git -C $n checkout -q FETCH_HEAD; \
+      n=${r%%:*}; s=${r##*:}; test -n "$s"; \
+      git init -q $n && git -C $n fetch -q --depth 1 https://github.com/wowdev/$n.git $s && git -C $n checkout -q FETCH_HEAD; \
     done
 COPY app/ClientData.csproj app/Program.cs app/fdids.csv /src/app/
-RUN sed -i 's#\.\./TACTSharp#../TACTSharp#; s#\.\./DBCD#../DBCD#' /src/app/ClientData.csproj \
-    && dotnet publish /src/app -c Release -o /out \
+RUN dotnet publish /src/app -c Release -o /out \
     && cp /src/app/fdids.csv /out/ \
     && cp -r /src/WoWDBDefs/definitions /out/definitions
 

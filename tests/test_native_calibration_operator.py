@@ -22,9 +22,11 @@ from typing import Any
 import pytest
 from PIL import Image, ImageOps
 
+from crowley.native import build as native_build
+from crowley.native import matcher as matcher_runtime
+from crowley.native import pins
 from crowley.session import pointer_execution
 from crowley.session.executor import BindingMetadata, Point, PointerTarget, Rect
-from tools import template_matcher_runtime as matcher_runtime
 
 MODULE_PATH = Path(__file__).parents[1] / "tools" / "native_calibration_operator.py"
 sys.path.insert(0, str(MODULE_PATH.parent))
@@ -33,6 +35,11 @@ assert spec and spec.loader
 operator = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = operator
 spec.loader.exec_module(operator)
+
+_TEST_XDOTOOL_BUILD_INPUTS = {
+    "compiler": {"name": "cc", "sha256": "0" * 64, "version": "test compiler"},
+    "linker": {"name": "ld", "sha256": "1" * 64, "version": "test linker"},
+}
 
 
 @pytest.fixture(autouse=True)
@@ -1460,6 +1467,7 @@ int main(int argc, char **argv) {
                 "archive_sha256": PINNED_ARCHIVE_SHA256,
                 "executable": PRIVATE_TOOL_BASENAME,
                 "executable_sha256": executable_sha256,
+                pins.XDOTOOL_BUILD_INPUTS_KEY: _TEST_XDOTOOL_BUILD_INPUTS,
             },
             sort_keys=True,
         ),
@@ -1635,6 +1643,7 @@ int main(int argc, char **argv) {
                 "archive_sha256": PINNED_ARCHIVE_SHA256,
                 "executable": PRIVATE_TOOL_BASENAME,
                 "executable_sha256": digest,
+                pins.XDOTOOL_BUILD_INPUTS_KEY: _TEST_XDOTOOL_BUILD_INPUTS,
             },
             sort_keys=True,
         ),
@@ -1650,7 +1659,7 @@ def test_manifest_and_exclusive_template_match(tmp_path):
     manifest, construct_scene, restore_scene = make_scenes(tmp_path)
     matcher = operator.TemplateMatcher(
         manifest,
-        artifact_root=matcher_runtime.DEFAULT_ARTIFACT_ROOT,
+        artifact_root=matcher_runtime.default_artifact_root(),
     )
     assert matcher.source_bindings["template-matcher-binary"] == matcher_runtime.EXPECTED_ARTIFACT_SHA256
     for source_name, source_digest in matcher_runtime.EXPECTED_SOURCE_HASHES.items():
@@ -1694,7 +1703,7 @@ def test_manifest_and_exclusive_template_match(tmp_path):
 
 def test_template_matcher_forwards_one_absolute_deadline_to_search_and_score(tmp_path: Path) -> None:
     manifest, construct_scene, restore_scene = make_scenes(tmp_path)
-    root = matcher_runtime.DEFAULT_ARTIFACT_ROOT
+    root = matcher_runtime.default_artifact_root()
     calls: list[tuple[str, float]] = []
 
     class RecordingRuntime:
@@ -1775,7 +1784,7 @@ def test_click_matcher_failure_refuses_before_fixed_input_or_action_log(
     failure: str,
 ) -> None:
     manifest, construct_scene, _restore_scene = make_scenes(tmp_path)
-    delegate = matcher_runtime.TemplateMatcherRuntime(matcher_runtime.DEFAULT_ARTIFACT_ROOT)
+    delegate = matcher_runtime.TemplateMatcherRuntime(matcher_runtime.default_artifact_root())
 
     class FailingRuntime:
         @property
@@ -1920,7 +1929,7 @@ def test_control_capture_parks_hovered_pointer_before_real_matcher(tmp_path: Pat
     shutil.copyfile(hovered_scene, old_path)
     matcher = operator.TemplateMatcher(
         manifest,
-        runtime=matcher_runtime.TemplateMatcherRuntime(matcher_runtime.DEFAULT_ARTIFACT_ROOT),
+        runtime=matcher_runtime.TemplateMatcherRuntime(matcher_runtime.default_artifact_root()),
     )
 
     class HoverScreen(FakeScreen):
@@ -4267,6 +4276,7 @@ int main(int argc, char **argv) {
                 "archive_sha256": PINNED_ARCHIVE_SHA256,
                 "executable": PRIVATE_TOOL_BASENAME,
                 "executable_sha256": executable_sha256,
+                pins.XDOTOOL_BUILD_INPUTS_KEY: _TEST_XDOTOOL_BUILD_INPUTS,
             },
             sort_keys=True,
         ),
@@ -6083,18 +6093,19 @@ def test_measure_deferred_public_admission_retains_real_failure_status(tmp_path:
         child.wait(timeout=3)
 
 
-def test_observer_manifest_binds_current_reviewed_source_bytes(tmp_path: Path) -> None:
+def test_observer_manifest_rejects_legacy_schema(tmp_path: Path) -> None:
     observer = tmp_path / "observer"
     observer.write_bytes(b"#!/bin/sh\nexit 0\n")
     observer.chmod(0o700)
-    source_root = Path(operator.__file__).resolve().parents[1]
+    source_root = native_build.NATIVE_ROOT
     source_names = (
         "native/x11_identity_observer/Cargo.toml",
         "native/x11_identity_observer/Cargo.lock",
         "native/x11_identity_observer/src/main.rs",
     )
     source_hashes = {
-        name: hashlib.sha256((source_root / name).read_bytes()).hexdigest() for name in source_names
+        name: hashlib.sha256((source_root / name.removeprefix("native/")).read_bytes()).hexdigest()
+        for name in source_names
     }
     manifest_path = observer.with_suffix(".manifest.json")
     manifest_path.write_text(
@@ -6115,40 +6126,7 @@ def test_observer_manifest_binds_current_reviewed_source_bytes(tmp_path: Path) -
     )
     manifest_path.chmod(0o600)
     screen = SimpleNamespace(backend=SimpleNamespace(resolver_kind="pinned-rust-v1"))
-    bindings = operator._verify_observer_manifest(
-        screen, observer, hashlib.sha256(observer.read_bytes()).hexdigest()
-    )
-    assert bindings["identity-observer-source-main.rs"] == source_hashes[source_names[-1]]
-    mutated = json.loads(manifest_path.read_text(encoding="utf-8"))
-    mutated["source_sha256"][source_names[-1]] = "f" * 64
-    manifest_path.write_text(json.dumps(mutated, sort_keys=True), encoding="utf-8")
-    with pytest.raises(operator.OperatorError, match="source digest is stale"):
-        operator._verify_observer_manifest(
-            screen, observer, hashlib.sha256(observer.read_bytes()).hexdigest()
-        )
-    original_manifest = json.loads(
-        json.dumps(
-            {
-                "schema": "crowley.x11-identity-observer.v1",
-                "target": "x86_64-unknown-linux-gnu",
-                "binary": str(observer),
-                "binary_sha256": hashlib.sha256(observer.read_bytes()).hexdigest(),
-                "source_sha256": source_hashes,
-                "static_inputs": {},
-                "toolchain": {},
-                "linker": {},
-            }
-        )
-    )
-    manifest_path.write_text(json.dumps(original_manifest, sort_keys=True), encoding="utf-8")
-    manifest_path.chmod(0o644)
-    with pytest.raises(operator.OperatorError, match="private regular"):
-        operator._verify_observer_manifest(
-            screen, observer, hashlib.sha256(observer.read_bytes()).hexdigest()
-        )
-    manifest_path.unlink()
-    manifest_path.symlink_to(observer)
-    with pytest.raises(operator.OperatorError, match="private regular|unavailable"):
+    with pytest.raises(operator.OperatorError, match="source manifest schema is malformed"):
         operator._verify_observer_manifest(
             screen, observer, hashlib.sha256(observer.read_bytes()).hexdigest()
         )

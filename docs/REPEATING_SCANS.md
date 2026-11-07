@@ -58,7 +58,7 @@ chord. Keep the prior setting in the setup receipt when changing it.
 Build the pinned native input tool and install the editable controller:
 
 ```sh
-uv run python tools/build_crowley_xdotool.py
+uv run crowley-native build xdotool
 uv tool install --editable /home/dev/repos/pegasus
 mkdir -p ~/.config/crowley ~/.config/systemd/user
 cp deploy/crowley-session.example.toml ~/.config/crowley/session.toml

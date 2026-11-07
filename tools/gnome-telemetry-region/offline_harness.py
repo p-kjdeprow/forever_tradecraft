@@ -31,15 +31,31 @@ from types import SimpleNamespace
 
 from PIL import Image
 
+from crowley.platform.paths import XdgDirs
 from crowley.session.source_binding import SAFETY_MODULES, build_source_binding
 
 ROOT = Path(__file__).resolve().parents[2]
-STAGE = Path(
-    os.environ.get("GNOME_TELEMETRY_REGION_STAGE", "/home/dev/.cache/crowley/gnome-telemetry-region-r6")
-)
-BINARY = Path(os.environ.get("GNOME_TELEMETRY_REGION_BINARY", STAGE / "prefix/bin/gnome-screenshot"))
 PATCH = ROOT / "tools/gnome-telemetry-region/0001-typed-telemetry-area.patch"
-MANIFEST = ROOT / "tools/gnome-telemetry-region/manifest.example.json"
+
+
+def _stage_root() -> Path:
+    configured = os.environ.get("GNOME_TELEMETRY_REGION_STAGE")
+    if configured is not None:
+        stage = Path(configured)
+        if not stage.is_absolute():
+            raise RuntimeError("GNOME_TELEMETRY_REGION_STAGE must be absolute")
+        return stage
+    return XdgDirs.from_environ(os.environ).crowley_cache / "gnome-telemetry-region-r6"
+
+
+def _binary_path() -> Path:
+    configured = os.environ.get("GNOME_TELEMETRY_REGION_BINARY")
+    if configured is not None:
+        binary = Path(configured)
+        if not binary.is_absolute():
+            raise RuntimeError("GNOME_TELEMETRY_REGION_BINARY must be absolute")
+        return binary
+    return _stage_root() / "prefix/bin/gnome-screenshot"
 
 
 def _png_256() -> bytes:
@@ -332,7 +348,7 @@ def _compiled_private_shell_fixture() -> None:
             xauthority = root / "Xauthority"
             xauthority.touch(mode=0o600)
             local_binary = root / "gnome-screenshot-r6"
-            shutil.copyfile(BINARY, local_binary)
+            shutil.copyfile(_binary_path(), local_binary)
             local_binary.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
             profile = DriverProfile(
                 display=display,
@@ -400,12 +416,12 @@ def _compiled_private_shell_fixture() -> None:
                 ):
                     raise RuntimeError("production parent composed PNG did not preserve exact pixels")
             parent, child = socket.socketpair()
-            image_fd = os.open(BINARY, os.O_RDONLY)
+            image_fd = os.open(_binary_path(), os.O_RDONLY)
             output = root / "capture.png"
             nonce = "compiled-private-fixture"
             process = subprocess.Popen(
                 [
-                    str(BINARY),
+                    str(_binary_path()),
                     "--telemetry-region",
                     "--telemetry-x",
                     "80",
@@ -500,10 +516,10 @@ def _compiled_private_shell_fixture() -> None:
 
                 refusal_output = root / f"{label}.png"
                 owner_parent, owner_child = socket.socketpair()
-                executable_fd = os.open(BINARY, os.O_RDONLY)
+                executable_fd = os.open(_binary_path(), os.O_RDONLY)
                 refusal = subprocess.Popen(
                     [
-                        str(BINARY),
+                        str(_binary_path()),
                         "--telemetry-region",
                         "--telemetry-x",
                         "80",
@@ -2084,8 +2100,9 @@ def run_paused_diagnostic(config_path: Path, output_dir: Path) -> dict[str, obje
 
 
 def _compiled_parser_checks() -> None:
-    if not BINARY.is_file():
-        raise RuntimeError(f"private binary missing: {BINARY}")
+    binary = _binary_path()
+    if not binary.is_file():
+        raise RuntimeError(f"private binary missing: {binary}")
     cases = [
         ["--telemetry-region"],
         ["--telemetry-region", "--telemetry-x", "1", "--telemetry-x", "1"],
@@ -2211,15 +2228,12 @@ def _compiled_parser_checks() -> None:
         ],
     ]
     for args in cases:
-        result = subprocess.run([str(BINARY), *args], capture_output=True, text=True, check=False)
+        result = subprocess.run([str(binary), *args], capture_output=True, text=True, check=False)
         if result.returncode == 0:
             raise RuntimeError(f"compiled parser accepted invalid telemetry argv: {args}")
 
 
 def self_check() -> None:
-    document = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    assert document["telemetry_options"]["branch"] == "ScreenshotArea"
-    assert document["telemetry_options"]["exact_size"] == [256, 256]
     text = PATCH.read_text(encoding="utf-8")
     for required in ("ScreenshotArea", "telemetry_owner_fd", "primary_owner", "flash"):
         assert required in text, required
@@ -2325,9 +2339,10 @@ def main() -> int:
         _compiled_parser_checks()
         _protocol_fixture()
         _compiled_private_shell_fixture()
+    binary = _binary_path()
     print(
         json.dumps(
-            {"self_check": options.self_check, "self_test": options.self_test, "binary": str(BINARY)},
+            {"self_check": options.self_check, "self_test": options.self_test, "binary": str(binary)},
             sort_keys=True,
         )
     )

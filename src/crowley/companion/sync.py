@@ -625,10 +625,9 @@ class Companion:
         atomic_write(target, text)
         self._last_data_write = time.time()
         log.info(
-            "wrote %s (%d acked scans, %d shopping lists)",
+            "wrote %s (%d acked scans)",
             target,
             len(data["ackedScans"]),
-            len(data["shoppingLists"]),
         )
         if configured:
             self.write_queue()

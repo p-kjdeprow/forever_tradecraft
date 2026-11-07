@@ -40,7 +40,6 @@ def test_empty_scans_are_accepted_with_distinct_ack_surfaces(tmp_path: Path) -> 
                 "ackedScans": ["uid-1"],
                 "scanPlan": _pinned_plan(),
                 "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-                "shoppingLists": [],
             },
             header="test",
         ).encode(),
@@ -58,7 +57,6 @@ def test_empty_scans_are_accepted_with_distinct_ack_surfaces(tmp_path: Path) -> 
                 "ackedScans": [],
                 "scanPlan": _pinned_plan(),
                 "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-                "shoppingLists": [],
             },
             header="test",
         ).encode(),
@@ -69,6 +67,21 @@ def test_empty_scans_are_accepted_with_distinct_ack_surfaces(tmp_path: Path) -> 
         render_assignment("CrowleyDB", {"scans": {}}, header="test").encode(),
     )
     assert queues_empty(saved, companion, data, settled_uid="uid-1")
+
+
+def test_data_rejects_removed_shopping_lists_key(tmp_path: Path) -> None:
+    data = tmp_path / "Data.lua"
+    value = {
+        "generatedAt": 1,
+        "ackedScans": [],
+        "scanPlan": _pinned_plan(),
+        "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
+        "shoppingLists": [],
+    }
+    _private_write(data, render_assignment("CROWLEY_DATA", value, header="stale").encode())
+
+    with pytest.raises(EvidenceError, match="CROWLEY_DATA is malformed"):
+        read_data_acknowledged_ids(data)
 
 
 def test_legacy_sweeps_queue_is_rejected(tmp_path: Path) -> None:

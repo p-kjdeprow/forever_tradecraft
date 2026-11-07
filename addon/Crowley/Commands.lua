@@ -9,7 +9,6 @@ local HELP = {
   "/crowley hud [hide|show|status] - toggle or inspect the telemetry display",
   "  The telemetry HUD is required for agent operation; hiding it is a display preference only.",
   "/crowley set <region|ruleset|faction> <value|auto> - override house detection",
-  "/crowley lists - push Crowley shopping lists into Auctionator",
   "/crowley probe - record which AH APIs this client has",
   "/crowley reference - capture item metadata and AH deposits",
   "/crowley account - capture and summarize account state",
@@ -260,10 +259,6 @@ SlashCmdList.CROWLEY = function(msg)
     status()
   elseif cmd == "set" then
     set(args[2] and args[2]:lower(), args[3])
-  elseif cmd == "lists" then
-    local houseKey = ns.Context.House().key
-    ns.Print(("synced %d shopping list(s) to Auctionator for %s")
-      :format(ns.Bridge.SyncShoppingLists(houseKey), houseKey))
   elseif cmd == "probe" then
     ns.Probe()
   elseif cmd == "reference" and not args[2] then

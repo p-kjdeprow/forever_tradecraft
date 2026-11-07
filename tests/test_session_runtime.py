@@ -627,7 +627,6 @@ class LifecycleBackend(X11Backend):
                 "ackedScans": [self.uid],
                 "scanPlan": load_catalog().scan_plan(),
                 "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-                "shoppingLists": [],
             }
             (self.root / "Data.lua").write_text(render_assignment("CROWLEY_DATA", data, "fixture"))
         if self.agent_client is None:
@@ -1077,7 +1076,6 @@ class LifecycleBackend(X11Backend):
                     "ackedScans": [],
                     "scanPlan": load_catalog().scan_plan(),
                     "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-                    "shoppingLists": [],
                 }
                 (self.root / "Data.lua").write_text(
                     render_assignment("CROWLEY_DATA", empty_data, "logout flush")
@@ -1131,7 +1129,6 @@ class LifecycleBackend(X11Backend):
                 "ackedScans": [self.uid],
                 "scanPlan": load_catalog().scan_plan(),
                 "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-                "shoppingLists": [],
             }
             (self.root / "Data.lua").write_text(render_assignment("CROWLEY_DATA", data, "fixture"))
             if self.agent_client is not None:
@@ -2999,7 +2996,6 @@ def test_runtime_reconcile_ready_scanner_is_idle_with_pending_saved_uid(tmp_path
                 "ackedScans": [uid],
                 "scanPlan": load_catalog().scan_plan(),
                 "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-                "shoppingLists": [],
             },
             "runtime pending UID",
         )
@@ -3075,7 +3071,6 @@ def test_runtime_uncertain_no_agent_never_recovers_login_or_input(tmp_path: Path
                         "ackedScans": [uid],
                         "scanPlan": load_catalog().scan_plan(),
                         "referenceItemIDs": sorted(item.item_id for item in load_catalog().items),
-                        "shoppingLists": [],
                     },
                     "runtime unsettled queue",
                 )

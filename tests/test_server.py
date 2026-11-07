@@ -563,6 +563,7 @@ def test_uploads_are_idempotent_and_acked(client):
     assert client.post("/v1/scans", json=upload).json()["status"] == "duplicate"
     data = client.post("/v1/addon-data", json={"scan_ids": ["dup", "unknown"]}).json()
     assert data["ackedScans"] == ["dup"]
+    assert set(data) == {"generatedAt", "ackedScans", "scanPlan", "referenceItemIDs"}
     plan = client.get("/v1/scan-plan").json()
     assert plan["schemaVersion"] == 2
     assert plan["planHash"] and plan["planJSON"]

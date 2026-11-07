@@ -203,6 +203,8 @@ def test_generator_uses_complete_checkout_tocs_for_empty_alternate_root(tmp_path
     toc = (tmp_path / "addon/Crowley/Crowley.toc").read_text(encoding="utf-8")
     entries = [line.strip() for line in toc.splitlines() if line.strip() and not line.startswith("##")]
     assert entries.count("GeneratedTarget.lua") == 1
+    assert "Bridge.lua" not in entries
+    assert "Auctionator" not in toc
     assert entries.index("GeneratedTarget.lua") < entries.index("Context.lua") < entries.index("Scanner.lua")
 
 
@@ -577,6 +579,12 @@ def test_controller_qualification_consumes_alternate_canonical_plan_count(
     data_value.ackedScans = client._to_lua([raw["id"]])
     data_value.referenceItemIDs = client._to_lua(sorted(item.item_id for item in alternate_catalog.items))
     data_path.write_bytes(client.lua.globals()._serialize("CROWLEY_DATA", data_value).encode("latin-1"))
+    assert {key for key, _ in data_value.items()} == {
+        "generatedAt",
+        "ackedScans",
+        "scanPlan",
+        "referenceItemIDs",
+    }
     evidence = evidence_module.read_stable_saved_scan(
         saved_path,
         uid=raw["id"],

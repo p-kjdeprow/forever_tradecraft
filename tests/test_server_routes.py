@@ -2,11 +2,14 @@
 
 from collections.abc import Iterable
 
+import pytest
 from fastapi.routing import APIRoute, _IncludedRouter
+from pydantic import ValidationError
 from starlette.routing import BaseRoute
 
 from crowley.server.app import app
 from crowley.server.deps import require_token
+from crowley.server.routes.addon import AddonDataRequest, AddonDataResponse
 
 EXPECTED_ROUTES = frozenset(
     {
@@ -53,3 +56,14 @@ def test_full_route_table_preserves_methods_paths_and_auth() -> None:
     }
     assert actual == EXPECTED_ROUTES
     assert len(actual) == len(EXPECTED_ROUTES)
+
+
+def test_addon_data_contract_excludes_shopping_lists() -> None:
+    assert set(AddonDataResponse.model_fields) == {
+        "generatedAt",
+        "ackedScans",
+        "scanPlan",
+        "referenceItemIDs",
+    }
+    with pytest.raises(ValidationError, match="shoppingLists"):
+        AddonDataRequest.model_validate({"shoppingLists": []})

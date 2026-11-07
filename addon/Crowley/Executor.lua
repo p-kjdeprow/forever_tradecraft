@@ -649,7 +649,7 @@ local function eventFailure(event, ...)
   elseif event == "UI_ERROR_MESSAGE" and state.inFlight then
     local first, second = ...
     finishStarted("failed", { error = tostring(second or first) })
-  elseif event == "BAG_UPDATE" or event == "BAG_UPDATE_DELAYED" or event == "MAIL_INBOX_UPDATE" or event == "MAIL_UPDATE" or event == "MERCHANT_UPDATE" or event == "TRADE_SKILL_UPDATE" then
+  elseif event == "BAG_UPDATE" or event == "BAG_UPDATE_DELAYED" or event == "MAIL_INBOX_UPDATE" or event == "MERCHANT_UPDATE" then
     observeVendorSell()
     observePostcondition()
   end
@@ -659,11 +659,11 @@ local function eventFrame(event)
   if event == "AUCTION_HOUSE_SHOW" then frameOpen.ah = true
   elseif event == "AUCTION_HOUSE_CLOSED" then frameOpen.ah = false
   elseif event == "MERCHANT_SHOW" then frameOpen.merchant = true
-  elseif event == "MERCHANT_CLOSED" or event == "MERCHANT_CLOSE" then frameOpen.merchant = false
+  elseif event == "MERCHANT_CLOSED" then frameOpen.merchant = false
   elseif event == "MAIL_SHOW" then frameOpen.mailbox = true
   elseif event == "MAIL_CLOSED" then frameOpen.mailbox = false
-  elseif event == "TRADE_SKILL_SHOW" or event == "PROFESSION_SHOW" then frameOpen.profession = true
-  elseif event == "TRADE_SKILL_CLOSE" or event == "PROFESSION_CLOSE" then frameOpen.profession = false end
+  elseif event == "TRADE_SKILL_SHOW" then frameOpen.profession = true
+  elseif event == "TRADE_SKILL_CLOSE" then frameOpen.profession = false end
   updateButton()
 end
 
@@ -867,30 +867,35 @@ ns.RegisterModule("Executor", {
   end,
 })
 
+local REGISTERED_EVENTS = {
+  { name = "AUCTION_HOUSE_SHOW", handler = eventFrame },
+  { name = "AUCTION_HOUSE_CLOSED", handler = eventFrame },
+  { name = "MERCHANT_SHOW", handler = eventFrame },
+  { name = "MERCHANT_CLOSED", handler = eventFrame },
+  { name = "MAIL_SHOW", handler = eventFrame },
+  { name = "MAIL_CLOSED", handler = eventFrame },
+  { name = "TRADE_SKILL_SHOW", handler = eventFrame },
+  { name = "TRADE_SKILL_CLOSE", handler = eventFrame },
+  { name = "COMMODITY_PRICE_UPDATED", handler = commodityPrice },
+  { name = "COMMODITY_PURCHASE_SUCCEEDED", handler = eventFailure },
+  { name = "COMMODITY_PURCHASE_FAILED", handler = eventFailure },
+  { name = "AUCTION_HOUSE_AUCTION_CREATED", handler = eventFailure },
+  { name = "AUCTION_CANCELED", handler = eventFailure },
+  { name = "UI_ERROR_MESSAGE", handler = eventFailure },
+  { name = "BAG_UPDATE", handler = eventFailure },
+  { name = "BAG_UPDATE_DELAYED", handler = eventFailure },
+  { name = "MAIL_INBOX_UPDATE", handler = eventFailure },
+  { name = "MERCHANT_UPDATE", handler = eventFailure },
+}
+
+function Executor.RegisteredEvents()
+  local events = {}
+  for index, registration in ipairs(REGISTERED_EVENTS) do events[index] = registration.name end
+  return events
+end
+
 -- With Queue.lua's false placeholder, the executor creates no frame and
 -- registers no events, leaving the scanner's live surface untouched.
 if CROWLEY_QUEUE ~= nil and CROWLEY_QUEUE ~= false then
-  ns.On("AUCTION_HOUSE_SHOW", eventFrame)
-  ns.On("AUCTION_HOUSE_CLOSED", eventFrame)
-  ns.On("MERCHANT_SHOW", eventFrame)
-  ns.On("MERCHANT_CLOSED", eventFrame)
-  ns.On("MERCHANT_CLOSE", eventFrame)
-  ns.On("MAIL_SHOW", eventFrame)
-  ns.On("MAIL_CLOSED", eventFrame)
-  ns.On("TRADE_SKILL_SHOW", eventFrame)
-  ns.On("TRADE_SKILL_CLOSE", eventFrame)
-  ns.On("PROFESSION_SHOW", eventFrame)
-  ns.On("PROFESSION_CLOSE", eventFrame)
-  ns.On("COMMODITY_PRICE_UPDATED", commodityPrice)
-  ns.On("COMMODITY_PURCHASE_SUCCEEDED", eventFailure)
-  ns.On("COMMODITY_PURCHASE_FAILED", eventFailure)
-  ns.On("AUCTION_HOUSE_AUCTION_CREATED", eventFailure)
-  ns.On("AUCTION_CANCELED", eventFailure)
-  ns.On("UI_ERROR_MESSAGE", eventFailure)
-  ns.On("BAG_UPDATE", eventFailure)
-  ns.On("BAG_UPDATE_DELAYED", eventFailure)
-  ns.On("MAIL_INBOX_UPDATE", eventFailure)
-  ns.On("MAIL_UPDATE", eventFailure)
-  ns.On("MERCHANT_UPDATE", eventFailure)
-  ns.On("TRADE_SKILL_UPDATE", eventFailure)
+  for _, registration in ipairs(REGISTERED_EVENTS) do ns.On(registration.name, registration.handler) end
 end

@@ -1366,7 +1366,6 @@ def test_runtime_durable_empty_scan_facts_reject_without_format2_proof(
                 "ackedScans": [],
                 "scanPlan": catalog.scan_plan(),
                 "referenceItemIDs": sorted(item.item_id for item in catalog.items),
-                "shoppingLists": [],
             },
             "empty scan",
         ),

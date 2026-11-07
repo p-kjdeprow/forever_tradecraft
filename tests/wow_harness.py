@@ -498,15 +498,6 @@ C_Item = {
   end,
 }
 
--- Records what the addon pushes into Auctionator.
-_lists = {}
-Auctionator = { API = { v1 = {
-  ConvertToSearchString = function(caller, term)
-    return ('"%s";;;;;;;;;%s;;;;%s'):format(term.searchString, term.maxPrice / 10000, term.quantity)
-  end,
-  CreateShoppingList = function(caller, name, items) _lists[name] = items end,
-} } }
-
 local function keyValues(key)
   if type(key) ~= "table" then return nil end
   return key.itemID, key.itemLevel or 0, key.itemSuffix or 0, key.battlePetSpeciesID or 0
@@ -2033,10 +2024,6 @@ class WowClient:
 
     def slash(self, msg: str) -> None:
         self.lua.globals().SlashCmdList.CROWLEY(msg)
-
-    @property
-    def shopping_lists(self) -> dict[str, list[str]]:
-        return {k: list(v.values()) for k, v in self.lua.globals()._lists.items()}
 
     @property
     def chat(self) -> list[str]:

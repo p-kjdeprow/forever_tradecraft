@@ -296,7 +296,6 @@ def _write_data(
         "ackedScans": sorted(acknowledged, key=lambda item: item.encode()),
         "scanPlan": plan,
         "referenceItemIDs": sorted(item.item_id for item in catalog.items),
-        "shoppingLists": [],
     }
     if not include_reference_item_ids:
         del value["referenceItemIDs"]

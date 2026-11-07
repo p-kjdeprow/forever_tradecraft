@@ -419,6 +419,52 @@ def test_addon_accepts_byte_sorted_non_ascii_acked_scan_array():
     client.login()
 
 
+def test_addon_rejects_removed_shopping_lists_data_key():
+    client = WowClient()
+    client.lua.globals().CROWLEY_DATA.shoppingLists = client._to_lua([])
+    with pytest.raises(Exception, match="unknown or missing keys"):
+        client.login()
+
+
+def test_executor_registers_only_pinned_forever_events():
+    queue = {
+        "format": 1,
+        "queueId": "beta-normal-alliance-1760000000-event-contract",
+        "generatedAt": 1759990000,
+        "expiresAt": 1760000100,
+        "house": "beta-normal-alliance",
+        "character": "Tester",
+        "armed": False,
+        "actions": [{"seq": 1, "kind": "mail_collect", "maxMessages": 1}],
+    }
+    client = WowClient(queue=queue)
+    client.login()
+    expected = {
+        "AUCTION_HOUSE_SHOW",
+        "AUCTION_HOUSE_CLOSED",
+        "MERCHANT_SHOW",
+        "MERCHANT_CLOSED",
+        "MAIL_SHOW",
+        "MAIL_CLOSED",
+        "TRADE_SKILL_SHOW",
+        "TRADE_SKILL_CLOSE",
+        "COMMODITY_PRICE_UPDATED",
+        "COMMODITY_PURCHASE_SUCCEEDED",
+        "COMMODITY_PURCHASE_FAILED",
+        "AUCTION_HOUSE_AUCTION_CREATED",
+        "AUCTION_CANCELED",
+        "UI_ERROR_MESSAGE",
+        "BAG_UPDATE",
+        "BAG_UPDATE_DELAYED",
+        "MAIL_INBOX_UPDATE",
+        "MERCHANT_UPDATE",
+    }
+    actual = {str(event) for event in client.ns.Executor.RegisteredEvents().values()}
+    assert actual == expected
+    registered = {str(event) for event, _ in client.ns.handlers.items()}
+    assert expected <= registered
+
+
 def test_agent_first_publication_sees_initialized_scanner_and_executor():
     queue = {
         "format": 1,

@@ -8,9 +8,10 @@ from fractions import Fraction
 from typing import Any
 
 from crowley.analysis.books import Book
+from crowley.core.auction_rules import AuctionHouseRules
 
 from .accounts import Account
-from .api import AH_CUT, CraftingCapabilities, ItemFacts, Recipe, Strategy
+from .api import CraftingCapabilities, ItemFacts, Recipe, Strategy
 from .data import validate_recipes
 from .execution import ExecutionContext, release_mail, settle_expiry, settle_fills
 from .market import Market
@@ -102,9 +103,9 @@ def _mark_equity_details(
             liquid_limit = 0
         liquid_quantity = min(quantity, liquid_limit)
         if snapshot is not None and snapshot.fair is not None and snapshot.visible_min is not None:
-            liquid_mark = min(snapshot.fair, Fraction(snapshot.visible_min)) * (1 - AH_CUT)
+            liquid_mark = min(snapshot.fair, Fraction(snapshot.visible_min)) * (1 - market.rules.seller_cut)
         elif snapshot is not None and snapshot.visible_min is not None:
-            liquid_mark = Fraction(snapshot.visible_min) * (1 - AH_CUT)
+            liquid_mark = Fraction(snapshot.visible_min) * (1 - market.rules.seller_cut)
         else:
             liquid_mark = Fraction(0)
         fact = market.facts(item_id)
@@ -224,6 +225,8 @@ def run_backtest(
     wind_down_hours: Any = 24,
     demand_share: Any = 1,
     capabilities: CraftingCapabilities | None = None,
+    *,
+    rules: AuctionHouseRules,
 ) -> BacktestResult:
     """Run all strategies through one shared sequence of recorded sweeps."""
 
@@ -249,10 +252,12 @@ def run_backtest(
         capabilities = EMPTY_CAPABILITIES
     elif not isinstance(capabilities, CraftingCapabilities):
         raise TypeError("capabilities must be CraftingCapabilities")
+    if not isinstance(rules, AuctionHouseRules):
+        raise TypeError("rules must be AuctionHouseRules")
     from .data import precompute_statistics
 
     indexed_statistics = precompute_statistics(books) if not statistics else statistics
-    market = Market(books, indexed_statistics, facts, recipes)
+    market = Market(books, indexed_statistics, facts, recipes, rules=rules)
     all_times = market.times
     steps = tuple(
         (step, t)
@@ -291,6 +296,7 @@ def run_backtest(
         "window": {"start": start_t, "end": end_t},
         "wind_down_hours": wind_down_hours,
         "demand_share": demand_share,
+        "auction_rules_version": rules.version,
         "capabilities": capabilities.canonical,
         "capabilities_hash": capabilities_hash(capabilities),
         "strategy_professions": {
@@ -351,6 +357,7 @@ def run_backtest(
             next_listing_id=next_listing_id,
             wind_down=wind_down_active and Fraction(t) >= wind_down_start_t,
             demand_share=demand_share,
+            rules=rules,
         )
         settle_fills(context)
         settle_expiry(context)

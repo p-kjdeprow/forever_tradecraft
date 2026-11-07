@@ -8,6 +8,8 @@ from types import SimpleNamespace
 import pytest
 
 from crowley.analysis.books import Book, Group
+from crowley.core.auction_rules import rules_for_house
+from crowley.core.house import House
 from crowley.trading import __main__ as cli
 from crowley.trading import paper
 from crowley.trading.accounts import Account
@@ -23,6 +25,8 @@ from crowley.trading.requirements import (
     recipe_gate,
 )
 from crowley.trading.strategies.crafting import CraftingStrategy
+
+RULES = rules_for_house(House("us", "normal", "alliance"))
 
 
 def _recipe(**kwargs: object) -> Recipe:
@@ -186,6 +190,7 @@ def test_reports_bind_capabilities_and_gate_counts() -> None:
         1000,
         wind_down_hours=0,
         capabilities=CraftingCapabilities(),
+        rules=RULES,
     )
     enabled = run_backtest(
         books,
@@ -197,6 +202,7 @@ def test_reports_bind_capabilities_and_gate_counts() -> None:
         1000,
         wind_down_hours=0,
         capabilities=CraftingCapabilities.from_values([3938], [162], [1]),
+        rules=RULES,
     )
     assert gated.metadata["capabilities_hash"] != enabled.metadata["capabilities_hash"]
     assert gated.metadata["recipe_availability"]["crafting_engineering"]["available"] == 0
@@ -206,6 +212,7 @@ def test_reports_bind_capabilities_and_gate_counts() -> None:
 class _StrategyMarket:
     t = 1
     sweep_index = 0
+    rules = RULES
 
     def items(self):
         return {
@@ -380,6 +387,9 @@ def test_step_refuses_recreated_or_changed_run_before_writes(
         "a" * 64,
         capabilities.canonical,
         capabilities_hash(capabilities),
+        "us",
+        "normal",
+        "alliance",
     )
 
     class Connection:
@@ -422,7 +432,7 @@ def _craft_context(capabilities: CraftingCapabilities) -> tuple[ExecutionContext
         10: ItemFacts(10, 0, 1, 1, 20, 0),
         11: ItemFacts(11, 0, None, None, 20, 0),
     }
-    market = Market(books, {}, facts, (_recipe(),))
+    market = Market(books, {}, facts, (_recipe(),), rules=RULES)
     market.set_step(0, 0, {})
     account = Account(
         "craft",
@@ -432,7 +442,7 @@ def _craft_context(capabilities: CraftingCapabilities) -> tuple[ExecutionContext
         crafting_capabilities=capabilities,
     )
     account.add_inventory(10, 1, unit_cost=1)
-    return ExecutionContext(market, [account], 0, 0, {}), account
+    return ExecutionContext(market, [account], 0, 0, {}, rules=RULES), account
 
 
 def test_executor_gate_precedes_reagent_time_and_cooldown_mutation() -> None:
@@ -461,6 +471,7 @@ def test_strategy_does_not_acquire_reagents_for_unavailable_recipe() -> None:
     class MarketView:
         t = 1
         sweep_index = 0
+        rules = RULES
 
         def items(self):
             from crowley.trading.api import ItemSnapshot, Level

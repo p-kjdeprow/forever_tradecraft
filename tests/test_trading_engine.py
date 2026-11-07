@@ -6,6 +6,8 @@ import pytest
 
 from crowley.analysis.books import Book, Group
 from crowley.analysis.metrics import compute_metrics
+from crowley.core.auction_rules import rules_for_house
+from crowley.core.house import House
 from crowley.trading.__main__ import _select_sweeps, _sweep_step_times
 from crowley.trading.accounts import Account, Mail
 from crowley.trading.api import (
@@ -36,6 +38,7 @@ from crowley.trading.strategies import crafting
 from crowley.trading.strategies.vendor_arb import VendorArbStrategy
 
 ITEM = 7
+RULES = rules_for_house(House("us", "normal", "alliance"))
 
 
 def book(
@@ -104,6 +107,7 @@ def run(
         strategies,
         None,
         capital,
+        rules=RULES,
         **kwargs,
     )
 
@@ -124,10 +128,10 @@ def test_obtainability_survives_next_sweep_and_respects_purchase_net_and_ceiling
             book(900, [("cheap", 10, 2), ("high", 20, 3)], sweep_id=2, ceiling=15),
         ]
     }
-    market = Market(books, {}, facts(), ())
+    market = Market(books, {}, facts(), (), rules=RULES)
     purchased = {(ITEM, "cheap"): 1}
     market.set_step(0, 0, purchased)
-    context = ExecutionContext(market, [], 0, 0, purchased)
+    context = ExecutionContext(market, [], 0, 0, purchased, rules=RULES)
     assert [(group.result_id, quantity) for group, quantity in obtainable_units(context, ITEM)] == [
         ("cheap", 1)
     ]
@@ -138,9 +142,9 @@ def test_obtainability_survives_next_sweep_and_respects_purchase_net_and_ceiling
             book(2_000, [("cheap", 10, 5)], sweep_id=2),
         ]
     }
-    gap_market = Market(gap_books, {}, facts(), ())
+    gap_market = Market(gap_books, {}, facts(), (), rules=RULES)
     gap_market.set_step(0, 0, {})
-    assert obtainable_units(ExecutionContext(gap_market, [], 0, 0, {}), ITEM) == []
+    assert obtainable_units(ExecutionContext(gap_market, [], 0, 0, {}, rules=RULES), ITEM) == []
 
 
 def test_buy_is_cash_limited_and_levels_are_purchase_net():
@@ -233,8 +237,63 @@ def test_invalid_intervals_and_post_eligibility_are_conservative():
     assert result.accounts["seller"].counts["units_sold"] == 1
 
 
+def test_neutral_house_sale_uses_the_neutral_seller_cut():
+    books = {
+        ITEM: [
+            book(0, [("a", 80, 1)], sweep_id=1),
+            book(900, [("a", 80, 1)], sweep_id=2),
+            book(1_800, [], sweep_id=3),
+        ]
+    }
+    seller = Script("neutral_seller", {0: [VendorBuy(ITEM, 1), Post(ITEM, 40, 1, 12)]})
+    neutral_rules = rules_for_house(House("us", "normal", "neutral"))
+
+    result = run_backtest(
+        books,
+        {},
+        facts(sell=0, bundle_size=1, bundle_price=1, stack=1),
+        (),
+        [seller],
+        None,
+        1_000,
+        wind_down_hours=0,
+        rules=neutral_rules,
+    )
+
+    account = result.accounts["neutral_seller"]
+    assert account.closed_trades[0]["proceeds"] == 34
+    assert account.fees["ah_cut"] == 6
+
+
+def test_faction_house_sale_retains_the_existing_five_percent_cut():
+    books = {
+        ITEM: [
+            book(0, [("a", 80, 1)], sweep_id=1),
+            book(900, [("a", 80, 1)], sweep_id=2),
+            book(1_800, [], sweep_id=3),
+        ]
+    }
+    seller = Script("faction_seller", {0: [VendorBuy(ITEM, 1), Post(ITEM, 40, 1, 12)]})
+
+    result = run_backtest(
+        books,
+        {},
+        facts(sell=0, bundle_size=1, bundle_price=1, stack=1),
+        (),
+        [seller],
+        None,
+        1_000,
+        wind_down_hours=0,
+        rules=RULES,
+    )
+
+    account = result.accounts["faction_seller"]
+    assert account.closed_trades[0]["proceeds"] == 38
+    assert account.fees["ah_cut"] == 2
+
+
 def test_mail_delay_expiry_and_cancel_deposit_accounting():
-    assert deposit(100, 3, 12) == 45
+    assert deposit(100, 3, 12, RULES) == 45
     books = {
         ITEM: [
             book(0, [("a", 10, 1)], sweep_id=1),
@@ -263,9 +322,17 @@ def test_mail_delay_expiry_and_cancel_deposit_accounting():
     )
     cancel_account = cancel_result.accounts["canceller"]
     listing_id = next(iter(cancel_account.listings_by_id))
-    market = Market(two_sweeps([("a", 10, 1)]), {}, facts(sell=100), ())
+    market = Market(two_sweeps([("a", 10, 1)]), {}, facts(sell=100), (), rules=RULES)
     market.set_step(0, 0, {})
-    context = ExecutionContext(market, [cancel_account], 0, 0, {}, next_listing_id=listing_id + 1)
+    context = ExecutionContext(
+        market,
+        [cancel_account],
+        0,
+        0,
+        {},
+        next_listing_id=listing_id + 1,
+        rules=RULES,
+    )
     assert execute_intent(context, cancel_account, Cancel(listing_id))
     assert cancel_account.inventory_balance[ITEM] == 1
     assert cancel_account.fees["deposits_lost"] == 15
@@ -313,6 +380,7 @@ def test_vendor_bundle_rounds_up_and_vendor_arb_sells_one_step_later():
         None,
         1_000,
         wind_down_hours=0,
+        rules=RULES,
     )
     account = result.accounts["vendor_arb"]
     assert account.cash_balance == 1_150
@@ -556,11 +624,20 @@ def test_fractional_prices_and_summary_statistics_fail_loudly():
     fractional = {ITEM: [book(0, [("a", 10, 1)], sweep_id=1), book(900, [("a", 10, 1)], sweep_id=2)]}
     fractional[ITEM][0].groups[0] = Group("a", Fraction(21, 2), 1, 100_000)
     with pytest.raises(ValueError, match="not integral"):
-        Market(fractional, {}, facts(), ())
+        Market(fractional, {}, facts(), (), rules=RULES)
 
     summary = compute_metrics(two_sweeps([("a", 10, 1)]))
     with pytest.raises(ValueError, match="indexed"):
-        run_backtest(two_sweeps([("a", 10, 1)]), summary, facts(), (), [Script("x")], None, 100)
+        run_backtest(
+            two_sweeps([("a", 10, 1)]),
+            summary,
+            facts(),
+            (),
+            [Script("x")],
+            None,
+            100,
+            rules=RULES,
+        )
 
 
 def test_sweep_selection_uses_step_times_and_keeps_exclusion_counts_consistent():
@@ -698,7 +775,7 @@ def test_liquidity_aware_mark_uses_purchase_net_and_vendor_for_excess():
             }
         ]
     }
-    market = Market(books, statistics, facts(sell=10), ())
+    market = Market(books, statistics, facts(sell=10), (), rules=RULES)
     market.set_step(0, 0, {(ITEM, "cheap"): 15})
     account = Account("x", frozenset(), 0, 0)
     account.add_inventory(ITEM, 8)
@@ -716,10 +793,10 @@ def test_craft_time_truncates_and_then_rejects_when_no_time_fits():
         reagent: ItemFacts(reagent, 0, 1, 1, 20, 0),
         output: ItemFacts(output, 0, None, None, 20, 0),
     }
-    market = Market(books, {}, recipe_facts, recipes)
+    market = Market(books, {}, recipe_facts, recipes, rules=RULES)
     market.set_step(0, 0, {})
     account = Account("x", frozenset({"alchemy"}), 10_000, 10_000)
-    context = ExecutionContext(market, [account], 0, 0, {})
+    context = ExecutionContext(market, [account], 0, 0, {}, rules=RULES)
     assert execute_intent(context, account, VendorBuy(reagent, TIME_BUDGET))
     assert execute_intent(context, account, Craft(22, TIME_BUDGET))
     assert not execute_intent(context, account, Craft(22, 1))
@@ -737,12 +814,19 @@ def test_craft_rejects_wrong_profession_and_insufficient_reagent():
         reagent: ItemFacts(reagent, 0, None, None, 20, 0),
         output: ItemFacts(output, 0, None, None, 20, 0),
     }
-    market = Market(two_sweeps([("a", 10, 1)]), {}, recipe_facts, recipes)
+    market = Market(two_sweeps([("a", 10, 1)]), {}, recipe_facts, recipes, rules=RULES)
     market.set_step(0, 0, {})
     wrong_profession = Account("wrong", frozenset(), 100, 100)
     wrong_profession.add_inventory(reagent, 2)
     missing_reagent = Account("missing", frozenset({"alchemy"}), 100, 100)
-    context = ExecutionContext(market, [wrong_profession, missing_reagent], 0, 0, {})
+    context = ExecutionContext(
+        market,
+        [wrong_profession, missing_reagent],
+        0,
+        0,
+        {},
+        rules=RULES,
+    )
     assert not execute_intent(context, wrong_profession, Craft(22, 1))
     assert wrong_profession.rejections["profession"] == 1
     assert not execute_intent(context, missing_reagent, Craft(22, 1))
@@ -785,10 +869,10 @@ def test_wind_down_rejects_acquisitions_but_allows_vendor_sell_and_reports_check
 
 def test_wind_down_rejection_does_not_consume_time_budget():
     books = two_sweeps([("a", 10, 1)])
-    market = Market(books, {}, facts(bundle_size=1, bundle_price=1), ())
+    market = Market(books, {}, facts(bundle_size=1, bundle_price=1), (), rules=RULES)
     market.set_step(0, 0, {})
     account = Account("x", frozenset(), 100, 100)
-    context = ExecutionContext(market, [account], 0, 0, {}, wind_down=True)
+    context = ExecutionContext(market, [account], 0, 0, {}, wind_down=True, rules=RULES)
     assert not execute_intent(context, account, VendorBuy(ITEM, 1))
     assert context.time_used == 0
     assert context.clicks_used == 0

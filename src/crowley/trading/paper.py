@@ -15,6 +15,9 @@ from typing import Any
 import psycopg
 from psycopg.types.json import Jsonb
 
+from crowley.core.auction_rules import rules_for_house
+from crowley.core.house import House
+
 from .api import CraftingCapabilities
 from .data import load_client_data, load_commodity_books, precompute_statistics
 from .engine import BacktestResult, run_backtest
@@ -27,6 +30,27 @@ DEFAULT_STRATEGIES = (
     "dip_reversion",
     "vendor_arb",
 )
+
+PAPER_RUN_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("id", "pr.id"),
+    ("name", "pr.name"),
+    ("house_id", "pr.house_id"),
+    ("house", "h.key"),
+    ("client_build", "pr.client_build"),
+    ("start_t", "pr.start_t"),
+    ("capital_copper", "pr.capital_copper"),
+    ("strategies", "pr.strategies"),
+    ("weights", "pr.weights"),
+    ("demand_share", "pr.demand_share"),
+    ("engine_digest", "pr.engine_digest"),
+    ("capabilities", "pr.capabilities"),
+    ("capabilities_hash", "pr.capabilities_hash"),
+    ("region", "h.region"),
+    ("ruleset", "h.ruleset"),
+    ("faction", "h.faction"),
+)
+PAPER_RUN_COLUMN_INDEX = {name: index for index, (name, _expression) in enumerate(PAPER_RUN_COLUMNS)}
+PAPER_RUN_SELECT = ", ".join(f"{expression} AS {name}" for name, expression in PAPER_RUN_COLUMNS)
 
 
 class PaperError(RuntimeError):
@@ -67,6 +91,10 @@ def _full_build(row: Any) -> str:
     return f"{_row(row, 'client_version', 0)}.{_row(row, 'client_build', 1)}"
 
 
+def _paper_run_value(row: Any, column: str) -> Any:
+    return _row(row, column, PAPER_RUN_COLUMN_INDEX[column])
+
+
 def _build_rows(conn: Any, house_id: int) -> list[Any]:
     return conn.execute(
         """
@@ -89,8 +117,18 @@ def _source_digest() -> str:
     """Hash every Python source file that can affect a trading replay."""
 
     source_root = Path(__file__).resolve().parents[2]
-    directories = (source_root / "crowley" / "trading", source_root / "crowley" / "analysis")
-    paths = sorted(path for directory in directories for path in directory.rglob("*.py") if path.is_file())
+    directories = (
+        source_root / "crowley" / "trading",
+        source_root / "crowley" / "analysis",
+    )
+    paths = [path for directory in directories for path in directory.rglob("*.py") if path.is_file()]
+    paths.extend(
+        (
+            source_root / "crowley" / "core" / "auction_rules.py",
+            source_root / "crowley" / "core" / "house.py",
+        )
+    )
+    paths.sort()
     digest = hashlib.sha256()
     for path in paths:
         relative = path.relative_to(source_root).as_posix()
@@ -232,25 +270,32 @@ def create_run(
 
 
 def _run_from_row(row: Any) -> dict[str, Any]:
-    raw_capabilities = _row(row, "capabilities", 11)
+    raw_capabilities = _paper_run_value(row, "capabilities")
     capabilities = capabilities_from_mapping(raw_capabilities)
     if raw_capabilities != capabilities.canonical:
         raise PaperError("paper run capabilities are not in canonical form")
-    stored_capabilities_hash = str(_row(row, "capabilities_hash", 12))
+    stored_capabilities_hash = str(_paper_run_value(row, "capabilities_hash"))
     if stored_capabilities_hash != capabilities_hash(capabilities):
         raise PaperError("paper run capabilities changed or have an invalid hash")
+    house_identity = House(
+        str(_paper_run_value(row, "region")),
+        str(_paper_run_value(row, "ruleset")),
+        str(_paper_run_value(row, "faction")),
+    )
     return {
-        "id": int(_row(row, "id", 0)),
-        "name": str(_row(row, "name", 1)),
-        "house_id": int(_row(row, "house_id", 2)),
-        "house": str(_row(row, "key", 3)),
-        "client_build": str(_row(row, "client_build", 4)),
-        "start_t": int(_row(row, "start_t", 5)),
-        "capital_copper": int(_row(row, "capital_copper", 6)),
-        "strategies": list(_row(row, "strategies", 7)),
-        "weights": list(_row(row, "weights", 8)),
-        "demand_share": str(_row(row, "demand_share", 9)),
-        "engine_digest": str(_row(row, "engine_digest", 10)),
+        "id": int(_paper_run_value(row, "id")),
+        "name": str(_paper_run_value(row, "name")),
+        "house_id": int(_paper_run_value(row, "house_id")),
+        "house": str(_paper_run_value(row, "house")),
+        "house_identity": house_identity,
+        "rules": rules_for_house(house_identity),
+        "client_build": str(_paper_run_value(row, "client_build")),
+        "start_t": int(_paper_run_value(row, "start_t")),
+        "capital_copper": int(_paper_run_value(row, "capital_copper")),
+        "strategies": list(_paper_run_value(row, "strategies")),
+        "weights": list(_paper_run_value(row, "weights")),
+        "demand_share": str(_paper_run_value(row, "demand_share")),
+        "engine_digest": str(_paper_run_value(row, "engine_digest")),
         "capabilities": capabilities,
         "capabilities_hash": stored_capabilities_hash,
     }
@@ -258,10 +303,8 @@ def _run_from_row(row: Any) -> dict[str, Any]:
 
 def _load_run(conn: Any, name: str) -> dict[str, Any]:
     row = conn.execute(
-        """
-        SELECT pr.id, pr.name, pr.house_id, h.key, pr.client_build, pr.start_t,
-               pr.capital_copper, pr.strategies, pr.weights, pr.demand_share, pr.engine_digest,
-               pr.capabilities, pr.capabilities_hash
+        f"""
+        SELECT {PAPER_RUN_SELECT}
         FROM paper_runs AS pr
         JOIN houses AS h ON h.id = pr.house_id
         WHERE pr.name = %s
@@ -352,6 +395,7 @@ def _replay(db_url: str, name: str) -> tuple[dict[str, Any], BacktestResult, flo
                 wind_down_hours=0,
                 demand_share=_fraction(run["demand_share"]),
                 capabilities=run["capabilities"],
+                rules=run["rules"],
             )
             result.metadata.update(
                 {
@@ -519,10 +563,8 @@ def step_run(db_url: str, name: str) -> str:
     with psycopg.connect(database_url(db_url)) as conn:
         with conn.transaction():
             live = conn.execute(
-                """
-                SELECT pr.id, pr.name, pr.house_id, h.key, pr.client_build, pr.start_t,
-                       pr.capital_copper, pr.strategies, pr.weights, pr.demand_share,
-                       pr.engine_digest, pr.capabilities, pr.capabilities_hash
+                f"""
+                SELECT {PAPER_RUN_SELECT}
                 FROM paper_runs AS pr
                 JOIN houses AS h ON h.id = pr.house_id
                 WHERE pr.name = %s

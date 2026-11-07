@@ -13,6 +13,8 @@ from pathlib import Path
 import httpx
 import psycopg
 
+from crowley.core.auction_rules import rules_for_house
+from crowley.core.house import House
 from crowley.core.queue import QueueFormatError
 
 from .api import CraftingCapabilities
@@ -376,6 +378,7 @@ def main(argv: list[str] | None = None) -> int:
             wind_down_hours=args.wind_down_hours,
             demand_share=args.demand_share,
             capabilities=capabilities,
+            rules=rules_for_house(House.parse(args.house)),
         )
         result.metadata.update(
             {

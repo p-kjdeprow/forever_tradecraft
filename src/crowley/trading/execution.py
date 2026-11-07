@@ -9,9 +9,10 @@ from fractions import Fraction
 from typing import Any
 
 from crowley.analysis.books import Group, Interval
+from crowley.core.auction_rules import AuctionHouseRules
 
 from .accounts import Account, LedgerEvent, Listing, Mail
-from .api import AH_CUT, DURATIONS_HOURS, Buy, Cancel, Craft, Intent, Post, VendorBuy, VendorSell
+from .api import Buy, Cancel, Craft, Intent, Post, VendorBuy, VendorSell
 from .market import Market
 from .requirements import recipe_gate
 
@@ -30,7 +31,6 @@ VENDOR_SELL_CLICKS_PER_STACK = 1
 VENDOR_BUY_CLICKS = 2
 CRAFT_CLICKS = 2
 CRAFT_SECONDS = 3
-DEPOSIT_RATE = Fraction(15, 100)
 
 
 @dataclass
@@ -39,12 +39,17 @@ class ExecutionContext:
     accounts: Sequence[Account]
     t: float
     sweep_index: int
+    rules: AuctionHouseRules = field(kw_only=True)
     purchased: dict[tuple[int, Any], int] = field(default_factory=dict)
     clicks_used: int = 0
     next_listing_id: int = 1
     time_used: int = 0
     wind_down: bool = False
     demand_share: Fraction = Fraction(1)
+
+    def __post_init__(self) -> None:
+        if self.rules != self.market.rules:
+            raise ValueError("execution rules do not match market rules")
 
     def account_index(self, account: Account) -> int:
         for index, candidate in enumerate(self.accounts):
@@ -65,12 +70,15 @@ class ExecutionContext:
         return True
 
 
-def deposit(sell_price: int, quantity: int, duration_hours: int) -> int:
-    """The conservative D1 auction deposit model."""
+def deposit(
+    sell_price: int,
+    quantity: int,
+    duration_hours: int,
+    rules: AuctionHouseRules,
+) -> int:
+    """Return the house-specific deposit for a listing."""
 
-    if duration_hours not in DURATIONS_HOURS:
-        raise ValueError(f"unsupported duration: {duration_hours}")
-    return math.ceil(Fraction(sell_price * quantity) * DEPOSIT_RATE * duration_hours / 12)
+    return rules.deposit_policy.calculate(sell_price, quantity, duration_hours)
 
 
 def _interval_for(market: Market, item_id: int, index: int) -> Interval | None:
@@ -224,7 +232,7 @@ def settle_fills(context: ExecutionContext) -> None:
             listing.quantity -= fill
             filled_before += fill
             gross = listing.unit_price * fill
-            proceeds = math.floor(Fraction(gross) * (1 - AH_CUT))
+            proceeds = math.floor(Fraction(gross) * (1 - context.rules.seller_cut))
             ah_fee = gross - proceeds
             cumulative_sold = listing.original_quantity - listing.quantity
             refund = _refund_for(listing, cumulative_sold)
@@ -344,7 +352,7 @@ def _execute_post(context: ExecutionContext, account: Account, intent: Post) -> 
     if intent.unit_price < 1:
         context.reject(account, "invalid_price", intent)
         return False
-    if intent.duration_hours not in DURATIONS_HOURS:
+    if intent.duration_hours not in context.rules.deposit_policy.supported_durations_hours:
         context.reject(account, "invalid_duration", intent)
         return False
     fact = context.market.facts(intent.item_id)
@@ -603,13 +611,11 @@ def execute_intent(context: ExecutionContext, account: Account, intent: Intent) 
 
 
 __all__ = [
-    "AH_CUT",
     "BUY_CLICKS",
     "CANCEL_CLICKS",
     "CLICK_BUDGET",
     "CRAFT_CLICKS",
     "CRAFT_SECONDS",
-    "DEPOSIT_RATE",
     "ExecutionContext",
     "MAIL_DELAY_SECONDS",
     "POST_CLICKS",

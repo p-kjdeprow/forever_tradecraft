@@ -8,10 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .auction_rules import rules_for_house
+
 REGIONS = frozenset({"us", "eu", "kr", "tw", "cn", "beta"})
 RULESETS = frozenset({"normal", "pvp", "rp", "hardcore"})
-# Cut taken from the seller on a successful sale.
-AH_CUT = {"alliance": 0.05, "horde": 0.05, "neutral": 0.15}
+FACTIONS = frozenset({"alliance", "horde", "neutral"})
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class House:
             raise ValueError(f"unknown region {self.region!r}")
         if self.ruleset not in RULESETS:
             raise ValueError(f"unknown ruleset {self.ruleset!r}")
-        if self.faction not in AH_CUT:
+        if self.faction not in FACTIONS:
             raise ValueError(f"unknown faction {self.faction!r}")
 
     @classmethod
@@ -39,7 +40,9 @@ class House:
 
     @property
     def ah_cut(self) -> float:
-        return AH_CUT[self.faction]
+        """Compatibility view of the seller cut as a float."""
+
+        return float(rules_for_house(self).seller_cut)
 
     def __str__(self) -> str:
         return self.key

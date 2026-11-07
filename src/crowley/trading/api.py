@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Protocol
 
+from crowley.core.auction_rules import AuctionHouseRules
+
 COPPER_PER_GOLD = 10_000
-AH_CUT = Fraction(5, 100)
-DURATIONS_HOURS = (12, 24, 48)
 
 
 # -- market view ----------------------------------------------------------------------
@@ -154,6 +154,7 @@ class MarketView(Protocol):
 
     t: int
     sweep_index: int
+    rules: AuctionHouseRules
 
     def items(self) -> Mapping[int, ItemSnapshot]:
         """Commodities with an observed full or bounded book at this sweep."""

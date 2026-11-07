@@ -7,12 +7,15 @@ import uuid
 from datetime import UTC, datetime
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 
 import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
 from crowley.analysis.books import Book, Group
+from crowley.core.auction_rules import rules_for_house
+from crowley.core.house import House
 from crowley.trading import __main__ as trading_cli
 from crowley.trading import paper
 from crowley.trading.api import Buy, Craft, CraftingCapabilities, ItemFacts, Recipe, VendorBuy
@@ -22,6 +25,7 @@ from crowley.trading.requirements import capabilities_hash
 from crowley.trading.strategies import build
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
+RULES = rules_for_house(House("us", "normal", "alliance"))
 
 
 def test_paper_defaults_use_the_provisional_measured_four_strategy_order(monkeypatch, capsys):
@@ -119,6 +123,65 @@ def test_create_run_default_insert_has_canonical_four_strategy_config(monkeypatc
     assert build(names[3]).professions == frozenset()
 
 
+@pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
+def test_paper_step_reload_uses_the_complete_paper_run_projection(monkeypatch):
+    from crowley.server.db import migrate
+
+    suffix = uuid.uuid4().hex
+    house_key = f"paper-reload-{suffix}"
+    run_name = f"paper-reload-{suffix}"
+    capabilities = CraftingCapabilities()
+    house_id: int | None = None
+
+    with psycopg.connect(DB_URL) as conn:
+        migrate(conn)
+        with conn.transaction():
+            house_id = conn.execute(
+                """
+                INSERT INTO houses (key, region, ruleset, faction)
+                VALUES (%s, 'us', 'normal', 'alliance')
+                RETURNING id
+                """,
+                (house_key,),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO paper_runs
+                    (name, house_id, client_build, start_t, capital_copper, strategies,
+                     weights, demand_share, engine_digest, capabilities, capabilities_hash)
+                VALUES (%s, %s, '1.0.0', 0, 100, %s, %s, '1', %s, %s, %s)
+                """,
+                (
+                    run_name,
+                    house_id,
+                    Jsonb(["vendor_arb"]),
+                    Jsonb(["1"]),
+                    paper._source_digest(),
+                    Jsonb(capabilities.canonical),
+                    capabilities_hash(capabilities),
+                ),
+            )
+
+    try:
+        with psycopg.connect(DB_URL) as conn:
+            run = paper._load_run(conn, run_name)
+        monkeypatch.setattr(
+            paper,
+            "_replay",
+            lambda *_args: (run, SimpleNamespace(step_log=[], accounts={}), 0.0),
+        )
+
+        assert "steps_added=0 latest_t=none" in paper.step_run(DB_URL, run_name)
+        assert run["house_identity"] == House("us", "normal", "alliance")
+        assert run["rules"].seller_cut == Fraction(1, 20)
+    finally:
+        with psycopg.connect(DB_URL) as conn:
+            with conn.transaction():
+                conn.execute("DELETE FROM paper_runs WHERE name = %s", (run_name,))
+                if house_id is not None:
+                    conn.execute("DELETE FROM houses WHERE id = %s", (house_id,))
+
+
 class Script:
     name = "paper_test"
     professions = frozenset({"alchemy"})
@@ -149,6 +212,7 @@ def test_step_log_records_execution_effects_and_rejections():
         None,
         100,
         wind_down_hours=0,
+        rules=RULES,
     )
 
     decisions = result.step_log[0]["strategies"]["paper_test"]
@@ -177,6 +241,7 @@ def test_step_log_records_actual_craft_times():
         None,
         1_000,
         wind_down_hours=0,
+        rules=RULES,
     )
 
     decisions = result.step_log[0]["strategies"]["paper_test"]
@@ -299,10 +364,10 @@ def test_paper_step_replays_the_old_latest_step_when_a_sweep_arrives(monkeypatch
             house_id = conn.execute(
                 """
                 INSERT INTO houses (key, region, ruleset, faction)
-                VALUES (%s, 'test', 'normal', %s)
+                VALUES (%s, 'us', 'normal', 'alliance')
                 RETURNING id
                 """,
-                (house_key, suffix),
+                (house_key,),
             ).fetchone()[0]
             conn.execute(
                 """

@@ -96,10 +96,10 @@ class SnipeFlipStrategy:
         return plans
 
     def _buy_limit(self, plan: _Plan, market: MarketView) -> tuple[int, Fraction] | None:
-        if not clears_vendor_floor(plan.target, plan.facts):
+        if not clears_vendor_floor(market.rules, plan.target, plan.facts):
             return None
         deposit = deposit_per_unit(market, plan.item_id, 24)
-        net = net_proceeds_per_unit(plan.target, deposit)
+        net = net_proceeds_per_unit(market.rules, plan.target, deposit)
         margin_limit = floor_fraction(net / (1 + as_fraction(self.params["min_margin"])))
         effective_limit = min(plan.buy_limit, margin_limit)
         if effective_limit <= 0 or not any(
@@ -124,11 +124,13 @@ class SnipeFlipStrategy:
             quantity = item_inventory(inventory, item_id)
             if quantity <= 0:
                 continue
-            if not clears_vendor_floor(plan.target, plan.facts):
+            if not clears_vendor_floor(market.rules, plan.target, plan.facts):
                 vendor_exits.append((item_id, quantity))
                 continue
             deposit = market.deposit(item_id, quantity, 24)
-            proceeds = net_proceeds_per_unit(plan.target, Fraction(deposit) / quantity) * quantity
+            proceeds = (
+                net_proceeds_per_unit(market.rules, plan.target, Fraction(deposit) / quantity) * quantity
+            )
             post_candidates.append((proceeds, item_id, quantity, deposit))
 
         for item_id, quantity in sorted(vendor_exits):
@@ -161,7 +163,7 @@ class SnipeFlipStrategy:
             )
             if age < reprice_age or age < 0 or not overpriced:
                 continue
-            if not clears_vendor_floor(plan.target, plan.facts):
+            if not clears_vendor_floor(market.rules, plan.target, plan.facts):
                 continue
             repost_deposit = market.deposit(listing.item_id, listing.quantity_remaining, 24)
             if repost_deposit <= projected_cash:

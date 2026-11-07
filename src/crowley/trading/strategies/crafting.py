@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from fractions import Fraction
 
 from crowley.trading.api import (
-    AH_CUT,
     AccountView,
     Buy,
     Cancel,
@@ -131,8 +130,8 @@ class CraftingStrategy:
         duration = self.params["listing_duration_hours"]
         if isinstance(duration, bool) or not isinstance(duration, int):
             raise TypeError("listing_duration_hours must be an integer")
-        if duration not in (12, 24, 48):
-            raise ValueError("listing_duration_hours must be 12, 24, or 48")
+        if duration <= 0:
+            raise ValueError("listing_duration_hours must be positive")
         horizon = self.params["post_horizon_hours"]
         if horizon is not None:
             horizon = _strict_fraction(horizon, "post_horizon_hours")
@@ -212,7 +211,7 @@ class CraftingStrategy:
             if not (
                 target < listing.unit_price
                 and Fraction(target) <= Fraction(listing.unit_price) * (1 - self._reprice_gap)
-                and clears_vendor_floor(target, facts)
+                and clears_vendor_floor(market.rules, target, facts)
             ):
                 continue
             replacement_deposit = market.deposit(
@@ -221,7 +220,8 @@ class CraftingStrategy:
                 self._listing_duration_hours,
             )
             net_after_deposit = (
-                Fraction(target * listing.quantity_remaining) * (1 - AH_CUT) - replacement_deposit
+                Fraction(target * listing.quantity_remaining) * (1 - market.rules.seller_cut)
+                - replacement_deposit
             )
             if (
                 replacement_deposit > projected_cash
@@ -339,7 +339,7 @@ class CraftingStrategy:
                     floor_ratio=self.params["floor_ratio"],
                     cap_ratio=self.params["cap_ratio"],
                 )
-                value += quantity * times * target * (1 - AH_CUT) - market.deposit(
+                value += quantity * times * target * (1 - market.rules.seller_cut) - market.deposit(
                     item_id, quantity * times, self._listing_duration_hours
                 )
             cost = sum((source.full_cost for source in sources), Fraction(0))
@@ -423,6 +423,11 @@ class CraftingStrategy:
         return purchases
 
     def decide(self, market: MarketView, account: AccountView) -> Sequence[Intent]:
+        if self._listing_duration_hours not in market.rules.deposit_policy.supported_durations_hours:
+            raise ValueError(
+                f"listing_duration_hours {self._listing_duration_hours} is not supported by "
+                f"auction-house rules {market.rules.version}"
+            )
         recipes = {
             recipe.spell_id: recipe for recipe in sorted(market.recipes(), key=lambda entry: entry.spell_id)
         }
@@ -481,7 +486,7 @@ class CraftingStrategy:
                 floor_ratio=self.params["floor_ratio"],
                 cap_ratio=self.params["cap_ratio"],
             )
-            if not clears_vendor_floor(target, facts):
+            if not clears_vendor_floor(market.rules, target, facts):
                 vendor_exits.append((item_id, quantity))
                 continue
             post_limit = _post_horizon_limit(
@@ -495,7 +500,7 @@ class CraftingStrategy:
             if quantity <= 0:
                 continue
             deposit = market.deposit(item_id, quantity, self._listing_duration_hours)
-            proceeds = Fraction(quantity) * target * (1 - AH_CUT) - deposit
+            proceeds = Fraction(quantity) * target * (1 - market.rules.seller_cut) - deposit
             post_exits.append((proceeds, item_id, quantity, deposit))
 
         for item_id, quantity in sorted(vendor_exits):

@@ -1,0 +1,6 @@
+{
+  "binary": "gnome-screenshot",
+  "build": {
+    "private_binary_sha256": "cb938cab1bd99dc088d05f6f55c8a0443401320755e2037633e7f9ac6dbe2396"
+  }
+}

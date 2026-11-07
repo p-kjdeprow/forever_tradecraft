@@ -1,0 +1,1 @@
+"""Pure Crowley domain contracts."""

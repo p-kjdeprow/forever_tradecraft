@@ -1,1 +1,1 @@
-""" """
+"""Platform adapters for Crowley."""

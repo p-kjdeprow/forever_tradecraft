@@ -35,6 +35,7 @@ from crowley.session.journal import DEFAULT_STATE, Journal
 from crowley.session.model import ModelObservation
 from crowley.session.route_walk import KeyEvent, Pose, Route, RouteFile, simulate
 from crowley.session.startup import StartupEnvironment, mint_runtime_evidence
+from tests.support.companion_state import write_companion_state
 
 from .test_session_runtime import (
     LifecycleBackend,
@@ -944,7 +945,7 @@ def _make_case(tmp_path: Path, *, armed: bool, max_messages: int):
     # rather than allowing the public reconciliation path to treat absence as
     # malformed state.
     assert config.companion_state is not None
-    config.companion_state.write_text('{"uploaded": {}, "probes": []}', encoding="utf-8")
+    write_companion_state(config.companion_state)
     value = copy.deepcopy(DEFAULT_STATE)
     value.update(
         {

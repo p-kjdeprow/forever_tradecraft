@@ -42,6 +42,7 @@ from crowley.session.guardian import GuardianError
 from crowley.session.journal import DEFAULT_STATE, Journal
 from crowley.session.model import LunaAdapter, ModelError
 from crowley.session.protocol import decode_frame, encode_frame, pack_cells
+from tests.support.companion_state import write_companion_state
 
 
 def _executor_none() -> dict:
@@ -305,7 +306,7 @@ def _write_data(
 
 
 def _write_companion(path: Path, uid: str) -> None:
-    path.write_text(json.dumps({"uploaded": {uid: 1_760_000_001}, "probes": []}), encoding="utf-8")
+    write_companion_state(path, uploaded={uid: 1_760_000_001})
 
 
 def _write_complete_saved_scan(path: Path, uid: str, started_at: int) -> None:

@@ -56,6 +56,7 @@ from crowley.session.startup import (
     TakeoverDrillRecord,
     mint_runtime_evidence,
 )
+from tests.support.companion_state import write_companion_state
 from tests.test_session_input_tool import fixture_input_tool
 
 from .wow_harness import Auction, WowClient
@@ -618,8 +619,9 @@ class LifecycleBackend(X11Backend):
                 "persistence": "unknown",
             }
             _saved_fixture(self.root / "Crowley.lua", self.uid, self.current["scanner"]["startedAt"])
-            companion = {"uploaded": {self.uid: self.current["wallTime"] + 3}, "probes": []}
-            (self.root / "companion.json").write_text(json.dumps(companion))
+            write_companion_state(
+                self.root / "companion.json", uploaded={self.uid: self.current["wallTime"] + 3}
+            )
             data = {
                 "generatedAt": self.current["wallTime"],
                 "ackedScans": [self.uid],
@@ -2988,7 +2990,7 @@ def test_runtime_reconcile_ready_scanner_is_idle_with_pending_saved_uid(tmp_path
     _saved_fixture(config.saved_variables, uid, 100)  # type: ignore[arg-type]
     assert config.companion_state is not None
     assert config.data_lua is not None
-    config.companion_state.write_text(json.dumps({"uploaded": {uid: 103}, "probes": []}))
+    write_companion_state(config.companion_state, uploaded={uid: 103})
     config.data_lua.write_text(
         render_assignment(
             "CROWLEY_DATA",
@@ -3050,7 +3052,7 @@ def test_runtime_uncertain_no_agent_never_recovers_login_or_input(tmp_path: Path
             _saved_fixture(config.saved_variables, uid, 100)  # type: ignore[arg-type]
             assert config.companion_state is not None
             assert config.data_lua is not None
-            config.companion_state.write_text(json.dumps({"uploaded": {uid: 103}, "probes": []}))
+            write_companion_state(config.companion_state, uploaded={uid: 103})
             config.data_lua.write_text(
                 render_assignment(
                     "CROWLEY_DATA",

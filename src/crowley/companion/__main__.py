@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 
 from .config import CompanionSettings, config_path, state_path
+from .sync import State, state_file_lock
 
 REPO_ADDON_DIR = Path(__file__).resolve().parents[3] / "addon"
 
@@ -18,7 +19,10 @@ def cmd_doctor(_: argparse.Namespace) -> None:
     print(f"config file: {config_path()} ({'exists' if config_path().exists() else 'missing'})")
     print(f"state file:  {state_path()}")
     settings = CompanionSettings()
+    with state_file_lock(state_path()):
+        state = State.load(state_path())
     print(f"wow_dir: {settings.wow_path} ({'ok' if settings.wow_path.is_dir() else 'MISSING'})")
+    print(f"wtf_account: {settings.wtf_account}")
     for name in ("Crowley", "Crowley_Data"):
         target = settings.addons_dir / name
         print(f"addon {name}: {'installed' if target.exists() else 'not installed'}")
@@ -26,6 +30,12 @@ def cmd_doctor(_: argparse.Namespace) -> None:
     print(f"SavedVariables files: {len(files) or 'none yet (log in and /reload once)'}")
     for path in files:
         print(f"  {path}")
+    print(f"rejections: {len(state.rejections)}")
+    for rejection in sorted(state.rejections.values(), key=lambda item: (item.last_seen, item.key.record_id)):
+        print(
+            f"  {rejection.key.record_kind}/{rejection.key.record_id}: "
+            f"HTTP {rejection.status} {rejection.error_code}: {rejection.error_message}"
+        )
 
     try:
         response = httpx.get(f"{settings.server_url.rstrip('/')}/healthz", timeout=5)
@@ -66,6 +76,13 @@ def cmd_once(_: argparse.Namespace) -> None:
     Companion(CompanionSettings()).once()
 
 
+def cmd_retry_rejected(args: argparse.Namespace) -> None:
+    from .sync import Companion
+
+    count = Companion(CompanionSettings()).retry_rejected(args.id)
+    print(f"retrying {count} rejected record(s)")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="crowley-companion")
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -73,6 +90,9 @@ def main() -> None:
     sub.add_parser("run", help="watch SavedVariables and sync continuously").set_defaults(fn=cmd_run)
     sub.add_parser("once", help="upload pending scans and write Data.lua once").set_defaults(fn=cmd_once)
     sub.add_parser("doctor", help="check paths, config and server").set_defaults(fn=cmd_doctor)
+    retry = sub.add_parser("retry-rejected", help="retry permanently rejected records")
+    retry.add_argument("--id", help="retry only the matching record id")
+    retry.set_defaults(fn=cmd_retry_rejected)
     sub.add_parser("install-addon", help="install the addons into the game folder").set_defaults(
         fn=cmd_install_addon
     )

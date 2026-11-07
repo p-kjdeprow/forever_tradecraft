@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import shutil
-from pathlib import Path
 
 import httpx
 
 from .config import CompanionSettings, config_path, state_path
 from .sync import State, state_file_lock
-
-REPO_ADDON_DIR = Path(__file__).resolve().parents[3] / "addon"
 
 
 def cmd_doctor(_: argparse.Namespace) -> None:
@@ -44,26 +40,6 @@ def cmd_doctor(_: argparse.Namespace) -> None:
         print(f"server {settings.server_url}: unreachable ({exc})")
 
 
-def cmd_install_addon(_: argparse.Namespace) -> None:
-    settings = CompanionSettings()
-    addons = settings.addons_dir
-
-    # Crowley is symlinked so repo edits show up after /reload. Crowley_Data is a real folder
-    # because the companion writes into it and that must not dirty the repo.
-    target = addons / "Crowley"
-    if target.is_symlink():
-        target.unlink()
-    target.symlink_to(REPO_ADDON_DIR / "Crowley", target_is_directory=True)
-    print(f"linked {target} -> {REPO_ADDON_DIR / 'Crowley'}")
-
-    data_target = addons / "Crowley_Data"
-    data_target.mkdir(exist_ok=True)
-    for source in (REPO_ADDON_DIR / "Crowley_Data").iterdir():
-        if source.suffix == ".toc" or not (data_target / source.name).exists():
-            shutil.copy2(source, data_target / source.name)
-    print(f"installed {data_target}")
-
-
 def cmd_run(_: argparse.Namespace) -> None:
     from .sync import Companion
 
@@ -93,10 +69,6 @@ def main() -> None:
     retry = sub.add_parser("retry-rejected", help="retry permanently rejected records")
     retry.add_argument("--id", help="retry only the matching record id")
     retry.set_defaults(fn=cmd_retry_rejected)
-    sub.add_parser("install-addon", help="install the addons into the game folder").set_defaults(
-        fn=cmd_install_addon
-    )
-
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,

@@ -13,7 +13,7 @@ addon/Crowley_Data   data file the companion writes; loaded at login or /reload
 src/crowley/core     shared: SavedVariables parser, scan format, stats, Lua writer
 src/crowley/companion  watches the game folder, uploads scans, writes Crowley_Data
 src/crowley/server   FastAPI + TimescaleDB ingest and query API
-deploy/              docker compose (db + server), companion systemd unit
+deploy/              systemd, launcher and image-build templates
 ```
 
 See [docs/HANDOFF.md](docs/HANDOFF.md) for requirements, history and roadmap, and
@@ -27,29 +27,34 @@ starts targeted sweeps every 900 seconds while the AH is open, with bounded reta
 ## Quickstart (server and game on one Linux machine)
 
 ```sh
-# 1. Server + database
-cp deploy/.env.example deploy/.env      # set CROWLEY_API_TOKEN and CROWLEY_DB_PASSWORD
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d --build
+# 1. Install the package and render the target-specific configuration.
+uv tool install .
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+crowley-ops install --game-root "/path/to/World of Warcraft"
+
+# 2. Fill the rendered templates. The account directory is literal and may
+# coexist with other accounts under WTF/Account.
+$EDITOR "$XDG_CONFIG_HOME/crowley/companion.toml"
+$EDITOR "$XDG_CONFIG_HOME/crowley/session.toml"
+$EDITOR "$XDG_CONFIG_HOME/crowley/secrets.env"
+# Put CROWLEY_API_TOKEN, CROWLEY_DB_PASSWORD, CROWLEY_IMAGE_VERSION,
+# CROWLEY_DATABASE_URL, CROWLEY_BIND and CROWLEY_PAPER_RUN only in secrets.env.
+chmod 600 "$XDG_CONFIG_HOME/crowley/secrets.env"
+
+# 3. Build the server image from this checkout (or pass an explicit wheel instead).
+crowley-ops image build --source "$PWD"
+
+# 4. Server + database. Compose uses CROWLEY_DB_PASSWORD for its internal db:5432 DSN;
+# CROWLEY_DATABASE_URL remains the host-facing URL used by doctor and paper trading.
+docker compose --env-file "$XDG_CONFIG_HOME/crowley/secrets.env" \
+  -f "$(crowley-ops compose-file)" up -d
 curl localhost:8080/healthz
 
-# 2. Companion install and config
-# Replace /absolute/checkout with the absolute path of this checkout.
-uv tool install --editable /absolute/checkout
-mkdir -p ~/.config/crowley && cat > ~/.config/crowley/companion.toml <<TOML
-wow_dir    = "/home/you/.wine/drive_c/Program Files (x86)/World of Warcraft/_forever_"
-server_url = "http://127.0.0.1:8080"
-api_token  = "<CROWLEY_API_TOKEN from deploy/.env>"
-TOML
-crowley-companion install-addon  # symlinks Crowley, copies Crowley_Data
-crowley-companion doctor         # checks paths, addons and the server
-crowley-companion run            # or install deploy/crowley-companion.service
+# 5. Copy units, timers, launcher and packaged addon files, then inspect every check.
+crowley-ops doctor
 
-# The user service reads the authenticated config above and invokes the installed
-# command directly; it does not require this checkout as its working directory.
-mkdir -p ~/.config/systemd/user
-cp deploy/crowley-companion.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now crowley-companion
+# Start the installed companion only after reviewing doctor output.
+crowley-companion run
 ```
 
 In game:
@@ -75,49 +80,20 @@ confirmed sale. Confirmed own sales are recorded separately only after a full ow
 
 ## Game and server on different machines (Tailscale)
 
-1. On the server, set `CROWLEY_BIND` in `deploy/.env` to `tailscale ip -4` and restart compose with `--env-file deploy/.env`.
+1. On the server, set `CROWLEY_BIND` in `$XDG_CONFIG_HOME/crowley/secrets.env` to `tailscale ip -4` and restart Compose with that env file.
 2. On the game machine, set `server_url = "http://<server-tailnet-name>:8080"` and run the companion there.
 
-## Historical local deployment (2026-10-15)
+## Deployment notes
 
-The game, companion, API and database run on Linux host `3080servermach`; the repository is
-at `/home/dev/repos/pegasus`. WoW 1.60.1 build 70374/interface 16001 runs locally through
-Lutris/Wine. Crowley is a repo
-symlink and generated `Crowley_Data` has the 428-active-ID, 900-second, 20-level plan. The
-verified house is `beta-normal-alliance`; Moonlight/Sunshine and the fullscreen watcher are
-disabled. The companion is active. The database has six accepted sweeps, 2,568 observations
-and 5,726 captured price rows.
-
-The full native verification sweep `beta-normal-alliance-1792040351-Arthur-6643` ran from
-2026-10-15 04:59:11 to 05:07:15 UTC (484 seconds). It queried all 428 active IDs with zero
-incomplete or unqueried items: 306 full commodity observations (1,328 rows), 23 bounded
-commodity observations (460 rows), and 99 full item observations (1,101 rows). It captured
-2,889 rows across 271 row-bearing IDs and 125,395 units, all under `beta-normal-alliance`.
-Native item examples include equipment 873, recipe 2555, and containers 4238, 4240, 4241,
-4245 and 5765.
-
-A later scheduled sweep, `beta-normal-alliance-1792041251-Arthur-0169`, ran 05:14:11–05:19:36
-UTC and stored 1,599 rows. It attempted 293 items (292 successful, one active item
-interrupted when the AH closed) and left 135 unqueried when the AH closed. This later scan is
-newer by scan time; the preceding 428-item run is the full verification result. After the
-second reload, the addon reported two uploaded scans cleared and loaded the 428-active-ID
-plan. A further normal reload persisted the cleared queue, independently verified empty on
-disk. Arthur is parked at Buckler with the AH closed. The earlier
-malformed 961-row sweep remains intact in private quarantine and was never ingested. The earlier three
-rows for item 2555 came from a cold level-zero SellSearch query and are not proof of current
-item dispatch. The class-aware correction is now verified natively for recipes, containers
-and equipment. Sol approved it; 118 addon/core tests and the normal suite (149 passed, 15 DB
-tests skipped) passed. The earlier isolated full database run preceded those later addon
-checks. See the [live validation record](.archive/live-client/real-validation.md) and
-[handoff](docs/HANDOFF.md) for chronology, remaining limits and preserved payload hashes.
-Repository guidance is in [AGENTS.md](AGENTS.md); reusable game/client workflows are in
-`.agents/skills/`.
+The installer copies units, timers and packaged addon files into user-owned destinations and
+records a sha256 manifest under the XDG state directory. It never links a production unit or
+addon to a checkout. Use `--dev-addon-from` only for an explicit development checkout, and
+use `--dry-run` to review the diff first.
 
 ## Tests
 
 ```sh
-export CARGO=/home/dev/.cache/crowley/rust-toolchain-1.85.1/toolchain/bin/cargo
-flock /home/dev/.cache/r-pg.lock uv run pytest  # bounded xdist default: 16 workers
+uv run pytest  # bounded xdist default: 16 workers
 ```
 
 Run DB coverage serially against a fresh disposable test database using the

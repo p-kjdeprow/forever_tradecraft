@@ -9,4 +9,3 @@ Unit=crowley-health.service
 
 [Install]
 WantedBy=timers.target
-

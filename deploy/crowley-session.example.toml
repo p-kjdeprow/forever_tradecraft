@@ -47,17 +47,17 @@ ack_deadline_seconds = 60
 model = "gpt-6-luna"
 cli_version = "codex-cli 0.162.1"
 # Select the provisioned pinned binary; the global CLI can update independently.
-codex_path = "/home/dev/.cache/crowley/codex/0.162.1/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+codex_path = "~/.cache/crowley/codex/codex"
 # Persistent restart intent, intervention history, and acceptance evidence.
 journal = "~/.local/state/crowley/session.json"
-socket = "/run/user/1000/crowley/session.sock"
+socket = "~/.local/run/crowley/session.sock"
 # Set these to the exact paths used by the existing companion and WoW client.
 saved_variables = "/path/to/WTF/Account/<account>/SavedVariables/Crowley.lua"
 companion_state = "~/.local/state/crowley/companion-state.json"
 data_lua = "/path/to/Wow/Interface/AddOns/Crowley_Data/Data.lua"
 # Optional reviewed native telemetry producer.  Leave both unset for stock
 # full-desktop capture; never select this binary through PATH.
-# telemetry_region_executable = "/home/dev/.cache/crowley/gnome-telemetry-region-r6/prefix/bin/gnome-screenshot"
+# telemetry_region_executable = "~/.cache/crowley/gnome-telemetry-region/gnome-screenshot"
 # telemetry_region_executable_sha256 = "cb938cab1bd99dc088d05f6f55c8a0443401320755e2037633e7f9ac6dbe2396"
 
 [native]

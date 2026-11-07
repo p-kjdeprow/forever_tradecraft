@@ -57,6 +57,12 @@ _PRIVATE_IPV4_NETWORKS = (
     ipaddress.ip_network("192" + ".168.0.0/16"),
     ipaddress.ip_network("100" + ".64.0.0/10"),
 )
+_DOCKER_DEPLOY_PATHS: Final = frozenset(
+    {
+        "deploy/docker/Dockerfile",
+        "src/crowley/ops/resources/docker-compose.yml",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +120,25 @@ def _is_machine_host(host: str) -> bool:
     return address == ipaddress.IPv6Address(":" + ":1")
 
 
+def _is_allowed_docker_loopback(path: str, host: str) -> bool:
+    """Allow container-local loopback only in the Docker deployment files.
+
+    IPv4 loopback and hostname forms in ``deploy/docker/`` refer to the
+    container itself or enforce a loopback-only host bind; the same values
+    elsewhere remain machine-specific.
+    """
+
+    if path not in _DOCKER_DEPLOY_PATHS:
+        return False
+    normalized = host.strip("[]").lower()
+    if normalized == "local" + "host":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
 def _sorted_findings(path: str, occurrences: Counter[tuple[str, str]]) -> tuple[Finding, ...]:
     return tuple(
         Finding(path=path, category=category, match=match, count=occurrences[(category, match)])
@@ -153,7 +178,10 @@ def scan_text(path: str, text: str) -> tuple[Finding, ...]:
     _add_matches(occurrences, "shebang", invalid_shebangs)
 
     url_matches = [
-        match.group(0) for match in _MACHINE_URL_RE.finditer(text) if _is_machine_host(match.group("host"))
+        match.group(0)
+        for match in _MACHINE_URL_RE.finditer(text)
+        if _is_machine_host(match.group("host"))
+        and not _is_allowed_docker_loopback(path, match.group("host"))
     ]
     _add_matches(occurrences, "machine-url", url_matches)
     return _sorted_findings(path, occurrences)
@@ -196,6 +224,8 @@ def scan_repository(root: Path) -> tuple[Finding, ...]:
     findings: list[Finding] = []
     for relative_path in _tracked_paths(root):
         file_path = root / relative_path
+        if not file_path.exists() and not file_path.is_symlink():
+            continue
         if file_path.is_symlink():
             findings.extend(scan_symlink(relative_path, file_path.readlink().as_posix()))
             continue

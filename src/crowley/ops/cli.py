@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-from crowley.ops import backup, health
+from crowley.ops import backup, doctor, health, install
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -20,11 +20,64 @@ def _parser() -> argparse.ArgumentParser:
 
     drill = sub.add_parser("drill")
     drill.add_argument("snapshot", type=Path)
+
+    install_parser = sub.add_parser("install", help="install units and the packaged addon")
+    install_parser.add_argument("--game-root", type=Path)
+    install_parser.add_argument("--dry-run", action="store_true")
+    install_parser.add_argument("--force", action="store_true")
+    install_parser.add_argument("--dev-addon-from", type=Path)
+    sub.add_parser("doctor", help="check the installed runtime")
+    sub.add_parser("compose-file", help="print the packaged Docker Compose file")
+    image = sub.add_parser("image", help="build the Crowley server image")
+    image_commands = image.add_subparsers(dest="image_command", required=True)
+    image_build = image_commands.add_parser("build", help="build from a wheel or source checkout")
+    image_input = image_build.add_mutually_exclusive_group(required=True)
+    image_input.add_argument("--wheel", type=Path)
+    image_input.add_argument("--source", type=Path)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "install":
+        try:
+            result = install.install(
+                install.InstallRequest(
+                    game_root=args.game_root,
+                    dev_addon_from=args.dev_addon_from,
+                    dry_run=args.dry_run,
+                    force=args.force,
+                )
+            )
+        except install.InstallError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(install.diff_text(result))
+        return 0
+    if args.command == "doctor":
+        report = doctor.doctor()
+        if report.ok:
+            print("doctor: OK")
+            return 0
+        for problem in report.problems:
+            print(f"doctor: {problem}", file=sys.stderr)
+        return 1
+    if args.command == "compose-file":
+        try:
+            print(install.compose_file_path())
+        except install.InstallError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        return 0
+    if args.command == "image":
+        try:
+            tag = install.build_image(wheel=args.wheel, source=args.source)
+        except install.InstallError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        print(f"image built: {tag}")
+        return 0
+
     try:
         paths = health.operation_paths()
     except health.OperationsError as exc:

@@ -1,0 +1,10 @@
+[Unit]
+Description=Hourly Crowley validated market backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/crowley-ops backup
+EnvironmentFile=%E/crowley/secrets.env
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=4500

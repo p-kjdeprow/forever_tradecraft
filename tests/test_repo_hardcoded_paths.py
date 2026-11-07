@@ -60,6 +60,16 @@ def test_repository_matches_hardcode_baseline() -> None:
     )
 
 
+def test_scan_repository_skips_tracked_file_deleted_from_worktree(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+    deleted = tmp_path / "deleted.txt"
+    deleted.write_text("/ho" + "me/example\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", "deleted.txt"], check=True)
+    deleted.unlink()
+
+    assert scan_repository(tmp_path) == ()
+
+
 @pytest.mark.parametrize(
     ("category", "text", "match"),
     [
@@ -202,6 +212,13 @@ def test_scan_text_counts_each_machine_url_occurrence() -> None:
     url = _fragmented("127.0.", "0.1:8080")
     findings = scan_text("synthetic.txt", f"{url} {url}")
     assert findings == (Finding("synthetic.txt", "machine-url", url, 2),)
+
+
+def test_scan_text_allows_loopback_only_in_docker_deploy_files() -> None:
+    url = _fragmented("http://127.0.", "0.1:8080/healthz")
+    assert scan_text("deploy/docker/Dockerfile", url) == ()
+    assert scan_text("src/crowley/ops/resources/docker-compose.yml", url) == ()
+    assert Finding("README.md", "machine-url", url, 1) in scan_text("README.md", url)
 
 
 def test_scan_text_ignores_public_urls() -> None:

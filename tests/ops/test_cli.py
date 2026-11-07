@@ -119,6 +119,11 @@ def test_checkout_only_repo_option_is_rejected(capsys: pytest.CaptureFixture[str
     assert "unrecognized arguments" in capsys.readouterr().err
 
 
+def test_compose_file_prints_the_packaged_resource(capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["compose-file"]) == 0
+    assert Path(capsys.readouterr().out.strip()).name == "docker-compose.yml"
+
+
 def test_expected_snapshot_failure_is_reported_without_stdout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

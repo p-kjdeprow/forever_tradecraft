@@ -4,15 +4,15 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/crowley-session --config %h/.config/crowley/session.toml daemon
-Restart=on-failure
-RestartSec=5s
+# %t is XDG_RUNTIME_DIR. The installed command resolves its user config.
+ExecStart=%h/.local/bin/crowley-session --config %E/crowley/session.toml daemon
+EnvironmentFile=%E/crowley/secrets.env
 Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_RUNTIME_DIR=%t
-# Carry the authenticated user-session authority into the user unit without
-# copying a display-manager path into the repository or configuration.
 PassEnvironment=XAUTHORITY
+Restart=on-failure
+RestartSec=5s
 
 [Install]
 WantedBy=default.target

@@ -698,7 +698,7 @@ def test_wheel_contains_namespaced_compose_only_and_preserves_source_parity(
 ) -> None:
     repository = Path(__file__).parents[2]
     packaged = backup._compose_resource()
-    assert packaged.read_bytes() == (repository / "deploy/docker-compose.yml").read_bytes()
+    assert packaged.read_bytes() == (repository / "src/crowley/ops/resources/docker-compose.yml").read_bytes()
 
     wheel_dir = tmp_path / "wheel"
     subprocess.run(

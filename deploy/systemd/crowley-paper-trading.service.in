@@ -1,0 +1,11 @@
+[Unit]
+Description=Crowley paper trading replay
+
+[Service]
+Type=oneshot
+# The installed wrapper reads CROWLEY_PAPER_RUN and CROWLEY_DATABASE_URL.
+ExecStart=%h/.local/bin/crowley-paper-step
+EnvironmentFile=%E/crowley/secrets.env
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=14min

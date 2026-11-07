@@ -35,7 +35,7 @@ loading this change does not authorize automation to resume.
 
 ## Installation and profile
 
-Use `deploy/crowley-session.example.toml` for the measured client profile. Fill in
+Use the rendered `session.toml` for the measured client profile. Fill in
 its canonical plan hash/JSON and the existing SavedVariables, companion state and
 Data.lua paths. Keep the journal under `~/.local/state/crowley/`; it holds durable
 scan intents, acknowledgment evidence and the takeover record. Do not replace it
@@ -55,17 +55,16 @@ defines1 as gamepad-only and2 as keyboard/mouse. The controller reads this mode
 and refuses a disabled or unavailable keyboard interaction before pressing the
 chord. Keep the prior setting in the setup receipt when changing it.
 
-Build the pinned native input tool and install the editable controller:
+Install the package and render the reviewed runtime files into the XDG
+configuration directory:
 
 ```sh
-uv run python tools/build_crowley_xdotool.py
-uv tool install --editable /home/dev/repos/pegasus
-mkdir -p ~/.config/crowley ~/.config/systemd/user
-cp deploy/crowley-session.example.toml ~/.config/crowley/session.toml
-# Fill and review the profile before starting the service.
-cp deploy/crowley-session.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now crowley-session.service
+uv tool install .
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+crowley-ops install --game-root "/path/to/World of Warcraft"
+# Fill and review the rendered session.toml, companion.toml and secrets.env.
+# Keep CROWLEY_API_TOKEN, CROWLEY_DB_PASSWORD and CROWLEY_DATABASE_URL only in secrets.env.
+crowley-ops doctor
 ```
 
 The input-tool builder needs `cc`, `make`, `readelf`, `objdump`, `libx11-dev`,

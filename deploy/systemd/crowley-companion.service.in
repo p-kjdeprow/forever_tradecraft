@@ -1,0 +1,13 @@
+[Unit]
+Description=Crowley companion (WoW SavedVariables to local Crowley API)
+After=network-online.target
+
+[Service]
+# %h is the user home; %E is XDG_CONFIG_HOME.
+ExecStart=%h/.local/bin/crowley-companion run
+EnvironmentFile=%E/crowley/secrets.env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

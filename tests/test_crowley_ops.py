@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from tests.support.companion_state import write_companion_state
 from tools import crowley_ops as ops
 
 NOW = datetime(2026, 10, 19, 20, 0, tzinfo=UTC)
@@ -188,7 +189,7 @@ def _health(
     _install_last_good(state_root, backup_root, manifest=manifest)
     config = _config(tmp_path)
     companion = tmp_path / "companion.json"
-    companion.write_text("{}", encoding="utf-8")
+    write_companion_state(companion)
     config_object = SimpleNamespace(socket=tmp_path / "session.sock", companion_state=companion)
 
     def socket_fn(*_args, **_kwargs):

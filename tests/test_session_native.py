@@ -89,6 +89,7 @@ from crowley.session.input_events import (
 from crowley.session.model import CLI_VERSION
 from crowley.session.motion import MotionError, MotionFrame
 from crowley.session.protocol import ProtocolError, decode_frame, pack_cells
+from tests.support.companion_state import write_companion_state
 from tests.test_session_input_tool import fixture_input_tool
 
 from .wow_harness import WowClient
@@ -886,7 +887,7 @@ def _write_region_config(tmp_path: Path, *, target: GameTarget, telemetry: str =
     saved.parent.mkdir(parents=True)
     data.parent.mkdir(parents=True)
     saved.write_text("", encoding="utf-8")
-    companion.write_text("{}", encoding="utf-8")
+    write_companion_state(companion)
     data.write_text("", encoding="utf-8")
     socket_dir = tmp_path / "session-runtime"
     socket_dir.mkdir(mode=0o700)

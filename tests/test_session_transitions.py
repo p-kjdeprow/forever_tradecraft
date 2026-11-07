@@ -17,6 +17,7 @@ from crowley.session.cli import SessionIPC
 from crowley.session.controller import ActionKind, ControllerStatus
 from crowley.session.evidence import SweepEvidence
 from crowley.session.journal import DEFAULT_STATE, Journal, JournalError
+from tests.support.companion_state import write_companion_state
 
 
 class _Driver:
@@ -1355,7 +1356,7 @@ def test_runtime_durable_empty_scan_facts_reject_without_format2_proof(
     config.saved_variables.write_text(
         render_assignment("CrowleyDB", {"scans": {}, "sweeps": {}}, "empty scan"), encoding="utf-8"
     )
-    config.companion_state.write_text('{"uploaded": {}, "probes": []}\n', encoding="utf-8")
+    write_companion_state(config.companion_state)
     catalog = load_catalog()
     config.data_lua.write_text(
         render_assignment(

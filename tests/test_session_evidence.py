@@ -1,6 +1,5 @@
 """Durable companion/Data.lua boundaries for the repeating session."""
 
-import json
 import os
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from crowley.session.evidence import (
     read_data_acknowledged_ids,
     read_uploads,
 )
+from tests.support.companion_state import write_companion_state
 
 
 def _private_write(path: Path, data: bytes) -> None:
@@ -27,7 +27,7 @@ def _pinned_plan() -> dict:
 
 def test_companion_upload_map_and_data_lua_are_distinct_ack_surfaces(tmp_path: Path) -> None:
     companion = tmp_path / "companion-state.json"
-    _private_write(companion, b'{"uploaded":{"uid-1":1000},"probes":[]}')
+    write_companion_state(companion, uploaded={"uid-1": 1000})
     data = tmp_path / "Data.lua"
     _private_write(
         data,
@@ -66,15 +66,15 @@ def test_companion_upload_map_and_data_lua_are_distinct_ack_surfaces(tmp_path: P
     assert queues_empty(saved, companion, data, settled_uid="uid-1")
 
 
-def test_companion_legacy_ack_array_is_rejected(tmp_path: Path) -> None:
+def test_companion_legacy_state_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "companion-state.json"
-    _private_write(path, json.dumps({"acknowledged": ["uid-1"]}).encode())
+    _private_write(path, b'{"uploaded":{"uid-1":1000},"probes":[]}')
     try:
         read_uploads(path)
     except EvidenceError:
         pass
     else:
-        raise AssertionError("legacy acknowledgement arrays must not stand in for companion upload state")
+        raise AssertionError("legacy companion state must not stand in for the current versioned contract")
 
 
 def test_qualify_saved_scan_extracts_complete_native_rows_and_owned_section(tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from crowley.core import savedvars
+from crowley.core import companion_state, savedvars
 from crowley.core.game_target import packaged_game_target, target_scan_plan
 from crowley.core.scanformat import ScanFormatError, decode_json_payload, validate_v2_envelope
 from crowley.core.watchlist import load_catalog
@@ -297,29 +297,10 @@ def read_uploads(path: str | Path) -> dict[str, int]:
     """
 
     try:
-        value = json.loads(stable_file(path).decode("utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError, JournalError) as exc:
+        value = companion_state.parse_bytes(stable_file(path))
+    except (OSError, UnicodeError, companion_state.CompanionStateError, JournalError) as exc:
         raise EvidenceError(f"acknowledgement file is malformed: {exc}") from exc
-    if not isinstance(value, dict):
-        raise EvidenceError("acknowledgement state must be an object")
-    if set(value) != {"uploaded", "probes"}:
-        raise EvidenceError("companion state fields differ")
-    uploaded = value.get("uploaded")
-    probes = value.get("probes")
-    if not isinstance(uploaded, dict) or not isinstance(probes, list):
-        raise EvidenceError("companion state types are invalid")
-    if any(
-        not isinstance(uid, str)
-        or not uid
-        or not isinstance(timestamp, int)
-        or isinstance(timestamp, bool)
-        or timestamp <= 0
-        for uid, timestamp in uploaded.items()
-    ):
-        raise EvidenceError("companion upload map is invalid")
-    if any(not isinstance(item, int) or isinstance(item, bool) or item <= 0 for item in probes):
-        raise EvidenceError("companion probe list is invalid")
-    return {uid: timestamp for uid, timestamp in uploaded.items()}
+    return dict(value.uploaded)
 
 
 def read_acknowledged_ids(path: str | Path) -> tuple[str, ...]:

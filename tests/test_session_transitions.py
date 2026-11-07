@@ -1353,7 +1353,7 @@ def test_runtime_durable_empty_scan_facts_reject_without_format2_proof(
     assert config.companion_state is not None
     assert config.data_lua is not None
     config.saved_variables.write_text(
-        render_assignment("CrowleyDB", {"scans": {}, "sweeps": {}}, "empty scan"), encoding="utf-8"
+        render_assignment("CrowleyDB", {"scans": {}}, "empty scan"), encoding="utf-8"
     )
     config.companion_state.write_text('{"uploaded": {}, "probes": []}\n', encoding="utf-8")
     catalog = load_catalog()

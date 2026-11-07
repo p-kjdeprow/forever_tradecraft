@@ -4,7 +4,6 @@
 CROWLEY_DATA = {
   ["generatedAt"] = 0,
   ["ackedScans"] = {},
-  ["ackedSweeps"] = {},
   ["scanPlan"] = false,
   ["shoppingLists"] = {},
 }

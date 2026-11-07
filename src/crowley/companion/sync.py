@@ -226,6 +226,7 @@ class Companion:
         response = self.client.post("/v1/addon-data", json={"scan_ids": scan_ids})
         response.raise_for_status()
         data = response.json()
+        data["ackedScans"] = sorted(data["ackedScans"], key=lambda item: item.encode())
         text = render_assignment(
             "CROWLEY_DATA",
             data,

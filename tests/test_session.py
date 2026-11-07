@@ -1044,7 +1044,6 @@ def _max_executor_client(*, varied_identities: bool, pending_length: int) -> Wow
             pending_id: {"id": pending_id, "finishedAt": 1_759_990_000 + index}
             for index, pending_id in enumerate(pending_ids)
         },
-        "sweeps": {},
     }
     client = WowClient(queue=queue, initial_savedvars=saved)
     client.set_canonical_plan()
@@ -1129,7 +1128,6 @@ def test_real_lua_canonical_executor_frame_carries_native_scanner_uids() -> None
             pending_id: {"id": pending_id, "finishedAt": started_at + index}
             for index, pending_id in enumerate(pending_ids)
         },
-        "sweeps": {},
     }
     client = WowClient(
         faction="Alliance",

@@ -338,6 +338,108 @@ def test_harness_serializes_empty_lua_tables_as_arrays():
     assert wire == {"empty": [], "owners": {"Seller": True}}
 
 
+def test_addon_lifecycle_registry_runs_registered_modules_in_dependency_order_after_restore():
+    client = WowClient()
+    client.lua.globals().testNs = client.ns
+    client.lua.execute(
+        "_registry_order = {}; _seen_saved = nil; "
+        "testNs.RegisterModule('OrderB', {requires = {}, onLoad = function() "
+        "table.insert(_registry_order, 'B') end}); "
+        "testNs.RegisterModule('OrderA', {requires = {'OrderB'}, onLoad = function() "
+        "table.insert(_registry_order, 'A'); _seen_saved = CrowleyDB.lifecycleMarker end})"
+    )
+    client.inject_saved_variables({"lifecycleMarker": "restored"})
+    client.login()
+
+    assert list(client.lua.globals()._registry_order.values()) == ["B", "A"]
+    assert client.lua.globals()._seen_saved == "restored"
+
+
+def test_addon_lifecycle_registry_rejects_unknown_dependency_and_cycle():
+    unknown = WowClient()
+    unknown.lua.globals().testNs = unknown.ns
+    unknown.lua.execute("testNs.RegisterModule('Broken', {requires = {'Missing'}, onLoad = function() end})")
+    with pytest.raises(Exception, match="unknown module dependency.*Broken.*Missing"):
+        unknown.login()
+
+    cycle = WowClient()
+    cycle.lua.globals().testNs = cycle.ns
+    cycle.lua.execute(
+        "testNs.RegisterModule('CycleA', {requires = {'CycleB'}, onLoad = function() end}); "
+        "testNs.RegisterModule('CycleB', {requires = {'CycleA'}, onLoad = function() end})"
+    )
+    with pytest.raises(Exception, match="module dependency cycle.*CycleA.*CycleB.*CycleA"):
+        cycle.login()
+
+
+def test_addon_lifecycle_registry_rejects_duplicate_registration():
+    client = WowClient()
+    client.lua.globals().testNs = client.ns
+    with pytest.raises(Exception, match="duplicate module registration: Core"):
+        client.lua.execute("testNs.RegisterModule('Core', {requires = {}, onLoad = function() end})")
+
+
+@pytest.mark.parametrize("legacy", ["saved", "saved_acks", "data", "data_empty"])
+def test_addon_rejects_legacy_sweep_ack_storage(legacy):
+    saved = None
+    if legacy == "saved":
+        saved = {"sweeps": {"old-sweep": {"id": "old-sweep"}}}
+    elif legacy == "saved_acks":
+        saved = {"ackedSweeps": ["old-sweep"]}
+    client = WowClient(initial_savedvars=saved)
+    if legacy in {"data", "data_empty"}:
+        values = ["old-sweep"] if legacy == "data" else []
+        client.lua.globals().CROWLEY_DATA.ackedSweeps = client._to_lua(values)
+    with pytest.raises(Exception, match="legacy"):
+        client.login()
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "{[1] = 'b', [2] = 'a'}",
+        r"{[1] = '\195\169', [2] = 'a'}",
+        "{[1] = 'a', [2] = 'a'}",
+        "{[1] = ''}",
+        "{[1] = 'a', [2] = 1}",
+        "{[1] = 'a', [3] = 'c'}",
+        "{name = 'a'}",
+    ],
+)
+def test_addon_rejects_malformed_acked_scan_arrays(expression):
+    client = WowClient()
+    client.lua.execute(f"CROWLEY_DATA.ackedScans = {expression}")
+    with pytest.raises(Exception, match="ackedScans"):
+        client.login()
+
+
+def test_addon_accepts_byte_sorted_non_ascii_acked_scan_array():
+    client = WowClient()
+    client.lua.execute(r"CROWLEY_DATA.ackedScans = {'a', '\195\169'}")
+    client.login()
+
+
+def test_agent_first_publication_sees_initialized_scanner_and_executor():
+    queue = {
+        "format": 1,
+        "queueId": "beta-normal-alliance-1760000000-first-publication",
+        "generatedAt": 1759990000,
+        "expiresAt": 1760000100,
+        "house": "beta-normal-alliance",
+        "character": "Tester",
+        "armed": False,
+        "actions": [{"seq": 1, "kind": "mail_collect", "maxMessages": 1}],
+    }
+    client = WowClient(faction="Alliance", realm="Classic Beta PvE 2", current_region=110, queue=queue)
+    client.set_canonical_plan()
+    client.login()
+
+    first = decode_frame(client.agent_frame).snapshot.value
+    assert first["scanner"]["phase"] == "ready"
+    assert first["executor"]["availability"] == "valid"
+    assert first["executor"]["queueId"] == queue["queueId"]
+
+
 def test_addon_decides_saved_marker_after_file_execution_and_unknown_blocks_scanner():
     client = WowClient()
     assert client.ns.Agent.Surface() is None
@@ -3492,7 +3594,10 @@ def test_six_pending_sweeps_pause_without_eviction_until_ack_reload():
     assert len(list(client.lua.globals().CrowleyDB.scans.items())) == 6
     client.slash("scan force")
     assert "storage blocked" in client.chat[-1]
-    ids = [scan_id for scan_id, _ in client.lua.globals().CrowleyDB.scans.items()]
+    ids = sorted(
+        (scan_id for scan_id, _ in client.lua.globals().CrowleyDB.scans.items()),
+        key=lambda scan_id: scan_id.encode(),
+    )
     client.lua.globals().CROWLEY_DATA.ackedScans = client._to_lua(ids)
     client.login()
     assert not list(client.lua.globals().CrowleyDB.scans.items())

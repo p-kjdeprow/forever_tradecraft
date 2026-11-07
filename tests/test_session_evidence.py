@@ -4,6 +4,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from crowley.core.luawriter import render_assignment
 from crowley.core.scanformat import encode_json_payload
 from crowley.core.watchlist import load_catalog
@@ -25,7 +27,7 @@ def _pinned_plan() -> dict:
     return load_catalog().scan_plan()
 
 
-def test_companion_upload_map_and_data_lua_are_distinct_ack_surfaces(tmp_path: Path) -> None:
+def test_empty_scans_are_accepted_with_distinct_ack_surfaces(tmp_path: Path) -> None:
     companion = tmp_path / "companion-state.json"
     _private_write(companion, b'{"uploaded":{"uid-1":1000},"probes":[]}')
     data = tmp_path / "Data.lua"
@@ -62,8 +64,32 @@ def test_companion_upload_map_and_data_lua_are_distinct_ack_surfaces(tmp_path: P
         ).encode(),
     )
     saved = tmp_path / "Crowley.lua"
-    _private_write(saved, render_assignment("CrowleyDB", {"scans": {}, "sweeps": {}}, header="test").encode())
+    _private_write(
+        saved,
+        render_assignment("CrowleyDB", {"scans": {}}, header="test").encode(),
+    )
     assert queues_empty(saved, companion, data, settled_uid="uid-1")
+
+
+def test_legacy_sweeps_queue_is_rejected(tmp_path: Path) -> None:
+    saved = tmp_path / "Crowley.lua"
+    _private_write(
+        saved,
+        render_assignment("CrowleyDB", {"scans": {}, "sweeps": {}}, header="legacy").encode(),
+    )
+
+    with pytest.raises(EvidenceError, match="legacy sweeps"):
+        queues_empty(saved, tmp_path / "companion.json", tmp_path / "Data.lua")
+
+
+def test_nonempty_scans_queue_is_not_settled(tmp_path: Path) -> None:
+    saved = tmp_path / "Crowley.lua"
+    _private_write(
+        saved,
+        render_assignment("CrowleyDB", {"scans": {"uid-1": {}}}, header="pending").encode(),
+    )
+
+    assert not queues_empty(saved, tmp_path / "companion.json", tmp_path / "Data.lua")
 
 
 def test_companion_legacy_ack_array_is_rejected(tmp_path: Path) -> None:
@@ -165,7 +191,8 @@ def test_qualify_saved_scan_extracts_complete_native_rows_and_owned_section(tmp_
     }
     saved = tmp_path / "Crowley.lua"
     _private_write(
-        saved, render_assignment("CrowleyDB", {"scans": {uid: envelope}, "sweeps": {}}, "native").encode()
+        saved,
+        render_assignment("CrowleyDB", {"scans": {uid: envelope}}, "native").encode(),
     )
     parsed = qualify_saved_scan(
         saved.read_bytes(),

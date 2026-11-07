@@ -8,6 +8,7 @@ ns.Executor = Executor
 
 local MAX_ACTIONS = 50
 local MAX_SELECTION_STATES = 10000
+local MAX_SAFE = 9007199254740991
 local MAX_U32 = 4294967295
 local DURATION = { [12] = 1, [24] = 2, [48] = 3 }
 
@@ -26,44 +27,31 @@ local sessionArmed = false
 local button
 local frameOpen = { ah = false, merchant = false, mailbox = false, profession = false }
 
-local function finiteInteger(value, positive)
-  if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return false end
-  if value ~= math.floor(value) then return false end
-  return positive and value > 0 or value >= 0
-end
-
-local function exactKeys(value, allowed)
-  if type(value) ~= "table" then return false end
-  for key in pairs(value) do if not allowed[key] then return false end end
-  for key in pairs(allowed) do if value[key] == nil then return false end end
-  return true
-end
-
 local function validAction(action, index)
   if type(action) ~= "table" or type(action.kind) ~= "string" then return false, "action " .. index .. " has an unknown kind" end
   local fields = ACTION_FIELDS[action.kind]
   if not fields then return false, "action " .. index .. " has an unknown kind " .. tostring(action.kind) end
-  if not exactKeys(action, fields) then return false, "action " .. index .. " has unknown or missing fields" end
-  if action.seq ~= index or not finiteInteger(action.seq, true) then return false, "action " .. index .. " has a non-contiguous seq" end
+  if not ns.Util.ExactKeys(action, fields) then return false, "action " .. index .. " has unknown or missing fields" end
+  if action.seq ~= index or not ns.Util.IsInteger(action.seq, 1, MAX_SAFE) then return false, "action " .. index .. " has a non-contiguous seq" end
   if action.kind == "buy_commodity" then
-    if not finiteInteger(action.itemID, true) or not finiteInteger(action.quantity, true) or not finiteInteger(action.maxUnitPrice, true) then
+    if not ns.Util.IsInteger(action.itemID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.quantity, 1, MAX_SAFE) or not ns.Util.IsInteger(action.maxUnitPrice, 1, MAX_SAFE) then
       return false, "action " .. index .. " has an invalid positive integer"
     end
   elseif action.kind == "post_commodity" then
-    if not finiteInteger(action.itemID, true) or not finiteInteger(action.quantity, true) or not finiteInteger(action.unitPrice, true) or
+    if not ns.Util.IsInteger(action.itemID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.quantity, 1, MAX_SAFE) or not ns.Util.IsInteger(action.unitPrice, 1, MAX_SAFE) or
         not DURATION[action.durationHours] then return false, "action " .. index .. " has an invalid post field" end
   elseif action.kind == "cancel_auction" then
-    if not finiteInteger(action.auctionID, true) then return false, "action " .. index .. " has an invalid auctionID" end
+    if not ns.Util.IsInteger(action.auctionID, 1, MAX_SAFE) then return false, "action " .. index .. " has an invalid auctionID" end
   elseif action.kind == "vendor_sell" or action.kind == "vendor_buy" then
-    if not finiteInteger(action.itemID, true) or not finiteInteger(action.quantity, true) then
+    if not ns.Util.IsInteger(action.itemID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.quantity, 1, MAX_SAFE) then
       return false, "action " .. index .. " has an invalid positive integer"
     end
   elseif action.kind == "craft" then
-    if not finiteInteger(action.recipeID, true) or not finiteInteger(action.times, true) then
+    if not ns.Util.IsInteger(action.recipeID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.times, 1, MAX_SAFE) then
       return false, "action " .. index .. " has an invalid positive integer"
     end
   elseif action.kind == "mail_collect" then
-    if not finiteInteger(action.maxMessages, true) or action.maxMessages > MAX_U32 then
+    if not ns.Util.IsInteger(action.maxMessages, 1, MAX_U32) then
       return false, "action " .. index .. " has an invalid maxMessages"
     end
   end
@@ -72,12 +60,12 @@ end
 
 local function validateQueue(queue)
   if type(queue) ~= "table" then return false, "queue is not a table" end
-  if not exactKeys(queue, { format = true, queueId = true, generatedAt = true, expiresAt = true, house = true, character = true, armed = true, actions = true }) then
+  if not ns.Util.ExactKeys(queue, { format = true, queueId = true, generatedAt = true, expiresAt = true, house = true, character = true, armed = true, actions = true }) then
     return false, "queue has unknown or missing fields"
   end
   if queue.format ~= 1 then return false, "queue format is invalid" end
   if type(queue.queueId) ~= "string" or queue.queueId == "" or #queue.queueId > 192 then return false, "queueId is invalid" end
-  if not finiteInteger(queue.generatedAt, true) or not finiteInteger(queue.expiresAt, true) or queue.expiresAt <= queue.generatedAt then
+  if not ns.Util.IsInteger(queue.generatedAt, 1, MAX_SAFE) or not ns.Util.IsInteger(queue.expiresAt, 1, MAX_SAFE) or queue.expiresAt <= queue.generatedAt then
     return false, "queue expiry is invalid"
   end
   if type(queue.house) ~= "string" or queue.house == "" or #queue.house > 256 then return false, "queue house is invalid" end
@@ -279,7 +267,7 @@ local function bagSlots(itemID)
       local info = C_Container.GetContainerItemInfo(bag, slot)
       local id = info and info.itemID
       local quantity = info and (info.stackCount or info.quantity or info.count)
-      if id == itemID and finiteInteger(quantity, true) then
+      if id == itemID and ns.Util.IsInteger(quantity, 1, MAX_SAFE) then
         slots[#slots + 1] = { bag = bag, slot = slot, quantity = quantity, itemID = itemID }
       end
     end
@@ -347,7 +335,7 @@ local function bagCount()
     for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
       local info = C_Container.GetContainerItemInfo(bag, slot)
       local quantity = info and (info.stackCount or info.quantity or info.count)
-      if finiteInteger(quantity, false) then total = total + quantity end
+      if ns.Util.IsInteger(quantity, 0, MAX_SAFE) then total = total + quantity end
     end
   end
   return total
@@ -360,7 +348,7 @@ local function bagItemCount(itemID)
     for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
       local info = C_Container.GetContainerItemInfo(bag, slot)
       local quantity = info and (info.stackCount or info.quantity or info.count)
-      if info and info.itemID == itemID and finiteInteger(quantity, false) then total = total + quantity end
+      if info and info.itemID == itemID and ns.Util.IsInteger(quantity, 0, MAX_SAFE) then total = total + quantity end
     end
   end
   return total
@@ -371,7 +359,7 @@ local function mailMessageEmpty(index)
   local ok, _, _, _, _, money, _, _, hasItem = pcall(GetInboxHeaderInfo, index)
   if not ok then return false end
   if money == nil and hasItem == nil then return false end
-  return finiteInteger(money or 0, false) and (money or 0) == 0 and hasItem ~= true
+  return ns.Util.IsInteger(money or 0, 0, MAX_SAFE) and (money or 0) == 0 and hasItem ~= true
 end
 
 local function observePostcondition()
@@ -383,7 +371,7 @@ local function observePostcondition()
   elseif phase == "mail_wait" then
     if type(GetInboxNumItems) == "function" then
       local after = GetInboxNumItems()
-      local removed = finiteInteger(after, false) and after < state.beforeMailCount
+      local removed = ns.Util.IsInteger(after, 0, MAX_SAFE) and after < state.beforeMailCount
       local emptied = mailMessageEmpty(state.mailIndex)
       if removed or emptied then
         state.mailProcessed = state.mailProcessed + 1
@@ -414,7 +402,7 @@ local function recipeReady(action)
   local info = C_TradeSkillUI.GetRecipeInfo(action.recipeID)
   if type(info) ~= "table" or info.learned ~= true then return false, "recipe_not_learned" end
   local count = C_TradeSkillUI.GetCraftableCount(action.recipeID)
-  if not finiteInteger(count, false) or count < action.times then return false, "craftable_count_short" end
+  if not ns.Util.IsInteger(count, 0, MAX_SAFE) or count < action.times then return false, "craftable_count_short" end
   return true
 end
 
@@ -456,7 +444,7 @@ local function resolve(action)
     if not C_AuctionHouse or type(C_AuctionHouse.CanCancelAuction) ~= "function" or C_AuctionHouse.CanCancelAuction(action.auctionID) ~= true then return false, "cannot_cancel" end
     if type(C_AuctionHouse.GetCancelCost) ~= "function" then return false, "cancel_cost_unavailable" end
     local costOK, cost = pcall(C_AuctionHouse.GetCancelCost, action.auctionID)
-    if not costOK or not finiteInteger(cost, false) then return false, "cancel_cost_invalid" end
+    if not costOK or not ns.Util.IsInteger(cost, 0, MAX_SAFE) then return false, "cancel_cost_invalid" end
     local detail = { auctionID = action.auctionID, cost = cost }
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
     local called, reason = protected("C_AuctionHouse.CancelAuction", C_AuctionHouse.CancelAuction, action.auctionID)
@@ -510,7 +498,7 @@ local function resolve(action)
   elseif kind == "mail_collect" then
     if type(GetInboxNumItems) ~= "function" or type(AutoLootMailItem) ~= "function" then return false, "mail_api_unavailable" end
     local available = GetInboxNumItems()
-    if not finiteInteger(available, false) or available < 1 then return false, "mailbox_empty" end
+    if not ns.Util.IsInteger(available, 0, MAX_SAFE) or available < 1 then return false, "mailbox_empty" end
     local count = math.min(action.maxMessages, available)
     local detail = { messages = count }
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
@@ -627,7 +615,7 @@ local function commodityPrice(_, first, second, third)
     if first ~= action.itemID then return end
     unitPrice, totalPrice = second, third
   end
-  local valid = finiteInteger(unitPrice, false) and finiteInteger(totalPrice, false)
+  local valid = ns.Util.IsInteger(unitPrice, 0, MAX_SAFE) and ns.Util.IsInteger(totalPrice, 0, MAX_SAFE)
   if valid then valid = totalPrice >= unitPrice * action.quantity end
   if not valid then
     state.result.detail.unitPrice, state.result.detail.totalPrice = unitPrice, totalPrice
@@ -872,14 +860,16 @@ function Executor.Skip()
   return true
 end
 
-local function onLoaded(_, name)
-  if name == "Crowley" and ns.db then loadQueue() end
-end
+ns.RegisterModule("Executor", {
+  requires = { "Core" },
+  onLoad = function()
+    if CROWLEY_QUEUE ~= nil and CROWLEY_QUEUE ~= false then loadQueue() end
+  end,
+})
 
 -- With Queue.lua's false placeholder, the executor creates no frame and
 -- registers no events, leaving the scanner's live surface untouched.
 if CROWLEY_QUEUE ~= nil and CROWLEY_QUEUE ~= false then
-  ns.On("ADDON_LOADED", onLoaded)
   ns.On("AUCTION_HOUSE_SHOW", eventFrame)
   ns.On("AUCTION_HOUSE_CLOSED", eventFrame)
   ns.On("MERCHANT_SHOW", eventFrame)

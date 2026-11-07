@@ -284,6 +284,7 @@ SlashCmdList.CROWLEY = function(msg)
   end
 end
 
-ns.On("ADDON_LOADED", function(_, name)
-  if name == "Crowley" and ns.db then ensurePanel() end
-end)
+ns.RegisterModule("Commands", {
+  requires = { "Core", "Agent" },
+  onLoad = function() ensurePanel() end,
+})

@@ -1,15 +1,12 @@
-local addonName, ns = ...
+local ADDON_NAME, ns = ...
 
 ns.VERSION = "0.2.0"
--- Bump when the shape of CrowleyDB.scans changes; the server keys its parser off this.
-ns.SCAN_FORMAT = 2
 ns.MAX_STORED_SCANS = 6
 
 local defaults = {
   -- Manual overrides for the house a scan is attributed to. nil = auto-detect.
   settings = {},
   scans = {}, -- legacy entries are retained only for the flush transition
-  sweeps = {},
   cursorItemID = nil,
   cursorPlanHash = nil,
   failureCount = 0,
@@ -26,32 +23,18 @@ local NATIVE_STATES = {
   failed = true, restore_pending = true,
 }
 
-local function copyValue(value)
-  if type(value) ~= "table" then return value end
-  local result = {}
-  for key, child in pairs(value) do result[key] = copyValue(child) end
-  return result
-end
-
-local function exactKeys(value, allowed)
-  if type(value) ~= "table" then return false end
-  for key in pairs(value) do if not allowed[key] then return false end end
-  for key in pairs(allowed) do if value[key] == nil then return false end end
-  return true
-end
-
 local function validToken(token, allowRecovery)
-  if type(token) ~= "string" or #token < 1 or #token > 64 then return false end
+  if not ns.Util.IsString(token, 1, 64) then return false end
   if token:find("[%c]") then return false end
   if allowRecovery then return token:match("^recovery:[0-9a-f]+$") ~= nil and #token == 33 end
   return token:find("%s") == nil
 end
 
 local function validateNativeMarker(marker)
-  if type(marker) ~= "table" or not exactKeys(marker, { schema = true, state = true, token = true, attempts = true }) then
+  if type(marker) ~= "table" or not ns.Util.ExactKeys(marker, { schema = true, state = true, token = true, attempts = true }) then
     return nil, "malformed"
   end
-  if marker.schema ~= 1 or type(marker.attempts) ~= "number" or marker.attempts ~= math.floor(marker.attempts) then
+  if marker.schema ~= 1 or not ns.Util.IsInteger(marker.attempts, 0, 1) then
     return nil, "malformed"
   end
   local state = marker.state
@@ -65,7 +48,7 @@ local function validateNativeMarker(marker)
   elseif not validToken(marker.token, false) then
     return nil, "malformed"
   end
-  return copyValue(marker), nil
+  return ns.Util.Copy(marker), nil
 end
 
 local function decideNativeConstruction()
@@ -76,20 +59,20 @@ local function decideNativeConstruction()
   end
   local valid, reason = validateNativeMarker(marker)
   if not valid then
-    ns.nativeDecision = { kind = "restore_only", state = "unknown", marker = copyValue(marker), reason = reason }
+    ns.nativeDecision = { kind = "restore_only", state = "unknown", marker = ns.Util.Copy(marker), reason = reason }
     return
   end
   -- armed is the only pre-reload spelling. The next load owns the
   -- canonical deferred spelling while retaining the exact boot token.
   if valid.state == "armed" then
     valid.state = "deferred"
-    ns.db.nativeConstruction = copyValue(valid)
+    ns.db.nativeConstruction = ns.Util.Copy(valid)
   end
   ns.nativeDecision = { kind = valid.state, state = valid.state, marker = valid, reason = "" }
 end
 
 function ns.NativeDecision()
-  return copyValue(ns.nativeDecision or { kind = "unknown", state = "unknown", marker = nil, reason = "not_loaded" })
+  return ns.Util.Copy(ns.nativeDecision or { kind = "unknown", state = "unknown", marker = nil, reason = "not_loaded" })
 end
 
 function ns.NativeMarkerValid(marker)
@@ -99,7 +82,7 @@ end
 function ns.SetNativeMarker(marker)
   local valid, reason = validateNativeMarker(marker)
   if not valid then return false, reason end
-  ns.db.nativeConstruction = copyValue(valid)
+  ns.db.nativeConstruction = ns.Util.Copy(valid)
   return true
 end
 
@@ -112,9 +95,11 @@ end
 -- Scans the companion has confirmed uploading are listed in CROWLEY_DATA.ackedScans;
 -- drop them so SavedVariables does not grow without bound.
 local function pruneScans(db)
+  if type(CROWLEY_DATA) ~= "table" or not ns.Util.IsDenseUniqueByteSortedStrings(CROWLEY_DATA.ackedScans) then
+    error("CROWLEY_DATA.ackedScans must be a dense array of unique byte-sorted non-empty strings")
+  end
   local acked = {}
-  for _, id in ipairs(CROWLEY_DATA.ackedScans or {}) do acked[id] = true end
-  for _, id in ipairs(CROWLEY_DATA.ackedSweeps or {}) do acked[id] = true end
+  for _, id in ipairs(CROWLEY_DATA.ackedScans) do acked[id] = true end
 
   local remaining = {}
   local dropped = 0
@@ -142,26 +127,68 @@ local function pruneScans(db)
   end
 end
 
-local function pruneSweeps(db)
-  local acked = {}
-  for _, id in ipairs(CROWLEY_DATA.ackedSweeps or CROWLEY_DATA.ackedScans or {}) do acked[id] = true end
-  local remaining = {}
-  for id, sweep in pairs(db.sweeps or {}) do
-    if not acked[id] then remaining[#remaining + 1] = sweep end
-  end
-  db.sweeps = {}
-  for _, sweep in ipairs(remaining) do db.sweeps[sweep.id] = sweep end
-  db.storageBlocked = db.storageBlocked or #remaining >= ns.MAX_STORED_SCANS
-  if db.storageBlocked then
-    ns.Print(("storage blocked: %d unacknowledged sweep(s); /reload, companion upload, then reload again")
-      :format(#remaining))
-  end
-end
-
 function ns.PruneStorage()
   if not ns.db then return end
   pruneScans(ns.db)
-  pruneSweeps(ns.db)
+end
+
+local modules = {}
+local moduleOrder = {}
+local lifecycleStarted = false
+
+function ns.RegisterModule(name, specification)
+  if type(name) ~= "string" or name == "" then error("module name must be a non-empty string") end
+  if type(specification) ~= "table" then error("module " .. name .. " registration must be a table") end
+  if type(specification.requires) ~= "table" then error("module " .. name .. " requires must be an array") end
+  if type(specification.onLoad) ~= "function" then error("module " .. name .. " onLoad must be a function") end
+  if modules[name] then error("duplicate module registration: " .. name) end
+  if lifecycleStarted then error("module registered after addon lifecycle started: " .. name) end
+  modules[name] = { requires = specification.requires, onLoad = specification.onLoad }
+  moduleOrder[#moduleOrder + 1] = name
+end
+
+local function loadModules()
+  local states, ordered = {}, {}
+  local function visit(name, path)
+    local module = modules[name]
+    if not module then error("unknown module dependency: " .. table.concat(path, " -> ") .. " -> " .. name) end
+    if states[name] == 1 then error("module dependency cycle: " .. table.concat(path, " -> ") .. " -> " .. name) end
+    if states[name] == 2 then return end
+    states[name] = 1
+    local nextPath = ns.Util.Copy(path)
+    nextPath[#nextPath + 1] = name
+    for _, requirement in ipairs(module.requires) do
+      if type(requirement) ~= "string" or requirement == "" then
+        error("module " .. name .. " has an invalid dependency")
+      end
+      visit(requirement, nextPath)
+    end
+    states[name] = 2
+    ordered[#ordered + 1] = name
+  end
+  for _, name in ipairs(moduleOrder) do visit(name, {}) end
+  for _, name in ipairs(ordered) do modules[name].onLoad() end
+end
+
+local function rejectLegacyStorage()
+  if type(CrowleyDB) ~= "table" then
+    error("CrowleyDB must be a table or nil before ADDON_LOADED")
+  end
+  if CrowleyDB.sweeps ~= nil then
+    error("CrowleyDB contains legacy key sweeps; remove it before loading Crowley")
+  end
+  if CrowleyDB.ackedSweeps ~= nil then
+    error("CrowleyDB contains legacy key ackedSweeps; remove it before loading Crowley")
+  end
+  if type(CROWLEY_DATA) ~= "table" then
+    error("CROWLEY_DATA.ackedScans must be a dense array of unique byte-sorted non-empty strings")
+  end
+  if CROWLEY_DATA.ackedSweeps ~= nil then
+    error("CROWLEY_DATA contains legacy key ackedSweeps; refresh Data.lua before loading Crowley")
+  end
+  if not ns.Util.IsDenseUniqueByteSortedStrings(CROWLEY_DATA.ackedScans) then
+    error("CROWLEY_DATA.ackedScans must be a dense array of unique byte-sorted non-empty strings")
+  end
 end
 
 ns.frame = CreateFrame("Frame")
@@ -192,24 +219,33 @@ ns.frame:SetScript("OnEvent", function(_, event, ...)
   for _, fn in ipairs(snapshot) do fn(event, ...) end
 end)
 
+ns.RegisterModule("Core", {
+  requires = {},
+  onLoad = function()
+    ns.db = CrowleyDB
+    decideNativeConstruction()
+    ns.db.cursorItemID = ns.db.cursorItemID
+    ns.db.cursorPlanHash = ns.db.cursorPlanHash
+    ns.db.failureCount = ns.db.failureCount or 0
+    ns.PruneStorage()
+    local plan = CROWLEY_DATA.scanPlan
+    if plan and plan.planHash then
+      ns.Print(("plan loaded: %s (%d item(s))"):format(plan.planHash:sub(1, 12), #(plan.itemIDs or {})))
+    else
+      ns.Print("plan not loaded; collection is paused until the companion writes Data.lua")
+    end
+  end,
+})
+
 ns.On("ADDON_LOADED", function(_, name)
-  if name ~= addonName then return end
-  CrowleyDB = CrowleyDB or {}
+  if name ~= ADDON_NAME then return end
+  if CrowleyDB == nil then CrowleyDB = {} end
+  rejectLegacyStorage()
   for k, v in pairs(defaults) do
     if CrowleyDB[k] == nil then CrowleyDB[k] = v end
   end
-  ns.db = CrowleyDB
-  decideNativeConstruction()
-  ns.db.cursorItemID = ns.db.cursorItemID
-  ns.db.cursorPlanHash = ns.db.cursorPlanHash
-  ns.db.failureCount = ns.db.failureCount or 0
-  ns.PruneStorage()
-  local plan = CROWLEY_DATA.scanPlan
-  if plan and plan.planHash then
-    ns.Print(("plan loaded: %s (%d item(s))"):format(plan.planHash:sub(1, 12), #(plan.itemIDs or {})))
-  else
-    ns.Print("plan not loaded; collection is paused until the companion writes Data.lua")
-  end
+  lifecycleStarted = true
+  loadModules()
 end)
 
 ns.On("AUCTION_HOUSE_SHOW", function()

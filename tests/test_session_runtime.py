@@ -417,7 +417,7 @@ def _saved_fixture(path: Path, uid: str, started: int) -> None:
         "numObservations": 428,
         "payload": encode_json_payload(payload),
     }
-    path.write_text(render_assignment("CrowleyDB", {"scans": {uid: envelope}, "sweeps": {}}, "fixture"))
+    path.write_text(render_assignment("CrowleyDB", {"scans": {uid: envelope}}, "fixture"))
 
 
 def _attach_recording_anchor_provider(driver: DesktopDriver, root: Path) -> None:
@@ -1068,7 +1068,7 @@ class LifecycleBackend(X11Backend):
                 self.current["context"]["character"] = ""
                 self.current["context"]["realm"] = ""
                 (self.root / "Crowley.lua").write_text(
-                    render_assignment("CrowleyDB", {"scans": {}, "sweeps": {}}, "logout flush")
+                    render_assignment("CrowleyDB", {"scans": {}}, "logout flush")
                 )
                 empty_data = {
                     "generatedAt": self.current["wallTime"],
@@ -3019,6 +3019,20 @@ def test_runtime_reconcile_ready_scanner_is_idle_with_pending_saved_uid(tmp_path
         assert facts["scanner_idle"] is True
         assert facts["stable_format2_uid"] == uid
         assert facts["stable_format2_evidence"] is not None
+    finally:
+        daemon.request_shutdown()
+        driver.close()
+
+
+def test_runtime_reconcile_rejects_legacy_sweeps_queue(tmp_path: Path) -> None:
+    daemon, _backend, driver, _controller, config, _clock = _runtime_daemon(tmp_path)
+    assert config.saved_variables is not None
+    config.saved_variables.write_text(
+        render_assignment("CrowleyDB", {"scans": {}, "sweeps": {}}, "legacy queue")
+    )
+    try:
+        with pytest.raises(EvidenceError, match="legacy sweeps"):
+            daemon._reconcile_durable_files(_snapshot(1000))
     finally:
         daemon.request_shutdown()
         driver.close()

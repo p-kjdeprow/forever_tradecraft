@@ -86,7 +86,7 @@ function Scanner.LogoutFenceActive()
 end
 
 local function scheduleFinite(value)
-  if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return 0 end
+  if not ns.Util.IsFiniteNumber(value, nil, nil) then return 0 end
   return value
 end
 
@@ -97,7 +97,7 @@ local function scheduleInteger(value)
 end
 
 local function scheduleString(value)
-  if type(value) ~= "string" then return "" end
+  if not ns.Util.IsString(value, 0, nil) then return "" end
   return value:sub(1, SCHEDULE_TRACE_STRING_LIMIT)
 end
 
@@ -250,15 +250,17 @@ ns.On("PLAYER_LOGOUT", function()
   ns.ahOpen = false
   if state then Scanner.Abort("logout") end
 end)
-ns.On("ADDON_LOADED", function(_, name)
-  if name ~= "Crowley" or not ns.db then return end
-  beginScheduleLoad()
-  local decision = nativeDecision()
-  nativeConstructionFence = decision.kind ~= "ordinary" and decision.kind ~= "finalized"
-  ns.db.agentLastSaved = ns.db.agentLastSaved or {
-    memoryUid = "", finishedAt = 0, planned = 0, attempted = 0, failures = 0, rows = 0,
-  }
-end)
+ns.RegisterModule("Scanner", {
+  requires = { "Core" },
+  onLoad = function()
+    beginScheduleLoad()
+    local decision = nativeDecision()
+    nativeConstructionFence = decision.kind ~= "ordinary" and decision.kind ~= "finalized"
+    ns.db.agentLastSaved = ns.db.agentLastSaved or {
+      memoryUid = "", finishedAt = 0, planned = 0, attempted = 0, failures = 0, rows = 0,
+    }
+  end,
+})
 
 local function safeProduct(a, b)
   if type(a) ~= "number" or type(b) ~= "number" or a < 0 or b < 0 or a > MAX_SAFE or b > MAX_SAFE then return nil end
@@ -314,17 +316,10 @@ local function sameArray(left, right)
   return true
 end
 
-local function exactKeys(value, allowed)
-  if type(value) ~= "table" then return false end
-  for key in pairs(value) do if not allowed[key] then return false end end
-  for key in pairs(allowed) do if value[key] == nil then return false end end
-  return true
-end
-
 local function planMatchesCanonical(source, loaded)
   local definition = canonicalPlanDefinition()
   if not definition or type(source) ~= "table" or type(loaded) ~= "table" then return false end
-  if not exactKeys(loaded, {
+  if not ns.Util.ExactKeys(loaded, {
     schemaVersion = true, id = true, revision = true, catalogHash = true,
     targetClientBuild = true, cadenceSeconds = true, initialPriceLevels = true,
     itemIDs = true, pools = true,
@@ -334,7 +329,7 @@ local function planMatchesCanonical(source, loaded)
       loaded.targetClientBuild ~= CANONICAL_CLIENT_BUILD or loaded.cadenceSeconds ~= CADENCE or
       loaded.initialPriceLevels ~= CANONICAL_LEVELS or
       not sameArray(loaded.itemIDs, definition.itemIDs) then return false end
-  if not exactKeys(loaded.pools, { core = true, discovery = true }) or
+  if not ns.Util.ExactKeys(loaded.pools, { core = true, discovery = true }) or
       not sameArray(loaded.pools.core, definition.pools.core) or
       not sameArray(loaded.pools.discovery, definition.pools.discovery) then return false end
   if source.planHash ~= CANONICAL_PLAN_HASH or source.schemaVersion ~= loaded.schemaVersion or
@@ -342,7 +337,7 @@ local function planMatchesCanonical(source, loaded)
       source.catalogHash ~= loaded.catalogHash or source.targetClientBuild ~= loaded.targetClientBuild or
       source.cadenceSeconds ~= loaded.cadenceSeconds or source.initialPriceLevels ~= loaded.initialPriceLevels or
       not sameArray(source.itemIDs, loaded.itemIDs) then return false end
-  if not exactKeys(source.pools, { core = true, discovery = true }) or
+  if not ns.Util.ExactKeys(source.pools, { core = true, discovery = true }) or
       not sameArray(source.pools.core, loaded.pools.core) or
       not sameArray(source.pools.discovery, loaded.pools.discovery) then return false end
   if (source.sweepCapSeconds == nil) ~= (loaded.sweepCapSeconds == nil) or
@@ -923,7 +918,7 @@ local function beginOwned(sweep)
   ns.On("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", sweep.ownedSentHandler)
   ns.On("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", sweep.ownedResponseHandler)
   ns.On("OWNED_AUCTIONS_UPDATED", sweep.ownedHandler)
-  sweep.ownedTimer = C_Timer.After(OWNED_TIMEOUT, function()
+  C_Timer.After(OWNED_TIMEOUT, function()
     if state == sweep and not sweep.owned then
       failOwned(sweep, "query_timeout")
     end
@@ -960,7 +955,7 @@ local function beginItem(itemID, ordinal)
     ns.On("ITEM_KEY_ITEM_INFO_RECEIVED", s.metadataHandler)
     C_Item.RequestLoadItemDataByID(itemID)
   else startSearch(s) end
-  s.timer = C_Timer.After(ITEM_TIMEOUT, function()
+  C_Timer.After(ITEM_TIMEOUT, function()
     if state and state.item == s then failCurrent(s.metadataWaiting and "metadata_unavailable" or "query_timeout") Scanner.Next() end
   end)
 end
@@ -1133,7 +1128,7 @@ function Scanner.Finish()
   local owned = s.owned or { status = "unqueried", query = { kind = "unqueried" }, reasonCode = "not_started", rowCount = 0, rows = {} }
   local payload = { planHash = s.planHash, planJSON = s.planJSON, observations = s.observations, owned = owned }
   local compressed = C_EncodingUtil.CompressString(C_EncodingUtil.SerializeJSON(payload), Enum.CompressionMethod.Deflate)
-  local id = ("%s-%d-%s-%04d"):format(s.house.key, s.startedAt, s.context.character, math.random(0, 9999))
+  local id = ns.Util.NewID({ s.house.key, s.startedAt, s.context.character }, 0, 9999)
   ns.db.scans[id] = { id = id, format = 3, house = s.house, context = s.context, startedAt = s.startedAt, finishedAt = time(), numRows = 0,
     numObservations = #s.order, payload = C_EncodingUtil.EncodeBase64(compressed) }
   for _, observation in pairs(s.observations) do ns.db.scans[id].numRows = ns.db.scans[id].numRows + observation.rowCount end
@@ -1194,11 +1189,13 @@ function Scanner.Status()
   local pending = {}
   local pendingSeen = {}
   for id in pairs(db.scans or {}) do pendingSeen[id] = true end
-  for id in pairs(db.sweeps or {}) do pendingSeen[id] = true end
   for id in pairs(pendingSeen) do pending[#pending + 1] = id end
   table.sort(pending)
   local acked = {}
-  for _, id in ipairs((CROWLEY_DATA and CROWLEY_DATA.ackedScans) or {}) do acked[#acked + 1] = id end
+  if type(CROWLEY_DATA) ~= "table" or not ns.Util.IsDenseUniqueByteSortedStrings(CROWLEY_DATA.ackedScans) then
+    error("CROWLEY_DATA.ackedScans must be a dense array of unique byte-sorted non-empty strings")
+  end
+  for _, id in ipairs(CROWLEY_DATA.ackedScans) do acked[#acked + 1] = id end
   table.sort(acked)
   local function copyArray(array)
     local result = {} for i, value in ipairs(array) do result[i] = value end return result

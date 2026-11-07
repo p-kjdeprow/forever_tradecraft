@@ -12,24 +12,6 @@ local BAG_MAX_SLOTS = 36
 local MAX_INBOX_MESSAGES = 100
 local MAX_MAIL_ATTACHMENTS = 16
 
-local function copy(value)
-  if type(value) ~= "table" then return value end
-  local result = {}
-  for key, child in pairs(value) do result[key] = copy(child) end
-  return result
-end
-
-local function integer(value, minimum, maximum)
-  if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return false end
-  if value ~= math.floor(value) or value < (minimum or 0) or value > (maximum or MAX_SAFE) then return false end
-  return true
-end
-
-local function number(value, minimum)
-  if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return false end
-  return value >= (minimum or 0)
-end
-
 local function invalid(field)
   return { kind = "invalid_native", field = field }
 end
@@ -50,20 +32,20 @@ local function bagSection()
   for bag = 0, 4 do
     local ok, numSlots = safeCall(C_Container.GetContainerNumSlots, bag)
     if not ok then error(numSlots) end
-    if not integer(numSlots, 0, BAG_MAX_SLOTS) then return invalid("bags.numSlots") end
+    if not ns.Util.IsInteger(numSlots, 0, BAG_MAX_SLOTS) then return invalid("bags.numSlots") end
     local okFree, freeSlots = safeCall(C_Container.GetContainerNumFreeSlots, bag)
     if not okFree then error(freeSlots) end
-    if not integer(freeSlots, 0, numSlots) then return invalid("bags.freeSlots") end
+    if not ns.Util.IsInteger(freeSlots, 0, numSlots) then return invalid("bags.freeSlots") end
     local record = { numSlots = numSlots, freeSlots = freeSlots, slots = {} }
     for slot = 1, numSlots do
       local okInfo, info = safeCall(C_Container.GetContainerItemInfo, bag, slot)
       if not okInfo then error(info) end
       if info ~= nil then
         if type(info) ~= "table" then return invalid("bags.slots.info") end
-        if not integer(info.itemID, 1) then return invalid("bags.slots.itemID") end
-        if not integer(info.stackCount, 1, INTEGER_MAX) then return invalid("bags.slots.count") end
+        if not ns.Util.IsInteger(info.itemID, 1, MAX_SAFE) then return invalid("bags.slots.itemID") end
+        if not ns.Util.IsInteger(info.stackCount, 1, INTEGER_MAX) then return invalid("bags.slots.count") end
         if type(info.isBound) ~= "boolean" then return invalid("bags.slots.bound") end
-        if not integer(info.quality, 0, 32767) then return invalid("bags.slots.quality") end
+        if not ns.Util.IsInteger(info.quality, 0, 32767) then return invalid("bags.slots.quality") end
         record.slots[tostring(slot)] = {
           itemID = info.itemID,
           count = info.stackCount,
@@ -86,15 +68,15 @@ local function professionSection()
   for position = 1, 5 do
     local index = indices[position]
     if index ~= nil then
-      if not integer(index, 1, INTEGER_MAX) then return invalid("professions.index") end
+      if not ns.Util.IsInteger(index, 1, INTEGER_MAX) then return invalid("professions.index") end
       if seen[index] then return invalid("professions.index") end
       seen[index] = true
       local infoOK, name, _, level, maxLevel, _, _, skillLineID = safeCall(GetProfessionInfo, index)
       if not infoOK then error(name) end
       if type(name) ~= "string" or name == "" then return invalid("professions.name") end
-      if not integer(skillLineID, 1, INTEGER_MAX) then return invalid("professions.skillLineID") end
-      if not integer(level, 0, INTEGER_MAX) then return invalid("professions.level") end
-      if not integer(maxLevel, 0, INTEGER_MAX) then return invalid("professions.maxLevel") end
+      if not ns.Util.IsInteger(skillLineID, 1, INTEGER_MAX) then return invalid("professions.skillLineID") end
+      if not ns.Util.IsInteger(level, 0, INTEGER_MAX) then return invalid("professions.level") end
+      if not ns.Util.IsInteger(maxLevel, 0, INTEGER_MAX) then return invalid("professions.maxLevel") end
       if level > maxLevel then return invalid("professions.level") end
       professions[#professions + 1] = {
         name = name,
@@ -119,7 +101,7 @@ local function tradeSection(existingRecipes, existingCooldowns)
   if not baseOK then error(base) end
   if type(base) ~= "table" then return invalid("recipes.baseProfessionInfo") end
   local skillLineID = base.skillLineID
-  if not integer(skillLineID, 1, INTEGER_MAX) then return invalid("recipes.skillLineID") end
+  if not ns.Util.IsInteger(skillLineID, 1, INTEGER_MAX) then return invalid("recipes.skillLineID") end
 
   local idsOK, recipeIDs = safeCall(C_TradeSkillUI.GetAllRecipeIDs)
   if not idsOK then error(recipeIDs) end
@@ -128,7 +110,7 @@ local function tradeSection(existingRecipes, existingCooldowns)
   local seen = {}
   for index = 1, #recipeIDs do
     local recipeID = recipeIDs[index]
-    if not integer(recipeID, 1) then return invalid("recipes.recipeID") end
+    if not ns.Util.IsInteger(recipeID, 1, INTEGER_MAX) then return invalid("recipes.recipeID") end
     if seen[recipeID] then return invalid("recipes.recipeID") end
     seen[recipeID] = true
     ids[#ids + 1] = recipeID
@@ -152,8 +134,8 @@ local function tradeSection(existingRecipes, existingCooldowns)
       local cooldownOK, cooldown = safeCall(C_Spell.GetSpellCooldown, recipeID)
       if not cooldownOK then error(cooldown) end
       if type(cooldown) ~= "table" then return invalid("cooldowns.info") end
-      if not number(cooldown.startTime) then return invalid("cooldowns.start") end
-      if not number(cooldown.duration) then return invalid("cooldowns.duration") end
+      if not ns.Util.IsFiniteNumber(cooldown.startTime, 0, nil) then return invalid("cooldowns.start") end
+      if not ns.Util.IsFiniteNumber(cooldown.duration, 0, nil) then return invalid("cooldowns.duration") end
       if cooldown.duration > 0 then
         active[tostring(recipeID)] = { start = cooldown.startTime, duration = cooldown.duration }
       end
@@ -163,10 +145,10 @@ local function tradeSection(existingRecipes, existingCooldowns)
   -- Error markers are section values, not recipe maps.  Never merge one into
   -- a successful capture or the next envelope would contain mixed schemas.
   local recipes = {}
-  if type(existingRecipes) == "table" and existingRecipes.kind == nil then recipes = copy(existingRecipes) end
+  if type(existingRecipes) == "table" and existingRecipes.kind == nil then recipes = ns.Util.Copy(existingRecipes) end
   local old = recipes[tostring(skillLineID)]
   local cooldowns = {}
-  if type(existingCooldowns) == "table" and existingCooldowns.kind == nil then cooldowns = copy(existingCooldowns) end
+  if type(existingCooldowns) == "table" and existingCooldowns.kind == nil then cooldowns = ns.Util.Copy(existingCooldowns) end
   if type(old) == "table" and type(old.learned) == "table" then
     for _, oldRecipeID in ipairs(old.learned) do cooldowns[tostring(oldRecipeID)] = nil end
   end
@@ -179,14 +161,14 @@ local function mailSection()
   if not MailFrame or type(MailFrame.IsShown) ~= "function" or not MailFrame:IsShown() then return nil end
   local okCount, count = safeCall(GetInboxNumItems)
   if not okCount then error(count) end
-  if not integer(count, 0, MAX_INBOX_MESSAGES) then return invalid("mail.count") end
+  if not ns.Util.IsInteger(count, 0, MAX_INBOX_MESSAGES) then return invalid("mail.count") end
   local messages = {}
   for index = 1, count do
     local headerOK, packageIcon, stationeryIcon, sender, subject, money, cod, daysLeft, hasItem =
       safeCall(GetInboxHeaderInfo, index)
     if not headerOK then error(packageIcon) end
-    if not integer(money, 0) then return invalid("mail.money") end
-    if not number(daysLeft) then return invalid("mail.daysLeft") end
+    if not ns.Util.IsInteger(money, 0, MAX_SAFE) then return invalid("mail.money") end
+    if not ns.Util.IsFiniteNumber(daysLeft, 0, nil) then return invalid("mail.daysLeft") end
     if type(hasItem) ~= "boolean" then return invalid("mail.hasItem") end
     local items = {}
     if hasItem then
@@ -194,8 +176,8 @@ local function mailSection()
         local itemOK, itemName, itemID, texture, itemCount = safeCall(GetInboxItem, index, attachment)
         if not itemOK then error(itemName) end
         if itemID == nil then break end
-        if not integer(itemID, 1) then return invalid("mail.items.itemID") end
-        if not integer(itemCount, 1, INTEGER_MAX) then return invalid("mail.items.count") end
+        if not ns.Util.IsInteger(itemID, 1, MAX_SAFE) then return invalid("mail.items.itemID") end
+        if not ns.Util.IsInteger(itemCount, 1, INTEGER_MAX) then return invalid("mail.items.count") end
         items[#items + 1] = { itemID = itemID, count = itemCount }
       end
     end
@@ -211,7 +193,7 @@ local function newEnvelope()
   if type(context.character) ~= "string" or context.character == "" then error("invalid context character") end
   return {
     format = 1,
-    id = ("%s-%s-%d-%04d"):format(house.key, context.character, capturedAt, math.random(0, 9999)),
+    id = ns.Util.NewID({ house.key, context.character, capturedAt }, 0, 9999),
     house = house,
     context = context,
     capturedAt = capturedAt,
@@ -232,7 +214,7 @@ local function capture(sections)
     return false
   end
   local previous = ns.db.account
-  if type(previous) == "table" then account = copy(previous) end
+  if type(previous) == "table" then account = ns.Util.Copy(previous) end
   local houseOK, house = safeCall(ns.Context.House)
   local contextOK, context = safeCall(ns.Context.Snapshot)
   if not houseOK or not contextOK then
@@ -243,13 +225,13 @@ local function capture(sections)
   account.house = house
   account.context = context
   account.capturedAt = time()
-  account.id = ("%s-%s-%d-%04d"):format(house.key, context.character, account.capturedAt, math.random(0, 9999))
+  account.id = ns.Util.NewID({ house.key, context.character, account.capturedAt }, 0, 9999)
 
   for _, section in ipairs(sections) do
     if section == "gold" then
       local goldOK, gold = safeCall(GetMoney)
       if not goldOK then account.gold = failure(gold)
-      elseif not integer(gold, 0) then account.gold = invalid("gold")
+      elseif not ns.Util.IsInteger(gold, 0, MAX_SAFE) then account.gold = invalid("gold")
       else account.gold = gold end
     elseif section == "bags" then
       local bagsOK, bags = safeCall(bagSection)
@@ -271,7 +253,7 @@ local function capture(sections)
         account.recipes = trade.recipes
         account.cooldowns = trade.cooldowns
       elseif trade.kind == "invalid_native" then
-        account.recipes = copy(trade)
+        account.recipes = ns.Util.Copy(trade)
         local field = tostring(trade.field)
         if field:sub(1, 8) == "recipes." then
           field = "cooldowns." .. field:sub(9)
@@ -280,7 +262,7 @@ local function capture(sections)
         end
         account.cooldowns = invalid(field)
       elseif trade.kind == "error" then
-        account.recipes = copy(trade)
+        account.recipes = ns.Util.Copy(trade)
         account.cooldowns = failure(trade.detail)
       else
         account.recipes = failure("invalid trade capture result")

@@ -228,12 +228,6 @@
     "path": "docs/TESTING.md"
   },
   {
-    "category": "machine-url",
-    "count": 1,
-    "match": "http://127.0.0.1:8080",
-    "path": "src/crowley/companion/config.py"
-  },
-  {
     "category": "posix-home",
     "count": 2,
     "match": "/home/dev",

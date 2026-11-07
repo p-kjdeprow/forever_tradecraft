@@ -14,40 +14,51 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Crowley operational tools")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("backup", "health"):
-        item = sub.add_parser(name)
-        item.add_argument("--repo", type=Path, required=True)
-        item.add_argument("--config", type=Path, required=True)
-        item.add_argument("--state-root", type=Path, required=True)
-        item.add_argument("--backup-root", type=Path, required=True)
+        sub.add_parser(name)
 
-    snapshot = sub.add_parser("snapshot")
-    snapshot.add_argument("--repo", type=Path, required=True)
-    snapshot.add_argument("--root", type=Path, default=backup.DEFAULT_ROOT)
+    sub.add_parser("snapshot")
 
     drill = sub.add_parser("drill")
     drill.add_argument("snapshot", type=Path)
-    drill.add_argument("--repo", type=Path, required=True)
-    drill.add_argument("--root", type=Path, default=backup.DEFAULT_ROOT)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    try:
+        paths = health.operation_paths()
+    except health.OperationsError as exc:
+        if args.command in {"backup", "health", "snapshot", "drill"}:
+            if args.command in {"backup", "health"}:
+                print(
+                    json.dumps(
+                        {
+                            "schema": health.OPS_SCHEMA,
+                            "operation": args.command,
+                            "outcome": "failed",
+                            "error_category": health.fixed_error(exc),
+                            "exit_code": 2,
+                        },
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(str(exc), file=sys.stderr)
+            return 2
+        raise
     if args.command in {"backup", "health"}:
         try:
             if args.command == "backup":
                 result = health.backup_operation(
-                    repo=args.repo,
-                    config=args.config,
-                    state_root=args.state_root,
-                    backup_root=args.backup_root,
+                    state_root=paths.state_root,
+                    backup_root=paths.backup_root,
                 )
             else:
                 result = health.health_operation(
-                    repo=args.repo,
-                    config_path=args.config,
-                    state_root=args.state_root,
-                    backup_root=args.backup_root,
+                    config_path=paths.config_path,
+                    state_root=paths.state_root,
+                    backup_root=paths.backup_root,
+                    companion_state_path=paths.companion_state,
                 )
         except (health.OperationsError, OSError, ValueError) as exc:
             print(
@@ -78,11 +89,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "snapshot":
-            result = backup.snapshot(args.repo, args.root)
+            result = backup.snapshot(paths.backup_root)
             print(f"snapshot complete: {result.name}")
             return 0
 
-        result = backup.drill(args.repo, args.snapshot, args.root)
+        result = backup.drill(args.snapshot, paths.backup_root)
         receipt = backup.strict_json(result.read_bytes())
         print(f"restore drill {receipt['result']}: {result.name}")
         return 0

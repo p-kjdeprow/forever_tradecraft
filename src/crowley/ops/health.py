@@ -20,14 +20,16 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from crowley.ops import backup as market_backup
 from crowley.ops.backup import BACKUP_ID_RE
+from crowley.platform.paths import XdgDirs, XdgPathError
 from crowley.session import evidence
 from crowley.session.cli import _socket_request
-from crowley.session.config import load_config
+from crowley.session.config import ClientConfig, load_client_config
 
 OPS_SCHEMA = "crowley.host-operations-v1"
 BACKUP_RECORD_SCHEMA = "crowley.host-last-good-backup-v1"
@@ -110,6 +112,29 @@ class OperationsError(RuntimeError):
 
 class BusyError(OperationsError):
     """The operation's process-lifetime lock is already held."""
+
+
+@dataclass(frozen=True, slots=True)
+class OperationPaths:
+    """The installed-package operational paths resolved from XDG roots."""
+
+    config_path: Path
+    state_root: Path
+    backup_root: Path
+    companion_state: Path
+
+
+def operation_paths() -> OperationPaths:
+    try:
+        dirs = XdgDirs.from_environ(os.environ)
+    except XdgPathError as exc:
+        raise OperationsError("Crowley XDG paths are unavailable") from exc
+    return OperationPaths(
+        config_path=dirs.crowley_config / "session.toml",
+        state_root=dirs.crowley_state / market_backup.OPERATIONS_STATE,
+        backup_root=dirs.crowley_state / market_backup.BACKUP_STATE,
+        companion_state=dirs.crowley_state / "companion-state.json",
+    )
 
 
 def _utc_now() -> dt.datetime:
@@ -304,11 +329,9 @@ def _record_base(kind: str, started: dt.datetime) -> dict[str, Any]:
 
 def backup_operation(
     *,
-    repo: Path,
-    config: Path,
     state_root: Path,
     backup_root: Path,
-    snapshot_fn: Callable[[Path, Path], Path] = market_backup.snapshot,
+    snapshot_fn: Callable[[Path], Path] = market_backup.snapshot,
     validate_fn: Callable[[Path], tuple[dict[str, Any], str]] = market_backup.validate_snapshot,
     now: Callable[[], dt.datetime] = _utc_now,
 ) -> dict[str, Any]:
@@ -320,14 +343,7 @@ def backup_operation(
     receipt = _record_base("backup", started)
     try:
         with _process_lock(state_root / "backup.lock"):
-            try:
-                repo = repo.resolve(strict=True)
-                config = config.resolve(strict=True)
-            except OSError as exc:
-                raise OperationsError("config or repository path is unavailable") from exc
-            if not repo.is_dir() or not config.is_file():
-                raise OperationsError("config or repository path is invalid")
-            snapshot_path = snapshot_fn(repo, backup_root)
+            snapshot_path = snapshot_fn(backup_root)
             if not isinstance(snapshot_path, Path):
                 snapshot_path = Path(snapshot_path)
             try:
@@ -811,12 +827,12 @@ def _classify(
 
 def health_operation(
     *,
-    repo: Path,
-    config_path: Path,
+    config_path: Path | None = None,
     state_root: Path,
     backup_root: Path,
+    companion_state_path: Path | None = None,
     now: Callable[[], dt.datetime] = _utc_now,
-    load_config_fn: Callable[[Path], Any] = load_config,
+    load_config_fn: Callable[[Path], ClientConfig] = load_client_config,
     socket_fn: Callable[..., dict[str, Any]] = _socket_request,
     service_fn: Callable[[], dict[str, dict[str, str]]] = _service_status,
     uploads_fn: Callable[[Path], dict[str, int]] = evidence.read_uploads,
@@ -824,16 +840,23 @@ def health_operation(
     _private_dir(state_root)
     current = now()
     issues: list[str] = []
-    config: Any = None
+    config: ClientConfig | None = None
     status: dict[str, Any] | None = None
     services: dict[str, dict[str, str]] = {}
+    if config_path is None or companion_state_path is None:
+        try:
+            defaults = operation_paths()
+        except OperationsError:
+            defaults = None
+            issues.append("xdg_paths_unavailable")
+        if defaults is not None:
+            if config_path is None:
+                config_path = defaults.config_path
+            if companion_state_path is None:
+                companion_state_path = defaults.companion_state
     try:
-        resolved_repo = repo.resolve(strict=True)
-        if not resolved_repo.is_dir():
-            raise OperationsError("repository path is not a directory")
-    except Exception:
-        issues.append("repo_unavailable")
-    try:
+        if config_path is None:
+            raise OperationsError("session configuration path is unavailable")
         resolved_config = config_path.resolve(strict=True)
         if not resolved_config.is_file():
             raise OperationsError("config path is not a file")
@@ -862,12 +885,16 @@ def health_operation(
         issues.extend(service_issues)
         issues.extend(backup_issues)
     else:
-        upload_facts, upload_issues = _upload_facts(
-            status,
-            config.companion_state if config is not None and config.companion_state else Path("/nonexistent"),
-            current,
-            uploads_fn,
-        )
+        if companion_state_path is None:
+            upload_facts = {"last_uid": None, "last_uid_age_seconds": None, "latest_age_seconds": None}
+            upload_issues = ["companion_state_unavailable"]
+        else:
+            upload_facts, upload_issues = _upload_facts(
+                status,
+                companion_state_path,
+                current,
+                uploads_fn,
+            )
         classification, class_issues = _classify(
             status, service_issues, upload_issues, backup_issues, current
         )

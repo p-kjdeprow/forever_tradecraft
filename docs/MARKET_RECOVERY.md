@@ -5,12 +5,18 @@ the immutable raw archive volume, then checks that the dump can be restored into
 a fresh Compose project with no host-published ports. It is a one-time operator
 tool, not a scheduled backup service or a whole-machine clone.
 
-Run it from the repository root, passing the checkout explicitly:
+The installed package supplies the Compose file and migration inventory. The
+operations use XDG paths: secrets are read from
+`$XDG_CONFIG_HOME/crowley/secrets.env`, and state is stored under
+`$XDG_STATE_HOME/crowley/` (with the platform defaults when those variables are
+unset).
 
 ```sh
-crowley-ops snapshot --repo "$PWD"
-crowley-ops drill --repo "$PWD" \
-  ~/.local/state/crowley/market-backups/<printed-backup-id>
+crowley-ops snapshot
+crowley-ops drill \
+  "${XDG_STATE_HOME:-$HOME/.local/state}/crowley/market-backups/<printed-backup-id>"
+crowley-ops backup
+crowley-ops health
 ```
 
 The default state directory and each snapshot/receipt directory are mode `0700`;
@@ -28,11 +34,13 @@ excluded, and symlinks or special files stop the snapshot. The tool does not
 query live row counts. All row counts and market-reference results in the
 private receipt are derived from the restored disposable database.
 
-The source commit and dirty-tree digest in the manifest record where the
-snapshot was made; unrelated later source or artifact edits do not invalidate
-it. Restore compatibility still requires the recorded Compose and migration
-digests, pinned database/server image identities, PostgreSQL and TimescaleDB
-versions, and the migration files embedded in the pinned server image to match.
+The manifest records the installed package name and version for provenance,
+along with a canonical digest of the packaged Compose file and migrations.
+Restore compatibility is bound to that resource digest, the recorded Compose
+and migration digests, pinned database/server image identities, PostgreSQL and
+TimescaleDB versions, and the migration files embedded in the pinned server
+image. A package version change alone does not invalidate a snapshot when those
+deployment resources and image identities remain identical.
 Container, volume, and network IDs from the snapshot remain provenance and a
 collision deny set. The drill separately freezes the current source identities
 and rechecks them while it runs; recreated source IDs do not invalidate an
@@ -87,9 +95,9 @@ disposable database; raw command text is inspected only in memory and is never
 retained. The CLI reports only the fixed stage label and never includes SQL or
 command output.
 
-The preserved manual snapshot at
-`/home/dev/.local/state/crowley/market-backups/beta-20261017T061327Z` predates
-this layout and has no v1 completion contract. The canonical validator refuses
-it; its recovery remains a separate manual procedure. No receipt, environment
-value, connection string, credential, raw payload, or unsanitized operational
-metadata belongs in the repository.
+A preserved manual snapshot under
+`$XDG_STATE_HOME/crowley/market-backups/` may predate this layout and have no
+v1 completion contract. The canonical validator refuses such a snapshot; its
+recovery remains a separate manual procedure. No receipt, environment value,
+connection string, credential, raw payload, or unsanitized operational metadata
+belongs in the repository.

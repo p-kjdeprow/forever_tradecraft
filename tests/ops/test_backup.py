@@ -6,8 +6,10 @@ import io
 import json
 import os
 import runpy
+import subprocess
 import tarfile
 import uuid
+import zipfile
 from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -435,15 +437,14 @@ def test_acceptance_counts_must_be_derived_from_restored_dump():
         backup.db_count_provenance(counts, "live_database", reference_table_keys)
 
 
-def test_migration_inventory_uses_repository_relative_paths(tmp_path: Path):
-    migration_dir = tmp_path / "src/crowley/server/migrations"
-    migration_dir.mkdir(parents=True)
-    (migration_dir / "002_second.sql").write_bytes(b"second")
-    (migration_dir / "001_first.sql").write_bytes(b"first")
-    result = backup._migration_inventory(tmp_path)
+def test_migration_inventory_uses_packaged_relative_paths():
+    result = backup._packaged_migrations()
     assert [item["path"] for item in result] == [
-        "src/crowley/server/migrations/001_first.sql",
-        "src/crowley/server/migrations/002_second.sql",
+        f"src/crowley/server/migrations/{name}"
+        for name in sorted(
+            (path.name for path in Path("src/crowley/server/migrations").glob("*.sql")),
+            key=lambda value: value.encode("utf-8"),
+        )
     ]
 
 
@@ -495,8 +496,7 @@ def test_reference_inventory_lifecycle_drops_database_after_inventory() -> None:
 )
 def test_catalog_inventory_builds_from_real_packaged_migrations() -> None:
     database_url = os.environ["CROWLEY_TEST_DATABASE_URL"]
-    repository = Path(__file__).parents[2]
-    expected_manifest = backup._migration_inventory(repository)
+    expected_manifest = backup._packaged_migrations()
     maintenance_options = conninfo_to_dict(database_url)
     maintenance_options["dbname"] = "postgres"
     maintenance_url = make_conninfo(**maintenance_options)
@@ -557,6 +557,165 @@ def _compatibility_facts(source: dict) -> dict:
         },
         "server_image_migrations": deepcopy(source["migrations"]),
     }
+
+
+def _new_manifest(raw_bytes: bytes) -> dict:
+    value = _manifest(raw_bytes)
+    source = value["source"]
+    with backup._packaged_resources() as packaged:
+        source["package_name"] = packaged.package_name
+        source["package_version"] = packaged.package_version
+        source["compose_file_sha256"] = packaged.compose_file_sha256
+        source["migrations"] = list(packaged.migrations)
+        source["deployment_resources_sha256"] = packaged.deployment_resources_sha256
+    source.pop("source_commit")
+    source.pop("dirty_tree_sha256")
+    value["schema_version"] = backup.CURRENT_SCHEMA_VERSION
+    value["backup_id"] = "crowley-20261107T061327Z-012345abcdef"
+    return value
+
+
+def test_new_schema_manifest_binds_packaged_resources_and_has_no_git_provenance() -> None:
+    manifest = _new_manifest(_tar_bytes({}))
+    validated = backup.validate_manifest(manifest)
+    assert validated["schema_version"] == backup.CURRENT_SCHEMA_VERSION
+    assert set(validated["source"]) >= {
+        "package_name",
+        "package_version",
+        "deployment_resources_sha256",
+    }
+    assert "source_commit" not in validated["source"]
+    assert "dirty_tree_sha256" not in validated["source"]
+
+
+def test_snapshot_builds_new_manifest_from_packaged_resources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_home = tmp_path / "config" / "crowley"
+    runtime = tmp_path / "runtime"
+    config_home.mkdir(parents=True)
+    runtime.mkdir(mode=0o700)
+    secrets = config_home / "secrets.env"
+    secrets.write_text("CROWLEY_DB_PASSWORD=fixture\nCROWLEY_API_TOKEN=fixture\n", encoding="utf-8")
+    os.chmod(secrets, 0o600)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home.parent))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    source_containers = {
+        "db": {"id": "a" * 64, "image_id": "sha256:" + "b" * 64},
+        "server": {"id": "c" * 64, "image_id": "sha256:" + "d" * 64},
+    }
+    monkeypatch.setattr(
+        backup,
+        "_source_resources",
+        lambda _compose, _env: (
+            {"name": "crowley"},
+            source_containers,
+            {
+                "volumes": {
+                    "crowley-db": {"name": "db-volume", "mountpoint": "/db"},
+                    "crowley-raw": {"name": "raw-volume", "mountpoint": "/raw"},
+                },
+                "networks": [],
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        backup,
+        "_image_identity",
+        lambda image_id: {"id": image_id, "repo_digests": []},
+    )
+    monkeypatch.setattr(backup, "_local_version", lambda _container_id: ("16.6", "2.17.2"))
+    monkeypatch.setattr(
+        backup,
+        "_run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, stdout=b"fixture dump"),
+    )
+
+    def capture_raw(_volume: str, _image: str, output: Path) -> None:
+        output.write_bytes(_tar_bytes({"raw/object": b"fixture raw"}))
+        os.chmod(output, 0o600)
+
+    monkeypatch.setattr(backup, "_capture_raw_volume", capture_raw)
+
+    snapshot = backup.snapshot(tmp_path / "backups")
+    manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == backup.CURRENT_SCHEMA_VERSION
+    assert manifest["source"]["package_name"] == "crowley"
+    assert "source_commit" not in manifest["source"]
+    assert "dirty_tree_sha256" not in manifest["source"]
+
+
+def test_new_schema_resource_digest_mismatch_refuses_drill_compatibility() -> None:
+    manifest = _new_manifest(_tar_bytes({}))
+    recorded = manifest["source"]
+    current = deepcopy(recorded)
+    current["deployment_resources_sha256"] = "f" * 64
+    with pytest.raises(backup.BackupError, match="packaged deployment resources"):
+        backup.validate_source_compatibility(recorded, current, schema_version=backup.CURRENT_SCHEMA_VERSION)
+
+
+def test_new_schema_package_version_is_provenance_only() -> None:
+    manifest = _new_manifest(_tar_bytes({}))
+    recorded = manifest["source"]
+    current = _compatibility_facts(recorded)
+    current.update(
+        {
+            "package_name": recorded["package_name"],
+            "package_version": "0.1.1",
+            "deployment_resources_sha256": recorded["deployment_resources_sha256"],
+        }
+    )
+    backup.validate_source_compatibility(recorded, current, schema_version=backup.CURRENT_SCHEMA_VERSION)
+
+
+def test_drill_rejects_resource_digest_before_secret_or_docker_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = _new_manifest(_tar_bytes({}))
+    manifest["source"]["deployment_resources_sha256"] = "f" * 64
+    monkeypatch.setattr(backup, "validate_snapshot", lambda _path: (manifest, "a" * 64))
+
+    def forbidden_secrets() -> Path:
+        pytest.fail("secrets lookup must not occur before resource compatibility")
+
+    def forbidden_source(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("Docker source inspection must not occur before resource compatibility")
+
+    def forbidden_docker(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("Docker operation must not occur before resource compatibility")
+
+    monkeypatch.setattr(backup, "secrets_path", forbidden_secrets)
+    monkeypatch.setattr(backup, "_source_resources", forbidden_source)
+    monkeypatch.setattr(backup, "_docker", forbidden_docker)
+
+    with pytest.raises(backup.BackupError, match="packaged deployment resources"):
+        backup.drill(tmp_path / "snapshot", tmp_path / "backups")
+
+
+def test_wheel_contains_namespaced_compose_only_and_preserves_source_parity(
+    tmp_path: Path,
+) -> None:
+    repository = Path(__file__).parents[2]
+    packaged = backup._compose_resource()
+    assert packaged.read_bytes() == (repository / "deploy/docker-compose.yml").read_bytes()
+
+    wheel_dir = tmp_path / "wheel"
+    subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(wheel_dir)],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheels = sorted(wheel_dir.glob("*.whl"))
+    assert len(wheels) == 1
+    with zipfile.ZipFile(wheels[0]) as wheel:
+        files = {name for name in wheel.namelist() if not name.endswith("/")}
+    compose_files = sorted(name for name in files if name.endswith("docker-compose.yml"))
+    assert compose_files == ["crowley/ops/resources/docker-compose.yml"]
+    assert not any(name.startswith("deploy/") for name in files)
+    assert not any(".data/" in name for name in files)
 
 
 def test_historical_resource_id_drift_does_not_block_restore_compatibility():

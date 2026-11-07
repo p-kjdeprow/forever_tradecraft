@@ -20,18 +20,26 @@ import tarfile
 import tempfile
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib import metadata, resources
+from importlib.resources.abc import Traversable
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
+from crowley.platform.paths import XdgDirs, XdgPathError
+
 SCHEMA = "crowley.market-backup-manifest"
+HISTORICAL_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 RECEIPT_SCHEMA = "crowley.market-backup-drill-receipt"
 SUMMARY_SCHEMA = "crowley.market-backup-drill-summary"
 MARKER_PREFIX = "crowley.market-backup-complete-v1 "
-DEFAULT_ROOT = Path.home() / ".local/state/crowley/market-backups"
-COMPOSE = Path("deploy/docker-compose.yml")
-ENV_FILE = Path("deploy/.env")
+OPERATIONS_STATE = Path("host-operations")
+BACKUP_STATE = Path("market-backups")
+COMPOSE = Path("crowley/ops/resources/docker-compose.yml")
+SECRETS_FILE = Path("secrets.env")
 MIGRATIONS = Path("src/crowley/server/migrations")
 NEW_BACKUP_ID_PREFIX = "crowley-"
 HISTORICAL_BACKUP_ID_PREFIX = "beta-"
@@ -128,6 +136,18 @@ class SchemaInventory:
     views: tuple[ViewInventory, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class PackagedResources:
+    """The deployment resources used by an installed Crowley package."""
+
+    package_name: str
+    package_version: str
+    compose_path: Path
+    compose_file_sha256: str
+    migrations: tuple[dict[str, str], ...]
+    deployment_resources_sha256: str
+
+
 class BackupError(RuntimeError):
     """Safe-to-report bounded operation error (does not contain subprocess text)."""
 
@@ -146,6 +166,98 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _xdg_dirs() -> XdgDirs:
+    try:
+        return XdgDirs.from_environ(os.environ)
+    except XdgPathError as exc:
+        raise BackupError("Crowley XDG paths are unavailable") from exc
+
+
+def default_state_root() -> Path:
+    return _xdg_dirs().crowley_state / OPERATIONS_STATE
+
+
+def default_backup_root() -> Path:
+    return _xdg_dirs().crowley_state / BACKUP_STATE
+
+
+def secrets_path() -> Path:
+    path = _xdg_dirs().crowley_config / SECRETS_FILE
+    try:
+        metadata_info = path.lstat()
+    except OSError as exc:
+        raise BackupError("Crowley secrets file is unavailable") from exc
+    if (
+        stat.S_ISLNK(metadata_info.st_mode)
+        or not stat.S_ISREG(metadata_info.st_mode)
+        or metadata_info.st_uid != os.getuid()
+        or stat.S_IMODE(metadata_info.st_mode) != 0o600
+    ):
+        raise BackupError("Crowley secrets file is unsafe")
+    return path
+
+
+def _package_identity() -> tuple[str, str]:
+    try:
+        distribution = metadata.distribution("crowley")
+    except metadata.PackageNotFoundError as exc:
+        raise BackupError("installed Crowley package metadata is unavailable") from exc
+    package_name = distribution.metadata.get("Name")
+    package_version = distribution.version
+    if not package_name or not package_version:
+        raise BackupError("installed Crowley package identity is incomplete")
+    return package_name, package_version
+
+
+def _packaged_migrations() -> list[dict[str, str]]:
+    migration_root = resources.files("crowley.server.migrations")
+    rows: list[dict[str, str]] = []
+    for resource in sorted(
+        (item for item in migration_root.iterdir() if item.name.endswith(".sql")),
+        key=lambda item: item.name.encode("utf-8"),
+    ):
+        data = resource.read_bytes()
+        rows.append(
+            {
+                "path": f"{MIGRATIONS.as_posix()}/{resource.name}",
+                "sha256": sha256_bytes(data),
+            }
+        )
+    if not rows:
+        raise BackupError("no packaged migration files found")
+    return rows
+
+
+def _compose_resource() -> Traversable:
+    compose = resources.files("crowley.ops.resources").joinpath("docker-compose.yml")
+    if not compose.is_file():
+        raise BackupError("packaged Docker Compose file is unavailable")
+    return compose
+
+
+@contextmanager
+def _packaged_resources() -> Iterator[PackagedResources]:
+    package_name, package_version = _package_identity()
+    compose_resource = _compose_resource()
+    compose_bytes = compose_resource.read_bytes()
+    compose_digest = sha256_bytes(compose_bytes)
+    migrations = _packaged_migrations()
+    resource_descriptor = {
+        "compose_file": {"path": COMPOSE.as_posix(), "sha256": compose_digest},
+        "migrations": migrations,
+    }
+    deployment_digest = sha256_bytes(canonical_json(resource_descriptor))
+    with resources.as_file(compose_resource) as compose_path:
+        yield PackagedResources(
+            package_name=package_name,
+            package_version=package_version,
+            compose_path=compose_path,
+            compose_file_sha256=compose_digest,
+            migrations=tuple(migrations),
+            deployment_resources_sha256=deployment_digest,
+        )
 
 
 def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -200,41 +312,23 @@ def _path(value: Any, where: str) -> str:
     return text
 
 
-def validate_manifest(value: Any) -> dict[str, Any]:
-    top = _exact_keys(
-        value,
-        {"schema", "schema_version", "backup_id", "created_at_utc", "source", "database_dump", "raw_archive"},
-        "manifest",
-    )
-    if top["schema"] != SCHEMA or type(top["schema_version"]) is not int or top["schema_version"] != 1:
-        raise BackupError("unsupported manifest schema")
-    if not isinstance(top["backup_id"], str) or not BACKUP_ID_RE.fullmatch(top["backup_id"]):
-        raise BackupError("invalid backup id")
-    created = _string(top["created_at_utc"], "created_at_utc")
-    try:
-        parsed = dt.datetime.fromisoformat(created.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise BackupError("invalid created_at_utc") from exc
-    if not created.endswith("Z") or parsed.utcoffset() != dt.timedelta(0):
-        raise BackupError("created_at_utc must be UTC Z")
-    source = _exact_keys(
-        top["source"],
-        {
-            "compose_file_sha256",
-            "compose_project",
-            "services",
-            "containers",
-            "volumes",
-            "networks",
-            "source_commit",
-            "dirty_tree_sha256",
-            "migrations",
-            "postgres_server_version",
-            "timescaledb_extension_version",
-        },
-        "source",
-    )
-    _sha(source["compose_file_sha256"], "compose file")
+def _validate_migrations(value: Any, *, path_prefix: str) -> list[dict[str, str]]:
+    if not isinstance(value, list) or not value:
+        raise BackupError("invalid migrations")
+    migration_paths: list[str] = []
+    for migration in value:
+        item = _exact_keys(migration, {"path", "sha256"}, "migration")
+        path = _path(item["path"], "migration path")
+        if not path.startswith(path_prefix) or not path.endswith(".sql"):
+            raise BackupError("migration path outside packaged migration tree")
+        migration_paths.append(path)
+        _sha(item["sha256"], "migration")
+    if migration_paths != sorted(set(migration_paths), key=lambda p: p.encode("utf-8")):
+        raise BackupError("migrations must be unique and sorted")
+    return value
+
+
+def _validate_common_source(source: dict[str, Any]) -> None:
     _string(source["compose_project"], "compose project")
     services = _exact_keys(source["services"], {"database", "server"}, "services")
     _string(services["database"], "database service")
@@ -246,7 +340,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
             if not ID_RE.fullmatch(_string(item[key], f"{name}.{key}")):
                 raise BackupError(f"invalid {name} {key}")
         if not isinstance(item["repo_digests"], list) or any(
-            not isinstance(d, str) or not d for d in item["repo_digests"]
+            not isinstance(digest, str) or not digest for digest in item["repo_digests"]
         ):
             raise BackupError(f"invalid {name} repo digests")
         if item["repo_digests"] != sorted(set(item["repo_digests"])):
@@ -265,22 +359,91 @@ def validate_manifest(value: Any) -> dict[str, Any]:
         _string(net["id"], "network id")
     if network_names != sorted(set(network_names)):
         raise BackupError("networks must be unique and sorted")
-    _string(source["source_commit"], "source commit")
-    _sha(source["dirty_tree_sha256"], "dirty tree")
-    if not isinstance(source["migrations"], list) or not source["migrations"]:
-        raise BackupError("invalid migrations")
-    migration_paths: list[str] = []
-    for migration in source["migrations"]:
-        item = _exact_keys(migration, {"path", "sha256"}, "migration")
-        path = _path(item["path"], "migration path")
-        if not path.startswith("src/crowley/server/migrations/") or not path.endswith(".sql"):
-            raise BackupError("migration path outside repository migration tree")
-        migration_paths.append(path)
-        _sha(item["sha256"], "migration")
-    if migration_paths != sorted(set(migration_paths), key=lambda p: p.encode("utf-8")):
-        raise BackupError("migrations must be unique and sorted")
     _string(source["postgres_server_version"], "postgres version")
     _string(source["timescaledb_extension_version"], "timescaledb version")
+
+
+def validate_manifest(value: Any) -> dict[str, Any]:
+    top = _exact_keys(
+        value,
+        {"schema", "schema_version", "backup_id", "created_at_utc", "source", "database_dump", "raw_archive"},
+        "manifest",
+    )
+    if (
+        top["schema"] != SCHEMA
+        or type(top["schema_version"]) is not int
+        or top["schema_version"]
+        not in {
+            HISTORICAL_SCHEMA_VERSION,
+            CURRENT_SCHEMA_VERSION,
+        }
+    ):
+        raise BackupError("unsupported manifest schema")
+    if not isinstance(top["backup_id"], str) or not BACKUP_ID_RE.fullmatch(top["backup_id"]):
+        raise BackupError("invalid backup id")
+    created = _string(top["created_at_utc"], "created_at_utc")
+    try:
+        parsed = dt.datetime.fromisoformat(created.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise BackupError("invalid created_at_utc") from exc
+    if not created.endswith("Z") or parsed.utcoffset() != dt.timedelta(0):
+        raise BackupError("created_at_utc must be UTC Z")
+    schema_version = top["schema_version"]
+    source_keys = (
+        {
+            "compose_file_sha256",
+            "compose_project",
+            "services",
+            "containers",
+            "volumes",
+            "networks",
+            "source_commit",
+            "dirty_tree_sha256",
+            "migrations",
+            "postgres_server_version",
+            "timescaledb_extension_version",
+        }
+        if schema_version == HISTORICAL_SCHEMA_VERSION
+        else {
+            "package_name",
+            "package_version",
+            "deployment_resources_sha256",
+            "compose_file_sha256",
+            "compose_project",
+            "services",
+            "containers",
+            "volumes",
+            "networks",
+            "migrations",
+            "postgres_server_version",
+            "timescaledb_extension_version",
+        }
+    )
+    source = _exact_keys(top["source"], source_keys, "source")
+    _sha(source["compose_file_sha256"], "compose file")
+    if schema_version == HISTORICAL_SCHEMA_VERSION:
+        _string(source["source_commit"], "source commit")
+        _sha(source["dirty_tree_sha256"], "dirty tree")
+        _validate_migrations(source["migrations"], path_prefix="src/crowley/server/migrations/")
+    else:
+        _string(source["package_name"], "package name")
+        _string(source["package_version"], "package version")
+        _sha(source["deployment_resources_sha256"], "deployment resources")
+        migrations = _validate_migrations(source["migrations"], path_prefix="src/crowley/server/migrations/")
+        expected_resources_digest = sha256_bytes(
+            canonical_json(
+                {
+                    "compose_file": {
+                        "path": COMPOSE.as_posix(),
+                        "sha256": source["compose_file_sha256"],
+                    },
+                    "migrations": migrations,
+                }
+            )
+        )
+        if source["deployment_resources_sha256"] != expected_resources_digest:
+            raise BackupError("deployment resources digest does not match manifest resources")
+    _validate_common_source(source)
     dump = _exact_keys(top["database_dump"], {"path", "format", "size_bytes", "sha256"}, "database_dump")
     if dump["path"] != "database.dump" or dump["format"] != "postgres-custom":
         raise BackupError("invalid database dump descriptor")
@@ -389,40 +552,6 @@ def validate_snapshot(path: Path) -> tuple[dict[str, Any], str]:
     if _hash_tar_members(path / "raw.tar") != raw["members"]:
         raise BackupError("raw archive inventory mismatch")
     return manifest, digest
-
-
-def dirty_tree_sha256(repo: Path) -> str:
-    result = _run(["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=repo, binary=True)
-    records = result.stdout.split(b"\0")
-    changed: dict[str, dict[str, Any]] = {}
-    index = 0
-    while index < len(records):
-        item = records[index]
-        index += 1
-        if not item:
-            continue
-        if len(item) < 4:
-            raise BackupError("git status returned malformed paths")
-        status = item[:2].decode("ascii", "replace")
-        raw_name = item[3:]
-        # Rename/copy records have a second NUL-separated path. Hash both names.
-        names = [raw_name]
-        if "R" in status or "C" in status:
-            if index >= len(records):
-                raise BackupError("git status rename record was incomplete")
-            names.append(records[index])
-            index += 1
-        for raw in names:
-            name = raw.decode("utf-8", "strict")
-            if name in {"deploy/.env", "deploy/.env.local"} or Path(name).name.startswith(".env."):
-                continue
-            candidate = repo / name
-            if candidate.is_file() and not candidate.is_symlink():
-                changed[name] = {"path": name, "state": "present", "sha256": sha256_file(candidate)}
-            else:
-                changed[name] = {"path": name, "state": "deleted", "sha256": None}
-    rows = sorted(changed.values(), key=lambda item: item["path"].encode("utf-8"))
-    return sha256_bytes(canonical_json(rows))
 
 
 def _run(
@@ -723,44 +852,33 @@ def _live_inventory() -> dict[str, Any]:
     return {"containers": containers, "volumes": volumes, "networks": networks}
 
 
-def _compose_base(repo: Path, extra: list[str] | None = None) -> list[str]:
+def _compose_base(compose_path: Path, env_file: Path, extra: list[str] | None = None) -> list[str]:
     args = [
         "compose",
         "--project-directory",
-        str(repo / "deploy"),
+        str(compose_path.parent),
         "-f",
-        str(repo / COMPOSE),
+        str(compose_path),
         "--env-file",
-        str(repo / ENV_FILE),
+        str(env_file),
     ]
     if extra:
         args.extend(extra)
     return args
 
 
-def _compose_config(repo: Path, extras: list[str] | None = None) -> dict[str, Any]:
-    raw = _docker(_compose_base(repo, extras) + ["config", "--format", "json"]).stdout
+def _compose_config(compose_path: Path, env_file: Path, extras: list[str] | None = None) -> dict[str, Any]:
+    raw = _docker(_compose_base(compose_path, env_file, extras) + ["config", "--format", "json"]).stdout
     return _json_output(raw, "compose config")
 
 
-def _source_compose(repo: Path) -> dict[str, Any]:
-    config = _compose_config(repo)
+def _source_compose(compose_path: Path, env_file: Path) -> dict[str, Any]:
+    config = _compose_config(compose_path, env_file)
     if config.get("name") != "crowley" or set(config.get("services", {})) != {"db", "server"}:
         raise BackupError("unexpected source Compose project or services")
     if set(config.get("volumes", {})) != {"crowley-db", "crowley-raw"}:
         raise BackupError("unexpected source Compose volumes")
     return config
-
-
-def _repo_digest(path: Path) -> str:
-    return sha256_file(path)
-
-
-def _migration_inventory(repo: Path) -> list[dict[str, str]]:
-    files = sorted((repo / MIGRATIONS).glob("*.sql"), key=lambda p: p.as_posix().encode("utf-8"))
-    if not files:
-        raise BackupError("no migration files found")
-    return [{"path": p.relative_to(repo).as_posix(), "sha256": sha256_file(p)} for p in files]
 
 
 def _local_version(container_id: str) -> tuple[str, str]:
@@ -793,13 +911,6 @@ def _local_version(container_id: str) -> tuple[str, str]:
     if len(parts) != 2 or not all(parts):
         raise BackupError("could not read source PostgreSQL/TimescaleDB versions")
     return parts[0], parts[1]
-
-
-def _safe_repo_commit(repo: Path) -> str:
-    commit = _run(["git", "rev-parse", "HEAD"], cwd=repo).stdout.strip()
-    if not re.fullmatch(r"[0-9a-f]{40,64}", commit):
-        raise BackupError("invalid source commit metadata")
-    return commit
 
 
 def _set_private(path: Path, data: bytes, mode: int = 0o600) -> None:
@@ -838,7 +949,7 @@ def _ensure_root(root: Path) -> None:
         else:
             cur.mkdir(mode=0o700)
             # Newly created ancestors belong to this process; existing parent
-            # directories may legitimately be root-owned (for example /home).
+            # system directories may legitimately be root-owned.
             if index == len(root.parts[1:]) and cur.stat().st_uid != os.getuid():
                 raise BackupError("private backup root is not owned by this user")
     if root.stat().st_uid != os.getuid():
@@ -870,7 +981,7 @@ with tarfile.open(fileobj=out,mode='w|',format=tarfile.PAX_FORMAT) as tar:
 """
 
 
-def _capture_raw_volume(repo: Path, raw_volume: str, server_image_id: str, output: Path) -> None:
+def _capture_raw_volume(raw_volume: str, server_image_id: str, output: Path) -> None:
     cmd = [
         "docker",
         "run",
@@ -888,15 +999,17 @@ def _capture_raw_volume(repo: Path, raw_volume: str, server_image_id: str, outpu
     ]
     with output.open("xb") as handle:
         os.chmod(output, 0o600)
-        proc = _run(cmd, cwd=repo, binary=True, stdout=handle, check=False)
+        proc = _run(cmd, binary=True, stdout=handle, check=False)
         handle.flush()
         os.fsync(handle.fileno())
     if proc.returncode:
         raise BackupError("read-only raw-volume snapshot helper failed")
 
 
-def _source_resources(repo: Path) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    config = _source_compose(repo)
+def _source_resources(
+    compose_path: Path, env_file: Path
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    config = _source_compose(compose_path, env_file)
     project = config["name"]
     current = _live_inventory()
     source_containers: dict[str, dict[str, Any]] = {}
@@ -947,104 +1060,111 @@ def _source_resources(repo: Path) -> tuple[dict[str, Any], dict[str, Any], dict[
     )
 
 
-def snapshot(repo: Path, root: Path) -> Path:
-    repo = repo.resolve(strict=True)
+def snapshot(root: Path) -> Path:
     _ensure_root(root)
-    config, containers, inventory = _source_resources(repo)
-    database, server = containers["db"], containers["server"]
-    database_image = _image_identity(database["image_id"])
-    server_image = _image_identity(server["image_id"])
-    postgres_version, timescale_version = _local_version(database["id"])
-    now = dt.datetime.now(dt.UTC).replace(microsecond=0)
-    backup_id = f"{NEW_BACKUP_ID_PREFIX}{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}"
-    out = root / backup_id
-    out.mkdir(mode=0o700)
-    _fsync_dir(root)
-    _set_private(out / "INCOMPLETE", b"")
-    _fsync_dir(out)
-    dump_path, raw_path = out / "database.dump", out / "raw.tar"
-    try:
-        with dump_path.open("xb") as handle:
-            os.chmod(dump_path, 0o600)
-            proc = _run(
-                ["docker", "exec", database["id"], "pg_dump", "-w", "-U", "crowley", "-d", "crowley", "-Fc"],
-                binary=True,
-                stdout=handle,
-                check=False,
-            )
-            handle.flush()
-            os.fsync(handle.fileno())
-        if proc.returncode:
-            raise BackupError("database dump failed")
-        _capture_raw_volume(repo, inventory["volumes"]["crowley-raw"]["name"], server["image_id"], raw_path)
-        raw_members = _hash_tar_members(raw_path)
-        status = _run(
-            ["git", "status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd=repo, binary=True
-        )
-        del status
-        dirty_hash = dirty_tree_sha256(repo)
-        manifest = {
-            "schema": SCHEMA,
-            "schema_version": 1,
-            "backup_id": backup_id,
-            "created_at_utc": now.isoformat().replace("+00:00", "Z"),
-            "source": {
-                "compose_file_sha256": _repo_digest(repo / COMPOSE),
-                "compose_project": config["name"],
-                "services": {"database": "db", "server": "server"},
-                "containers": {
-                    "database": {
-                        "id": database["id"],
-                        "image_id": database_image["id"],
-                        "repo_digests": database_image["repo_digests"],
+    with _packaged_resources() as packaged:
+        config, containers, inventory = _source_resources(packaged.compose_path, secrets_path())
+        database, server = containers["db"], containers["server"]
+        database_image = _image_identity(database["image_id"])
+        server_image = _image_identity(server["image_id"])
+        postgres_version, timescale_version = _local_version(database["id"])
+        now = dt.datetime.now(dt.UTC).replace(microsecond=0)
+        backup_id = f"{NEW_BACKUP_ID_PREFIX}{now.strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:12]}"
+        out = root / backup_id
+        out.mkdir(mode=0o700)
+        _fsync_dir(root)
+        _set_private(out / "INCOMPLETE", b"")
+        _fsync_dir(out)
+        dump_path, raw_path = out / "database.dump", out / "raw.tar"
+        try:
+            with dump_path.open("xb") as handle:
+                os.chmod(dump_path, 0o600)
+                proc = _run(
+                    [
+                        "docker",
+                        "exec",
+                        database["id"],
+                        "pg_dump",
+                        "-w",
+                        "-U",
+                        "crowley",
+                        "-d",
+                        "crowley",
+                        "-Fc",
+                    ],
+                    binary=True,
+                    stdout=handle,
+                    check=False,
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
+            if proc.returncode:
+                raise BackupError("database dump failed")
+            _capture_raw_volume(inventory["volumes"]["crowley-raw"]["name"], server["image_id"], raw_path)
+            raw_members = _hash_tar_members(raw_path)
+            manifest = {
+                "schema": SCHEMA,
+                "schema_version": CURRENT_SCHEMA_VERSION,
+                "backup_id": backup_id,
+                "created_at_utc": now.isoformat().replace("+00:00", "Z"),
+                "source": {
+                    "package_name": packaged.package_name,
+                    "package_version": packaged.package_version,
+                    "deployment_resources_sha256": packaged.deployment_resources_sha256,
+                    "compose_file_sha256": packaged.compose_file_sha256,
+                    "compose_project": config["name"],
+                    "services": {"database": "db", "server": "server"},
+                    "containers": {
+                        "database": {
+                            "id": database["id"],
+                            "image_id": database_image["id"],
+                            "repo_digests": database_image["repo_digests"],
+                        },
+                        "server": {
+                            "id": server["id"],
+                            "image_id": server_image["id"],
+                            "repo_digests": server_image["repo_digests"],
+                        },
                     },
-                    "server": {
-                        "id": server["id"],
-                        "image_id": server_image["id"],
-                        "repo_digests": server_image["repo_digests"],
+                    "volumes": {
+                        "database": inventory["volumes"]["crowley-db"],
+                        "raw_archive": inventory["volumes"]["crowley-raw"],
                     },
+                    "networks": inventory["networks"],
+                    "migrations": list(packaged.migrations),
+                    "postgres_server_version": postgres_version,
+                    "timescaledb_extension_version": timescale_version,
                 },
-                "volumes": {
-                    "database": inventory["volumes"]["crowley-db"],
-                    "raw_archive": inventory["volumes"]["crowley-raw"],
+                "database_dump": {
+                    "path": "database.dump",
+                    "format": "postgres-custom",
+                    "size_bytes": dump_path.stat().st_size,
+                    "sha256": sha256_file(dump_path),
                 },
-                "networks": inventory["networks"],
-                "source_commit": _safe_repo_commit(repo),
-                "dirty_tree_sha256": dirty_hash,
-                "migrations": _migration_inventory(repo),
-                "postgres_server_version": postgres_version,
-                "timescaledb_extension_version": timescale_version,
-            },
-            "database_dump": {
-                "path": "database.dump",
-                "format": "postgres-custom",
-                "size_bytes": dump_path.stat().st_size,
-                "sha256": sha256_file(dump_path),
-            },
-            "raw_archive": {
-                "path": "raw.tar",
-                "format": "tar",
-                "size_bytes": raw_path.stat().st_size,
-                "sha256": sha256_file(raw_path),
-                "members": raw_members,
-            },
-        }
-        validate_manifest(manifest)
-        manifest_bytes = canonical_json(manifest)
-        _set_private(out / "manifest.json", manifest_bytes)
-        _fsync_dir(out)
-        digest = sha256_bytes(manifest_bytes)
-        temp_marker = out / f".COMPLETE.{uuid.uuid4().hex}.tmp"
-        _set_private(temp_marker, f"{MARKER_PREFIX}{digest}\n".encode("ascii"))
-        os.replace(temp_marker, out / "COMPLETE")
-        _fsync_dir(out)
-        (out / "INCOMPLETE").unlink()
-        _fsync_dir(out)
-        validate_snapshot(out)
-        return out
-    except BaseException:
-        # Keep the INCOMPLETE evidence in place. Never erase a partial backup.
-        raise
+                "raw_archive": {
+                    "path": "raw.tar",
+                    "format": "tar",
+                    "size_bytes": raw_path.stat().st_size,
+                    "sha256": sha256_file(raw_path),
+                    "members": raw_members,
+                },
+            }
+            validate_manifest(manifest)
+            manifest_bytes = canonical_json(manifest)
+            _set_private(out / "manifest.json", manifest_bytes)
+            _fsync_dir(out)
+            digest = sha256_bytes(manifest_bytes)
+            temp_marker = out / f".COMPLETE.{uuid.uuid4().hex}.tmp"
+            _set_private(temp_marker, f"{MARKER_PREFIX}{digest}\n".encode("ascii"))
+            os.replace(temp_marker, out / "COMPLETE")
+            _fsync_dir(out)
+            (out / "INCOMPLETE").unlink()
+            _fsync_dir(out)
+            validate_snapshot(out)
+            return out
+        except BaseException:
+            # Keep the INCOMPLETE evidence in place. Never erase a partial backup.
+            raise
 
 
 def validate_compose_isolation(
@@ -1170,17 +1290,17 @@ def classify_orphans(
     return result
 
 
-def _compose_args(repo: Path, project: str, override: Path, credentials: Path) -> list[str]:
+def _compose_args(compose_path: Path, project: str, override: Path, credentials: Path) -> list[str]:
     return [
         "compose",
         "--project-directory",
-        str(repo / "deploy"),
+        str(compose_path.parent),
         "-f",
-        str(repo / COMPOSE),
+        str(compose_path),
         "-f",
         str(override),
         "--env-file",
-        str(repo / ENV_FILE),
+        str(secrets_path()),
         "--env-file",
         str(credentials),
         "--project-name",
@@ -1189,7 +1309,7 @@ def _compose_args(repo: Path, project: str, override: Path, credentials: Path) -
 
 
 def _target_compose(
-    repo: Path,
+    compose_path: Path,
     project: str,
     override: Path,
     credentials: Path,
@@ -1199,7 +1319,7 @@ def _target_compose(
     input_data: bytes | None = None,
 ) -> subprocess.CompletedProcess[Any]:
     return _docker(
-        _compose_args(repo, project, override, credentials) + args, check=check, input_data=input_data
+        _compose_args(compose_path, project, override, credentials) + args, check=check, input_data=input_data
     )
 
 
@@ -1211,10 +1331,12 @@ def _labels_ok(labels: Any, project: str, service: str) -> bool:
     )
 
 
-def _target_ids(repo: Path, project: str, override: Path, credentials: Path) -> dict[str, Any]:
+def _target_ids(compose_path: Path, project: str, override: Path, credentials: Path) -> dict[str, Any]:
     ids = [
         line
-        for line in _target_compose(repo, project, override, credentials, ["ps", "-aq"]).stdout.splitlines()
+        for line in _target_compose(
+            compose_path, project, override, credentials, ["ps", "-aq"]
+        ).stdout.splitlines()
         if line
     ]
     inspected = [_inspect_container(cid) for cid in ids]
@@ -1259,7 +1381,7 @@ def _assert_project_absent(live: dict[str, Any], project: str) -> None:
 
 
 def _guard_current(
-    repo: Path,
+    compose_path: Path,
     project: str,
     override: Path,
     credentials: Path,
@@ -1312,7 +1434,7 @@ def _guard_current(
             if val["labels"].get("com.docker.compose.project") != project
         },
     }
-    target_now = _target_ids(repo, project, override, credentials)
+    target_now = _target_ids(compose_path, project, override, credentials)
     _target_guard(target_now, project, source, external, expected=expected)
     target_membership = {network["name"]: network["id"] for network in target_now["networks"]}
     for helper in helpers:
@@ -2048,12 +2170,19 @@ def _target_image_migrations(image_id: str) -> list[dict[str, str]]:
         raise BackupError("recorded server image migration inspection failed") from exc
 
 
-def validate_source_compatibility(recorded: dict[str, Any], current: dict[str, Any]) -> None:
-    """Check restore compatibility while leaving source revision fields as provenance."""
+def validate_source_compatibility(
+    recorded: dict[str, Any], current: dict[str, Any], *, schema_version: int = HISTORICAL_SCHEMA_VERSION
+) -> None:
+    """Check the explicitly versioned packaged-resource compatibility contract."""
     if recorded["compose_file_sha256"] != current["compose_file_sha256"]:
         raise BackupError("snapshot Compose file no longer matches")
     if recorded["migrations"] != current["migrations"]:
         raise BackupError("snapshot migration files no longer match")
+    if schema_version == CURRENT_SCHEMA_VERSION:
+        if recorded["deployment_resources_sha256"] != current["deployment_resources_sha256"]:
+            raise BackupError("snapshot packaged deployment resources no longer match")
+    elif schema_version != HISTORICAL_SCHEMA_VERSION:
+        raise BackupError("unsupported manifest schema")
     for field in ("postgres_server_version", "timescaledb_extension_version"):
         if recorded[field] != current[field]:
             raise BackupError("snapshot source database versions no longer match")
@@ -2194,7 +2323,7 @@ def _target_version(db_id: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
-def _make_helper(repo: Path, project: str, raw_volume: str, image_id: str) -> tuple[str, dict[str, Any]]:
+def _make_helper(project: str, raw_volume: str, image_id: str) -> tuple[str, dict[str, Any]]:
     name = f"{project}-raw-restore"
     script = r"""import os,sys,tarfile
 root='/data'
@@ -2257,7 +2386,7 @@ with tarfile.open(fileobj=sys.stdin.buffer,mode='r|') as tar:
 
 
 def _extract_raw(
-    repo: Path,
+    compose_path: Path,
     project: str,
     raw_volume: str,
     image_id: str,
@@ -2268,13 +2397,13 @@ def _extract_raw(
     override: Path,
     credentials: Path,
 ) -> tuple[str, dict[str, Any]]:
-    helper_id, info = _make_helper(repo, project, raw_volume, image_id)
+    helper_id, info = _make_helper(project, raw_volume, image_id)
     if info["id"] in live["containers"] or info["id"] in {c["id"] for c in source["containers"].values()}:
         raise BackupError("raw helper container identity collides with source")
     now = _inspect_container(helper_id)
     if now["id"] != info["id"] or not _labels_ok(now["labels"], project, "raw-restore-helper"):
         raise BackupError("raw helper ownership changed before write")
-    _guard_current(repo, project, override, credentials, source, target, [info])
+    _guard_current(compose_path, project, override, credentials, source, target, [info])
     with archive.open("rb") as source_handle:
         code = _stream_to_process(["docker", "start", "-ai", helper_id], source_handle)
     if code:
@@ -2283,7 +2412,7 @@ def _extract_raw(
 
 
 def _verify_raw_volume(
-    repo: Path,
+    compose_path: Path,
     project: str,
     raw_volume: str,
     image_id: str,
@@ -2350,7 +2479,7 @@ print(json.dumps(sorted(found,key=lambda x:x['path'].encode('utf-8')),sort_keys=
     mounts = [m for m in info["mounts"] if m["Destination"] == "/data" and m["Type"] == "volume"]
     if len(mounts) != 1 or mounts[0]["Name"] != raw_volume or mounts[0]["RW"]:
         raise BackupError("raw verification helper mount is not read-only target volume")
-    _guard_current(repo, project, override, credentials, source, target, [*helpers, info])
+    _guard_current(compose_path, project, override, credentials, source, target, [*helpers, info])
     proc = _docker(["start", "-a", helper_id], binary=True, check=False)
     if proc.returncode:
         raise BackupError("raw volume inventory verification failed")
@@ -2945,7 +3074,7 @@ def _mark(receipt: dict[str, Any], name: str, state: str) -> None:
 
 
 def _create_and_capture_target(
-    repo: Path,
+    compose_path: Path,
     project: str,
     override: Path,
     credentials: Path,
@@ -2954,8 +3083,8 @@ def _create_and_capture_target(
     # Set the attempt flag before invoking Compose: it may create a subset and
     # then fail, leaving resources even when discovery never begins.
     creation["attempted"] = True
-    _target_compose(repo, project, override, credentials, ["create", "--no-build"])
-    target = _target_ids(repo, project, override, credentials)
+    _target_compose(compose_path, project, override, credentials, ["create", "--no-build"])
+    target = _target_ids(compose_path, project, override, credentials)
     creation["target"] = target
     return target
 
@@ -3114,12 +3243,28 @@ def _remove_owned(
         return {"verified": False, "removed": sorted(removed)}
 
 
-def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
-    repo = repo.resolve(strict=True)
+def drill(snapshot_path: Path, root: Path) -> Path:
+    with _packaged_resources() as packaged:
+        return _drill(packaged, snapshot_path, root)
+
+
+def _drill(packaged: PackagedResources, snapshot_path: Path, root: Path) -> Path:
+    compose_path = packaged.compose_path
     _ensure_root(root)
     started = dt.datetime.now(dt.UTC).replace(microsecond=0)
     manifest, manifest_digest = validate_snapshot(snapshot_path)
-    source_config, source_containers, source_meta = _source_resources(repo)
+    source = manifest["source"]
+    if manifest["schema_version"] == CURRENT_SCHEMA_VERSION:
+        if source["deployment_resources_sha256"] != packaged.deployment_resources_sha256:
+            raise BackupError("snapshot packaged deployment resources no longer match")
+    elif manifest["schema_version"] != HISTORICAL_SCHEMA_VERSION:
+        raise BackupError("unsupported manifest schema")
+    if source["compose_file_sha256"] != packaged.compose_file_sha256:
+        raise BackupError("snapshot Compose file no longer matches")
+    if source["migrations"] != list(packaged.migrations):
+        raise BackupError("snapshot migration files no longer match")
+    secret_file = secrets_path()
+    _, source_containers, source_meta = _source_resources(compose_path, secret_file)
     live_before = source_meta["live_inventory"]
     source = {
         "containers": source_containers,
@@ -3151,14 +3296,17 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         }
     postgres_version, timescale_version = _local_version(source_containers["db"]["id"])
     compatibility = {
-        "compose_file_sha256": _repo_digest(repo / COMPOSE),
-        "migrations": _migration_inventory(repo),
+        "package_name": packaged.package_name,
+        "package_version": packaged.package_version,
+        "deployment_resources_sha256": packaged.deployment_resources_sha256,
+        "compose_file_sha256": packaged.compose_file_sha256,
+        "migrations": list(packaged.migrations),
         "postgres_server_version": postgres_version,
         "timescaledb_extension_version": timescale_version,
         "containers": source_images,
         "server_image_migrations": _target_image_migrations(src["containers"]["server"]["image_id"]),
     }
-    validate_source_compatibility(src, compatibility)
+    validate_source_compatibility(src, compatibility, schema_version=manifest["schema_version"])
     project = f"crowley-drill-{uuid.uuid4().hex[:16]}"
     _assert_project_absent(live_before, project)
     receipt_dir = root / f"drill-{manifest['backup_id']}-{uuid.uuid4().hex[:8]}"
@@ -3190,7 +3338,9 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
     failure_metadata: dict[str, Any] | None = None
     try:
         config = _compose_config(
-            repo, ["-f", str(override), "--env-file", str(credentials), "--project-name", project]
+            compose_path,
+            secret_file,
+            ["-f", str(override), "--env-file", str(credentials), "--project-name", project],
         )
         validate_compose_isolation(
             config,
@@ -3204,16 +3354,16 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         before_create = _live_inventory()
         _assert_project_absent(before_create, project)
         _assert_source_current(before_create, source)
-        target = _create_and_capture_target(repo, project, override, credentials, creation)
+        target = _create_and_capture_target(compose_path, project, override, credentials, creation)
         receipt["target"] = _safe_target_receipt(target, project)
         _target_guard(target, project, source, live_before, service_state="created")
         _mark(receipt, "create_disposable_resources", "passed")
         db_id = target["containers"]["db"]["id"]
         server_id = target["containers"]["server"]["id"]
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         failure_stage = "start_disposable_database"
         try:
-            _target_compose(repo, project, override, credentials, ["start", "db"])
+            _target_compose(compose_path, project, override, credentials, ["start", "db"])
         except BackupError as exc:
             failure_reason = _safe_failure_reason(exc)
             raise BackupError(failure_stage) from None
@@ -3233,7 +3383,7 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         else:
             failure_stage = "database_readiness"
             try:
-                _guard_current(repo, project, override, credentials, source, target, helpers)
+                _guard_current(compose_path, project, override, credentials, source, target, helpers)
             except Exception:
                 failure_metadata = {"identity_recheck": "blocked", "metadata_read": "not_run"}
             else:
@@ -3251,7 +3401,7 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
             raise BackupError("disposable database did not become ready")
         failure_stage = "identity_before_database"
         try:
-            _guard_current(repo, project, override, credentials, source, target, helpers)
+            _guard_current(compose_path, project, override, credentials, source, target, helpers)
         except BackupError as exc:
             failure_reason = _safe_failure_reason(exc)
             raise BackupError(failure_stage) from None
@@ -3263,7 +3413,7 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
             raise BackupError(failure_stage) from None
         failure_stage = "identity_after_database"
         try:
-            _guard_current(repo, project, override, credentials, source, target, helpers)
+            _guard_current(compose_path, project, override, credentials, source, target, helpers)
         except BackupError as exc:
             failure_reason = _safe_failure_reason(exc)
             raise BackupError(failure_stage) from None
@@ -3275,10 +3425,10 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
             raise BackupError(failure_stage) from None
         _mark(receipt, "create_database_extension", "passed")
         failure_stage = None
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         _db_sql(db_id, "SELECT timescaledb_pre_restore()")
         _mark(receipt, "timescaledb_pre_restore", "passed")
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         with (snapshot_path / "database.dump").open("rb") as dump_handle:
             failure_stage = "pg_restore_single_job_no_owner"
             code, pg_restore_category = _stream_pg_restore(
@@ -3290,10 +3440,10 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
             raise BackupError(failure_stage) from None
         _mark(receipt, "pg_restore_single_job_no_owner", "passed")
         failure_stage = None
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         _db_sql(db_id, "SELECT timescaledb_post_restore()")
         _mark(receipt, "timescaledb_post_restore", "passed")
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         _db_sql(db_id, "ANALYZE")
         _mark(receipt, "analyze", "passed")
         pg_version, ts_version = _target_version(db_id)
@@ -3316,9 +3466,9 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
             }:
                 raise BackupError("reference migration helper identity collides with source")
             helpers.append(helper)
-            _guard_current(repo, project, override, credentials, source, target, helpers)
+            _guard_current(compose_path, project, override, credentials, source, target, helpers)
 
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         reference_inventory = _reference_database_inventory(
             db_id,
             src["containers"]["server"]["image_id"],
@@ -3328,7 +3478,7 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
             register_reference_helper,
             src["migrations"],
         )
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         restored_inventory = _catalog_inventory(db_id, "crowley")
         compare_schema_inventories(reference_inventory, restored_inventory)
         receipt["counts"] = _count_restored(db_id, reference_inventory, src["migrations"])
@@ -3338,9 +3488,9 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         raw_volume = next(
             m["Name"] for m in target["containers"]["server"]["mounts"] if m["Destination"] == "/data"
         )
-        _guard_current(repo, project, override, credentials, source, target, helpers)
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
         helper_id, helper_info = _extract_raw(
-            repo,
+            compose_path,
             project,
             raw_volume,
             src["containers"]["server"]["image_id"],
@@ -3355,7 +3505,7 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         receipt["target"]["helpers"].append(_safe_helper_receipt(helper_info, "raw-restore-helper"))
         _mark(receipt, "extract_raw_archive", "passed")
         _verify_id, verify_info = _verify_raw_volume(
-            repo,
+            compose_path,
             project,
             raw_volume,
             src["containers"]["server"]["image_id"],
@@ -3372,8 +3522,8 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         references, orphans = _raw_references(db_id, snapshot_path / "raw.tar", manifest)
         receipt["references"], receipt["orphans"] = references, orphans
         _mark(receipt, "validate_raw_references", "passed")
-        _guard_current(repo, project, override, credentials, source, target, helpers)
-        _target_compose(repo, project, override, credentials, ["start", "server"])
+        _guard_current(compose_path, project, override, credentials, source, target, helpers)
+        _target_compose(compose_path, project, override, credentials, ["start", "server"])
         _mark(receipt, "start_server", "passed")
         for _ in range(60):
             if _probe_api(server_id, authenticated=False):
@@ -3403,7 +3553,7 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         failure_reason = failure_reason or _safe_failure_reason(exc)
         if failure_stage in {"create_database", "create_extension"}:
             try:
-                _guard_current(repo, project, override, credentials, source, target, helpers)
+                _guard_current(compose_path, project, override, credentials, source, target, helpers)
             except Exception:
                 failure_metadata = {"identity_recheck": "blocked", "metadata_read": "not_run"}
             else:
@@ -3417,7 +3567,7 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
                     failure_metadata = {"identity_recheck": "passed", "metadata_read": "failed"}
         elif failure_stage == "pg_restore_single_job_no_owner":
             try:
-                _guard_current(repo, project, override, credentials, source, target, helpers)
+                _guard_current(compose_path, project, override, credentials, source, target, helpers)
             except Exception:
                 failure_metadata = {"identity_recheck": "blocked", "metadata_read": "not_run"}
             else:
@@ -3445,8 +3595,8 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
         try:
             if creation["target"]["containers"]:
                 target = creation["target"]
-                _guard_current(repo, project, override, credentials, source, target, helpers)
-                target = _target_ids(repo, project, override, credentials)
+                _guard_current(compose_path, project, override, credentials, source, target, helpers)
+                target = _target_ids(compose_path, project, override, credentials)
                 creation["target"] = target
                 receipt["target"] = _safe_target_receipt(target, project)
                 receipt["target"]["helpers"] = [

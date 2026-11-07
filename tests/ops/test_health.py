@@ -36,8 +36,7 @@ def _config(tmp_path: Path) -> Path:
 
 
 def _snapshot_functions(counter: list[int] | None = None):
-    def snapshot(repo: Path, root: Path) -> Path:
-        del repo
+    def snapshot(root: Path) -> Path:
         path = root / BACKUP_NAME
         path.mkdir(mode=0o700, exist_ok=True)
         manifest_bytes = ops.market_backup.canonical_json(_health_manifest())
@@ -184,7 +183,6 @@ def _healthy_services() -> dict[str, dict[str, str]]:
 def _health(
     tmp_path: Path,
     *,
-    repo: Path | None = None,
     status: dict[str, object] | None = None,
     uploads: dict[str, int] | None = None,
     services: dict[str, dict[str, str]] | None = None,
@@ -205,10 +203,10 @@ def _health(
         return {"ok": True, "status": status or _good_status()}
 
     return ops.health_operation(
-        repo=repo or tmp_path,
         config_path=config,
         state_root=state_root,
         backup_root=backup_root,
+        companion_state_path=companion,
         now=lambda: NOW,
         load_config_fn=lambda _path: config_object,
         socket_fn=socket_fn,
@@ -224,8 +222,6 @@ def test_backup_success_revalidates_and_atomically_records_last_good(tmp_path: P
     counter = [0]
     snapshot, validate = _snapshot_functions(counter)
     result = ops.backup_operation(
-        repo=tmp_path,
-        config=_config(tmp_path),
         state_root=state_root,
         backup_root=backup_root,
         snapshot_fn=snapshot,
@@ -246,12 +242,10 @@ def test_backup_failure_preserves_previous_last_good_and_uses_bounded_category(t
     _install_last_good(state_root, backup_root)
     prior = (state_root / "last-good-backup.json").read_bytes()
 
-    def fail(_repo: Path, _root: Path) -> Path:
+    def fail(_root: Path) -> Path:
         raise RuntimeError("secret database output must not escape")
 
     result = ops.backup_operation(
-        repo=tmp_path,
-        config=_config(tmp_path),
         state_root=state_root,
         backup_root=backup_root,
         snapshot_fn=fail,
@@ -278,8 +272,6 @@ def test_backup_validation_failure_preserves_previous_last_good(
         return {"backup_id": BACKUP_NAME[:-1] + "0"}, "b" * 64
 
     result = ops.backup_operation(
-        repo=tmp_path,
-        config=_config(tmp_path),
         state_root=state_root,
         backup_root=backup_root,
         snapshot_fn=snapshot,
@@ -313,8 +305,8 @@ def test_large_schema_valid_manifest_passes_backup_admission_and_health(tmp_path
     state_root, backup_root = tmp_path / "state", tmp_path / "backups"
     snapshot, _unused = _snapshot_functions()
 
-    def large_snapshot(_repo: Path, root: Path) -> Path:
-        path = snapshot(_repo, root)
+    def large_snapshot(root: Path) -> Path:
+        path = snapshot(root)
         (path / "manifest.json").write_bytes(manifest_bytes)
         os.chmod(path / "manifest.json", 0o600)
         (path / "COMPLETE").write_bytes(
@@ -332,8 +324,6 @@ def test_large_schema_valid_manifest_passes_backup_admission_and_health(tmp_path
         return value, ops.market_backup.sha256_bytes(manifest_bytes)
 
     result = ops.backup_operation(
-        repo=tmp_path,
-        config=_config(tmp_path),
         state_root=state_root,
         backup_root=backup_root,
         snapshot_fn=large_snapshot,
@@ -349,11 +339,9 @@ def test_large_schema_valid_manifest_passes_backup_admission_and_health(tmp_path
 def test_backup_missing_config_writes_bounded_failure_receipt(tmp_path: Path) -> None:
     state_root, backup_root = tmp_path / "state", tmp_path / "backups"
     result = ops.backup_operation(
-        repo=tmp_path,
-        config=tmp_path / "missing-session.toml",
         state_root=state_root,
         backup_root=backup_root,
-        snapshot_fn=lambda *_: pytest.fail("missing config must fail before snapshot"),
+        snapshot_fn=lambda _root: pytest.fail("missing config must fail before snapshot"),
         now=lambda: NOW,
     )
     assert result["exit_code"] == 2
@@ -368,8 +356,6 @@ def test_completed_backup_survives_receipt_directory_failure(tmp_path: Path) -> 
     (state_root / "receipts").write_text("not a directory", encoding="utf-8")
     snapshot, validate = _snapshot_functions()
     result = ops.backup_operation(
-        repo=tmp_path,
-        config=_config(tmp_path),
         state_root=state_root,
         backup_root=backup_root,
         snapshot_fn=snapshot,
@@ -394,8 +380,6 @@ def test_backup_uses_real_nonblocking_process_lock(tmp_path: Path) -> None:
     assert ready.wait(2)
     snapshot, _validate = _snapshot_functions()
     result = ops.backup_operation(
-        repo=tmp_path,
-        config=_config(tmp_path),
         state_root=state_root,
         backup_root=backup_root,
         snapshot_fn=snapshot,
@@ -786,7 +770,6 @@ def test_health_rejects_malformed_ipc_status_without_retaining_payload(tmp_path:
 def test_health_missing_config_persists_null_status_and_independent_issues(tmp_path: Path) -> None:
     state_root = tmp_path / "state"
     result = ops.health_operation(
-        repo=tmp_path,
         config_path=tmp_path / "missing-session.toml",
         state_root=state_root,
         backup_root=tmp_path / "missing-backups",
@@ -801,10 +784,9 @@ def test_health_missing_config_persists_null_status_and_independent_issues(tmp_p
     assert "BLOCKED" not in json.dumps(persisted)
 
 
-def test_health_repo_issue_overrides_gated_classification(tmp_path: Path) -> None:
+def test_health_does_not_require_a_repository_checkout(tmp_path: Path) -> None:
     result = _health(
         tmp_path,
-        repo=tmp_path / "missing-repository",
         status=_good_status(
             state="PAUSED",
             nativeCalibration=False,
@@ -814,8 +796,8 @@ def test_health_repo_issue_overrides_gated_classification(tmp_path: Path) -> Non
         ),
         uploads={},
     )
-    assert result["classification"] == "attention"
-    assert "repo_unavailable" in result["issues"]
+    assert result["classification"] == "gated"
+    assert "repo_unavailable" not in result["issues"]
 
 
 @pytest.mark.parametrize(

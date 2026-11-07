@@ -7,6 +7,7 @@
 ## Dependencies: Auctionator, Crowley_Data
 
 GeneratedTarget.lua
+Util.lua
 Core.lua
 Context.lua
 Account.lua

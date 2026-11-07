@@ -12458,14 +12458,15 @@ class SessionDaemon:
         db = root.get("CrowleyDB")
         if not isinstance(db, dict):
             raise EvidenceError("SavedVariables reconciliation has no CrowleyDB")
-        if "scans" not in db or "sweeps" not in db:
-            raise EvidenceError("SavedVariables reconciliation is missing explicit queue fields")
-        for name in ("scans", "sweeps"):
-            if not isinstance(db[name], dict):
-                raise EvidenceError(f"SavedVariables reconciliation has malformed {name}")
+        if "sweeps" in db:
+            raise EvidenceError("SavedVariables reconciliation contains legacy sweeps queue field")
+        if "scans" not in db:
+            raise EvidenceError("SavedVariables reconciliation is missing scans queue field")
+        if not isinstance(db["scans"], dict):
+            raise EvidenceError("SavedVariables reconciliation has malformed scans")
         stable_scan_ids = frozenset(uid for uid in db["scans"] if isinstance(uid, str) and uid)
-        stable_sweep_ids = frozenset(uid for uid in db["sweeps"] if isinstance(uid, str) and uid)
-        if len(stable_scan_ids) != len(db["scans"]) or len(stable_sweep_ids) != len(db["sweeps"]):
+        stable_sweep_ids = frozenset()
+        if len(stable_scan_ids) != len(db["scans"]):
             raise EvidenceError("SavedVariables reconciliation queue IDs are malformed")
         scan_kwargs = self._saved_scan_kwargs(snapshot)
         stable_evidence = None

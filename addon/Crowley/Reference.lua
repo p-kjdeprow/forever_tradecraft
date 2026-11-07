@@ -16,12 +16,6 @@ local INFO_FIELDS = {
 }
 local running
 
-local function finiteInteger(value, minimum, maximum)
-  if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge then return false end
-  if value ~= math.floor(value) or value < (minimum or 0) or value > (maximum or MAX_SAFE) then return false end
-  return true
-end
-
 local function validItemIDs(value)
   if type(value) ~= "table" then return false end
   local count = #value
@@ -32,7 +26,7 @@ local function validItemIDs(value)
   local seen = {}
   for index = 1, count do
     local itemID = value[index]
-    if not finiteInteger(itemID, 1) or seen[itemID] then return false end
+    if not ns.Util.IsInteger(itemID, 1, MAX_SAFE) or seen[itemID] then return false end
     seen[itemID] = true
   end
   return true
@@ -63,7 +57,7 @@ local function readInfo(itemID)
       elseif field ~= "sellPrice" then
         maximum = INTEGER_MAX
       end
-      if not finiteInteger(value, field == "maxStack" and 1 or 0, maximum) then return nil, field end
+      if not ns.Util.IsInteger(value, field == "maxStack" and 1 or 0, maximum) then return nil, field end
     end
   end
   return values, nil
@@ -83,7 +77,7 @@ local function deposit(capture, itemID, maxStack)
         sawNil = true
       elseif type(result) ~= "number" then
         badType = badType or type(result)
-      elseif not finiteInteger(result, 0) then
+      elseif not ns.Util.IsInteger(result, 0, MAX_SAFE) then
         badType = badType or "number"
       else
         sawNumber = true
@@ -182,7 +176,7 @@ function Reference.Start()
     house = house, context = context, startedAt = startedAt, ahOpen = ns.ahOpen == true,
   }
   for index = 1, #ids do capture.ids[index] = ids[index] end
-  capture.id = ("%s-%d-%s-%04d"):format(house.key, startedAt, context.character, math.random(0, 9999))
+  capture.id = ns.Util.NewID({ house.key, startedAt, context.character }, 0, 9999)
   capture.handler = function(event, itemID, success) loaded(capture, event, itemID, success) end
   capture.deadline = function() deadline(capture) end
   running = capture
@@ -192,6 +186,4 @@ function Reference.Start()
   return true
 end
 
-ns.On("ADDON_LOADED", function(_, name)
-  if name == "Crowley" and ns.db then ns.Reference = Reference end
-end)
+ns.RegisterModule("Reference", { requires = { "Core" }, onLoad = function() ns.Reference = Reference end })

@@ -148,6 +148,11 @@ def _validate_toc_load_order(text: str, name: str) -> None:
     generated = [index for index, line in enumerate(entries) if line == "GeneratedTarget.lua"]
     if len(generated) != 1:
         raise GenerationError(f"{name} must contain exactly one GeneratedTarget.lua entry")
+    util = [index for index, line in enumerate(entries) if line == "Util.lua"]
+    if len(util) != 1:
+        raise GenerationError(f"{name} must contain exactly one Util.lua entry")
+    if util[0] != generated[0] + 1:
+        raise GenerationError(f"{name} must load Util.lua immediately after GeneratedTarget.lua")
     for dependency in ("Context.lua", "Scanner.lua"):
         dependency_indexes = [index for index, line in enumerate(entries) if line == dependency]
         if len(dependency_indexes) != 1 or generated[0] > dependency_indexes[0]:

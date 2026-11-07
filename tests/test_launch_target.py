@@ -211,8 +211,14 @@ def test_generator_rejects_broken_target_load_order():
 
     with pytest.raises(GenerationError, match="exactly one GeneratedTarget"):
         _validate_toc_load_order("Context.lua\nScanner.lua\n", "fixture.toc")
+    with pytest.raises(GenerationError, match="exactly one Util.lua"):
+        _validate_toc_load_order("GeneratedTarget.lua\nContext.lua\nScanner.lua\n", "fixture.toc")
+    with pytest.raises(GenerationError, match="Util.lua immediately after GeneratedTarget.lua"):
+        _validate_toc_load_order(
+            "GeneratedTarget.lua\nCore.lua\nUtil.lua\nContext.lua\nScanner.lua\n", "fixture.toc"
+        )
     with pytest.raises(GenerationError, match="before Context.lua"):
-        _validate_toc_load_order("Context.lua\nGeneratedTarget.lua\nScanner.lua\n", "fixture.toc")
+        _validate_toc_load_order("Context.lua\nGeneratedTarget.lua\nUtil.lua\nScanner.lua\n", "fixture.toc")
 
 
 def test_check_never_writes_missing_or_drifted_artifacts(tmp_path: Path):
@@ -568,7 +574,6 @@ def test_controller_qualification_consumes_alternate_canonical_plan_count(
     saved_path.write_bytes(client.saved_variables())
     data_path = tmp_path / "Data.lua"
     data_value = client.lua.globals().CROWLEY_DATA
-    data_value.ackedSweeps = None
     data_value.ackedScans = client._to_lua([raw["id"]])
     data_value.referenceItemIDs = client._to_lua(sorted(item.item_id for item in alternate_catalog.items))
     data_path.write_bytes(client.lua.globals()._serialize("CROWLEY_DATA", data_value).encode("latin-1"))

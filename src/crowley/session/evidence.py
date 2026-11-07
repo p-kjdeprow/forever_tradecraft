@@ -508,7 +508,7 @@ def queues_empty(
     The companion's ``uploaded`` map is a 30-day history, not a queue, so a
     closeout must require the settled UID in that map rather than deleting it.
     The addon data file is subsequently refreshed with an empty ``ackedScans``
-    list and the game's scan/sweep queues are empty after logout.
+    list and the game's scan queue is empty after logout.
     """
 
     try:
@@ -516,13 +516,14 @@ def queues_empty(
         db = root.get("CrowleyDB")
         if not isinstance(db, dict):
             raise EvidenceError("CrowleyDB is missing")
-        if "scans" not in db or "sweeps" not in db:
-            raise EvidenceError("CrowleyDB queue fields are missing")
+        if "sweeps" in db:
+            raise EvidenceError("CrowleyDB contains legacy sweeps queue field")
+        if "scans" not in db:
+            raise EvidenceError("CrowleyDB scans queue field is missing")
         scans = db["scans"]
-        sweeps = db["sweeps"]
-        if not isinstance(scans, dict) or not isinstance(sweeps, dict):
-            raise EvidenceError("CrowleyDB queue fields are malformed")
-        if scans or sweeps:
+        if not isinstance(scans, dict):
+            raise EvidenceError("CrowleyDB scans queue field is malformed")
+        if scans:
             return False
         uploads = read_uploads(companion_state)
         data_ids = read_data_acknowledged_ids(data_lua)

@@ -332,7 +332,7 @@ def _write_complete_saved_scan(path: Path, uid: str, started_at: int) -> None:
     path.write_text(
         render_assignment(
             "CrowleyDB",
-            {"scans": {uid: envelope}, "sweeps": {}},
+            {"scans": {uid: envelope}},
             "complete format-2 ACK recovery fixture",
         ),
         encoding="utf-8",
@@ -968,10 +968,6 @@ def test_actual_data_schema_matches_current_producer_and_rejects_bad_reference_i
     with pytest.raises(EvidenceError, match="CROWLEY_DATA is malformed"):
         read_data_acknowledged_ids(data)
 
-    _write_data(data, ["uid-1"], extra={"ackedSweeps": []})
-    with pytest.raises(EvidenceError, match="CROWLEY_DATA is malformed"):
-        read_data_acknowledged_ids(data)
-
 
 def test_strict_format2_bounded_commodity_allows_source_incomplete() -> None:
     envelope = _strict_bounded_commodity()
@@ -1566,7 +1562,7 @@ def test_closeout_waits_for_idle_frame_and_clears_flag_only_after_cleanup(tmp_pa
     saved = tmp_path / "Crowley.lua"
     _write_data(data, [])
     _write_companion(companion, uid)
-    saved.write_text(render_assignment("CrowleyDB", {"scans": {}, "sweeps": {}}, "empty"), encoding="utf-8")
+    saved.write_text(render_assignment("CrowleyDB", {"scans": {}}, "empty"), encoding="utf-8")
     journal = _state_file(
         tmp_path / "session.json",
         state=ControllerState.DISK_CLEANUP_SENT.value,

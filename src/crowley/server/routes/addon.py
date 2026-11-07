@@ -40,7 +40,7 @@ def addon_data(body: AddonDataRequest, request: Request) -> dict[str, Any]:
             ]
     return {
         "generatedAt": int(time.time()),
-        "ackedScans": sorted(acked),
+        "ackedScans": sorted(acked, key=lambda item: item.encode()),
         "scanPlan": dict(request.app.state.canonical_scan_plan),
         "referenceItemIDs": list(request.app.state.reference_item_ids),
         # Filled by the strategy engine in a later phase.

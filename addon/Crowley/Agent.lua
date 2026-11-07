@@ -59,19 +59,12 @@ local restoreReadinessLoad = 0
 -- callback as an ordinary boot before its first publish.
 local attachSurfaceScript
 
-local function copy(value)
-  if type(value) ~= "table" then return value end
-  local result = {}
-  for key, child in pairs(value) do result[key] = copy(child) end
-  return result
-end
-
 local function marker()
   return ns.db and ns.db.nativeConstruction
 end
 
 local function randomBoot()
-  return tostring(time()) .. "-" .. tostring(math.random(100000, 999999))
+  return ns.Util.NewID({ time() }, 100000, 999999)
 end
 
 local function nativeBoot(token)
@@ -176,8 +169,7 @@ local function planInfo(plan)
 end
 
 local function finiteNumber(value, name, minimum, maximum)
-  if type(value) ~= "number" or value ~= value or value == math.huge or value == -math.huge or
-      value < minimum or value > maximum then
+  if not ns.Util.IsFiniteNumber(value, minimum, maximum) then
     local detail = ""
     if name == "facing" then
       local text = tostring(value)
@@ -474,7 +466,7 @@ function Agent.Snapshot()
   -- The fence proof is part of every frame, including the idle state.  This
   -- keeps controller admission independent of whether a previous frame saw a
   -- fence attempt.
-  scannerValue.scheduleFence = copy(scanner.scheduleFence)
+  scannerValue.scheduleFence = ns.Util.Copy(scanner.scheduleFence)
   local value = {
     schema = 6, boot = boot, sequence = sequence + 1, wallTime = now, uptimeMs = uptime,
     context = {
@@ -493,15 +485,15 @@ function Agent.Snapshot()
       attempted = last.attempted or 0, failures = last.failures or 0, rows = last.rows or 0, persistence = "unknown",
     },
     pending = {
-      ids = copy(stored), count = #stored, cap = 6, blocked = scanner.phase == "blocked",
+      ids = ns.Util.Copy(stored), count = #stored, cap = 6, blocked = scanner.phase == "blocked",
       reason = scanner.reason or (scanner.phase == "blocked" and "queue_full" or ""),
     },
-    loaded = { ackedIds = copy(acked), generatedAt = CROWLEY_DATA.generatedAt or 0 }, chatEdit = activeEdit(),
+    loaded = { ackedIds = ns.Util.Copy(acked), generatedAt = CROWLEY_DATA.generatedAt or 0 }, chatEdit = activeEdit(),
     motion = movementTelemetry(),
-    render = copy(renderMetrics),
+    render = ns.Util.Copy(renderMetrics),
   }
   sequence = value.sequence
-  return copy(value)
+  return ns.Util.Copy(value)
 end
 
 local function buildSurface()
@@ -610,7 +602,7 @@ local function setLuaHeap(beforeMemory, afterMemory)
       beforeKiB = beforeMemory, afterKiB = afterMemory, netKiB = afterMemory - beforeMemory,
     }
   end
-  renderMetrics.luaHeap = copy(lastLuaHeap)
+  renderMetrics.luaHeap = ns.Util.Copy(lastLuaHeap)
 end
 
 local function setNativeState(phase, ordinal)
@@ -621,7 +613,7 @@ end
 function Agent.Publish()
   if hudHidden and not publishingForHudShow then error("agent_hud_hidden") end
   if not bootReady or not surface then error("agent_unconstructed") end
-  renderMetrics.luaHeap = copy(lastLuaHeap)
+  renderMetrics.luaHeap = ns.Util.Copy(lastLuaHeap)
   renderMetrics.nativePhase, renderMetrics.nativeOrdinal = nativePhase, nativeOrdinal
   local beforeMemory = countLuaMemory()
   local result, errorText
@@ -647,7 +639,7 @@ function Agent.Publish()
       table.sort(ordered)
       renderMetrics.updateP99Ms = ordered[math.max(1, math.ceil(#ordered * 0.99))]
     end
-    result = copy(snapshot)
+    result = ns.Util.Copy(snapshot)
   end)
   if not ok then errorText = failure end
   if errorText then error(errorText) end
@@ -855,8 +847,7 @@ function Agent.Restore()
   if not recoveryAdmitted then return false, "recovery_not_admitted" end
   if not ns.db then return false, "agent_not_loaded" end
   if type(ReloadUI) ~= "function" then return false, "reload_unavailable" end
-  local token = "recovery:"
-  for _ = 1, 24 do token = token .. string.format("%x", math.random(0, 15)) end
+  local token = ns.Util.NewHexID("recovery:", 24)
   local saved, reason = setMarker({ schema = 1, state = "restore_pending", token = token, attempts = 0 })
   if not saved then return false, reason end
   releaseAdmitted, recoveryAdmitted = false, false
@@ -1183,16 +1174,17 @@ local function initializeLoad()
   end
 end
 
-ns.On("ADDON_LOADED", function(_, name)
-  if name == "Crowley" and ns.db then
+ns.RegisterModule("Agent", {
+  requires = { "Core", "Scanner", "Executor" },
+  onLoad = function()
     if loadInitialized then return end
     loadInitialized = true
     ns.db.agentLastSaved = ns.db.agentLastSaved or {
       memoryUid = "", finishedAt = 0, planned = 0, attempted = 0, failures = 0, rows = 0,
     }
     initializeLoad()
-  end
-end)
+  end,
+})
 
 ns.On("PLAYER_ENTERING_WORLD", function()
   if not restoreInFlight or lifecycle ~= "restore_pending" then return end

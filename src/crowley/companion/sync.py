@@ -614,6 +614,7 @@ class Companion:
             return
         self.state.clear_record_rejections(key)
         data = response.json()
+        data["ackedScans"] = sorted(data["ackedScans"], key=lambda item: item.encode())
         text = render_assignment(
             "CROWLEY_DATA",
             data,

@@ -42,7 +42,7 @@ def _client_snapshot(*, successor: bool = False):
     }
     client = WowClient(
         queue=queue,
-        initial_savedvars={"lastSweepStart": ACTUAL_START, "scans": {}, "sweeps": {}},
+        initial_savedvars={"lastSweepStart": ACTUAL_START, "scans": {}},
     )
     client.set_canonical_plan()
     client.login()

@@ -228,7 +228,7 @@ def _validate_json_value(
 def canonical_json_bytes(value: object) -> bytes:
     """Encode compact sorted-key canonical JSON as UTF-8 with ``ensure_ascii=False``.
 
-    This matches the existing digest form used by ``tools/market_backup.py``
+    This matches the existing digest form used by ``crowley.ops.backup``
     and the scan payload encoder: sorted keys, compact separators, and literal
     UTF-8 Unicode rather than ASCII escape sequences.
     """

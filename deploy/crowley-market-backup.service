@@ -4,7 +4,7 @@ Description=Crowley validated market backup
 [Service]
 Type=oneshot
 WorkingDirectory=%h/repos/pegasus
-ExecStart=%h/repos/pegasus/.venv/bin/python -m tools.crowley_ops backup --repo %h/repos/pegasus --config %h/.config/crowley/session.toml --state-root %h/.local/state/crowley/host-operations --backup-root %h/.local/state/crowley/market-backups
+ExecStart=%h/.local/bin/crowley-ops backup --repo %h/repos/pegasus --config %h/.config/crowley/session.toml --state-root %h/.local/state/crowley/host-operations --backup-root %h/.local/state/crowley/market-backups
 UMask=0077
 NoNewPrivileges=true
 TimeoutStartSec=4500

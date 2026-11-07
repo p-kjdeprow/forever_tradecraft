@@ -14,8 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from crowley.ops import health as ops
 from tests.support.companion_state import write_companion_state
-from tools import crowley_ops as ops
 
 NOW = datetime(2026, 10, 19, 20, 0, tzinfo=UTC)
 GOOD_DIGEST = "a" * 64

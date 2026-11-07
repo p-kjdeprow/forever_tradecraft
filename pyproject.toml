@@ -21,6 +21,7 @@ crowley-server = "crowley.server.__main__:main"
 crowley-companion = "crowley.companion.__main__:main"
 crowley-watchlist = "crowley.core.watchlist:main"
 crowley-session = "crowley.session.cli:main"
+crowley-ops = "crowley.ops.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.18,<0.10.0"]

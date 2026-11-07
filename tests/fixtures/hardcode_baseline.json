@@ -115,13 +115,13 @@
   },
   {
     "category": "checkout-path",
-    "count": 3,
+    "count": 2,
     "match": "repos/pegasus",
     "path": "deploy/crowley-health.service"
   },
   {
     "category": "checkout-path",
-    "count": 3,
+    "count": 2,
     "match": "repos/pegasus",
     "path": "deploy/crowley-market-backup.service"
   },
@@ -187,7 +187,7 @@
   },
   {
     "category": "posix-home",
-    "count": 2,
+    "count": 1,
     "match": "/home/dev",
     "path": "docs/MARKET_RECOVERY.md"
   },
@@ -288,16 +288,46 @@
     "path": "src/crowley/trading/queue_cli.py"
   },
   {
+    "category": "docker-path",
+    "count": 4,
+    "match": "/var/lib/docker",
+    "path": "tests/ops/test_backup.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "172.20.0.2",
+    "path": "tests/ops/test_backup.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "172.30.0.1",
+    "path": "tests/ops/test_backup.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "172.30.0.2",
+    "path": "tests/ops/test_backup.py"
+  },
+  {
     "category": "temporary-path",
     "count": 1,
-    "match": "/tmp/stale-wow",
-    "path": "tests/test_companion.py"
+    "match": "/tmp/object",
+    "path": "tests/ops/test_backup.py"
   },
   {
     "category": "checkout-path",
     "count": 1,
     "match": "repos/pegasus",
-    "path": "tests/test_crowley_ops.py"
+    "path": "tests/ops/test_health.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/stale-wow",
+    "path": "tests/test_companion.py"
   },
   {
     "category": "machine-url",
@@ -310,36 +340,6 @@
     "count": 11,
     "match": "/home/dev",
     "path": "tests/test_launch_target.py"
-  },
-  {
-    "category": "docker-path",
-    "count": 4,
-    "match": "/var/lib/docker",
-    "path": "tests/test_market_backup.py"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "172.20.0.2",
-    "path": "tests/test_market_backup.py"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "172.30.0.1",
-    "path": "tests/test_market_backup.py"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "172.30.0.2",
-    "path": "tests/test_market_backup.py"
-  },
-  {
-    "category": "temporary-path",
-    "count": 1,
-    "match": "/tmp/object",
-    "path": "tests/test_market_backup.py"
   },
   {
     "category": "temporary-path",

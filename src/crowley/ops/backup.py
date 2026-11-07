@@ -7,7 +7,6 @@ not a scheduler or a general Docker cleanup utility.
 
 from __future__ import annotations
 
-import argparse
 import datetime as dt
 import gzip
 import hashlib
@@ -17,7 +16,6 @@ import os
 import re
 import stat
 import subprocess
-import sys
 import tarfile
 import tempfile
 import time
@@ -3500,35 +3498,3 @@ def drill(repo: Path, snapshot_path: Path, root: Path) -> Path:
             ) from None
         raise BackupError(f"restore drill {receipt['result']}; private receipt retained") from None
     return receipt_path
-
-
-def _main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--repo", type=Path, default=Path.cwd())
-    parser.add_argument("--root", type=Path, default=DEFAULT_ROOT)
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    subparsers.add_parser("snapshot")
-    drill_parser = subparsers.add_parser("drill")
-    drill_parser.add_argument("snapshot", type=Path)
-    args = parser.parse_args()
-    try:
-        if args.command == "snapshot":
-            result = snapshot(args.repo, args.root)
-            print(f"snapshot complete: {result.name}")
-        else:
-            result = drill(args.repo, args.snapshot, args.root)
-            receipt = strict_json(result.read_bytes())
-            print(f"restore drill {receipt['result']}: {result.name}")
-        return 0
-    except BackupError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    except Exception:
-        print(
-            "bounded backup operation failed; inspect private receipt or incomplete snapshot", file=sys.stderr
-        )
-        return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(_main())

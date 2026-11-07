@@ -7,7 +7,6 @@ metadata; snapshot creation and validation remain owned by ``market_backup``.
 
 from __future__ import annotations
 
-import argparse
 import datetime as dt
 import errno
 import fcntl
@@ -24,11 +23,11 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from crowley.ops import backup as market_backup
+from crowley.ops.backup import BACKUP_ID_RE
 from crowley.session import evidence
 from crowley.session.cli import _socket_request
 from crowley.session.config import load_config
-from tools import market_backup
-from tools.market_backup import BACKUP_ID_RE
 
 OPS_SCHEMA = "crowley.host-operations-v1"
 BACKUP_RECORD_SCHEMA = "crowley.host-last-good-backup-v1"
@@ -277,7 +276,7 @@ def _write_receipt(state_root: Path, receipt: dict[str, Any]) -> None:
         return
 
 
-def _fixed_error(exc: BaseException) -> str:
+def fixed_error(exc: BaseException) -> str:
     if isinstance(exc, BusyError):
         return "busy"
     if isinstance(exc, market_backup.BackupError):
@@ -287,6 +286,9 @@ def _fixed_error(exc: BaseException) -> str:
     if isinstance(exc, (OSError, OperationsError)):
         return "local_io_or_validation_failed"
     return "operation_failed"
+
+
+_fixed_error = fixed_error
 
 
 def _record_base(kind: str, started: dt.datetime) -> dict[str, Any]:
@@ -939,61 +941,3 @@ def health_operation(
             pass
     result["exit_code"] = 0 if result["classification"] == "gated" or result["operational"] else 2
     return result
-
-
-def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description=__doc__)
-    sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("backup", "health"):
-        item = sub.add_parser(name)
-        item.add_argument("--repo", type=Path, required=True)
-        item.add_argument("--config", type=Path, required=True)
-        item.add_argument("--state-root", type=Path, required=True)
-        item.add_argument("--backup-root", type=Path, required=True)
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
-    try:
-        if args.command == "backup":
-            result = backup_operation(
-                repo=args.repo, config=args.config, state_root=args.state_root, backup_root=args.backup_root
-            )
-        else:
-            result = health_operation(
-                repo=args.repo,
-                config_path=args.config,
-                state_root=args.state_root,
-                backup_root=args.backup_root,
-            )
-        print(
-            json.dumps(
-                {
-                    "schema": OPS_SCHEMA,
-                    "operation": args.command,
-                    "outcome": result.get("outcome", result.get("classification")),
-                    "exit_code": result["exit_code"],
-                },
-                sort_keys=True,
-            )
-        )
-        return int(result["exit_code"])
-    except (OperationsError, OSError, ValueError) as exc:
-        print(
-            json.dumps(
-                {
-                    "schema": OPS_SCHEMA,
-                    "operation": args.command,
-                    "outcome": "failed",
-                    "error_category": _fixed_error(exc),
-                    "exit_code": 2,
-                },
-                sort_keys=True,
-            )
-        )
-        return 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

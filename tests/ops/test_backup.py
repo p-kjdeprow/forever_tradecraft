@@ -17,11 +17,11 @@ import psycopg
 import pytest
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
 
+from crowley.ops import backup
 from crowley.server.db import migrate
 from crowley.server.ingest import _logical_digest
-from tools import market_backup as backup
 
-raw_scan = runpy.run_path(Path(__file__).with_name("test_core.py"))["raw_scan"]
+raw_scan = runpy.run_path(Path(__file__).parents[1] / "test_core.py")["raw_scan"]
 
 
 def _manifest(raw_bytes: bytes, dump_bytes: bytes = b"custom dump") -> dict:
@@ -495,7 +495,7 @@ def test_reference_inventory_lifecycle_drops_database_after_inventory() -> None:
 )
 def test_catalog_inventory_builds_from_real_packaged_migrations() -> None:
     database_url = os.environ["CROWLEY_TEST_DATABASE_URL"]
-    repository = Path(__file__).parents[1]
+    repository = Path(__file__).parents[2]
     expected_manifest = backup._migration_inventory(repository)
     maintenance_options = conninfo_to_dict(database_url)
     maintenance_options["dbname"] = "postgres"

@@ -162,7 +162,7 @@ These steps apply at launch, after the relevant deployment/input authorization.
 - Tests: `CARGO=~/.cache/crowley/rust-toolchain-1.85.1/toolchain/bin/cargo uv run pytest` (the default
   uses sixteen bounded xdist workers with work-stealing; add `CROWLEY_TEST_DATABASE_URL` only for the documented serial DB run in
   [TESTING](TESTING.md)).
-- Backups: `systemctl --user start crowley-market-backup.service`; restore drills via `tools.market_backup`.
+- Backups: `systemctl --user start crowley-market-backup.service`; restore drills via `crowley-ops drill`.
 - Pinned binaries: `~/.cache/crowley/{xdotool,x11-identity-observer,template-matcher,gnome-telemetry-region-r6,
   codex,rust-toolchain-1.85.1}`. Parts of `gnome-telemetry-region-r3/r5` are root-owned stale builds
   (remove with sudo).

@@ -5,12 +5,12 @@ the immutable raw archive volume, then checks that the dump can be restored into
 a fresh Compose project with no host-published ports. It is a one-time operator
 tool, not a scheduled backup service or a whole-machine clone.
 
-Run it from the repository root:
+Run it from the repository root, passing the checkout explicitly:
 
 ```sh
-uv run python tools/market_backup.py snapshot
-uv run python tools/market_backup.py drill \
-  /home/dev/.local/state/crowley/market-backups/<printed-backup-id>
+crowley-ops snapshot --repo "$PWD"
+crowley-ops drill --repo "$PWD" \
+  ~/.local/state/crowley/market-backups/<printed-backup-id>
 ```
 
 The default state directory and each snapshot/receipt directory are mode `0700`;

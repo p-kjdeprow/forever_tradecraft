@@ -104,7 +104,7 @@ def ensure_private_dir(path: str | os.PathLike[str]) -> None:
                 raise PrivatePathError("private directory must have mode 0700")
 
 
-def _validate_limit(max_bytes: int) -> None:
+def _validate_limit(max_bytes: object) -> None:
     if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
         raise PrivateReadError("max_bytes must be a nonnegative integer")
 
@@ -204,11 +204,16 @@ def _open_private_directory(path: Path) -> int:
         raise PrivateWriteError(f"private directory {path} cannot be opened") from exc
 
 
+def _validate_bytes(data: object) -> bytes:
+    if not isinstance(data, bytes):
+        raise PrivateWriteError("private file data must be bytes")
+    return data
+
+
 def atomic_write_private(path: str | os.PathLike[str], data: bytes) -> None:
     """Atomically publish bytes as a mode-0600 file in its private directory."""
 
-    if not isinstance(data, bytes):
-        raise PrivateWriteError("private file data must be bytes")
+    data = _validate_bytes(data)
     target = Path(path)
     _require_absolute(target, label="private file")
     ensure_private_dir(target.parent)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from decimal import Decimal
 from fractions import Fraction
 from math import ceil, floor
 
@@ -20,6 +21,15 @@ def floor_fraction(value: FractionInput) -> int:
 
 def ceil_fraction(value: FractionInput) -> int:
     return ceil(as_fraction(value))
+
+
+def fraction_parameter(params: Mapping[str, object], name: str) -> Fraction:
+    """Validate and convert one numeric strategy parameter at its config boundary."""
+
+    value = params.get(name)
+    if isinstance(value, bool) or not isinstance(value, (Fraction, int, float, Decimal, str)):
+        raise TypeError(f"strategy parameter {name!r} must be a numeric value")
+    return as_fraction(value)
 
 
 def trustworthy_fair(
@@ -41,6 +51,14 @@ def trustworthy_fair(
     if (p75 - p25) / fair > as_fraction(max_band_width):
         return False
     return demand > 0 and snapshot.demand_eligible_seconds >= MIN_DEMAND_ELIGIBLE_SECONDS
+
+
+def fair_value(snapshot: ItemSnapshot) -> Fraction:
+    """Return a snapshot's fair value after a strategy trust check."""
+
+    if snapshot.fair is None:
+        raise ValueError("strategy decision requires a fair value")
+    return snapshot.fair
 
 
 def held_quantity(account: AccountView, item_id: int) -> int:

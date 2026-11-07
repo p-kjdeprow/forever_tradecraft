@@ -20,10 +20,11 @@ from crowley.trading.api import (
 
 from .common import (
     SECONDS_PER_HOUR,
-    as_fraction,
     clears_vendor_floor,
     deposit_per_unit,
+    fair_value,
     floor_fraction,
+    fraction_parameter,
     held_quantity,
     item_inventory,
     maximum_purchase_quantity,
@@ -73,10 +74,10 @@ class SnipeFlipStrategy:
             if facts is None or not trustworthy_fair(
                 snapshot,
                 min_fair_n=int(self.params["min_fair_n"]),
-                max_band_width=self.params["max_band_width"],
+                max_band_width=fraction_parameter(self.params, "max_band_width"),
             ):
                 continue
-            buy_limit = floor_fraction(as_fraction(self.params["buy_ratio"]) * snapshot.fair)
+            buy_limit = floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot))
             plans[item_id] = _Plan(
                 item_id,
                 snapshot,
@@ -85,8 +86,8 @@ class SnipeFlipStrategy:
                 target_sell_price(
                     snapshot,
                     buy_limit,
-                    floor_ratio=self.params["floor_ratio"],
-                    cap_ratio=self.params["cap_ratio"],
+                    floor_ratio=fraction_parameter(self.params, "floor_ratio"),
+                    cap_ratio=fraction_parameter(self.params, "cap_ratio"),
                 ),
             )
         return plans
@@ -96,7 +97,7 @@ class SnipeFlipStrategy:
             return None
         deposit = deposit_per_unit(market, plan.item_id, 24)
         net = net_proceeds_per_unit(market.rules, plan.target, deposit)
-        margin_limit = floor_fraction(net / (1 + as_fraction(self.params["min_margin"])))
+        margin_limit = floor_fraction(net / (1 + fraction_parameter(self.params, "min_margin")))
         effective_limit = min(plan.buy_limit, margin_limit)
         if effective_limit <= 0 or not any(
             level.quantity > 0 and level.unit_price <= effective_limit for level in plan.snapshot.levels
@@ -148,7 +149,7 @@ class SnipeFlipStrategy:
                 projected_cash -= deposit
                 inventory[item_id] = 0
 
-        reprice_age = as_fraction(self.params["reprice_after_hours"]) * SECONDS_PER_HOUR
+        reprice_age = fraction_parameter(self.params, "reprice_after_hours") * SECONDS_PER_HOUR
         for listing in sorted(account.listings(), key=lambda entry: entry.listing_id):
             plan = plans.get(listing.item_id)
             if plan is None or listing.quantity_remaining <= 0 or plan.snapshot.visible_min is None:
@@ -177,9 +178,10 @@ class SnipeFlipStrategy:
             assert demand is not None
             capacity = max(
                 0,
-                floor_fraction(as_fraction(self.params["capacity_share"]) * demand) - held.get(item_id, 0),
+                floor_fraction(fraction_parameter(self.params, "capacity_share") * demand)
+                - held.get(item_id, 0),
             )
-            budget = floor_fraction(as_fraction(self.params["max_spend_share"]) * projected_cash)
+            budget = floor_fraction(fraction_parameter(self.params, "max_spend_share") * projected_cash)
             quantity = maximum_purchase_quantity(plan.snapshot.levels, effective_limit, budget, capacity)
             if quantity > 0:
                 opportunities.append((quantity * (net - effective_limit), item_id, plan, effective_limit))
@@ -187,12 +189,13 @@ class SnipeFlipStrategy:
         for _potential, item_id, plan, effective_limit in sorted(
             opportunities, key=lambda entry: (-entry[0], entry[1])
         ):
-            budget = floor_fraction(as_fraction(self.params["max_spend_share"]) * projected_cash)
+            budget = floor_fraction(fraction_parameter(self.params, "max_spend_share") * projected_cash)
             demand = plan.snapshot.demand_units_per_day
             assert demand is not None
             capacity = max(
                 0,
-                floor_fraction(as_fraction(self.params["capacity_share"]) * demand) - held.get(item_id, 0),
+                floor_fraction(fraction_parameter(self.params, "capacity_share") * demand)
+                - held.get(item_id, 0),
             )
             quantity = maximum_purchase_quantity(plan.snapshot.levels, effective_limit, budget, capacity)
             if quantity <= 0:

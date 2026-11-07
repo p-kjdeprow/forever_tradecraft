@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
+from typing import cast
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -9,6 +11,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class ServerSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CROWLEY_", env_file=".env", extra="ignore")
+
+    def __init__(self, **values: object) -> None:
+        initializer = cast(Callable[..., None], super().__init__)
+        initializer(**values)
 
     database_url: str = "postgresql://crowley:crowley@127.0.0.1:5432/crowley"
     api_token: SecretStr

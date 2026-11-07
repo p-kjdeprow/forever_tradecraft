@@ -11,7 +11,7 @@ from contextlib import nullcontext
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, NamedTuple, cast
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -58,6 +58,37 @@ PAPER_RUN_SELECT = ", ".join(f"{expression} AS {name}" for name, expression in P
 
 class PaperError(RuntimeError):
     """A paper run cannot be created or advanced without operator action."""
+
+
+def _row_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise PaperError(f"paper database field {field!r} is not an integer")
+    return value
+
+
+def _row_str(value: object, field: str) -> str:
+    if not isinstance(value, str):
+        raise PaperError(f"paper database field {field!r} is not text")
+    return value
+
+
+def _json_list(value: object, field: str) -> list[object]:
+    if not isinstance(value, list):
+        raise PaperError(f"paper database field {field!r} is not a JSON list")
+    return cast(list[object], value)
+
+
+def _json_string_list(value: object, field: str) -> list[str]:
+    values = _json_list(value, field)
+    if any(not isinstance(item, str) for item in values):
+        raise PaperError(f"paper database field {field!r} contains a non-text value")
+    return cast(list[str], values)
+
+
+def _json_mapping(value: object, field: str) -> Mapping[str, object]:
+    if not isinstance(value, Mapping) or any(not isinstance(key, str) for key in value):
+        raise PaperError(f"paper database field {field!r} is not a JSON object")
+    return cast(Mapping[str, object], value)
 
 
 class _IdRow(NamedTuple):
@@ -204,7 +235,7 @@ engine_digest = _source_digest
 
 def _parse_strategies(value: str | Sequence[str] | None) -> list[str]:
     if value is None:
-        names = list(DEFAULT_STRATEGIES)
+        names = [str(name) for name in DEFAULT_STRATEGIES]
     elif isinstance(value, str):
         names = [part.strip() for part in value.split(",")]
     else:
@@ -326,13 +357,34 @@ def create_run(
                     capabilities_digest,
                 ),
             ).fetchone()
-            return _IdRow(*result).id
+            if result is None:
+                raise PaperError("paper run insert did not return an id")
+            return _row_int(result[0], "paper run id")
 
 
 def _run_from_row(row: tuple[object, ...]) -> dict[str, Any]:
-    parsed = _PaperRunRow(*row)
-    raw_capabilities = parsed.capabilities
-    capabilities = capabilities_from_mapping(raw_capabilities)
+    if len(row) != len(PAPER_RUN_COLUMNS):
+        raise PaperError("paper run query returned an unexpected number of columns")
+    parsed = _PaperRunRow(
+        _row_int(row[0], "id"),
+        _row_str(row[1], "name"),
+        _row_int(row[2], "house_id"),
+        _row_str(row[3], "house"),
+        _row_str(row[4], "client_build"),
+        _row_int(row[5], "start_t"),
+        _row_int(row[6], "capital_copper"),
+        row[7],
+        row[8],
+        row[9],
+        _row_str(row[10], "engine_digest"),
+        row[11],
+        _row_str(row[12], "capabilities_hash"),
+        _row_str(row[13], "region"),
+        _row_str(row[14], "ruleset"),
+        _row_str(row[15], "faction"),
+    )
+    raw_capabilities = _json_mapping(parsed.capabilities, "capabilities")
+    capabilities = capabilities_from_mapping(cast(Mapping[str, Any], raw_capabilities))
     if raw_capabilities != capabilities.canonical:
         raise PaperError("paper run capabilities are not in canonical form")
     stored_capabilities_hash = str(parsed.capabilities_hash)
@@ -353,8 +405,8 @@ def _run_from_row(row: tuple[object, ...]) -> dict[str, Any]:
         "client_build": str(parsed.client_build),
         "start_t": int(parsed.start_t),
         "capital_copper": int(parsed.capital_copper),
-        "strategies": list(parsed.strategies),
-        "weights": list(parsed.weights),
+        "strategies": _json_string_list(parsed.strategies, "strategies"),
+        "weights": _json_list(parsed.weights, "weights"),
         "demand_share": str(parsed.demand_share),
         "engine_digest": str(parsed.engine_digest),
         "capabilities": capabilities,
@@ -374,7 +426,7 @@ def _load_run(conn: Any, name: str) -> dict[str, Any]:
     ).fetchone()
     if row is None:
         raise PaperError(f"unknown paper run {name!r}")
-    return _run_from_row(row)
+    return _run_from_row(cast(tuple[object, ...], row))
 
 
 def _immutable_config(run: Mapping[str, Any]) -> dict[str, Any]:
@@ -660,7 +712,7 @@ def step_run(db_url: str, name: str) -> str:
                 else:
                     latest_row = _LatestStepRow(*latest)
                     latest_t = latest_row.step_t
-                    total = latest_row.equity["total"]
+                    total = _json_mapping(latest_row.equity, "equity")["total"]
     output = (
         f"steps_added={added} latest_t={latest_t} total_equity={_gold(total)} "
         f"replay_seconds={replay_seconds:.2f}"
@@ -698,8 +750,8 @@ def status_run(db_url: str, name: str, last_intents: int = 20) -> str:
             else:
                 status_step = _StatusStepRow(*step)
                 step_t = status_step.step_t
-                equity = status_step.equity
-                realized = status_step.realized
+                equity = _json_mapping(status_step.equity, "equity")
+                realized = _json_mapping(status_step.realized, "realized")
                 lines.append(f"latest_t={step_t}")
                 for strategy in run["strategies"]:
                     lines.append(
@@ -735,9 +787,9 @@ def status_run(db_url: str, name: str, last_intents: int = 20) -> str:
                 pending_row = _PendingRow(*pending)
                 lines.append("pending (outcome not final):")
                 lines.append(f"pending_t={pending_row.step_t} pending_sweep_key={pending_row.sweep_key}")
-                pending_values = pending_row.intents
+                pending_values = _json_mapping(pending_row.intents, "pending intents")
                 for strategy, intent_list in pending_values.items():
-                    for ordinal, intent_value in enumerate(intent_list):
+                    for ordinal, intent_value in enumerate(_json_list(intent_list, "pending intent list")):
                         intent = json.dumps(intent_value, sort_keys=True, separators=(",", ":"))
                         lines.append(f"pending intent strategy={strategy} ordinal={ordinal} intent={intent}")
             return "\n".join(lines)

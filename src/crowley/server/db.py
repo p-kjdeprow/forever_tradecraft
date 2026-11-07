@@ -19,9 +19,11 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib import resources
+from typing import LiteralString, cast
 
 import psycopg
 from psycopg.pq import TransactionStatus
+from psycopg.sql import SQL
 from psycopg_pool import ConnectionPool
 
 log = logging.getLogger(__name__)
@@ -170,8 +172,10 @@ class MigrationStatus:
         return not (self.pending or self.unknown_applied or self.checksum_mismatch or self.checksum_missing)
 
 
-def create_pool(database_url: str) -> ConnectionPool:
-    pool = ConnectionPool(database_url, min_size=1, max_size=8, open=False)
+def create_pool(database_url: str) -> ConnectionPool[psycopg.Connection[tuple[object, ...]]]:
+    pool: ConnectionPool[psycopg.Connection[tuple[object, ...]]] = ConnectionPool(
+        database_url, min_size=1, max_size=8, open=False
+    )
     pool.open(wait=True, timeout=30)
     return pool
 
@@ -229,7 +233,7 @@ def apply_pending(conn: psycopg.Connection[tuple[object, ...]]) -> list[str]:
                 continue
             contents = _packaged_bytes(migration)
             with conn.transaction():
-                conn.execute(contents.decode("utf-8"))
+                conn.execute(SQL(cast(LiteralString, contents.decode("utf-8"))))
                 if _ledger_has_checksum(conn):
                     conn.execute(
                         "INSERT INTO schema_migrations (name, checksum) VALUES (%s, %s)",
@@ -323,23 +327,27 @@ def _ensure_ledger(conn: psycopg.Connection[tuple[object, ...]]) -> None:
 
 
 def _ledger_exists(conn: psycopg.Connection[tuple[object, ...]]) -> bool:
-    return conn.execute("SELECT to_regclass('schema_migrations')").fetchone()[0] is not None
+    row = conn.execute("SELECT to_regclass('schema_migrations')").fetchone()
+    if row is None:
+        raise MigrationStateError("migration ledger existence query returned no row")
+    return row[0] is not None
 
 
 def _ledger_has_checksum(conn: psycopg.Connection[tuple[object, ...]]) -> bool:
-    return bool(
-        conn.execute(
-            """
-            SELECT EXISTS (
-                SELECT 1
-                FROM pg_attribute
-                WHERE attrelid = to_regclass('schema_migrations')
-                  AND attname = 'checksum'
-                  AND NOT attisdropped
-            )
-            """
-        ).fetchone()[0]
-    )
+    row = conn.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_attribute
+            WHERE attrelid = to_regclass('schema_migrations')
+              AND attname = 'checksum'
+              AND NOT attisdropped
+        )
+        """
+    ).fetchone()
+    if row is None:
+        raise MigrationStateError("migration checksum query returned no row")
+    return bool(row[0])
 
 
 def _backfill_and_require_checksums(
@@ -371,9 +379,10 @@ def _backfill_and_require_checksums(
                 "UPDATE schema_migrations SET checksum = %s WHERE name = %s AND checksum IS NULL",
                 (checksum, name),
             )
-        null_count = conn.execute("SELECT count(*) FROM schema_migrations WHERE checksum IS NULL").fetchone()[
-            0
-        ]
+        row = conn.execute("SELECT count(*) FROM schema_migrations WHERE checksum IS NULL").fetchone()
+        if row is None:
+            raise MigrationStateError("migration checksum count query returned no row")
+        null_count = row[0]
         if null_count:
             raise MigrationStateError(
                 "cannot make schema_migrations.checksum NOT NULL; an applied migration is unknown"
@@ -407,7 +416,10 @@ def _prepare_idle_connection(conn: psycopg.Connection[tuple[object, ...]]) -> No
         raise MigrationStateError("migration connection has a failed transaction; rollback before migrating")
     if status == TransactionStatus.IDLE:
         return
-    if conn.execute("SELECT txid_current_if_assigned()").fetchone()[0] is not None:
+    row = conn.execute("SELECT txid_current_if_assigned()").fetchone()
+    if row is None:
+        raise MigrationStateError("transaction assignment query returned no row")
+    if row[0] is not None:
         raise MigrationStateError(
             "migration connection has uncommitted changes; commit or rollback before migrating"
         )

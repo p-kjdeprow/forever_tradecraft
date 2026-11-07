@@ -110,6 +110,8 @@ def _serialize_intent(intent: Any) -> dict[str, Any]:
 
     if not is_dataclass(intent):
         return {"type": type(intent).__name__}
+    if isinstance(intent, type):
+        raise TypeError("intent dataclass must be an instance")
     return {"type": type(intent).__name__, **asdict(intent)}
 
 

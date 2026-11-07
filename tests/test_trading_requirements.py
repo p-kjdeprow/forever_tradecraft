@@ -425,7 +425,9 @@ def test_step_refuses_recreated_or_changed_run_before_writes(
     assert connection.calls == 1
 
 
-def _craft_context(capabilities: CraftingCapabilities) -> tuple[ExecutionContext, Account]:
+def _craft_context(
+    capabilities: CraftingCapabilities, *, recipe: Recipe | None = None
+) -> tuple[ExecutionContext, Account]:
     books = {
         11: [
             Book(0, [Group("out", Fraction(20), 1, 1000)], item_id=11, sweep_id=1),
@@ -436,7 +438,7 @@ def _craft_context(capabilities: CraftingCapabilities) -> tuple[ExecutionContext
         10: ItemFacts(10, 0, 1, 1, 20, 0),
         11: ItemFacts(11, 0, None, None, 20, 0),
     }
-    market = Market(books, {}, facts, (_recipe(),), rules=RULES)
+    market = Market(books, {}, facts, (recipe if recipe is not None else _recipe(),), rules=RULES)
     market.set_step(0, 0, {})
     account = Account(
         "craft",
@@ -469,6 +471,17 @@ def test_executor_allows_capabilities_and_retains_required_tool() -> None:
     # inventory/lot ledger; the craft does not consume or purchase them.
     assert 3938 not in account.inventory_balance
     assert account.inventory_balance[11] == 1
+
+
+def test_executor_craft_cost_stays_exact_for_integer_cost_reagent() -> None:
+    context, account = _craft_context(
+        CraftingCapabilities.from_values((3938,), (162,), (1,)),
+        recipe=_recipe(outputs=((11, 2),)),
+    )
+
+    assert execute_intent(context, account, Craft(1, 1))
+    assert account.lots[11][0].unit_cost == Fraction(1, 2)
+    assert isinstance(account.lots[11][0].unit_cost, Fraction)
 
 
 def test_strategy_does_not_acquire_reagents_for_unavailable_recipe() -> None:

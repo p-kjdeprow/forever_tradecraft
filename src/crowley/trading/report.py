@@ -193,7 +193,7 @@ def _sum_reports(
         for reason, count in report["rejections"].items():
             rejections[reason] = rejections.get(reason, 0) + count
     drawdown, drawdown_pct = _drawdown(curve, Fraction(start))
-    covered_days = Fraction(curve[-1][0] - curve[0][0], 86400) if len(curve) > 1 else Fraction(0)
+    covered_days = Fraction(str(curve[-1][0] - curve[0][0])) / 86400 if len(curve) > 1 else Fraction(0)
     return {
         "name": "total",
         "start_capital": start,
@@ -226,7 +226,7 @@ def _sum_reports(
 
 def build_report(result: BacktestResult) -> dict[str, Any]:
     covered_days = (
-        Fraction(result.times[-1] - result.times[0], 86400) if len(result.times) > 1 else Fraction(0)
+        Fraction(str(result.times[-1] - result.times[0])) / 86400 if len(result.times) > 1 else Fraction(0)
     )
     strategies = [
         _strategy_report(

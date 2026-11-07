@@ -420,12 +420,6 @@
     "path": "tests/test_session_motion_integration.py"
   },
   {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "tests/test_session_native.py"
-  },
-  {
     "category": "temporary-path",
     "count": 17,
     "match": "/tmp/Xauthority",
@@ -457,7 +451,7 @@
   },
   {
     "category": "posix-home",
-    "count": 2,
+    "count": 1,
     "match": "/home/dev",
     "path": "tests/test_session_native_regressions.py"
   },
@@ -517,7 +511,7 @@
   },
   {
     "category": "posix-home",
-    "count": 2,
+    "count": 1,
     "match": "/home/dev",
     "path": "tests/test_x11_identity_observer.py"
   },

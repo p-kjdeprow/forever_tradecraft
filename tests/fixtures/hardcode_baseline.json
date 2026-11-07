@@ -276,12 +276,6 @@
     "path": "tests/test_session_native.py"
   },
   {
-    "category": "machine-url",
-    "count": 1,
-    "match": "localhost",
-    "path": "tests/test_session_native_regressions.py"
-  },
-  {
     "category": "posix-home",
     "count": 1,
     "match": "/home/dev",

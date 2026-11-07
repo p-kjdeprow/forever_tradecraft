@@ -1,0 +1,15 @@
+{
+  "basic": {
+    "analysis": 5,
+    "companion": 4,
+    "core": 8,
+    "data": 0,
+    "server": 6,
+    "session": 471,
+    "trading": 31
+  },
+  "strict": {
+    "core/auction_rules.py": 0,
+    "platform": 0
+  }
+}

@@ -26,6 +26,18 @@ class DeadlineExpiredError(TimeoutError):
     """Raised when a bounded sleep is requested after its deadline."""
 
 
+def _validate_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a non-empty string")
+    return value
+
+
+def _validate_clock_domain(value: object, label: str) -> ClockDomain:
+    if not isinstance(value, ClockDomain):
+        raise TypeError(f"{label} must be a ClockDomain")
+    return value
+
+
 @dataclass(frozen=True, slots=True, eq=False)
 class ClockDomain:
     """Opaque identity for one source of monotonic time.
@@ -38,11 +50,10 @@ class ClockDomain:
     name: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.name, str) or not self.name:
-            raise ValueError("clock domain name must be a non-empty string")
+        _validate_text(self.name, "clock domain name")
 
 
-def _validate_nanoseconds(value: int, label: str) -> int:
+def _validate_nanoseconds(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{label} must be an integer nanosecond value")
     if value < 0:
@@ -50,7 +61,7 @@ def _validate_nanoseconds(value: int, label: str) -> int:
     return value
 
 
-def _duration_nanoseconds(seconds: float, label: str) -> int:
+def _duration_nanoseconds(seconds: object, label: str) -> int:
     if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
         raise TypeError(f"{label} must be a number of seconds")
     if not math.isfinite(float(seconds)):
@@ -60,12 +71,16 @@ def _duration_nanoseconds(seconds: float, label: str) -> int:
     return round(float(seconds) * _NANOSECONDS_PER_SECOND)
 
 
-def _signed_duration_nanoseconds(seconds: float, label: str) -> int:
+def _signed_duration_nanoseconds(seconds: object, label: str) -> int:
     if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
         raise TypeError(f"{label} must be a number of seconds")
     if not math.isfinite(float(seconds)):
         raise ValueError(f"{label} must be finite")
     return round(float(seconds) * _NANOSECONDS_PER_SECOND)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _domain_error(operation: str, expected: ClockDomain, actual: ClockDomain) -> ClockDomainError:
@@ -81,8 +96,7 @@ class MonotonicInstant:
 
     def __post_init__(self) -> None:
         _validate_nanoseconds(self.nanoseconds, "monotonic instant")
-        if not isinstance(self.domain, ClockDomain):
-            raise TypeError("monotonic instant domain must be a ClockDomain")
+        _validate_clock_domain(self.domain, "monotonic instant domain")
 
     def _require_same_domain(self, other: MonotonicInstant, operation: str) -> None:
         if self.domain is not other.domain:
@@ -99,7 +113,7 @@ class MonotonicInstant:
         if isinstance(other, MonotonicInstant):
             self._require_same_domain(other, "instant subtraction")
             return (self.nanoseconds - other.nanoseconds) / _NANOSECONDS_PER_SECOND
-        if isinstance(other, (int, float)) and not isinstance(other, bool):
+        if _is_number(other):
             delta = _signed_duration_nanoseconds(other, "instant offset")
             return self._with_nanoseconds(
                 _validate_nanoseconds(self.nanoseconds - delta, "resulting instant")
@@ -149,8 +163,7 @@ class Deadline:
 
     def __post_init__(self) -> None:
         _validate_nanoseconds(self.nanoseconds, "deadline")
-        if not isinstance(self.domain, ClockDomain):
-            raise TypeError("deadline domain must be a ClockDomain")
+        _validate_clock_domain(self.domain, "deadline domain")
 
     @classmethod
     def from_instant(cls, instant: MonotonicInstant) -> Deadline:
@@ -179,7 +192,7 @@ class Deadline:
         if isinstance(other, (Deadline, MonotonicInstant)):
             self._require_same_domain(other, "deadline subtraction")
             return (self.nanoseconds - other.nanoseconds) / _NANOSECONDS_PER_SECOND
-        if isinstance(other, (int, float)) and not isinstance(other, bool):
+        if _is_number(other):
             delta = _signed_duration_nanoseconds(other, "deadline offset")
             return self._with_nanoseconds(
                 _validate_nanoseconds(self.nanoseconds - delta, "resulting deadline")
@@ -230,6 +243,18 @@ class MonotonicClock(Protocol):
     def now(self) -> MonotonicInstant: ...
 
     def deadline_after(self, seconds: float) -> Deadline: ...
+
+
+def _validate_monotonic_clock(value: object) -> MonotonicClock:
+    if not isinstance(value, MonotonicClock):
+        raise TypeError("deadline clock base must implement MonotonicClock")
+    return value
+
+
+def _validate_deadline(value: object) -> Deadline:
+    if not isinstance(value, Deadline):
+        raise TypeError("child deadline must be a Deadline")
+    return value
 
 
 class _SystemMonotonicClockMeta(type):
@@ -304,8 +329,7 @@ class DeadlineClock:
     __slots__ = ("_base", "_deadline")
 
     def __init__(self, base: MonotonicClock, deadline: Deadline) -> None:
-        if not isinstance(base, MonotonicClock):
-            raise TypeError("deadline clock base must implement MonotonicClock")
+        base = _validate_monotonic_clock(base)
         if base.domain is not deadline.domain:
             raise _domain_error("deadline clock construction", base.domain, deadline.domain)
         object.__setattr__(self, "_base", base)
@@ -337,13 +361,14 @@ class DeadlineClock:
     def expired(self) -> bool:
         """Return whether the base clock has reached this action deadline."""
 
-        return self._base.now() >= self._deadline.instant
+        now = self._base.now()
+        self._deadline._require_same_domain(now, "deadline comparison")
+        return bool(now.nanoseconds >= self._deadline.nanoseconds)
 
     def child(self, deadline: Deadline) -> DeadlineClock:
         """Intersect this action with ``deadline``; a child cannot extend it."""
 
-        if not isinstance(deadline, Deadline):
-            raise TypeError("child deadline must be a Deadline")
+        deadline = _validate_deadline(deadline)
         self._deadline._require_same_domain(deadline, "deadline intersection")
         selected = deadline if deadline.nanoseconds < self._deadline.nanoseconds else self._deadline
         return DeadlineClock(self._base, selected)

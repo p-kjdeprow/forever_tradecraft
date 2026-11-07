@@ -11,6 +11,34 @@ if TYPE_CHECKING:
     from .house import House
 
 
+def _validate_fraction(value: object, label: str) -> Fraction:
+    if not isinstance(value, Fraction):
+        raise TypeError(f"{label} must be a Fraction")
+    return value
+
+
+def _validate_positive_integer(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{label} must be positive")
+    return value
+
+
+def _is_positive_integer(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def _validate_deposit_policy(value: object) -> DepositPolicy:
+    if not isinstance(value, DepositPolicy):
+        raise TypeError("deposit policy must be DepositPolicy")
+    return value
+
+
+def _validate_text(value: object, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must not be empty")
+    return value
+
+
 @dataclass(frozen=True)
 class DepositPolicy:
     """The deposit formula and the listing durations accepted by the client."""
@@ -20,22 +48,13 @@ class DepositPolicy:
     supported_durations_hours: tuple[int, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.rate, Fraction):
-            raise TypeError("deposit rate must be a Fraction")
+        _validate_fraction(self.rate, "deposit rate")
         if self.rate < 0:
             raise ValueError("deposit rate cannot be negative")
-        if (
-            isinstance(self.base_duration_hours, bool)
-            or not isinstance(self.base_duration_hours, int)
-            or self.base_duration_hours <= 0
-        ):
-            raise ValueError("deposit base duration must be positive")
+        _validate_positive_integer(self.base_duration_hours, "deposit base duration")
         if not self.supported_durations_hours:
             raise ValueError("deposit policy must support at least one duration")
-        if any(
-            isinstance(duration, bool) or not isinstance(duration, int) or duration <= 0
-            for duration in self.supported_durations_hours
-        ):
+        if any(not _is_positive_integer(duration) for duration in self.supported_durations_hours):
             raise ValueError("deposit durations must be positive integers")
         if tuple(sorted(set(self.supported_durations_hours))) != self.supported_durations_hours:
             raise ValueError("deposit durations must be sorted and unique")
@@ -59,14 +78,11 @@ class AuctionHouseRules:
     version: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.seller_cut, Fraction):
-            raise TypeError("seller cut must be a Fraction")
+        _validate_fraction(self.seller_cut, "seller cut")
         if not 0 <= self.seller_cut < 1:
             raise ValueError("seller cut must be in [0, 1)")
-        if not isinstance(self.deposit_policy, DepositPolicy):
-            raise TypeError("deposit policy must be DepositPolicy")
-        if not isinstance(self.version, str) or not self.version:
-            raise ValueError("auction-house rules version must not be empty")
+        _validate_deposit_policy(self.deposit_policy)
+        _validate_text(self.version, "auction-house rules version")
 
 
 _DEPOSIT_POLICY = DepositPolicy(

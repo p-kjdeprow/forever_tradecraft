@@ -59,6 +59,7 @@ Install the package and render the reviewed runtime files into the XDG
 configuration directory:
 
 ```sh
+crowley-native build xdotool
 uv tool install .
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 crowley-ops install --game-root "/path/to/World of Warcraft"

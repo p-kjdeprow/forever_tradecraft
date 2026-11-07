@@ -344,8 +344,26 @@ def _validate_export(
     return manifest
 
 
+def _docker_source_revisions() -> dict[str, str]:
+    revisions: dict[str, str] = {}
+    for argument, pin_name in (
+        ("TACTSHARP_SHA", "TACTSharp"),
+        ("DBCD_SHA", "DBCD"),
+        ("WOWDBDEFS_SHA", "WoWDBDefs"),
+    ):
+        pinned = EXPECTED_TOOL_PINS[pin_name]
+        prefix, separator, revision = pinned.rpartition("@")
+        if not separator or not prefix or not revision:
+            raise ExportCLIError(f"tool pin {pin_name} is not a repository revision")
+        revisions[argument] = revision
+    return revisions
+
+
 def build_image(*, tag: str = IMAGE, runner: Callable[..., Any] = subprocess.run) -> None:
-    command = ["docker", "build", "-t", tag, str(Path(__file__).with_name("client_data"))]
+    command = ["docker", "build"]
+    for argument, revision in _docker_source_revisions().items():
+        command.extend(("--build-arg", f"{argument}={revision}"))
+    command.extend(("-t", tag, str(Path(__file__).with_name("client_data"))))
     runner(command, check=True)
 
 

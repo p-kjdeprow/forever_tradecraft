@@ -989,3 +989,49 @@ fn main() {
         std::process::exit(1)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::parse_args;
+
+    fn valid_request() -> String {
+        r#"{"protocolVersion":1,"display":":0","xauthority":"","title":"World of Warcraft","class":"wowb.exe","executable":"WowB.exe","winePrefix":"wine-prefix","loader":"wine-preloader","outerWidth":1928,"outerHeight":1092,"clientWidth":1920,"clientHeight":1080,"nonce":"0123456789abcdef0123456789abcdef","binaryDigest":"0000000000000000000000000000000000000000000000000000000000000000"}"#.to_string()
+    }
+
+    #[test]
+    fn parses_the_closed_request_shape() {
+        let args = parse_args(&valid_request()).expect("valid observer request");
+        assert_eq!(args.outer_width, 1928);
+        assert_eq!(args.client_height, 1080);
+    }
+
+    #[test]
+    fn rejects_unsupported_protocol_and_oversized_input() {
+        let unsupported = valid_request().replace("\"protocolVersion\":1", "\"protocolVersion\":2");
+        assert_eq!(
+            parse_args(&unsupported).err().as_deref(),
+            Some("unsupported protocolVersion")
+        );
+        assert_eq!(
+            parse_args(&"x".repeat(16 * 1024 + 1)).err().as_deref(),
+            Some("request is oversized or contains NUL")
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_nonce_and_duplicate_keys() {
+        let malformed = valid_request().replace("0123456789abcdef0123456789abcdef", "short");
+        assert_eq!(
+            parse_args(&malformed).err().as_deref(),
+            Some("nonce is not a 128-bit hexadecimal token")
+        );
+        let duplicate = valid_request().replace(
+            "\"display\":\":0\"",
+            "\"display\":\":0\",\"display\":\":1\"",
+        );
+        assert_eq!(
+            parse_args(&duplicate).err().as_deref(),
+            Some("duplicate request key display")
+        );
+    }
+}

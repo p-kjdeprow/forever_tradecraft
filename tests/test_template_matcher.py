@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import hashlib
-import importlib.util
 import json
 import os
 import random
 import shutil
-import stat
 import struct
 import subprocess
 import sys
@@ -16,96 +13,42 @@ from pathlib import Path
 
 import pytest
 
-MAGIC = b"CRWTM001"
+from crowley.native import build as native_build
+from crowley.native import matcher as matcher_runtime
+from crowley.native import pins
+
+MAGIC = pins.MATCHER_MAGIC
 SEARCH = 1
 SCORE_AT = 2
 MAX_INPUT_BYTES = 64 * 1024 * 1024
-PROJECT = Path(__file__).resolve().parents[1] / "native" / "template_matcher"
-BUILDER = Path(__file__).resolve().parents[1] / "tools" / "build_template_matcher.py"
-SOURCE_FILES = ("Cargo.toml", "Cargo.lock", "src/main.rs")
-ARTIFACT_NAME = "template_matcher-v1"
-MANIFEST_NAME = f"{ARTIFACT_NAME}.manifest.json"
-
-
-def _source_pins() -> dict[str, str]:
-    return {name: hashlib.sha256((PROJECT / name).read_bytes()).hexdigest() for name in SOURCE_FILES}
-
-
-def _combined_source_pin(source_hashes: dict[str, str]) -> str:
-    digest = hashlib.sha256()
-    for name in SOURCE_FILES:
-        digest.update(name.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(source_hashes[name].encode("ascii"))
-        digest.update(b"\n")
-    return digest.hexdigest()
+PROJECT = native_build.NATIVE_ROOT / "template_matcher"
+BUILD_COMMAND = (sys.executable, "-m", "crowley.native.build", "build", "matcher")
+ARTIFACT_NAME = pins.MATCHER_ARTIFACT_NAME
+MANIFEST_NAME = pins.MATCHER_MANIFEST_NAME
 
 
 def _verify_configured_artifact(binary: Path) -> None:
-    if binary.name != ARTIFACT_NAME:
-        raise AssertionError("configured artifact name is not versioned")
     try:
-        binary_info = binary.lstat()
-        parent_info = binary.parent.lstat()
-        manifest = binary.parent.joinpath(MANIFEST_NAME)
-        manifest_info = manifest.lstat()
-        raw_manifest = json.loads(manifest.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as error:
-        raise AssertionError("configured artifact publication is unreadable") from error
-    if (
-        stat.S_ISLNK(binary_info.st_mode)
-        or not stat.S_ISREG(binary_info.st_mode)
-        or binary_info.st_mode & 0o077
-        or not binary_info.st_mode & 0o100
-        or stat.S_ISLNK(parent_info.st_mode)
-        or not stat.S_ISDIR(parent_info.st_mode)
-        or parent_info.st_mode & 0o077
-        or stat.S_ISLNK(manifest_info.st_mode)
-        or not stat.S_ISREG(manifest_info.st_mode)
-        or manifest_info.st_mode & 0o077
-    ):
-        raise AssertionError("configured artifact publication is not private")
-    if not isinstance(raw_manifest, dict):
-        raise AssertionError("configured artifact manifest is malformed")
-    source_hashes = _source_pins()
-    expected_source = _combined_source_pin(source_hashes)
-    if (
-        raw_manifest.get("schema") != "crowley.template-matcher-release"
-        or raw_manifest.get("schema_version") != 1
-        or raw_manifest.get("artifact") != ARTIFACT_NAME
-        or raw_manifest.get("source_hashes") != source_hashes
-        or raw_manifest.get("source_sha256") != expected_source
-        or raw_manifest.get("source_snapshot_sha256") != expected_source
-        or raw_manifest.get("target") != "x86_64-unknown-linux-gnu"
-    ):
-        raise AssertionError("configured artifact source manifest is stale")
-    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
-    if raw_manifest.get("artifact_sha256") != digest:
-        raise AssertionError("configured artifact digest does not match its manifest")
+        runtime = matcher_runtime.TemplateMatcherRuntime(binary.parent)
+    except matcher_runtime.ArtifactError as error:
+        raise AssertionError(str(error)) from error
+    else:
+        runtime.close()
 
 
 def _fresh_build_binary(project: Path, target_dir: Path) -> Path:
-    cargo = os.environ.get("CARGO")
-    if not cargo and os.environ.get("RUSTC"):
-        sibling = Path(os.environ["RUSTC"]).with_name("cargo")
-        if sibling.is_file():
-            cargo = str(sibling)
-    cargo = cargo or shutil.which("cargo")
-    if cargo is None:
-        pytest.fail("build the matcher or set CARGO")
+    configured = os.environ.get("CROWLEY_RUST_TOOLCHAIN")
+    if not configured:
+        pytest.fail("CROWLEY_RUST_TOOLCHAIN is required for native build tests")
+    toolchain_dir = Path(configured)
+    cargo_path = toolchain_dir / "cargo"
+    rustc_path = toolchain_dir / "rustc"
+    if not cargo_path.is_file() or not rustc_path.is_file():
+        pytest.fail("CROWLEY_RUST_TOOLCHAIN must contain cargo and rustc")
     target_dir.mkdir(mode=0o700, exist_ok=True)
     target_dir.chmod(0o700)
-    cargo_path = Path(cargo)
-    toolchain_dir = cargo_path.parent if cargo_path.is_absolute() else None
     environment = {
-        "PATH": ":".join(
-            part
-            for part in (
-                str(toolchain_dir) if toolchain_dir is not None else "",
-                os.environ.get("PATH", "/usr/bin:/bin"),
-            )
-            if part
-        ),
+        "PATH": f"{toolchain_dir}:{os.defpath}",
         "CARGO_TARGET_DIR": str(target_dir),
         "CARGO_HOME": str(target_dir / "cargo-home"),
         "CARGO_NET_OFFLINE": "true",
@@ -113,16 +56,10 @@ def _fresh_build_binary(project: Path, target_dir: Path) -> Path:
         "CARGO_TERM_COLOR": "never",
     }
     (target_dir / "cargo-home").mkdir(mode=0o700)
-    rustc = os.environ.get("RUSTC")
-    if not rustc and toolchain_dir is not None:
-        sibling = toolchain_dir / "rustc"
-        if sibling.is_file():
-            rustc = str(sibling)
-    if rustc:
-        environment["RUSTC"] = rustc
+    environment["RUSTC"] = str(rustc_path)
     result = subprocess.run(
         [
-            cargo,
+            str(cargo_path),
             "build",
             "--release",
             "--locked",
@@ -579,37 +516,24 @@ def test_oversized_input_is_refused_before_protocol_work(matcher_binary: Path) -
 def test_configured_artifact_requires_private_current_manifest_and_digest(tmp_path: Path) -> None:
     publication = tmp_path / "publication"
     publication.mkdir(mode=0o700)
+    native_build.build_matcher(publication)
     binary = publication / ARTIFACT_NAME
-    binary.write_bytes(b"reviewed-artifact")
-    binary.chmod(0o700)
-    source_hashes = _source_pins()
-    source_pin = _combined_source_pin(source_hashes)
-    manifest = {
-        "schema": "crowley.template-matcher-release",
-        "schema_version": 1,
-        "artifact": ARTIFACT_NAME,
-        "artifact_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
-        "source_hashes": source_hashes,
-        "source_sha256": source_pin,
-        "source_snapshot_sha256": source_pin,
-        "target": "x86_64-unknown-linux-gnu",
-    }
     manifest_path = publication / MANIFEST_NAME
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    manifest_path.chmod(0o600)
     _verify_configured_artifact(binary)
 
+    reviewed_artifact = binary.read_bytes()
     binary.write_bytes(b"tampered-artifact")
     binary.chmod(0o700)
     with pytest.raises(AssertionError, match="digest"):
         _verify_configured_artifact(binary)
 
-    binary.write_bytes(b"reviewed-artifact")
+    binary.write_bytes(reviewed_artifact)
     binary.chmod(0o700)
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest["source_hashes"]["Cargo.toml"] = "0" * 64
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     manifest_path.chmod(0o600)
-    with pytest.raises(AssertionError, match="stale"):
+    with pytest.raises(AssertionError, match="source pins"):
         _verify_configured_artifact(binary)
 
 
@@ -626,14 +550,12 @@ def test_default_build_ignores_stale_repository_target(tmp_path: Path) -> None:
 
 
 def test_builder_ignores_contaminated_cargo_configuration_and_wrappers(tmp_path: Path) -> None:
-    cargo = os.environ.get("CARGO")
-    if not cargo and os.environ.get("RUSTC"):
-        sibling = Path(os.environ["RUSTC"]).with_name("cargo")
-        if sibling.is_file():
-            cargo = str(sibling)
-    toolchain_dir = Path(cargo).parent if cargo and Path(cargo).is_absolute() else None
-    if toolchain_dir is None or not (toolchain_dir / "rustc").is_file():
-        pytest.skip("scoped test requires the pinned explicit toolchain")
+    configured = os.environ.get("CROWLEY_RUST_TOOLCHAIN")
+    if not configured:
+        pytest.fail("CROWLEY_RUST_TOOLCHAIN is required for native build tests")
+    toolchain_dir = Path(configured)
+    if not (toolchain_dir / "rustc").is_file():
+        pytest.fail("CROWLEY_RUST_TOOLCHAIN must contain rustc")
     marker = tmp_path / "wrapper-used"
     wrapper = tmp_path / "wrapper"
     wrapper.write_text(f"#!/bin/sh\nprintf used > {marker}\nexit 91\n", encoding="utf-8")
@@ -656,12 +578,9 @@ def test_builder_ignores_contaminated_cargo_configuration_and_wrappers(tmp_path:
     output = tmp_path / "publication"
     output.mkdir(mode=0o700)
     command = [
-        sys.executable,
-        str(BUILDER),
+        *BUILD_COMMAND,
         "--output-dir",
         str(output),
-        "--toolchain-dir",
-        str(toolchain_dir),
     ]
     clean_environment = {
         **os.environ,
@@ -714,18 +633,10 @@ def test_builder_ignores_contaminated_cargo_configuration_and_wrappers(tmp_path:
 def test_builder_refuses_ancestor_cargo_inputs_before_execution(
     tmp_path: Path, monkeypatch, poison: str
 ) -> None:
-    spec = importlib.util.spec_from_file_location("template_matcher_builder_ancestor", BUILDER)
-    assert spec and spec.loader
-    builder = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(builder)
-    cargo = os.environ.get("CARGO")
-    if not cargo and os.environ.get("RUSTC"):
-        sibling = Path(os.environ["RUSTC"]).with_name("cargo")
-        if sibling.is_file():
-            cargo = str(sibling)
-    if not cargo or not Path(cargo).is_absolute():
-        pytest.skip("scoped test requires the pinned explicit toolchain")
-    toolchain_dir = Path(cargo).parent
+    builder = native_build
+    configured = os.environ.get("CROWLEY_RUST_TOOLCHAIN")
+    if not configured:
+        pytest.fail("CROWLEY_RUST_TOOLCHAIN is required for native build tests")
     cache = tmp_path / "build-cache"
     cache.mkdir(mode=0o700)
     marker = tmp_path / "linker-executed"
@@ -746,15 +657,12 @@ def test_builder_refuses_ancestor_cargo_inputs_before_execution(
     output.mkdir(mode=0o700)
     monkeypatch.setattr(builder, "BUILD_CACHE_ROOT", cache)
     with pytest.raises(builder.BuildError, match="refusing ancestor"):
-        builder.build(output, toolchain_dir, None, None)
+        builder.build_matcher(output)
     assert not marker.exists()
 
 
 def test_source_snapshot_rejects_mutation_between_descriptor_snapshots(tmp_path: Path, monkeypatch) -> None:
-    spec = importlib.util.spec_from_file_location("template_matcher_builder", BUILDER)
-    assert spec and spec.loader
-    builder = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(builder)
+    builder = native_build
     source = tmp_path / "source"
     shutil.copytree(PROJECT, source)
     workspace = tmp_path / "workspace"
@@ -762,9 +670,9 @@ def test_source_snapshot_rejects_mutation_between_descriptor_snapshots(tmp_path:
     original = builder._read_source_files
     calls = 0
 
-    def mutate_after_first_read(root: Path) -> dict[str, bytes]:
+    def mutate_after_first_read(root: Path, source_files: tuple[str, ...]) -> dict[str, bytes]:
         nonlocal calls
-        snapshot = original(root)
+        snapshot = original(root, source_files)
         calls += 1
         if calls == 1:
             path = source / "src" / "main.rs"
@@ -773,14 +681,11 @@ def test_source_snapshot_rejects_mutation_between_descriptor_snapshots(tmp_path:
 
     monkeypatch.setattr(builder, "_read_source_files", mutate_after_first_read)
     with pytest.raises(builder.BuildError, match="changed"):
-        builder._prepare_source_snapshot(source, workspace)
+        builder._prepare_source_snapshot(source, workspace, builder.CRATE_SOURCE_FILES)
 
 
 def test_builder_requires_exact_official_toolchain_versions() -> None:
-    spec = importlib.util.spec_from_file_location("template_matcher_builder_versions", BUILDER)
-    assert spec and spec.loader
-    builder = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(builder)
+    builder = native_build
 
     builder._validate_toolchain_versions(
         builder.EXPECTED_RUSTC,
@@ -800,59 +705,20 @@ def test_builder_requires_exact_official_toolchain_versions() -> None:
             builder._validate_toolchain_versions(*versions)
 
 
-def test_public_benchmark_normalizes_relative_binary_and_rejects_symlink(tmp_path: Path, monkeypatch) -> None:
-    benchmark_path = Path(__file__).resolve().parents[1] / "tools" / "benchmark_template_matcher.py"
-    spec = importlib.util.spec_from_file_location("template_matcher_benchmark", benchmark_path)
-    assert spec and spec.loader
-    benchmark = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(benchmark)
-    configured = os.environ.get("CROWLEY_TEMPLATE_MATCHER_BIN")
-    if configured:
-        source_binary = Path(configured)
-    else:
-        cargo = os.environ.get("CARGO")
-        toolchain_dir = Path(cargo).parent if cargo and Path(cargo).is_absolute() else None
-        if toolchain_dir is None or not (toolchain_dir / "rustc").is_file():
-            pytest.skip("benchmark fixture requires the pinned template-matcher toolchain")
-        source_binary = tmp_path / "source-release" / ARTIFACT_NAME
-        source_binary.parent.mkdir(mode=0o700)
-        build_environment = {
-            **os.environ,
-            "HOME": str(tmp_path / "benchmark-builder-home"),
-        }
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(BUILDER),
-                "--output-dir",
-                str(source_binary.parent),
-                "--toolchain-dir",
-                str(toolchain_dir),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            cwd=Path("/"),
-            env=build_environment,
-        )
-        assert result.returncode == 0, (
-            f"template matcher publication failed:\n{result.stdout}\n{result.stderr}"
-        )
-    source_manifest = source_binary.parent / MANIFEST_NAME
-    publication = tmp_path / "release"
+def test_matcher_accepts_relative_private_root_and_rejects_symlink_binary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    publication = tmp_path / "publication"
     publication.mkdir(mode=0o700)
-    shutil.copy2(source_binary, publication / ARTIFACT_NAME)
-    shutil.copy2(source_manifest, publication / MANIFEST_NAME)
-    (publication / ARTIFACT_NAME).chmod(0o700)
-    (publication / MANIFEST_NAME).chmod(0o600)
+    native_build.build_matcher(publication)
     monkeypatch.chdir(tmp_path)
-    _source_hashes, _source_pin, digest = benchmark._source_binding(PROJECT, Path("release") / ARTIFACT_NAME)
-    assert digest == hashlib.sha256((publication / ARTIFACT_NAME).read_bytes()).hexdigest()
+    runtime = matcher_runtime.TemplateMatcherRuntime(Path("publication"))
+    runtime.close()
 
-    symlink_dir = tmp_path / "symlink-release"
-    symlink_dir.mkdir(mode=0o700)
-    (symlink_dir / ARTIFACT_NAME).symlink_to(publication / ARTIFACT_NAME)
-    shutil.copy2(publication / MANIFEST_NAME, symlink_dir / MANIFEST_NAME)
-    (symlink_dir / MANIFEST_NAME).chmod(0o600)
-    with pytest.raises(benchmark.BenchmarkError, match="regular file"):
-        benchmark._source_binding(PROJECT, symlink_dir / ARTIFACT_NAME)
+    real_binary = publication / "real-matcher"
+    real_binary.write_bytes((publication / ARTIFACT_NAME).read_bytes())
+    real_binary.chmod(0o700)
+    (publication / ARTIFACT_NAME).unlink()
+    (publication / ARTIFACT_NAME).symlink_to(real_binary)
+    with pytest.raises(matcher_runtime.ArtifactError, match="unavailable|regular"):
+        matcher_runtime.TemplateMatcherRuntime(publication)

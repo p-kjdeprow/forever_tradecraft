@@ -24,6 +24,7 @@ crowley-session = "crowley.session.cli:main"
 crowley-ops = "crowley.ops.cli:main"
 crowley-trading = "crowley.trading.__main__:main"
 crowley-paper-step = "crowley.ops.paper_step:main"
+crowley-native = "crowley.native.build:main"
 
 [build-system]
 requires = ["hatchling>=1.27,<2"]

@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-STAGE=${GNOME_TELEMETRY_REGION_STAGE:-/home/dev/.cache/crowley/gnome-telemetry-region-r3}
+if [[ $# -ne 1 ]]; then
+    printf 'usage: %s STAGE\n' "$0" >&2
+    exit 2
+fi
+STAGE=$1
 REPO=${GNOME_TELEMETRY_REGION_REPO:-$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)}
 PREFIX="$STAGE/prefix"
 BUILD="$STAGE/build"

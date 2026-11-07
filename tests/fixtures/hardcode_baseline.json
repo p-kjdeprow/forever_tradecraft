@@ -375,7 +375,7 @@
     "category": "posix-home",
     "count": 1,
     "match": "/home/dev",
-    "path": "tools/build_x11_identity_observer.py"
+    "path": "src/crowley/native/build.py"
   },
   {
     "category": "posix-home",

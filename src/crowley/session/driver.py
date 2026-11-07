@@ -35,6 +35,7 @@ from typing import Any, Protocol, cast
 
 from crowley.core.game_target import packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
+from crowley.platform.paths import XdgDirs
 
 from .executor import (
     BindingMetadata,
@@ -279,7 +280,13 @@ class _InvalidCaptureOutput(DriverError):
 
 
 DRIVER_VERSION = "native-x11-3"
-GNOME_CAPTURE_LOCK_PATH = Path.home() / ".cache" / "crowley" / "gnome-screenshot.lock"
+GNOME_CAPTURE_LOCK_PATH: Path | None = None
+
+
+def _capture_lock_path() -> Path:
+    if GNOME_CAPTURE_LOCK_PATH is not None:
+        return GNOME_CAPTURE_LOCK_PATH
+    return XdgDirs.from_environ(os.environ).crowley_cache / "gnome-screenshot.lock"
 
 
 def _capture_deadline(deadline_monotonic: float | None) -> float:
@@ -306,7 +313,7 @@ def _capture_lock(deadline_monotonic: float, *, check: Callable[[], None] | None
 
     import fcntl
 
-    lock_path = GNOME_CAPTURE_LOCK_PATH
+    lock_path = _capture_lock_path()
     parent = lock_path.parent
     try:
         parent.mkdir(mode=0o700, parents=True, exist_ok=True)

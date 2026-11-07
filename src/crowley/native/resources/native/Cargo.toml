@@ -1,8 +1,9 @@
-[package]
-name = "template_matcher"
-version = "0.1.0"
-edition = "2024"
-publish = false
+[workspace]
+resolver = "2"
+members = [
+    "template_matcher",
+    "x11_identity_observer",
+]
 
 [profile.release]
 opt-level = 3
@@ -12,4 +13,3 @@ codegen-units = 1
 lto = false
 incremental = false
 panic = "unwind"
-

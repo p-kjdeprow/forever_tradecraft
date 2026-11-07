@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import json
 import os
 import shutil
@@ -15,6 +14,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from crowley.native import build as native_build
+from crowley.native import pins
 from crowley.session.input_tool import (
     ARCHIVE_BASENAME,
     MANIFEST_BASENAME,
@@ -26,7 +27,11 @@ from crowley.session.input_tool import (
     verify_artifact,
 )
 
-VENDORED_SOURCE_ARCHIVE = Path(__file__).resolve().parents[1] / "vendor" / "xdotool-source.tar.gz"
+VENDORED_SOURCE_ARCHIVE = native_build.VENDORED_SOURCE_ARCHIVE
+_TEST_BUILD_INPUTS = {
+    "compiler": {"name": "cc", "sha256": "0" * 64, "version": "test compiler"},
+    "linker": {"name": "ld", "sha256": "1" * 64, "version": "test linker"},
+}
 
 
 def _artifact_copy(tmp_path: Path, executable_source: str = "") -> Path:
@@ -42,6 +47,7 @@ def _artifact_copy(tmp_path: Path, executable_source: str = "") -> Path:
                 "archive_sha256": PINNED_ARCHIVE_SHA256,
                 "executable": PRIVATE_TOOL_BASENAME,
                 "executable_sha256": digest,
+                pins.XDOTOOL_BUILD_INPUTS_KEY: _TEST_BUILD_INPUTS,
             },
             sort_keys=True,
         ),
@@ -722,41 +728,21 @@ def test_desktop_close_retains_pinned_image_when_guardian_close_fails(
 
 
 def test_builder_rechecks_existing_artifact_linkage(tmp_path: Path) -> None:
-    module_spec = importlib.util.spec_from_file_location(
-        "crowley_xdotool_builder", Path(__file__).resolve().parents[1] / "tools" / "build_crowley_xdotool.py"
-    )
-    assert module_spec is not None and module_spec.loader is not None
-    builder = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(builder)
     root = _artifact_copy(tmp_path)
     with pytest.raises(RuntimeError, match="static XTEST linkage"):
-        builder.build(VENDORED_SOURCE_ARCHIVE, root)
+        native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, root)
 
 
 def test_builder_idempotent_existing_artifact_rechecks_real_static_call_path(tmp_path: Path) -> None:
-    module_spec = importlib.util.spec_from_file_location(
-        "crowley_xdotool_builder_idempotent",
-        Path(__file__).resolve().parents[1] / "tools" / "build_crowley_xdotool.py",
-    )
-    assert module_spec is not None and module_spec.loader is not None
-    builder = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(builder)
     destination = tmp_path / "built"
-    first = builder.build(VENDORED_SOURCE_ARCHIVE, destination)
+    first = native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, destination)
     digest = hashlib.sha256((first / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest()
-    second = builder.build(VENDORED_SOURCE_ARCHIVE, destination)
+    second = native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, destination)
     assert second == destination
     assert hashlib.sha256((second / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest() == digest
 
 
 def test_builder_rejects_existing_dynamic_libxdo_dependency(tmp_path: Path) -> None:
-    module_spec = importlib.util.spec_from_file_location(
-        "crowley_xdotool_builder_dynamic",
-        Path(__file__).resolve().parents[1] / "tools" / "build_crowley_xdotool.py",
-    )
-    assert module_spec is not None and module_spec.loader is not None
-    builder = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(builder)
     library_source = tmp_path / "xdo.c"
     library = tmp_path / "libxdo.so"
     executable_source = tmp_path / "dynamic.c"
@@ -782,17 +768,10 @@ def test_builder_rejects_existing_dynamic_libxdo_dependency(tmp_path: Path) -> N
     )
     root = _artifact_copy(tmp_path / "artifact", str(executable))
     with pytest.raises(RuntimeError, match="static XTEST linkage"):
-        builder.build(VENDORED_SOURCE_ARCHIVE, root)
+        native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, root)
 
 
 def test_builder_rejects_existing_non_xtest_move_call_path(tmp_path: Path) -> None:
-    module_spec = importlib.util.spec_from_file_location(
-        "crowley_xdotool_builder_callpath",
-        Path(__file__).resolve().parents[1] / "tools" / "build_crowley_xdotool.py",
-    )
-    assert module_spec is not None and module_spec.loader is not None
-    builder = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(builder)
     source = tmp_path / "callpath.c"
     executable = tmp_path / "callpath"
     source.write_text(
@@ -802,7 +781,7 @@ def test_builder_rejects_existing_non_xtest_move_call_path(tmp_path: Path) -> No
     subprocess.run(["cc", "-O2", str(source), "-o", str(executable)], check=True)
     root = _artifact_copy(tmp_path / "artifact", str(executable))
     with pytest.raises(RuntimeError, match="static XTEST linkage"):
-        builder.build(VENDORED_SOURCE_ARCHIVE, root)
+        native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, root)
 
 
 def test_pinned_watchdog_releases_exact_holds_after_publication_replacement(
@@ -1015,6 +994,15 @@ def test_manifest_rejects_unknown_fields(tmp_path: Path) -> None:
     root = _artifact_copy(tmp_path)
     manifest = json.loads((root / MANIFEST_BASENAME).read_text(encoding="utf-8"))
     manifest["fallback"] = "/usr/bin/xdotool"
+    (root / MANIFEST_BASENAME).write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(InputToolError, match="fields"):
+        verify_artifact(root)
+
+
+def test_manifest_rejects_legacy_missing_build_inputs(tmp_path: Path) -> None:
+    root = _artifact_copy(tmp_path)
+    manifest = json.loads((root / MANIFEST_BASENAME).read_text(encoding="utf-8"))
+    del manifest[pins.XDOTOOL_BUILD_INPUTS_KEY]
     (root / MANIFEST_BASENAME).write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(InputToolError, match="fields"):
         verify_artifact(root)

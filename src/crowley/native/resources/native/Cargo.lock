@@ -6,3 +6,6 @@ version = 4
 name = "template_matcher"
 version = "0.1.0"
 
+[[package]]
+name = "x11_identity_observer"
+version = "1.0.0"

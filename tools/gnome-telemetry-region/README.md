@@ -29,7 +29,8 @@ in the production profile, install its ownership for the account running the
 daemon and verify its checksum still matches `manifest.json`:
 
 ```sh
-producer_path=/home/dev/.cache/crowley/gnome-telemetry-region-r6/prefix/bin/gnome-screenshot
+stage_dir=/path/to/private/gnome-telemetry-region-stage
+producer_path="$stage_dir/prefix/bin/gnome-screenshot"
 sudo chown -- "$(id -u):$(id -g)" "$producer_path"
 chmod 0700 "$producer_path"
 sha256sum "$producer_path"
@@ -56,11 +57,11 @@ runtime_dir=$(mktemp -d)
 chmod 700 "$runtime_dir"
 XDG_RUNTIME_DIR="$runtime_dir" gnome-screenshot --version
 XDG_RUNTIME_DIR="$runtime_dir" gnome-screenshot --help
-python3 tools/gnome-telemetry-region/offline_harness.py --self-test --self-check
+python3 tools/gnome-telemetry-region/offline_harness.py --self-check
 ```
 
-The reproducible R6 container command mounts only the new
-`/home/dev/.cache/crowley/gnome-telemetry-region-r6` (read/write) cache and
+The reproducible container command mounts only the new private stage directory
+(read/write) and
 uses the pinned
 `debian@sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858`
 image. The exact package list is `appstream ca-certificates desktop-file-utils
@@ -71,18 +72,18 @@ the cache-side `build-private.sh`; the script fails unless
 `GNOME_TELEMETRY_REGION_CONTAINER_DIGEST` equals the pinned digest and records
 the installed package versions. Prepare only the verified archives, Debian
 patch archive, source patch, recipe, manifest, README, and offline harness in
-the new cache before starting the container. It does not mount the host
+the private stage before starting the container. It does not mount the host
 repository, home directory, display socket, Xauthority, service socket, or
-credentials. R3/R4/R5 caches and freezes remain preserved; R6 uses a separate
-cache and keeps the same reviewed reproducibility contract.
+credentials. The stage argument is mandatory so the caller chooses the
+reviewed private build location explicitly.
 
 The exact invocation is:
 
 ```sh
 docker run --rm --network bridge \
-  --mount type=bind,src=/home/dev/.cache/crowley/gnome-telemetry-region-r6,dst=/home/dev/.cache/crowley/gnome-telemetry-region-r6 \
+  --mount type=bind,src="$stage_dir",dst=/stage \
   debian@sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858 \
-  bash -lc 'set -euxo pipefail; apt-get update; apt-get install -y --no-install-recommends appstream ca-certificates desktop-file-utils file gettext gcc libglib2.0-dev libgtk-3-dev libhandy-1-dev libx11-dev libxext-dev libxml2-utils meson ninja-build patch pkg-config python3 xz-utils; mkdir -m 700 -p /home/dev/.cache/crowley/gnome-telemetry-region-r6/build-runtime; export XDG_RUNTIME_DIR=/home/dev/.cache/crowley/gnome-telemetry-region-r6/build-runtime; GNOME_TELEMETRY_REGION_CONTAINER_DIGEST=sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858 GNOME_TELEMETRY_REGION_STAGE=/home/dev/.cache/crowley/gnome-telemetry-region-r6 bash /home/dev/.cache/crowley/gnome-telemetry-region-r6/tools/gnome-telemetry-region/build-private.sh'
+  bash -lc 'set -euxo pipefail; apt-get update; apt-get install -y --no-install-recommends appstream ca-certificates desktop-file-utils file gettext gcc libglib2.0-dev libgtk-3-dev libhandy-1-dev libx11-dev libxext-dev libxml2-utils meson ninja-build patch pkg-config python3 xz-utils; mkdir -m 700 -p /stage/build-runtime; export XDG_RUNTIME_DIR=/stage/build-runtime; GNOME_TELEMETRY_REGION_CONTAINER_DIGEST=sha256:2c037a04925515fdd6ea85ea14a682d0e79931f5e9f5d07b6dbfc6ba12f9e858 bash /stage/tools/gnome-telemetry-region/build-private.sh /stage'
 ```
 
 No live display, Shell call, input, service activation, profile binding, or

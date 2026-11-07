@@ -28,7 +28,7 @@ plan_json = "{\"cadenceSeconds\":900,\"catalogHash\":\"90918db5cc912e889553b5ddd
 
 [session]
 identity_observer_executable = "/path/to/pinned/x11-identity-observer"
-identity_observer_executable_sha256 = "5f4cb94ba23d079885ac9aaf7034619f60cf59f33dd91ae2f91174631c675b58"
+identity_observer_executable_sha256 = "60f9c5416f54e0b4f5cf7805cfa3a7abc1135b0fd054ac3e6894b64eccf0f339"
 
 mode = "repeat"
 cadence_seconds = 900

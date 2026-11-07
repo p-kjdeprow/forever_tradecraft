@@ -159,7 +159,7 @@ These steps apply at launch, after the relevant deployment/input authorization.
 
 - Python: `/home/dev/repos/pegasus/.venv/bin/python`; session CLI `~/.local/bin/crowley-session` (editable install
   of this checkout); config `deploy/config/session.toml` (linked from `~/.config/crowley/session.toml`).
-- Tests: `CARGO=~/.cache/crowley/rust-toolchain-1.85.1/toolchain/bin/cargo uv run pytest` (the default
+- Tests: `CROWLEY_RUST_TOOLCHAIN=~/.cache/crowley/rust-toolchain-1.85.1/toolchain/bin uv run pytest` (the default
   uses sixteen bounded xdist workers with work-stealing; add `CROWLEY_TEST_DATABASE_URL` only for the documented serial DB run in
   [TESTING](TESTING.md)).
 - Backups: `systemctl --user start crowley-market-backup.service`; restore drills via `crowley-ops drill`.

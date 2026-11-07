@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-# The DB URL is intentionally preserved because the xdist guard reads it before
-# schema-reset tests are allowed to run.
-_PRESERVED_ENVIRONMENT = "CROWLEY_TEST_DATABASE_URL"
+# These values are intentionally preserved: the DB URL controls the xdist guard,
+# and the toolchain path locates the pinned native build tool like XDG_CACHE_HOME.
+_PRESERVED_ENVIRONMENT = frozenset({"CROWLEY_TEST_DATABASE_URL", "CROWLEY_RUST_TOOLCHAIN"})
 _original_environment: dict[str, str] | None = None
 _temporary_roots: tuple[tempfile.TemporaryDirectory[str], tempfile.TemporaryDirectory[str]] | None = None
 _removed_environment_names: tuple[str, ...] = ()
@@ -31,7 +31,9 @@ def _install_hermetic_environment() -> None:
 
     _original_environment = dict(os.environ)
     _removed_environment_names = tuple(
-        sorted(name for name in os.environ if name.startswith("CROWLEY_") and name != _PRESERVED_ENVIRONMENT)
+        sorted(
+            name for name in os.environ if name.startswith("CROWLEY_") and name not in _PRESERVED_ENVIRONMENT
+        )
     )
     for name in _removed_environment_names:
         del os.environ[name]
@@ -67,7 +69,7 @@ def pytest_report_header(config: pytest.Config) -> str:
     removed = ", ".join(_removed_environment_names) or "<none>"
     return (
         "crowley hermetic env: removed CROWLEY_* names: "
-        f"{removed}; preserved {_PRESERVED_ENVIRONMENT} for the xdist DB guard"
+        f"{removed}; preserved {', '.join(sorted(_PRESERVED_ENVIRONMENT))} for required test infrastructure"
     )
 
 

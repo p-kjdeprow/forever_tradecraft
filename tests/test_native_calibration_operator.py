@@ -25,6 +25,7 @@ from PIL import Image, ImageOps
 from crowley.native import build as native_build
 from crowley.native import matcher as matcher_runtime
 from crowley.native import pins
+from crowley.platform.paths import XdgDirs
 from crowley.session import pointer_execution
 from crowley.session.executor import BindingMetadata, Point, PointerTarget, Rect
 
@@ -1078,6 +1079,9 @@ def _production_main_owner_fixture(
     # reap is asserted by the parent test.
     fixture_home = Path(error_path).parent / "fixture-home"
     fixture_home.mkdir(mode=0o700, exist_ok=True)
+    # Native artifacts resolve through XDG_CACHE_HOME at call time; pin the real
+    # cache before redirecting HOME so the pinned helpers stay discoverable.
+    os.environ["XDG_CACHE_HOME"] = str(XdgDirs.from_environ(os.environ).cache_home)
     os.environ["HOME"] = str(fixture_home)
     from crowley.session import pointer_execution
 

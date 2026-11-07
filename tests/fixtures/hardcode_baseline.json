@@ -186,12 +186,6 @@
     "path": "docs/HANDOFF.md"
   },
   {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "docs/MARKET_RECOVERY.md"
-  },
-  {
     "category": "checkout-path",
     "count": 1,
     "match": "repos/pegasus",
@@ -232,6 +226,18 @@
     "count": 2,
     "match": "/home/dev",
     "path": "src/crowley/data/game_target.json"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "127.0.0.1:5432",
+    "path": "src/crowley/ops/resources/docker-compose.yml"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "Localhost",
+    "path": "src/crowley/ops/resources/docker-compose.yml"
   },
   {
     "category": "machine-url",

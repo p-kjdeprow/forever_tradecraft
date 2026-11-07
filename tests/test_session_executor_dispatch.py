@@ -34,8 +34,24 @@ from crowley.session.executor import (
     plan_single_click,
 )
 from crowley.session.guardian import InputGuardian
+from crowley.session.input_broker import ButtonEmissionClaim, InputBroker
 from crowley.session.model import LunaAdapter
 from tests.test_session_input_tool import fixture_input_tool
+
+
+class _DispatchRatePermit:
+    is_open = True
+    acquired_monotonic = 0.0
+
+    def precommit(self, *, deadline_monotonic: float | None = None) -> int:
+        del deadline_monotonic
+        return 1
+
+    def record_press(self) -> int:
+        return 1
+
+    def close(self) -> None:
+        return None
 
 
 def test_closed_gesture_argv_is_admitted_as_one_process(
@@ -49,52 +65,98 @@ def test_closed_gesture_argv_is_admitted_as_one_process(
     backend._admission = lambda generation, dispatch: dispatch()
     backend._register_process_group = lambda _generation, _pgid: None
     monkeypatch.setattr("crowley.session.driver._resolve_wrapped_executable", lambda _command: "/bin/true")
+    admitted_chain = (
+        "xdotool",
+        "sleep",
+        "0.010",
+        "mousemove",
+        "10",
+        "20",
+        "mousedown",
+        "3",
+        "sleep",
+        "0.050",
+        "mousemove",
+        "30",
+        "40",
+        "sleep",
+        "0.020",
+        "mouseup",
+        "3",
+    )
+    broker = InputBroker.for_tests(
+        clock=lambda: 0.0,
+        permit_factory=lambda **_kwargs: _DispatchRatePermit(),
+    )
+    backend.input_broker = broker
+    reservation = broker.reserve_button_rate(deadline_monotonic=10.0)
+    gesture = broker.mint_admitted_gesture(
+        action_generation=1,
+        lease_generation=1,
+        button=PointerButton.RIGHT,
+        emitted_chain=admitted_chain,
+        destination_anchor="dispatch-test",
+        target_identity="dispatch-test",
+        guardian_admission_id="dispatch-test",
+        semantic_authorization="dispatch-test",
+        deadline_monotonic=10.0,
+        reservation=reservation,
+    )
     try:
-        result = backend._run(
-            [
-                "xdotool",
-                "mousemove",
-                "10",
-                "20",
-                "sleep",
-                "0.010",
-                "mousedown",
-                "3",
-                "sleep",
-                "0.050",
-                "mousemove",
-                "30",
-                "40",
-                "sleep",
-                "0.020",
-                "mouseup",
-                "3",
-            ],
-            generation=1,
-            input_schema="camera-drag",
-            expected_argv=(
-                "xdotool",
-                "mousemove",
-                "10",
-                "20",
-                "sleep",
-                "0.010",
-                "mousedown",
-                "3",
-                "sleep",
-                "0.050",
-                "mousemove",
-                "30",
-                "40",
-                "sleep",
-                "0.020",
-                "mouseup",
-                "3",
-            ),
-            held_buttons={3},
+        result_box: list[CompletedProcess[str]] = []
+        claim_box: list[ButtonEmissionClaim] = []
+
+        with pytest.raises(DriverError, match="broker emission claim"):
+            backend._run(
+                list(admitted_chain),
+                generation=1,
+                input_schema="camera-drag",
+                expected_argv=admitted_chain,
+                held_buttons={3},
+                admitted_button_gesture=gesture,
+            )
+
+        def emit(claim: ButtonEmissionClaim) -> None:
+            claim_box.append(claim)
+            result_box.append(
+                backend._run(
+                    list(admitted_chain),
+                    generation=1,
+                    input_schema="camera-drag",
+                    expected_argv=admitted_chain,
+                    held_buttons={3},
+                    button_emission_claim=claim,
+                    emission_action_generation=1,
+                    emission_lease_generation=1,
+                )
+            )
+
+        broker.emit_button_gesture(
+            gesture,
+            emitted_chain=admitted_chain,
+            action_generation=1,
+            lease_generation=1,
+            destination_anchor="dispatch-test",
+            target_identity="dispatch-test",
+            guardian_admission_id="dispatch-test",
+            semantic_authorization="dispatch-test",
+            emit=emit,
         )
+        assert len(result_box) == 1
+        result = result_box[0]
         assert result.returncode == 0
         assert not backend._active_processes
+        with pytest.raises(DriverError, match="foreign or already redeemed"):
+            backend._run(
+                list(admitted_chain),
+                generation=1,
+                input_schema="camera-drag",
+                expected_argv=admitted_chain,
+                held_buttons={3},
+                button_emission_claim=claim_box[0],
+                emission_action_generation=1,
+                emission_lease_generation=1,
+            )
         with pytest.raises(DriverError, match="not allowlisted"):
             backend._run(
                 [
@@ -124,6 +186,7 @@ def test_closed_gesture_argv_is_admitted_as_one_process(
                 input_schema="camera-drag",
             )
     finally:
+        broker.release_reservation(reservation)
         backend.release_held_input()
 
 
@@ -547,6 +610,13 @@ def test_pointer_click_success_records_protected_boundary_order(
             order.append("motion")
             moved = True
         elif schema == "single-click":
+            backend.input_broker.redeem_button_emission_claim(
+                kwargs["button_emission_claim"],
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
             order.append("click")
         return CompletedProcess(args, 0, "", "")
 

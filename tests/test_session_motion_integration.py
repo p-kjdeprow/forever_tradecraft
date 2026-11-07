@@ -26,7 +26,8 @@ from crowley.session.driver import (
     WindowIdentity,
     X11Backend,
 )
-from crowley.session.executor import KeyRole
+from crowley.session.executor import KeyRole, PointerButton
+from crowley.session.input_broker import ButtonEmissionClaim, InputBroker
 from crowley.session.input_events import EventClass, XI2Event
 from crowley.session.journal import DEFAULT_STATE, Journal
 from crowley.session.model import LunaAdapter, ModelRouteObservation
@@ -38,6 +39,7 @@ from crowley.session.motion import (
     MovementBasis,
     NativeMotionProvider,
 )
+from crowley.session.pointer_execution import PointerExecutionError
 from crowley.session.protocol import Frame, Snapshot
 
 from .test_session_input_tool import fixture_input_tool
@@ -47,6 +49,59 @@ from .wow_harness import WowClient
 
 class _Identity:
     fingerprint = "client-motion"
+
+
+class _FixtureRateGate:
+    """Test-only one-second broker gate with the production permit surface."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._next_allowed = 0.0
+
+    def acquire(self, *, deadline_monotonic: float | None, cancellation_check) -> _FixtureRatePermit:
+        while True:
+            if cancellation_check is not None:
+                cancellation_check()
+            now = time.monotonic()
+            if deadline_monotonic is not None and now >= deadline_monotonic:
+                raise PointerExecutionError("fixture click rate deadline expired")
+            with self._lock:
+                if now >= self._next_allowed:
+                    return _FixtureRatePermit(self, now)
+                wait = self._next_allowed - now
+            time.sleep(min(0.01, wait))
+
+
+class _FixtureRatePermit:
+    def __init__(self, gate: _FixtureRateGate, acquired: float) -> None:
+        self._gate = gate
+        self._acquired = acquired
+        self._closed = False
+
+    @property
+    def is_open(self) -> bool:
+        return not self._closed
+
+    @property
+    def acquired_monotonic(self) -> float:
+        return self._acquired
+
+    def precommit(self, *, deadline_monotonic: float | None = None) -> int:
+        if self._closed:
+            raise PointerExecutionError("fixture click permit is closed")
+        if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+            raise PointerExecutionError("fixture click deadline expired before precommit")
+        return time.monotonic_ns()
+
+    def record_press(self) -> int:
+        if self._closed:
+            raise PointerExecutionError("fixture click permit is closed")
+        with self._gate._lock:
+            self._gate._next_allowed = time.monotonic() + 1.0
+        return time.monotonic_ns()
+
+    def close(self) -> None:
+        self._closed = True
 
 
 def _executor_none() -> dict:
@@ -317,6 +372,9 @@ class _IPCBackend(X11Backend):
         expected_argv: tuple[str, ...] | None = None,
         deadline_monotonic: float | None = None,
         timeout: float = 5.0,
+        button_emission_claim: ButtonEmissionClaim | None = None,
+        emission_action_generation: int | None = None,
+        emission_lease_generation: int | None = None,
     ) -> subprocess.CompletedProcess[str]:
         """Run production X11Backend admission with a harmless process edge.
 
@@ -336,6 +394,9 @@ class _IPCBackend(X11Backend):
                 expected_argv=expected_argv,
                 deadline_monotonic=deadline_monotonic,
                 timeout=timeout,
+                button_emission_claim=button_emission_claim,
+                emission_action_generation=emission_action_generation,
+                emission_lease_generation=emission_lease_generation,
             )
 
         real_popen = driver_module.subprocess.Popen
@@ -390,6 +451,9 @@ class _IPCBackend(X11Backend):
                             expected_argv=expected_argv,
                             deadline_monotonic=deadline_monotonic,
                             timeout=timeout,
+                            button_emission_claim=button_emission_claim,
+                            emission_action_generation=emission_action_generation,
+                            emission_lease_generation=emission_lease_generation,
                         )
                         callback_succeeded = True
                     except Exception as exc:  # production _run reports child failure
@@ -446,6 +510,9 @@ class _IPCBackend(X11Backend):
                 expected_argv=expected_argv,
                 deadline_monotonic=deadline_monotonic,
                 timeout=timeout,
+                button_emission_claim=button_emission_claim,
+                emission_action_generation=emission_action_generation,
+                emission_lease_generation=emission_lease_generation,
             )
         finally:
             driver_module.subprocess.Popen = real_popen
@@ -462,10 +529,24 @@ class _IPCBackend(X11Backend):
         expected_argv: tuple[str, ...] | None = None,
         deadline_monotonic: float | None = None,
         timeout: float = 5.0,
+        button_emission_claim: ButtonEmissionClaim | None = None,
+        emission_action_generation: int | None = None,
+        emission_lease_generation: int | None = None,
     ) -> subprocess.CompletedProcess[str]:
         del calibration_ticket, held_keys, held_buttons, timeout
         if expected_argv is not None and tuple(args) != expected_argv:
             raise AssertionError("production driver did not use its sealed argv")
+        if input_schema == "single-click":
+            if not isinstance(button_emission_claim, ButtonEmissionClaim):
+                raise AssertionError("fixture received no broker emission claim")
+            button = PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT
+            self.input_broker.redeem_button_emission_claim(
+                button_emission_claim,
+                emitted_chain=tuple(args),
+                button=button,
+                action_generation=emission_action_generation,
+                lease_generation=emission_lease_generation,
+            )
         self.argv.append(tuple(args))
         if args == ["xinput", "--list", "--short"]:
             return subprocess.CompletedProcess(
@@ -863,6 +944,11 @@ def _ipc_motion_fixture(
         backend=backend,
         lease_path=tmp_path / "desktop-lease.lock",
     )
+    driver.input_broker = InputBroker.for_tests(
+        clock=time.monotonic,
+        permit_factory=_FixtureRateGate().acquire,
+    )
+    backend.input_broker = driver.input_broker
     evidence = replace(evidence, driver_version=driver.driver_version)
     evidence = replace(evidence, fingerprint=evidence.content_fingerprint()).with_hash()
     backend.evidence = evidence

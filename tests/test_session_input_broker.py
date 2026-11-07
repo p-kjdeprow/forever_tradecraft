@@ -7,7 +7,7 @@ import pytest
 
 from crowley.session.driver import X11Backend
 from crowley.session.executor import PointerButton
-from crowley.session.input_broker import InputBroker, InputBrokerError
+from crowley.session.input_broker import ButtonEmissionClaim, InputBroker, InputBrokerError
 from crowley.session.pointer_execution import PointerExecutionError
 
 
@@ -65,6 +65,7 @@ def _mint(
     lease_generation: int = 9,
     chain: tuple[str, ...] = ("xdotool", "mousedown", "1", "mouseup", "1"),
     deadline: float = 10.0,
+    semantic_authorization: str = "test-click",
 ):
     if button is PointerButton.RIGHT and chain == ("xdotool", "mousedown", "1", "mouseup", "1"):
         chain = ("xdotool", "mousedown", "3", "mouseup", "3")
@@ -77,14 +78,22 @@ def _mint(
         destination_anchor="anchor-1",
         target_identity="client-1",
         guardian_admission_id="guardian-1",
-        semantic_authorization="test-click",
+        semantic_authorization=semantic_authorization,
         deadline_monotonic=deadline,
         reservation=reservation,
     )
     return gesture, reservation, chain
 
 
-def _emit(broker: InputBroker, gesture, chain: tuple[str, ...], *, action: int = 4, lease: int = 9):
+def _emit(
+    broker: InputBroker,
+    gesture,
+    chain: tuple[str, ...],
+    *,
+    action: int = 4,
+    lease: int = 9,
+    semantic_authorization: str = "test-click",
+):
     return broker.emit_button_gesture(
         gesture,
         emitted_chain=chain,
@@ -93,8 +102,14 @@ def _emit(broker: InputBroker, gesture, chain: tuple[str, ...], *, action: int =
         destination_anchor="anchor-1",
         target_identity="client-1",
         guardian_admission_id="guardian-1",
-        semantic_authorization="test-click",
-        emit=lambda: None,
+        semantic_authorization=semantic_authorization,
+        emit=lambda claim: broker.redeem_button_emission_claim(
+            claim,
+            emitted_chain=chain,
+            button=gesture.button,
+            action_generation=action,
+            lease_generation=lease,
+        ),
     )
 
 
@@ -109,6 +124,65 @@ def test_admitted_gesture_is_immutable_and_one_use() -> None:
             _emit(broker, gesture, chain)
     finally:
         broker.release_reservation(reservation)
+
+
+def test_admitted_gesture_cannot_cross_broker_provenance() -> None:
+    owner, _gate, _clock = _broker()
+    foreign, _foreign_gate, _foreign_clock = _broker()
+    gesture, reservation, chain = _mint(owner)
+    try:
+        with pytest.raises(InputBrokerError, match="not minted by this broker"):
+            foreign.emit_button_gesture(
+                gesture,
+                emitted_chain=chain,
+                action_generation=4,
+                lease_generation=9,
+                destination_anchor="anchor-1",
+                target_identity="client-1",
+                guardian_admission_id="guardian-1",
+                semantic_authorization="test-click",
+                emit=lambda _claim: pytest.fail("foreign gesture reached emission"),
+            )
+    finally:
+        owner.release_reservation(reservation)
+
+
+def test_emission_claim_cannot_cross_broker_provenance() -> None:
+    owner, _owner_gate, _owner_clock = _broker()
+    foreign, _foreign_gate, _foreign_clock = _broker()
+    gesture, reservation, chain = _mint(owner)
+    try:
+
+        def emit(claim: ButtonEmissionClaim) -> None:
+            with pytest.raises(InputBrokerError, match="foreign or already redeemed"):
+                foreign.redeem_button_emission_claim(
+                    claim,
+                    emitted_chain=chain,
+                    button=gesture.button,
+                    action_generation=4,
+                    lease_generation=9,
+                )
+            owner.redeem_button_emission_claim(
+                claim,
+                emitted_chain=chain,
+                button=gesture.button,
+                action_generation=4,
+                lease_generation=9,
+            )
+
+        owner.emit_button_gesture(
+            gesture,
+            emitted_chain=chain,
+            action_generation=4,
+            lease_generation=9,
+            destination_anchor="anchor-1",
+            target_identity="client-1",
+            guardian_admission_id="guardian-1",
+            semantic_authorization="test-click",
+            emit=emit,
+        )
+    finally:
+        owner.release_reservation(reservation)
 
 
 def test_gesture_digest_mismatch_is_refused_without_consuming_the_admission() -> None:
@@ -217,7 +291,13 @@ def test_all_button_downs_share_the_one_second_gate(
                 semantic_authorization="camera-drag"
                 if second_button is PointerButton.RIGHT
                 else "test-click",
-                emit=lambda: None,
+                emit=lambda claim: broker.redeem_button_emission_claim(
+                    claim,
+                    emitted_chain=second_chain,
+                    button=second_button,
+                    action_generation=4,
+                    lease_generation=9,
+                ),
             )
         finally:
             broker.release_reservation(second_reservation)
@@ -284,13 +364,77 @@ def test_production_click_and_camera_chains_share_the_rate_gate(
                 semantic_authorization=(
                     "camera_drag" if second_button is PointerButton.RIGHT else "world_click"
                 ),
-                emit=lambda: None,
+                emit=lambda claim: broker.redeem_button_emission_claim(
+                    claim,
+                    emitted_chain=second_chain,
+                    button=second_button,
+                    action_generation=4,
+                    lease_generation=9,
+                ),
             )
         finally:
             broker.release_reservation(second_reservation)
         assert gate.reservations == 2
     finally:
         broker.release_reservation(first_reservation)
+
+
+def test_calibration_click_and_runtime_click_share_the_rate_gate() -> None:
+    broker, gate, clock = _broker()
+    calibration_chain = ("xdotool", "mousedown", "1", "sleep", "0.100000", "mouseup", "1")
+    runtime_chain = ("xdotool", "mousedown", "1", "sleep", "0.100000", "mouseup", "1")
+    calibration, calibration_reservation, _ = _mint(
+        broker,
+        chain=calibration_chain,
+        semantic_authorization="input_calibration",
+    )
+    try:
+        _emit(
+            broker,
+            calibration,
+            calibration_chain,
+            semantic_authorization="input_calibration",
+        )
+        clock[0] = 0.999
+        with pytest.raises(InputBrokerError, match="click spacing"):
+            broker.reserve_button_rate(deadline_monotonic=10.0)
+        clock[0] = 1.0
+        runtime_reservation = broker.reserve_button_rate(deadline_monotonic=10.0)
+        try:
+            runtime = broker.mint_admitted_gesture(
+                action_generation=4,
+                lease_generation=9,
+                button=PointerButton.LEFT,
+                emitted_chain=runtime_chain,
+                destination_anchor="runtime-anchor",
+                target_identity="client-1",
+                guardian_admission_id="runtime-guardian",
+                semantic_authorization="world_click",
+                deadline_monotonic=10.0,
+                reservation=runtime_reservation,
+            )
+            broker.emit_button_gesture(
+                runtime,
+                emitted_chain=runtime_chain,
+                action_generation=4,
+                lease_generation=9,
+                destination_anchor="runtime-anchor",
+                target_identity="client-1",
+                guardian_admission_id="runtime-guardian",
+                semantic_authorization="world_click",
+                emit=lambda claim: broker.redeem_button_emission_claim(
+                    claim,
+                    emitted_chain=runtime_chain,
+                    button=PointerButton.LEFT,
+                    action_generation=4,
+                    lease_generation=9,
+                ),
+            )
+        finally:
+            broker.release_reservation(runtime_reservation)
+        assert gate.reservations == 2
+    finally:
+        broker.release_reservation(calibration_reservation)
 
 
 def test_release_cleanup_does_not_need_a_gesture_or_rate_reservation() -> None:
@@ -325,6 +469,17 @@ def test_precommit_emit_record_order_is_owned_by_the_broker() -> None:
     broker, gate, _clock = _broker()
     gesture, reservation, chain = _mint(broker)
     try:
+
+        def emit(claim: ButtonEmissionClaim) -> None:
+            gate.events.append("emit")
+            broker.redeem_button_emission_claim(
+                claim,
+                emitted_chain=chain,
+                button=gesture.button,
+                action_generation=4,
+                lease_generation=9,
+            )
+
         broker.emit_button_gesture(
             gesture,
             emitted_chain=chain,
@@ -334,7 +489,7 @@ def test_precommit_emit_record_order_is_owned_by_the_broker() -> None:
             target_identity="client-1",
             guardian_admission_id="guardian-1",
             semantic_authorization="test-click",
-            emit=lambda: gate.events.append("emit"),
+            emit=emit,
         )
         assert gate.events == ["precommit", "emit", "record_press"]
     finally:

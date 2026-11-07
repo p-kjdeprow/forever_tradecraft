@@ -27,9 +27,11 @@ from crowley.session.decoder import PixelDecoder
 from crowley.session.driver import (
     DesktopDriver,
     DriverProfile,
+    PointerButton,
     X11Backend,
 )
 from crowley.session.evidence import read_data_acknowledged_ids
+from crowley.session.input_broker import ButtonEmissionClaim, InputBroker
 from crowley.session.input_events import EventClass
 from crowley.session.journal import DEFAULT_STATE, Journal
 from crowley.session.model import ModelObservation
@@ -50,6 +52,42 @@ UID = "mail-composition-ack-1"
 WALL_TIME = 1_760_000_000
 QUEUE_ID = f"beta-normal-alliance-Arthur-{WALL_TIME}-a1b2"
 ROUTES = Path("deploy/config/routes/stormwind.json").resolve()
+
+
+class _MailFixtureRatePermit:
+    """Test-only open permit for exercising the broker emission path."""
+
+    def __init__(self, acquired_monotonic: float) -> None:
+        self._acquired_monotonic = acquired_monotonic
+        self._open = True
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    @property
+    def acquired_monotonic(self) -> float:
+        return self._acquired_monotonic
+
+    def precommit(self, *, deadline_monotonic: float | None = None) -> int:
+        del deadline_monotonic
+        return time.monotonic_ns()
+
+    def record_press(self) -> int:
+        return time.monotonic_ns()
+
+    def close(self) -> None:
+        self._open = False
+
+
+def _mail_fixture_rate_permit_factory(
+    *,
+    acquired_monotonic: float,
+    deadline_monotonic: float | None,
+    cancellation_check: object,
+) -> _MailFixtureRatePermit:
+    del deadline_monotonic, cancellation_check
+    return _MailFixtureRatePermit(acquired_monotonic)
 
 
 def _trace_kwargs(kwargs: dict) -> dict[str, str]:  # type: ignore[type-arg]
@@ -641,6 +679,16 @@ class _MailBackend(LifecycleBackend):
             self.current["hover"] = {"kind": "object", "name": "Mailbox"}
             return subprocess.CompletedProcess(args, 0, "", "")
         if schema == "single-click":
+            claim = kwargs.get("button_emission_claim")
+            if not isinstance(claim, ButtonEmissionClaim):
+                raise AssertionError("mail fixture received no broker emission claim")
+            self.input_broker.redeem_button_emission_claim(
+                claim,
+                emitted_chain=tuple(args),
+                button=PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT,
+                action_generation=kwargs["emission_action_generation"],
+                lease_generation=kwargs["emission_lease_generation"],
+            )
             x, y = self.pointer
             self._emit_runtime_pointer_click(
                 1,
@@ -923,6 +971,14 @@ def _make_case(tmp_path: Path, *, armed: bool, max_messages: int):
         monotonic=clock.monotonic,
         lease_path=tmp_path / "desktop.lock",
     )
+    driver.input_broker = InputBroker.for_tests(
+        clock=clock.monotonic,
+        permit_factory=lambda **kwargs: _mail_fixture_rate_permit_factory(
+            acquired_monotonic=clock.monotonic(),
+            **kwargs,
+        ),
+    )
+    backend.input_broker = driver.input_broker
     plan = load_catalog().scan_plan()
     config = SessionConfig(
         profile=driver.profile,

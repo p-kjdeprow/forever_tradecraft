@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from .driver import WindowIdentity
+    from .driver import SyntheticPointerProbe, WindowIdentity
 
 from .input_events import (
     RAW_MOTION_DETAIL,
@@ -339,6 +339,8 @@ class InputCalibrationEvidence:
     #  post_x, post_y, post_window), captured by the native producer around
     # the absolute XTEST move and included in the evidence seal.
     synthetic_motion_query: tuple[Any, ...] = ()
+    synthetic_motion_seed: int = 0
+    synthetic_motion_plan: tuple[tuple[float, int, int], ...] = ()
     target_layout_kind: str = GTK_LAYOUT_MUTTER_FRAME
     target_root_xid: int = 0
     target_parent_xid: int = 0
@@ -389,6 +391,8 @@ class InputCalibrationEvidence:
             ),
             "synthetic_motion_transitions": self.synthetic_motion_transitions,
             "synthetic_motion_query": self.synthetic_motion_query,
+            "synthetic_motion_seed": self.synthetic_motion_seed,
+            "synthetic_motion_plan": self.synthetic_motion_plan,
             "target_layout_kind": self.target_layout_kind,
             "target_root_xid": self.target_root_xid,
             "target_parent_xid": self.target_parent_xid,
@@ -485,8 +489,8 @@ class InputCalibrationEvidence:
         if self.xtest_profile is None:
             raise CalibrationError("input evidence has no sealed XTEST input profile")
         self.xtest_profile.verify()
-        if len(self.synthetic_motion_transitions) != 1:
-            raise CalibrationError("input evidence must contain exactly one baseline XTEST motion transition")
+        if not self.synthetic_motion_transitions:
+            raise CalibrationError("input evidence must contain a baseline XTEST motion sequence")
         if (
             not isinstance(self.synthetic_motion_query, tuple)
             or len(self.synthetic_motion_query) != 8
@@ -506,6 +510,59 @@ class InputCalibrationEvidence:
             raise CalibrationError("input evidence XTEST motion must prove nonzero displacement")
         if tuple(self.synthetic_motion_query[5:7]) != query_endpoint:
             raise CalibrationError("input evidence XTEST post-query does not equal its requested endpoint")
+        if (
+            isinstance(self.synthetic_motion_seed, bool)
+            or not isinstance(self.synthetic_motion_seed, int)
+            or not 0 <= self.synthetic_motion_seed < 2**64
+            or not self.synthetic_motion_plan
+        ):
+            raise CalibrationError("input evidence XTEST motion seed or plan is malformed")
+        if (
+            not isinstance(self.target_geometry, tuple)
+            or len(self.target_geometry) != 4
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in self.target_geometry)
+            or self.target_geometry[2] <= 0
+            or self.target_geometry[3] <= 0
+        ):
+            raise CalibrationError("input evidence target geometry is malformed")
+        target_left, target_top, target_width, target_height = self.target_geometry
+
+        def in_target(point: tuple[int, int]) -> bool:
+            return (
+                target_left <= point[0] < target_left + target_width
+                and target_top <= point[1] < target_top + target_height
+            )
+
+        if not in_target(query_origin) or not in_target(query_endpoint):
+            raise CalibrationError("input evidence XTEST motion endpoint is outside the certified target")
+        previous_plan_point: tuple[int, int] | None = None
+        planned_endpoints: list[tuple[int, int]] = []
+        previous_time = -1.0
+        for sample in self.synthetic_motion_plan:
+            if (
+                not isinstance(sample, tuple)
+                or len(sample) != 3
+                or isinstance(sample[0], bool)
+                or not isinstance(sample[0], float)
+                or not math.isfinite(sample[0])
+                or sample[0] < 0
+                or sample[0] <= previous_time
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in sample[1:])
+            ):
+                raise CalibrationError("input evidence XTEST motion plan is malformed")
+            point = (sample[1], sample[2])
+            if not in_target(point):
+                raise CalibrationError("input evidence XTEST motion plan left the certified target")
+            if previous_plan_point is not None and point != previous_plan_point:
+                planned_endpoints.append(point)
+            previous_plan_point = point
+            previous_time = sample[0]
+        if (
+            tuple(self.synthetic_motion_plan[0][1:]) != query_origin
+            or previous_plan_point != query_endpoint
+            or not planned_endpoints
+        ):
+            raise CalibrationError("input evidence XTEST motion plan is not sealed to its query")
         motion_facts = {
             (
                 proof[4],
@@ -559,7 +616,9 @@ class InputCalibrationEvidence:
             and proof[0] == "Motion"
             and proof[2] == self.xtest_profile.source_device
         ]
-        if len(baseline_raw) != 1 or len(baseline_motion) != 1:
+        if len(baseline_raw) != len(self.synthetic_motion_transitions) or len(baseline_motion) != len(
+            self.synthetic_motion_transitions
+        ):
             raise CalibrationError("input evidence baseline XTEST motion ancestry is not exactly one-to-one")
         previous_endpoint: tuple[int, int] | None = None
         for transition_index, transition in enumerate(self.synthetic_motion_transitions):
@@ -595,11 +654,7 @@ class InputCalibrationEvidence:
             ):
                 raise CalibrationError("input evidence XTEST transition identity is malformed")
             if transition_index == 0:
-                if (
-                    tuple(transition[8]) != query_origin
-                    or tuple(transition[10]) != query_endpoint
-                    or tuple(transition[10]) != tuple(self.synthetic_motion_query[5:7])
-                ):
+                if tuple(transition[8]) != query_origin:
                     raise CalibrationError(
                         "input evidence XTEST producer query is not sealed to its transition"
                     )
@@ -621,6 +676,8 @@ class InputCalibrationEvidence:
                 raise CalibrationError("input evidence XTEST transition must prove nonzero displacement")
             if any(isinstance(value, bool) or not isinstance(value, int) for value in endpoint):
                 raise CalibrationError("input evidence XTEST transition endpoint is malformed")
+            if not in_target(endpoint):
+                raise CalibrationError("input evidence XTEST motion endpoint left the certified target")
             valuators = transition[12]
             if (
                 not isinstance(valuators, tuple)
@@ -656,6 +713,14 @@ class InputCalibrationEvidence:
             ):
                 raise CalibrationError("input evidence XTEST transition modifiers are not sealed to Motion")
             previous_endpoint = endpoint
+        if (
+            tuple(self.synthetic_motion_transitions[0][8]) != query_origin
+            or tuple(self.synthetic_motion_transitions[-1][10]) != query_endpoint
+        ):
+            raise CalibrationError("input evidence XTEST motion sequence is not sealed to its query")
+        actual_endpoints = tuple(tuple(transition[10]) for transition in self.synthetic_motion_transitions)
+        if actual_endpoints != tuple(planned_endpoints):
+            raise CalibrationError("input evidence XTEST motion sequence differs from its plan")
         if (
             not isinstance(self.fingerprint, str)
             or not re.fullmatch(r"[0-9a-f]{64}", self.fingerprint)
@@ -3427,6 +3492,7 @@ class InputCalibrationWorkflow:
         self._game_identity: Any | None = None
         self._predicate_reasons: dict[str, Any] = {"count": 0, "first": None, "last": None}
         self._target_placement_diagnostic: dict[str, Any] | None = None
+        self._synthetic_pointer_probe: SyntheticPointerProbe | None = None
 
     @staticmethod
     def _bounded_error(value: Any, *, limit: int = 1024) -> str:
@@ -3526,16 +3592,25 @@ class InputCalibrationWorkflow:
         )
         observer_truncated = bool(observer_snapshot and observer_snapshot.get("rawTruncated"))
         synthetic_pointer_diagnostic = None
-        try:
-            backend = getattr(self.driver, "backend", None)
-            pointer_diagnostic = getattr(backend, "_last_synthetic_pointer_diagnostic", None)
-            if isinstance(pointer_diagnostic, dict):
-                # This is a bounded, producer-owned primitive payload. Copy
-                # the top-level mapping so cleanup cannot replace it while the
-                # workflow assembles the failure record.
-                synthetic_pointer_diagnostic = dict(pointer_diagnostic)
-        except Exception:
-            synthetic_pointer_diagnostic = None
+        probe = self._synthetic_pointer_probe
+        if probe is not None:
+            synthetic_pointer_diagnostic = {
+                "producer": "DesktopDriver.synthetic_target_keyboard_profile",
+                "origin": {
+                    "x": probe.origin[0],
+                    "y": probe.origin[1],
+                    "windowXid": probe.origin[2],
+                },
+                "requested": list(probe.requested_endpoint),
+                "post": {
+                    "x": probe.final_observed[0],
+                    "y": probe.final_observed[1],
+                    "windowXid": probe.final_observed[2],
+                },
+                "seed": probe.seed,
+                "plan": [list(sample) for sample in probe.plan],
+                "transitions": [list(point) for point in probe.emitted_transitions],
+            }
         target_placement_diagnostic = None
         if isinstance(self._target_placement_diagnostic, dict):
             target_placement_diagnostic = dict(self._target_placement_diagnostic)
@@ -3653,11 +3728,10 @@ class InputCalibrationWorkflow:
         whose target child is the owned XID.
         """
 
-        from .driver import X11Backend
+        from .driver import SyntheticPointerProbe, X11Backend
 
-        backend = getattr(self.driver, "backend", None)
-        if isinstance(backend, X11Backend):
-            backend._last_synthetic_pointer_diagnostic = None
+        backend = self.driver.backend
+        self._synthetic_pointer_probe = None
         target = self.window_factory()
         self._target = target
         # Open the calibration epoch before any owned helper is created.  The
@@ -3686,7 +3760,7 @@ class InputCalibrationWorkflow:
             xtest_profile = self.driver.xtest_input_profile(hierarchy)
             self._hierarchy = tuple(hierarchy)
             self._xtest_profile = xtest_profile
-            if isinstance(getattr(self.driver, "backend", None), X11Backend) and xtest_profile is None:
+            if isinstance(backend, X11Backend) and xtest_profile is None:
                 raise CalibrationError("owned XTEST input profile could not be measured")
             if xtest_profile is not None:
                 xtest_profile.verify()
@@ -3762,19 +3836,9 @@ class InputCalibrationWorkflow:
             if not callable(focus_target):
                 raise CalibrationError("input calibration focus capability is not configured")
             focus_target(window, calibration_ticket=calibration_ticket)
-            if isinstance(getattr(self.driver, "backend", None), X11Backend):
+            if isinstance(backend, X11Backend):
                 self._stage = "target_pointer_preflight"
-                pointer_position = getattr(self.driver.backend, "pointer_position", None)
-                if not callable(pointer_position):
-                    self._target_placement_diagnostic = {
-                        "producer": "InputCalibrationWorkflow.target_pointer_preflight",
-                        "targetXid": window.xid,
-                        "targetGeometry": list(window.geometry),
-                        "queryError": "native pointer position provider is unavailable",
-                    }
-                    raise CalibrationError(
-                        "owned GTK target pointer cannot be verified before synthetic input"
-                    )
+                pointer_position = backend.pointer_position
                 try:
                     pointer_x, pointer_y, pointer_xid = pointer_position()
                 except Exception as exc:
@@ -3803,20 +3867,48 @@ class InputCalibrationWorkflow:
                 if not pointer_certified or not pointer_inside:
                     raise CalibrationError("owned GTK target does not contain the current pointer")
                 self._stage = "synthetic"
-            synthetic_input = getattr(self.driver, "synthetic_target_keyboard_profile", None)
+            synthetic_input = self.driver.synthetic_target_keyboard_profile
             if not callable(synthetic_input):
                 raise CalibrationError("input calibration keyboard probe capability is not configured")
-            synthetic_input(
+            synthetic_result = synthetic_input(
                 window,
                 operations=keyboard_operations,
                 calibration_ticket=calibration_ticket,
             )
             synthetic_motion_query: tuple[Any, ...] = ()
-            if isinstance(getattr(self.driver, "backend", None), X11Backend):
-                raw_query = getattr(self.driver.backend, "_last_synthetic_motion_query", None)
-                if not isinstance(raw_query, tuple) or len(raw_query) != 8:
-                    raise CalibrationError("owned XTEST producer did not retain its pointer query")
-                synthetic_motion_query = raw_query
+            synthetic_motion_seed = 0
+            synthetic_motion_plan: tuple[tuple[float, int, int], ...] = ()
+            if isinstance(backend, X11Backend):
+                if not isinstance(synthetic_result, SyntheticPointerProbe):
+                    raise CalibrationError("owned XTEST producer returned no typed pointer probe")
+                self._synthetic_pointer_probe = synthetic_result
+                synthetic_motion_query = (
+                    synthetic_result.origin[0],
+                    synthetic_result.origin[1],
+                    synthetic_result.origin[2],
+                    synthetic_result.requested_endpoint[0],
+                    synthetic_result.requested_endpoint[1],
+                    synthetic_result.final_observed[0],
+                    synthetic_result.final_observed[1],
+                    synthetic_result.final_observed[2],
+                )
+                synthetic_motion_seed = synthetic_result.seed
+                synthetic_motion_plan = synthetic_result.plan
+                left, top, width, height = window.geometry
+                origin_inside = (
+                    left <= synthetic_result.origin[0] < left + width
+                    and top <= synthetic_result.origin[1] < top + height
+                )
+                endpoint_inside = (
+                    left <= synthetic_result.requested_endpoint[0] < left + width
+                    and top <= synthetic_result.requested_endpoint[1] < top + height
+                )
+                if not window.contains_xid(synthetic_result.origin[2]) or not origin_inside:
+                    raise CalibrationError("synthetic pointer probe origin is outside the owned target")
+                if not window.contains_xid(synthetic_result.final_observed[2]) or not endpoint_inside:
+                    raise CalibrationError("synthetic pointer probe endpoint is outside the owned target")
+                if synthetic_result.final_observed[:2] != synthetic_result.requested_endpoint:
+                    raise CalibrationError("synthetic pointer probe postcondition changed")
             trace = observer.collect_until(
                 lambda events: self._has_synthetic(
                     events,
@@ -3824,7 +3916,9 @@ class InputCalibrationWorkflow:
                     synthetic_key_source,
                     synthetic_pointer_source,
                     hierarchy,
-                    require_motion=isinstance(getattr(self.driver, "backend", None), X11Backend),
+                    require_motion=isinstance(backend, X11Backend),
+                    xtest_profile=xtest_profile,
+                    synthetic_motion_probe=self._synthetic_pointer_probe,
                     keyboard_operations=keyboard_operations,
                     keyboard_keymap=keyboard_keymap,
                     failure_reasons=self._predicate_reasons,
@@ -3834,13 +3928,14 @@ class InputCalibrationWorkflow:
             synthetic_records = self._records(trace)
             synthetic_phase = False
             synthetic_motion_transitions: tuple[tuple[Any, ...], ...] = ()
-            if isinstance(getattr(self.driver, "backend", None), X11Backend):
+            if isinstance(backend, X11Backend):
                 if xtest_profile is None:
                     raise CalibrationError("owned XTEST proof has no sealed input profile")
                 synthetic_motion_transitions = self._canonical_motion_transitions(
                     synthetic_records,
                     window,
                     xtest_profile,
+                    synthetic_motion_probe=self._synthetic_pointer_probe,
                 )
             synthetic_echo_proof = self._controlled_echo_proof(
                 synthetic_records,
@@ -3848,7 +3943,7 @@ class InputCalibrationWorkflow:
                 synthetic_key_source,
                 synthetic_pointer_source,
                 hierarchy,
-                xtest_profile if isinstance(getattr(self.driver, "backend", None), X11Backend) else None,
+                xtest_profile if isinstance(backend, X11Backend) else None,
             )
             if revoked or callback_error:
                 raise CalibrationError(
@@ -3885,9 +3980,10 @@ class InputCalibrationWorkflow:
                 window,
                 hierarchy,
                 pointer=True,
-                require_motion=isinstance(getattr(self.driver, "backend", None), X11Backend),
+                require_motion=isinstance(backend, X11Backend),
                 expected_modifiers=synthetic_modifiers,
                 xtest_profile=xtest_profile,
+                synthetic_motion_probe=self._synthetic_pointer_probe,
             )
             self.readiness = CalibrationReadiness(
                 target_pid=window.pid,
@@ -3940,7 +4036,7 @@ class InputCalibrationWorkflow:
                     synthetic_key_source,
                     synthetic_pointer_source,
                     hierarchy,
-                    require_motion=isinstance(getattr(self.driver, "backend", None), X11Backend),
+                    require_motion=isinstance(backend, X11Backend),
                 )
 
             while not human_ready(current_events()):
@@ -3992,6 +4088,9 @@ class InputCalibrationWorkflow:
                 xtest_profile=xtest_profile,
                 synthetic_motion_transitions=synthetic_motion_transitions,
                 synthetic_motion_query=synthetic_motion_query,
+                synthetic_motion_seed=synthetic_motion_seed,
+                synthetic_motion_plan=synthetic_motion_plan,
+                synthetic_motion_probe=self._synthetic_pointer_probe,
                 synthetic_prefix_records=synthetic_records,
             )
             # A deliberate sample revokes the generation and must discard the
@@ -4067,6 +4166,8 @@ class InputCalibrationWorkflow:
         require_motion: bool = False,
         keyboard_operations: tuple[KeyboardProbeOperation, ...] = (),
         keyboard_keymap: tuple[tuple[str, int], ...] = (),
+        xtest_profile: XTestInputProfile | None = None,
+        synthetic_motion_probe: SyntheticPointerProbe | None = None,
         failure_reasons: dict[str, Any] | None = None,
     ) -> bool:
         try:
@@ -4086,6 +4187,8 @@ class InputCalibrationWorkflow:
                 pointer=True,
                 require_motion=require_motion,
                 expected_detail=1,
+                xtest_profile=xtest_profile,
+                synthetic_motion_probe=synthetic_motion_probe,
             )
         except CalibrationError as exc:
             if failure_reasons is not None:
@@ -4247,6 +4350,7 @@ class InputCalibrationWorkflow:
         expected_detail: int | None = None,
         expected_modifiers: tuple[int, int, int] | None = None,
         xtest_profile: XTestInputProfile | None = None,
+        synthetic_motion_probe: SyntheticPointerProbe | None = None,
     ) -> None:
         parent = next((row[1] for row in hierarchy if row[0] == source), 0)
         if parent <= 0:
@@ -4287,7 +4391,13 @@ class InputCalibrationWorkflow:
         canonical = (
             pointer and require_motion and xtest_profile is not None and source == xtest_profile.source_device
         )
+        if canonical:
+            from .driver import SyntheticPointerProbe
+
+            if not isinstance(synthetic_motion_probe, SyntheticPointerProbe):
+                raise CalibrationError("event proof XTEST motion has no typed pointer plan")
         last_accepted_endpoint: tuple[int, int] | None = None
+        canonical_transitions: list[tuple[int, int]] = []
         for event in events:
             if not xi2_timestamp_valid(event.timestamp_ms):
                 raise CalibrationError("event proof timestamp is outside the XI2 CARD32 domain")
@@ -4379,6 +4489,7 @@ class InputCalibrationWorkflow:
                         )
                     if canonical:
                         last_accepted_endpoint = transition.endpoint_root
+                        canonical_transitions.append(transition.endpoint_root)
                     motion_seen = True
                 elif event.event_class in {EventClass.ENTER, EventClass.LEAVE}:
                     if (
@@ -4423,6 +4534,39 @@ class InputCalibrationWorkflow:
             raise CalibrationError("event proof raw motion has no following same-timestamp delivery")
         if require_motion and not motion_seen:
             raise CalibrationError("XTEST pointer proof has no measured motion event")
+        if canonical and synthetic_motion_probe is not None:
+            expected = synthetic_motion_probe.emitted_transitions
+            if tuple(canonical_transitions) != expected:
+                raise CalibrationError("event proof XTEST motion sequence differs from the pointer plan")
+            if not canonical_transitions:
+                raise CalibrationError("event proof XTEST motion sequence is empty")
+            origin = (int(synthetic_motion_probe.origin[0]), int(synthetic_motion_probe.origin[1]))
+            requested = synthetic_motion_probe.requested_endpoint
+            if last_accepted_endpoint is None or last_accepted_endpoint != requested:
+                raise CalibrationError("event proof XTEST motion sequence has the wrong final endpoint")
+            first_transition = next(
+                event
+                for event in events
+                if event.event_class is EventClass.MOTION and event.source_device == source
+            )
+            try:
+                first_decoded = decode_xtest_motion_transition(
+                    first_transition,
+                    expected_source=source,
+                    expected_parent=parent,
+                    expected_root_xid=xtest_profile.root_xid if xtest_profile is not None else 0,
+                    expected_child_xids=window.allowed_event_target_xids,
+                )
+            except (InputEventError, AttributeError) as exc:
+                raise CalibrationError("event proof XTEST first motion is malformed") from exc
+            if tuple(map(int, first_decoded.origin_root)) != origin:
+                raise CalibrationError("event proof XTEST motion sequence has the wrong certified origin")
+            left, top, width, height = window.geometry
+            if any(
+                not (left <= point[0] < left + width and top <= point[1] < top + height)
+                for point in canonical_transitions
+            ):
+                raise CalibrationError("event proof XTEST motion sequence left the certified target")
 
     @staticmethod
     def _sequence_modifiers(records: list[XI2Event], source: int) -> tuple[int, int, int]:
@@ -4557,6 +4701,8 @@ class InputCalibrationWorkflow:
         records: list[XI2Event],
         window: OwnedWindow,
         profile: XTestInputProfile,
+        *,
+        synthetic_motion_probe: SyntheticPointerProbe | None = None,
     ) -> tuple[tuple[Any, ...], ...]:
         """Seal the measured raw-to-primary XTEST pointer transitions."""
 
@@ -4623,6 +4769,22 @@ class InputCalibrationWorkflow:
             raise CalibrationError("synthetic raw motion has no following primary XTEST delivery")
         if not transitions:
             raise CalibrationError("synthetic XTEST proof has no canonical motion transition")
+        if synthetic_motion_probe is not None:
+            if (
+                tuple(transition[10] for transition in transitions)
+                != synthetic_motion_probe.emitted_transitions
+            ):
+                raise CalibrationError("synthetic XTEST motion sequence differs from the pointer plan")
+            if tuple(transitions[0][8]) != synthetic_motion_probe.origin[:2]:
+                raise CalibrationError("synthetic XTEST motion sequence has the wrong certified origin")
+            if tuple(transitions[-1][10]) != synthetic_motion_probe.requested_endpoint:
+                raise CalibrationError("synthetic XTEST motion sequence has the wrong final endpoint")
+            left, top, width, height = window.geometry
+            if any(
+                not (left <= transition[10][0] < left + width and top <= transition[10][1] < top + height)
+                for transition in transitions
+            ):
+                raise CalibrationError("synthetic XTEST motion sequence left the certified target")
         return tuple(transitions)
 
     @staticmethod
@@ -4667,6 +4829,9 @@ class InputCalibrationWorkflow:
         xtest_profile: XTestInputProfile | None = None,
         synthetic_motion_transitions: tuple[tuple[Any, ...], ...] = (),
         synthetic_motion_query: tuple[Any, ...] = (),
+        synthetic_motion_seed: int = 0,
+        synthetic_motion_plan: tuple[tuple[float, int, int], ...] = (),
+        synthetic_motion_probe: SyntheticPointerProbe | None = None,
         synthetic_prefix_records: list[XI2Event] | tuple[XI2Event, ...] | None = None,
     ) -> InputCalibrationEvidence:
         if (
@@ -4729,6 +4894,20 @@ class InputCalibrationWorkflow:
         if xtest_profile is None:
             raise CalibrationError("input evidence has no measured XTEST profile")
         xtest_profile.verify()
+        from .driver import SyntheticPointerProbe
+
+        if not isinstance(synthetic_motion_probe, SyntheticPointerProbe):
+            raise CalibrationError("input evidence has no typed XTEST motion probe")
+        if synthetic_motion_seed != synthetic_motion_probe.seed:
+            raise CalibrationError("input evidence XTEST motion seed differs from its typed probe")
+        if tuple(synthetic_motion_plan) != synthetic_motion_probe.plan:
+            raise CalibrationError("input evidence XTEST motion plan differs from its typed probe")
+        if tuple(synthetic_motion_query) != (
+            *synthetic_motion_probe.origin,
+            *synthetic_motion_probe.requested_endpoint,
+            *synthetic_motion_probe.final_observed,
+        ):
+            raise CalibrationError("input evidence XTEST motion query differs from its typed probe")
         synthetic_key = [
             event
             for event in records
@@ -4761,11 +4940,12 @@ class InputCalibrationWorkflow:
             prefix_records,
             window,
             xtest_profile,
+            synthetic_motion_probe=synthetic_motion_probe,
         )
-        if len(derived_motion_transitions) != 1:
-            raise CalibrationError("baseline calibration evidence must contain exactly one XTEST transition")
+        if not derived_motion_transitions:
+            raise CalibrationError("baseline calibration evidence must contain an XTEST transition sequence")
         baseline_transition = derived_motion_transitions[0]
-        if tuple(baseline_transition[8]) == tuple(baseline_transition[10]):
+        if tuple(baseline_transition[8]) == tuple(derived_motion_transitions[-1][10]):
             raise CalibrationError("baseline calibration evidence must prove nonzero displacement")
         if tuple(synthetic_motion_query[:2]) == tuple(synthetic_motion_query[3:5]):
             raise CalibrationError("baseline calibration query must prove nonzero displacement")
@@ -4917,6 +5097,8 @@ class InputCalibrationWorkflow:
             xtest_profile=xtest_profile,
             synthetic_motion_transitions=tuple(synthetic_motion_transitions),
             synthetic_motion_query=tuple(synthetic_motion_query),
+            synthetic_motion_seed=synthetic_motion_seed,
+            synthetic_motion_plan=tuple(synthetic_motion_plan),
             keyboard_keymap=tuple(keyboard_keymap),
             keyboard_profile=keyboard_profile,
         )

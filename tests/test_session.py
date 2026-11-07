@@ -510,6 +510,8 @@ def input_calibration(*, game_identity: str = "game-test-identity") -> InputCali
             ),
         ),
         synthetic_motion_query=(point[0], point[1], 1, endpoint[0], endpoint[1], endpoint[0], endpoint[1], 1),
+        synthetic_motion_seed=0,
+        synthetic_motion_plan=((0.0, point[0], point[1]), (0.5, endpoint[0], endpoint[1])),
         keyboard_keymap=(("A", 38),),
         keyboard_profile=(("type", "A", (("press", "A", 38, (0, 0, 0), 0),)),),
     )

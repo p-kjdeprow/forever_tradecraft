@@ -24,6 +24,7 @@ from crowley.session.driver import (
     X11Backend,
     XI2Observer,
 )
+from crowley.session.executor import PointerButton
 from crowley.session.guardian import GuardianError, InputGuardian
 from crowley.session.input_events import (
     RAW_MOTION_DETAIL,
@@ -626,8 +627,124 @@ def test_mutating_backend_calls_require_explicit_capability(tmp_path: Path) -> N
         backend._run(["xdotool", "type", "unsafe"], timeout=2)
     with pytest.raises(DriverError, match="generation"):
         backend.action("focus_game")
-    with pytest.raises(DriverError, match="ticket"):
-        backend.synthetic_calibration("0x600119", 10, 10)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["xdotool", "click", "1"],
+        ["xdotool", "mousedown", "1"],
+        ["xdotool", "mouseup", "1"],
+        ["xdotool", "mousemove_relative", "1", "1"],
+        ["xdotool", "exec", "true"],
+        ["xdotool", "mousemove", "10", "10"],
+    ],
+)
+def test_removed_raw_input_argv_forms_are_refused_before_spawn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, argv: list[str]
+) -> None:
+    backend = _x11(tmp_path)
+    spawned = False
+
+    def unexpected_spawn(*_args: object, **_kwargs: object) -> None:
+        nonlocal spawned
+        spawned = True
+        raise AssertionError("removed input argv form reached subprocess spawning")
+
+    monkeypatch.setattr("crowley.session.driver.subprocess.Popen", unexpected_spawn)
+    with pytest.raises(DriverError, match="not allowlisted|broker-admitted"):
+        backend._run(argv, generation=1, held_buttons={1})
+    assert not spawned
+
+
+def test_schema_qualified_single_step_pointer_motion_is_refused_before_spawn(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    backend = _x11(tmp_path)
+    spawned = False
+
+    def unexpected_spawn(*_args: object, **_kwargs: object) -> None:
+        nonlocal spawned
+        spawned = True
+        raise AssertionError("single-step pointer motion reached subprocess spawning")
+
+    monkeypatch.setattr("crowley.session.driver.subprocess.Popen", unexpected_spawn)
+    with pytest.raises(DriverError, match="not allowlisted"):
+        backend._run(
+            ["xdotool", "mousemove", "10", "10"],
+            generation=1,
+            input_schema="pointer-motion",
+            expected_argv=("xdotool", "mousemove", "10", "10"),
+        )
+    assert not spawned
+
+
+@pytest.mark.parametrize(
+    ("argv", "input_schema", "held_buttons"),
+    [
+        (
+            [
+                "xdotool",
+                "sleep",
+                "0.010",
+                "mousemove",
+                "10",
+                "10",
+                "sleep",
+                "0.010",
+                "mousemove",
+                "10",
+                "10",
+            ],
+            "pointer-motion",
+            set(),
+        ),
+        (
+            [
+                "xdotool",
+                "mousedown",
+                "3",
+                "sleep",
+                "0.050",
+                "mousemove",
+                "20",
+                "20",
+                "sleep",
+                "0.020",
+                "mouseup",
+                "3",
+            ],
+            "camera-drag",
+            {3},
+        ),
+    ],
+    ids=("repeated-pointer-destination", "one-step-camera-drag"),
+)
+def test_human_motion_requires_two_distinct_destinations_before_spawn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    argv: list[str],
+    input_schema: str,
+    held_buttons: set[int],
+) -> None:
+    backend = _x11(tmp_path)
+    spawned = False
+
+    def unexpected_spawn(*_args: object, **_kwargs: object) -> None:
+        nonlocal spawned
+        spawned = True
+        raise AssertionError("insufficient human motion reached subprocess spawning")
+
+    monkeypatch.setattr("crowley.session.driver.subprocess.Popen", unexpected_spawn)
+    with pytest.raises(DriverError, match="not allowlisted"):
+        backend._run(
+            argv,
+            generation=1,
+            input_schema=input_schema,
+            expected_argv=tuple(argv),
+            held_buttons=held_buttons,
+        )
+    assert not spawned
 
 
 def test_real_admission_publishes_only_current_holds(tmp_path: Path) -> None:
@@ -2472,6 +2589,13 @@ def test_production_camera_drag_entrypoint_seals_press_motion_release_contract(
     def run_chain(chain: list[str], **kwargs: object) -> SimpleNamespace:
         captured["chain"] = list(chain)
         captured["runKwargs"] = kwargs
+        driver.input_broker.redeem_button_emission_claim(
+            kwargs["button_emission_claim"],
+            emitted_chain=tuple(chain),
+            button=PointerButton.RIGHT,
+            action_generation=kwargs["emission_action_generation"],
+            lease_generation=kwargs["emission_lease_generation"],
+        )
         action = driver.guardian.action
         assert action is not None
 

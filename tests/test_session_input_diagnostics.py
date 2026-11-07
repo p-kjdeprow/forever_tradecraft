@@ -12,10 +12,17 @@ from types import SimpleNamespace
 import pytest
 
 import crowley.session.calibration as calibration_module
-from crowley.session.calibration import InputCalibrationWorkflow
+from crowley.session.calibration import CalibrationError, InputCalibrationWorkflow
 from crowley.session.controller import ControllerState
 from crowley.session.daemon import SessionDaemon
-from crowley.session.driver import CalibrationTicket, DesktopDriver, DriverError, DriverProfile, InputMonitor
+from crowley.session.driver import (
+    CalibrationTicket,
+    DesktopDriver,
+    DriverError,
+    DriverProfile,
+    InputMonitor,
+    SyntheticPointerProbe,
+)
 from crowley.session.input_events import EventClass, parse_xi2_records
 from tests.test_session_native_regressions import (
     FOREIGN,
@@ -297,25 +304,7 @@ def test_daemon_persists_actual_synthetic_origin_query(tmp_path: Path, monkeypat
             backend = self.backend
             backend.profile = DriverProfile(display=":test", xauthority="Xauthority")
             backend.xauthority = "Xauthority"
-            backend._calibration_focus_ticket = None
-            backend._last_synthetic_motion_query = None
-            backend._last_synthetic_pointer_diagnostic = None
-
-            def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-                if args[:2] == ["xdotool", "getwindowgeometry"]:
-                    return subprocess.CompletedProcess(
-                        args,
-                        0,
-                        "WINDOW=0x600119\nX=0\nY=0\nWIDTH=480\nHEIGHT=240\nSCREEN=0\n",
-                        "",
-                    )
-                if args == ["xdotool", "getwindowfocus"]:
-                    return subprocess.CompletedProcess(args, 0, str(TARGET), "")
-                return subprocess.CompletedProcess(args, 0, "", "")
-
-            backend._run = run  # type: ignore[method-assign]
-            pointer_reads = iter(((100, 100, TARGET), (100, 100, FOREIGN)))
-            backend.pointer_position = lambda **_kwargs: next(pointer_reads)  # type: ignore[method-assign]
+            backend.pointer_position = lambda **_kwargs: (987, 595, TARGET)  # type: ignore[method-assign]
 
         def issue_calibration_ticket(self, window):
             self.calibration_ticket = CalibrationTicket(
@@ -334,12 +323,13 @@ def test_daemon_persists_actual_synthetic_origin_query(tmp_path: Path, monkeypat
 
         def synthetic_target_keyboard_profile(self, window, *, operations, calibration_ticket):
             assert tuple(operations) == self._keyboard_operations
-            left, top, width, height = window.geometry
-            self.backend.synthetic_calibration(
-                hex(window.xid),
-                left + width // 2,
-                top + height // 2,
-                calibration_ticket=calibration_ticket,
+            return SyntheticPointerProbe(
+                origin=(987, 595, FOREIGN),
+                requested_endpoint=(1000, 600),
+                final_observed=(1000, 600, TARGET),
+                emitted_transitions=((994, 598), (1000, 600)),
+                seed=17,
+                plan=((0.0, 987, 595), (0.1, 994, 598), (0.2, 1000, 600)),
             )
 
     driver = OriginFailureDriver()
@@ -381,7 +371,7 @@ def test_daemon_persists_actual_synthetic_origin_query(tmp_path: Path, monkeypat
     finished: dict[str, object] = {}
     daemon._finish_calibration = lambda **kwargs: finished.update(kwargs)
 
-    with pytest.raises(DriverError, match="origin is outside the owned target"):
+    with pytest.raises(CalibrationError, match="origin is outside the owned target"):
         daemon.run_input_calibration()
 
     artifact = tmp_path / "state" / "input-calibration-diagnostics" / "latest-pre-human-failure.json"
@@ -395,21 +385,18 @@ def test_daemon_persists_actual_synthetic_origin_query(tmp_path: Path, monkeypat
     assert persisted["targetPlacement"] == {
         "producer": "InputCalibrationWorkflow.target_pointer_preflight",
         "targetXid": TARGET,
-        "targetGeometry": [0, 0, 480, 240],
-        "origin": {"x": 100, "y": 100, "windowXid": TARGET},
+        "targetGeometry": [800, 400, 480, 240],
+        "origin": {"x": 987, "y": 595, "windowXid": TARGET},
         "predicates": {"certifiedHitWindow": True, "insideTargetGeometry": True},
     }
     assert persisted["syntheticPointer"] == {
-        "producer": "X11Backend.synthetic_calibration",
-        "targetXid": TARGET,
-        "targetGeometry": [0, 0, 480, 240],
-        "requested": [240, 120],
-        "origin": {"x": 100, "y": 100, "windowXid": FOREIGN},
-        "originPredicates": {
-            "certifiedHitWindow": False,
-            "insideTargetGeometry": True,
-            "nonzeroDisplacement": True,
-        },
+        "producer": "DesktopDriver.synthetic_target_keyboard_profile",
+        "origin": {"x": 987, "y": 595, "windowXid": FOREIGN},
+        "requested": [1000, 600],
+        "post": {"x": 1000, "y": 600, "windowXid": TARGET},
+        "seed": 17,
+        "plan": [[0.0, 987, 595], [0.1, 994, 598], [0.2, 1000, 600]],
+        "transitions": [[994, 598], [1000, 600]],
     }
     assert len(workflows) == 1
     context = workflows[0].failure_context

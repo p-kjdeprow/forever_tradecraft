@@ -54,6 +54,7 @@ from .executor import (
 )
 from .guardian import GuardianError, InputGuardian
 from .input_broker import (
+    ButtonEmissionClaim,
     InputBroker,
     InputBrokerError,
     RatePermit,
@@ -779,6 +780,78 @@ class CalibrationTicket:
 
     def contains(self, xid: int) -> bool:
         return xid in self.target_xids
+
+
+@dataclass(frozen=True, slots=True)
+class SyntheticPointerProbe:
+    """Typed result of one owned calibration pointer gesture."""
+
+    origin: tuple[int, int, int]
+    requested_endpoint: tuple[int, int]
+    final_observed: tuple[int, int, int]
+    emitted_transitions: tuple[tuple[int, int], ...]
+    seed: int
+    plan: tuple[tuple[float, int, int], ...]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.origin, tuple)
+            or len(self.origin) != 3
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in self.origin)
+            or self.origin[2] <= 0
+        ):
+            raise DriverError("synthetic pointer probe origin is malformed")
+        if (
+            not isinstance(self.requested_endpoint, tuple)
+            or len(self.requested_endpoint) != 2
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in self.requested_endpoint)
+        ):
+            raise DriverError("synthetic pointer probe requested endpoint is malformed")
+        if (
+            not isinstance(self.final_observed, tuple)
+            or len(self.final_observed) != 3
+            or any(isinstance(value, bool) or not isinstance(value, int) for value in self.final_observed)
+            or self.final_observed[2] <= 0
+        ):
+            raise DriverError("synthetic pointer probe final observation is malformed")
+        if (
+            isinstance(self.seed, bool)
+            or not isinstance(self.seed, int)
+            or not 0 <= self.seed < 2**64
+            or not self.emitted_transitions
+            or any(
+                not isinstance(point, tuple)
+                or len(point) != 2
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in point)
+                for point in self.emitted_transitions
+            )
+            or not self.plan
+            or any(
+                not isinstance(sample, tuple)
+                or len(sample) != 3
+                or isinstance(sample[0], bool)
+                or not isinstance(sample[0], float)
+                or not math.isfinite(sample[0])
+                or sample[0] < 0
+                or any(isinstance(value, bool) or not isinstance(value, int) for value in sample[1:])
+                for sample in self.plan
+            )
+        ):
+            raise DriverError("synthetic pointer probe motion plan is malformed")
+        previous_time = -1.0
+        for sample in self.plan:
+            if sample[0] <= previous_time:
+                raise DriverError("synthetic pointer probe motion plan is not strictly timed")
+            previous_time = sample[0]
+        if self.plan[0][1:] != self.origin[:2] or self.plan[-1][1:] != self.requested_endpoint:
+            raise DriverError("synthetic pointer probe motion plan is not sealed to its endpoints")
+        planned_transitions = tuple(
+            sample[1:]
+            for previous, sample in zip(self.plan, self.plan[1:], strict=False)
+            if previous[1:] != sample[1:]
+        )
+        if planned_transitions != self.emitted_transitions:
+            raise DriverError("synthetic pointer probe transitions do not match its plan")
 
 
 @dataclass(frozen=True)
@@ -1782,14 +1855,6 @@ class X11Backend:
         self._publish_holds: Callable[[Any, set[str], set[int]], None] | None = None
         self._admission_health: Callable[[], None] | None = None
         self._calibration_focus_ticket: CalibrationTicket | None = None
-        # The native calibration producer records the query-confirmed origin,
-        # requested endpoint, and exact post-move result.  This is evidence
-        # carried into the calibration seal; it is deliberately absent until
-        # a complete, successful producer action has finished.
-        self._last_synthetic_motion_query: tuple[Any, ...] | None = None
-        # Failure-only query context is copied into the private pre-human
-        # diagnostic.  It never qualifies calibration or grants input.
-        self._last_synthetic_pointer_diagnostic: dict[str, Any] | None = None
         self.last_region_receipt: TelemetryRegionReceipt | None = None
         self.last_region_attempt: dict[str, float | str | None] = {}
         self.resolver_kind = "reference-test"
@@ -1929,7 +1994,13 @@ class X11Backend:
         expected_argv: tuple[str, ...] | None = None,
         deadline_monotonic: float | None = None,
         emergency_release: bool = False,
+        admitted_button_gesture: object | None = None,
+        button_emission_claim: ButtonEmissionClaim | None = None,
+        emission_action_generation: int | None = None,
+        emission_lease_generation: int | None = None,
     ) -> subprocess.CompletedProcess[str]:
+        if admitted_button_gesture is not None:
+            raise DriverError("button input requires a broker emission claim")
         if deadline_monotonic is None:
             deadline_monotonic = getattr(self, "_active_action_deadline", None)
         environment = os.environ.copy()
@@ -1983,104 +2054,38 @@ class X11Backend:
             amount = float(value)
             return math.isfinite(amount) and 0.0 < amount <= 2.0
 
-        def gesture_chain(tokens: list[str]) -> tuple[bool, bool]:
-            """Validate the legacy generic grammar for non-pointer probes."""
-
-            if not tokens or len(tokens) > 4096:
-                return False, False
-            index = 0
-            operations = 0
-            held_button: str | None = None
-            held_key: str | None = None
-            uses_input = False
-            while index < len(tokens):
-                operation = tokens[index]
-                if operation == "mousemove":
-                    if (
-                        index + 2 >= len(tokens)
-                        or not integer(tokens[index + 1])
-                        or not integer(tokens[index + 2])
-                    ):
-                        return False, False
-                    index += 3
-                    operations += 1
-                    uses_input = True
-                    continue
-                if operation == "sleep":
-                    if index + 1 >= len(tokens) or not bounded_sleep(tokens[index + 1]):
-                        return False, False
-                    index += 2
-                    continue
-                if operation == "mousedown":
-                    if (
-                        index + 1 >= len(tokens)
-                        or tokens[index + 1] not in {"1", "3"}
-                        or held_button is not None
-                    ):
-                        return False, False
-                    held_button = tokens[index + 1]
-                    index += 2
-                    operations += 1
-                    uses_input = True
-                    continue
-                if operation == "keydown":
-                    if (
-                        index + 1 >= len(tokens)
-                        or held_key is not None
-                        or not re.fullmatch(r"[A-Za-z0-9_+.-]+", tokens[index + 1])
-                    ):
-                        return False, False
-                    held_key = tokens[index + 1]
-                    index += 2
-                    operations += 1
-                    uses_input = True
-                    continue
-                if operation == "keyup":
-                    if index + 1 >= len(tokens) or tokens[index + 1] != held_key:
-                        return False, False
-                    held_key = None
-                    index += 2
-                    operations += 1
-                    uses_input = True
-                    continue
-                if operation == "mouseup":
-                    if index + 1 >= len(tokens) or tokens[index + 1] != held_button:
-                        return False, False
-                    held_button = None
-                    index += 2
-                    operations += 1
-                    uses_input = True
-                    continue
-                return False, False
-            return operations > 0 and held_button is None and held_key is None, uses_input
-
-        def pointer_segment(tokens: list[str], *, require_motion: bool) -> tuple[bool, bool]:
+        def pointer_segment(
+            tokens: list[str], *, require_motion: bool, minimum_moves: int = 1
+        ) -> tuple[bool, frozenset[tuple[int, int]]]:
             """Validate a pointer-only timed segment with no button/key state."""
 
             if len(tokens) > 4096:
-                return False, False
+                return False, frozenset()
+            if not tokens:
+                return not require_motion, frozenset()
             index = 0
-            moves = 0
-            operations = 0
+            destinations: set[tuple[int, int]] = set()
+            elapsed = 0.0
             while index < len(tokens):
-                operation = tokens[index]
-                if operation == "sleep":
-                    if index + 1 >= len(tokens) or not bounded_sleep(tokens[index + 1]):
-                        return False, False
-                    index += 2
-                    continue
-                if operation != "mousemove":
-                    return False, False
-                if (
-                    index + 2 >= len(tokens)
-                    or not integer(tokens[index + 1])
-                    or not integer(tokens[index + 2])
-                ):
-                    return False, False
-                moves += 1
-                operations += 1
-                index += 3
-            return (operations > 0 or not require_motion) and (not require_motion or moves > 0), moves > 0
+                if tokens[index] != "sleep" or index + 1 >= len(tokens):
+                    return False, frozenset()
+                if not bounded_sleep(tokens[index + 1]):
+                    return False, frozenset()
+                elapsed += float(tokens[index + 1])
+                if elapsed > 2.0:
+                    return False, frozenset()
+                index += 2
+                if index < len(tokens):
+                    if tokens[index] == "sleep":
+                        continue
+                    if tokens[index] != "mousemove" or index + 2 >= len(tokens):
+                        return False, frozenset()
+                    if not integer(tokens[index + 1]) or not integer(tokens[index + 2]):
+                        return False, frozenset()
+                    destinations.add((int(tokens[index + 1]), int(tokens[index + 2])))
+                    index += 3
+            required_destinations = minimum_moves if require_motion else 0
+            return len(destinations) >= required_destinations, frozenset(destinations)
 
         def keyboard_chain(tokens: list[str]) -> tuple[bool, bool]:
             """Validate one bounded sequence of explicit physical key transitions."""
@@ -2119,9 +2124,11 @@ class X11Backend:
                 return False, False
             prefix = tokens[:press]
             held = tokens[press + 2 : -2]
-            prefix_valid, _prefix_motion = pointer_segment(prefix, require_motion=False)
-            held_valid, held_motion = pointer_segment(held, require_motion=True)
-            return prefix_valid and held_valid and held_motion, prefix_valid and held_motion
+            prefix_valid, prefix_destinations = pointer_segment(prefix, require_motion=False)
+            held_valid, held_destinations = pointer_segment(held, require_motion=True, minimum_moves=1)
+            destinations = prefix_destinations | held_destinations
+            valid = prefix_valid and held_valid and len(destinations) >= 2
+            return valid, valid
 
         def motion_timeline(tokens: list[str]) -> tuple[bool, bool, frozenset[str]]:
             """Validate one sealed keyboard timeline and return its key set."""
@@ -2177,7 +2184,7 @@ class X11Backend:
         # Every desktop subprocess is admitted by a positive argv schema.
         # This keeps newly added X11 utilities and shell-like xdotool modes
         # closed by default; a denylist cannot safely describe the mutation
-        # surface of tools such as ``xprop`` or ``xdotool exec``.
+        # surface of tools such as ``xprop`` or shell-like xdotool modes.
         mutating = False
         potential_mutation = (
             command_name == "xdotool"
@@ -2192,11 +2199,8 @@ class X11Backend:
                 "keyup",
                 "type",
                 "mousemove",
-                "mousemove_relative",
-                "click",
                 "mousedown",
                 "mouseup",
-                "exec",
             }
         )
         if potential_mutation and generation is None and calibration_ticket is None:
@@ -2281,7 +2285,8 @@ class X11Backend:
                 elif input_schema == "keyboard-steps":
                     valid, mutating = keyboard_chain(args[1:])
                 else:
-                    valid, mutating = pointer_segment(args[1:], require_motion=True)
+                    valid, _destinations = pointer_segment(args[1:], require_motion=True, minimum_moves=2)
+                    mutating = valid
             elif subcommand in {"key", "keydown", "keyup"}:
                 valid = (
                     len(args) in {3, 4}
@@ -2291,16 +2296,7 @@ class X11Backend:
                 )
                 mutating = valid
             elif subcommand == "mousemove":
-                if len(args) == 4:
-                    valid = integer(args[2]) and integer(args[3])
-                    mutating = valid
-                else:
-                    valid, mutating = gesture_chain(args[1:])
-            elif subcommand in {"sleep", "mousedown", "mouseup"}:
-                valid, mutating = gesture_chain(args[1:])
-            elif subcommand == "click":
-                valid = len(args) == 3 and bool(re.fullmatch(r"[1-9][0-9]*", args[2]))
-                mutating = valid
+                valid = False
             else:
                 valid = False
         else:
@@ -2345,7 +2341,6 @@ class X11Backend:
             "keyup",
             "mousedown",
             "mouseup",
-            "click",
         }:
             # The ordinary named-key and calibration paths have no explicit
             # input schema, so derive their physical ownership directly from
@@ -2359,12 +2354,28 @@ class X11Backend:
                 expected_keys = frozenset({args[-1]})
                 expected_buttons = frozenset()
             else:
+                if admitted_button_gesture is None and subcommand in {"mousedown", "mouseup"}:
+                    raise DriverError("bare button transition requires a broker-admitted gesture")
                 expected_keys = frozenset()
                 expected_buttons = frozenset({int(args[-1])})
             if frozenset(held_keys) != expected_keys or frozenset(held_buttons) != expected_buttons:
                 raise DriverError("desktop argv holds do not match its sealed input plan")
         if mutating and generation is None and calibration_ticket is None:
             raise DriverError("input-producing desktop command requires an active capability")
+        if input_schema in {"single-click", "camera-drag"}:
+            if not isinstance(button_emission_claim, ButtonEmissionClaim):
+                raise DriverError("button input requires a broker emission claim")
+            if (
+                isinstance(emission_action_generation, bool)
+                or not isinstance(emission_action_generation, int)
+                or isinstance(emission_lease_generation, bool)
+                or not isinstance(emission_lease_generation, int)
+            ):
+                raise DriverError("button emission claim generations are malformed")
+        elif button_emission_claim is not None:
+            raise DriverError("broker emission claim is bound to a button schema")
+        elif emission_action_generation is not None or emission_lease_generation is not None:
+            raise DriverError("button emission claim generations require a button schema")
         if mutating and calibration_ticket is not None:
             if command_name == "xdotool" and subcommand in {"windowactivate", "windowfocus", "windowraise"}:
                 if len(args) != 4 or int(args[3], 0) != calibration_ticket.target_xid:
@@ -2379,6 +2390,18 @@ class X11Backend:
             getattr(self, "_calibration_ticket_current", None)
         ):
             raise DriverError("calibration ticket validator is not configured")
+        if input_schema in {"single-click", "camera-drag"}:
+            native_button = PointerButton.LEFT if args[2] == "1" else PointerButton.RIGHT
+            try:
+                self.input_broker.redeem_button_emission_claim(
+                    cast(ButtonEmissionClaim, button_emission_claim),
+                    emitted_chain=tuple(args),
+                    button=native_button,
+                    action_generation=cast(int, emission_action_generation),
+                    lease_generation=cast(int, emission_lease_generation),
+                )
+            except InputBrokerError as exc:
+                raise DriverError(str(exc)) from exc
         if command_name == "xdotool":
             if pinned_tool is None:
                 raise DriverError("private XTEST input tool is not configured")
@@ -3633,12 +3656,6 @@ class X11Backend:
             raise DriverError("native pointer position output is incomplete")
         return values["X"], values["Y"], values["WINDOW"]
 
-    def _pointer(self, identity: WindowIdentity, x: int, y: int, *, generation: int | None = None) -> None:
-        left, top, width, height = identity.child_geometry
-        if not (0 <= x < width and 0 <= y < height):
-            raise DriverError("pointer anchor is outside the verified client child")
-        self._run(["xdotool", "mousemove", str(left + x), str(top + y)], generation=generation)
-
     def is_descendant(self, xid: int, ancestor: int) -> bool:
         """Prove an XI2 target is in the verified client's current subtree."""
 
@@ -3919,8 +3936,7 @@ class X11Backend:
                     raise DriverError("native pointer deadline expired before click rate precommit")
                 if not isinstance(rate_reservation, RateReservation):
                     raise DriverError("native pointer action lost its broker rate reservation")
-                chain_for_digest = tuple(chain) if pointer_plan is not None else ()
-                emitted_chain = (*chain_for_digest, *click_argv)
+                emitted_chain = tuple(click_argv)
                 admission_id = (
                     guardian_admission_id
                     if isinstance(guardian_admission_id, str) and guardian_admission_id
@@ -3942,7 +3958,7 @@ class X11Backend:
                 except InputBrokerError as exc:
                     raise DriverError(str(exc)) from exc
 
-                def emit_click() -> None:
+                def emit_click(claim: ButtonEmissionClaim) -> None:
                     execution["clickDispatchStartedMonotonicNs"] = time.monotonic_ns()
                     execution["phase"] = "click_dispatched"
                     self._run(
@@ -3952,6 +3968,9 @@ class X11Backend:
                         input_schema="single-click",
                         expected_argv=tuple(click_argv),
                         deadline_monotonic=deadline_monotonic,
+                        button_emission_claim=claim,
+                        emission_action_generation=action_generation,
+                        emission_lease_generation=generation,
                     )
                     execution["pressReleaseMonotonicNs"] = time.monotonic_ns()
                     execution["clickAckMonotonicNs"] = time.monotonic_ns()
@@ -4623,97 +4642,6 @@ class X11Backend:
             }
             if _receipt_sink is not None and finalized_receipt is not None:
                 _receipt_sink(finalized_receipt)
-
-    def synthetic_calibration(
-        self, window_id: str, x: int, y: int, *, calibration_ticket: CalibrationTicket | None = None
-    ) -> None:
-        if calibration_ticket is None:
-            raise DriverError("synthetic calibration requires an exact calibration ticket")
-        self._last_synthetic_motion_query = None
-        self._last_synthetic_pointer_diagnostic = None
-        try:
-            target_xid = int(window_id, 0)
-        except (TypeError, ValueError) as exc:
-            raise DriverError("calibration target XID is malformed") from exc
-        if target_xid <= 0:
-            raise DriverError("calibration target XID is malformed")
-        geometry = _parse_shell_geometry(
-            self._run(["xdotool", "getwindowgeometry", "--shell", window_id]).stdout
-        )
-        left, top, width, height = geometry
-        if not (left <= x < left + width and top <= y < top + height):
-            raise DriverError("calibration point is outside the measured owned target geometry")
-        self._run(
-            ["xdotool", "windowactivate", "--sync", window_id],
-            calibration_ticket=calibration_ticket,
-        )
-        if int(self._run(["xdotool", "getwindowfocus"]).stdout.strip(), 0) != int(window_id, 0):
-            raise DriverError("calibration target did not receive focus")
-        # The absolute XTEST command is allowed to start only from a pointer
-        # that is already inside the certified target.  In particular, do not
-        # use a bootstrap warp to manufacture an origin for the proof.
-        requested = (int(x), int(y))
-        origin_x, origin_y, origin_window = self.pointer_position()
-        origin_inside_geometry = left <= origin_x < left + width and top <= origin_y < top + height
-        origin_certified_window = calibration_ticket.contains(origin_window)
-        origin_nonzero_displacement = (origin_x, origin_y) != requested
-        pointer_diagnostic: dict[str, Any] = {
-            "producer": "X11Backend.synthetic_calibration",
-            "targetXid": target_xid,
-            "targetGeometry": [left, top, width, height],
-            "requested": [requested[0], requested[1]],
-            "origin": {"x": origin_x, "y": origin_y, "windowXid": origin_window},
-            "originPredicates": {
-                "certifiedHitWindow": origin_certified_window,
-                "insideTargetGeometry": origin_inside_geometry,
-                "nonzeroDisplacement": origin_nonzero_displacement,
-            },
-        }
-        self._last_synthetic_pointer_diagnostic = pointer_diagnostic
-        if not origin_certified_window or not origin_inside_geometry:
-            raise DriverError("calibration pointer origin is outside the owned target")
-        if not origin_nonzero_displacement:
-            raise DriverError("calibration move must produce a nonzero measured displacement")
-        self._calibration_focus_ticket = calibration_ticket
-        self._run(
-            ["xdotool", "key", "F13"],
-            calibration_ticket=calibration_ticket,
-            held_keys={"F13"},
-        )
-        self._run(
-            ["xdotool", "mousemove", str(x), str(y)],
-            calibration_ticket=calibration_ticket,
-        )
-        post_x, post_y, post_window = self.pointer_position()
-        post_matches_requested = (post_x, post_y) == requested
-        post_inside_geometry = left <= post_x < left + width and top <= post_y < top + height
-        post_certified_window = calibration_ticket.contains(post_window)
-        pointer_diagnostic["post"] = {"x": post_x, "y": post_y, "windowXid": post_window}
-        pointer_diagnostic["postPredicates"] = {
-            "matchesRequested": post_matches_requested,
-            "insideTargetGeometry": post_inside_geometry,
-            "certifiedHitWindow": post_certified_window,
-        }
-        if not post_matches_requested or not post_inside_geometry or not post_certified_window:
-            raise DriverError("calibration pointer postcondition changed")
-        self._last_synthetic_motion_query = (
-            origin_x,
-            origin_y,
-            origin_window,
-            requested[0],
-            requested[1],
-            post_x,
-            post_y,
-            post_window,
-        )
-        try:
-            self._run(
-                ["xdotool", "click", "1"],
-                calibration_ticket=calibration_ticket,
-                held_buttons={1},
-            )
-        except Exception:
-            raise
 
     def calibration_focus(
         self,
@@ -8413,13 +8341,16 @@ class DesktopDriver:
                     target_identity=f"{identity.fingerprint}:{target_name}",
                     guardian_admission_id=f"world-click:{selected_action_generation}:{id(action)}",
                     semantic_authorization="world_click",
-                    emit=lambda: x11_backend._run(
+                    emit=lambda claim: x11_backend._run(
                         click_argv,
                         generation=generation,
                         held_buttons={1},
                         input_schema="single-click",
                         expected_argv=tuple(click_argv),
                         deadline_monotonic=deadline_monotonic,
+                        button_emission_claim=claim,
+                        emission_action_generation=selected_action_generation,
+                        emission_lease_generation=selected_lease_generation,
                     ),
                 )
                 self.last_pointer_execution["clickPrecommitMonotonicNs"] = (
@@ -8675,7 +8606,7 @@ class DesktopDriver:
                 target_identity=identity.fingerprint,
                 guardian_admission_id=f"camera-drag:{selected_action_generation}:{id(action)}",
                 semantic_authorization="camera_drag",
-                emit=lambda: x11_backend._run(
+                emit=lambda claim: x11_backend._run(
                     chain,
                     timeout=TAKEOVER_DRILL_HOVER_COMMAND_TIMEOUT_SECONDS,
                     generation=generation,
@@ -8683,6 +8614,9 @@ class DesktopDriver:
                     input_schema="camera-drag",
                     expected_argv=tuple(chain),
                     deadline_monotonic=deadline_monotonic,
+                    button_emission_claim=claim,
+                    emission_action_generation=selected_action_generation,
+                    emission_lease_generation=generation,
                 ),
             )
             self.guardian.check(generation)
@@ -9961,45 +9895,14 @@ class DesktopDriver:
             raise DriverError(str(exc)) from exc
         raise DriverError("captured trace alone cannot arm; run owned input calibration")
 
-    def synthetic_target_key_click(
-        self,
-        target: Any,
-        *,
-        calibration_ticket: CalibrationTicket | None = None,
-    ) -> None:
-        from .calibration import OwnedGtkCalibrationWindow, OwnedWindow
-
-        if not isinstance(self.backend, X11Backend):
-            raise DriverError("owned GTK input calibration requires the X11 backend")
-        if not isinstance(target, OwnedWindow) or target.title != OwnedGtkCalibrationWindow.TITLE:
-            raise DriverError("synthetic calibration target is not the owned GTK window")
-        if not Path(f"/proc/{target.pid}").exists():
-            raise DriverError("owned GTK calibration process no longer exists")
-        if not isinstance(calibration_ticket, CalibrationTicket):
-            raise DriverError("calibration key click requires an exact calibration ticket")
-        ticket = calibration_ticket
-        self._verify_calibration_target(ticket, target)
-        if not self.guardian.calibration_ticket_current(ticket):
-            raise DriverError("calibration ticket is stale or revoked")
-        props = self.backend._xprop(hex(target.xid), "WM_NAME", "_NET_WM_PID")
-        if target.title not in props or not re.search(rf"_NET_WM_PID\([^)]*\).*\b{target.pid}\b", props):
-            raise DriverError("owned GTK calibration XID/PID changed")
-        left, top, width, height = target.geometry
-        self.backend.synthetic_calibration(
-            hex(target.xid),
-            left + max(0, width // 2),
-            top + max(0, height // 2),
-            calibration_ticket=ticket,
-        )
-
     def synthetic_target_keyboard_profile(
         self,
         target: Any,
         *,
         operations: tuple[Any, ...],
         calibration_ticket: CalibrationTicket | None = None,
-    ) -> None:
-        """Capture the exact runtime keyboard emissions on the owned GTK target."""
+    ) -> SyntheticPointerProbe:
+        """Capture the runtime keyboard profile after one human-planned click."""
 
         from .calibration import KeyboardProbeOperation, OwnedGtkCalibrationWindow, OwnedWindow
 
@@ -10027,21 +9930,139 @@ class DesktopDriver:
         if target.title not in props or not re.search(rf"_NET_WM_PID\([^)]*\).*\b{target.pid}\b", props):
             raise DriverError("owned GTK calibration XID/PID changed")
         keymap = self.calibration_keyboard_keymap()
-        # F13, motion, and click establish the baseline and controlled target
-        # proof expected by the calibration workflow.  All of these commands
-        # carry the same ticket as the keyboard profile below.
         left, top, width, height = target.geometry
-        self.backend.synthetic_calibration(
-            hex(target.xid),
-            left + max(0, width // 2),
-            top + max(0, height // 2),
+        origin_x, origin_y, origin_window = self.backend.pointer_position()
+        if not calibration_ticket.contains(origin_window):
+            raise DriverError("calibration pointer origin is outside the owned target")
+        if not left <= origin_x < left + width or not top <= origin_y < top + height:
+            raise DriverError("calibration pointer origin is outside the owned target")
+        binding = BindingMetadata(
+            identity_fingerprint=f"calibration:{calibration_ticket.target_pid}:{calibration_ticket.target_xid}",
+            capture_id=f"calibration:{calibration_ticket.epoch}",
+            capture_sequence=calibration_ticket.epoch,
+            generation=calibration_ticket.epoch,
+            target_xid=target.xid,
+            target_ancestry=tuple(sorted(calibration_ticket.target_xids)),
+            source="owned-gtk-calibration",
+        )
+        client_bounds = Rect(0, 0, width, height)
+        pointer_target = PointerTarget("input_calibration", client_bounds, binding)
+        try:
+            seed = secrets.randbits(64)
+            gesture = plan_human_pointer(
+                Point(origin_x - left, origin_y - top),
+                pointer_target,
+                client_bounds,
+                seed=seed,
+                button=PointerButton.LEFT,
+                profile=self.pointer_motion_profile,
+            )
+            motion_chain = build_pointer_motion_chain(gesture.trajectory, target.geometry)
+        except (ExecutorError, PointerExecutionError) as exc:
+            raise DriverError(f"calibration pointer plan is invalid: {exc}") from exc
+        if gesture.click is None:
+            raise DriverError("calibration pointer plan has no press/release phase")
+        if gesture.endpoint == gesture.trajectory.samples[0].point:
+            raise DriverError("calibration pointer plan has zero endpoint displacement")
+        emitted_transitions: list[tuple[int, int]] = []
+        prior = gesture.trajectory.samples[0].point
+        for sample in gesture.trajectory.samples[1:]:
+            if sample.point == prior:
+                continue
+            emitted_transitions.append((left + int(sample.point.x), top + int(sample.point.y)))
+            prior = sample.point
+        if not emitted_transitions:
+            raise DriverError("calibration pointer plan emitted no motion transitions")
+        plan = tuple(
+            (sample.at, left + int(sample.point.x), top + int(sample.point.y))
+            for sample in gesture.trajectory.samples
+        )
+        self.backend._run(
+            ["xdotool", "key", "F13"],
             calibration_ticket=calibration_ticket,
+            held_keys={"F13"},
+        )
+        self.backend._run(
+            motion_chain,
+            calibration_ticket=calibration_ticket,
+            input_schema="pointer-motion",
+            expected_argv=tuple(motion_chain),
+        )
+        post_x, post_y, post_window = self.backend.pointer_position()
+        requested_endpoint = (
+            left + int(gesture.endpoint.x),
+            top + int(gesture.endpoint.y),
+        )
+        if (
+            not calibration_ticket.contains(post_window)
+            or not left <= post_x < left + width
+            or not top <= post_y < top + height
+            or (post_x, post_y) != requested_endpoint
+        ):
+            raise DriverError("calibration pointer postcondition changed")
+        click_argv = [
+            "xdotool",
+            "mousedown",
+            "1",
+            "sleep",
+            f"{gesture.click.dwell:.6f}",
+            "mouseup",
+            "1",
+        ]
+        destination_anchor = f"{target.xid}:{requested_endpoint[0]}:{requested_endpoint[1]}"
+        guardian_admission_id = f"calibration:{calibration_ticket.epoch}:{target.xid}"
+        try:
+            reservation = self.input_broker.reserve_button_rate()
+            try:
+                admitted_gesture = self.input_broker.mint_admitted_gesture(
+                    action_generation=calibration_ticket.epoch,
+                    lease_generation=calibration_ticket.epoch,
+                    button=PointerButton.LEFT,
+                    emitted_chain=tuple(click_argv),
+                    destination_anchor=destination_anchor,
+                    target_identity=f"{target.pid}:{target.xid}",
+                    guardian_admission_id=guardian_admission_id,
+                    semantic_authorization="input_calibration",
+                    reservation=reservation,
+                )
+                self.input_broker.emit_button_gesture(
+                    admitted_gesture,
+                    emitted_chain=tuple(click_argv),
+                    action_generation=calibration_ticket.epoch,
+                    lease_generation=calibration_ticket.epoch,
+                    destination_anchor=destination_anchor,
+                    target_identity=f"{target.pid}:{target.xid}",
+                    guardian_admission_id=guardian_admission_id,
+                    semantic_authorization="input_calibration",
+                    emit=lambda claim: self.backend._run(
+                        click_argv,
+                        calibration_ticket=calibration_ticket,
+                        held_buttons={1},
+                        input_schema="single-click",
+                        expected_argv=tuple(click_argv),
+                        button_emission_claim=claim,
+                        emission_action_generation=calibration_ticket.epoch,
+                        emission_lease_generation=calibration_ticket.epoch,
+                    ),
+                )
+            finally:
+                self.input_broker.release_reservation(reservation)
+        except InputBrokerError as exc:
+            raise DriverError(f"calibration button admission failed: {exc}") from exc
+        probe = SyntheticPointerProbe(
+            origin=(origin_x, origin_y, origin_window),
+            requested_endpoint=requested_endpoint,
+            final_observed=(post_x, post_y, post_window),
+            emitted_transitions=tuple(emitted_transitions),
+            seed=seed,
+            plan=plan,
         )
         self.backend.synthetic_keyboard_profile(
             operations,
             keymap=keymap,
             calibration_ticket=calibration_ticket,
         )
+        return probe
 
     def close(self) -> None:
         self.revoke("driver closed")
@@ -10103,6 +10124,7 @@ __all__ = [
     "NamedStateObservation",
     "MeasuredAnchor",
     "RecordingBackend",
+    "SyntheticPointerProbe",
     "WindowIdentity",
     "XI2Observer",
     "X11Backend",

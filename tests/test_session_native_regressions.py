@@ -50,6 +50,7 @@ from crowley.session.calibration import (
     OwnedGtkCalibrationWindow,
     OwnedWindow,
     XTestInputProfile,
+    xtest_sources,
 )
 from crowley.session.cli import SessionIPC
 from crowley.session.config import SessionConfig
@@ -58,13 +59,13 @@ from crowley.session.daemon import SessionDaemon
 from crowley.session.decoder import PixelDecoder
 from crowley.session.driver import (
     _EXEC_ADMISSION_WRAPPER,
-    CalibrationTicket,
     DesktopDriver,
     DriverError,
     DriverProfile,
     InputMonitor,
     MeasuredAnchor,
     RecordingBackend,
+    SyntheticPointerProbe,
     WindowIdentity,
     X11Backend,
 )
@@ -72,6 +73,10 @@ from crowley.session.guardian import GuardianError, InputGuardian
 from crowley.session.input_events import EventClass, XI2Event, parse_xi2_records
 from crowley.session.journal import DEFAULT_STATE, Journal, JournalError
 from crowley.session.protocol import HEADER_SIZE, ProtocolError, encode_frame, pack_cells
+from tests.support.ewmh_window_manager import (
+    start_ewmh_window_manager,
+    stop_ewmh_window_manager,
+)
 from tests.test_session_input_tool import fixture_input_tool
 from tests.x11_startup import start_private_xvfb
 
@@ -463,7 +468,7 @@ def _evidence(
         os.getpid(),
         TARGET,
         "CROWLEY INPUT CALIBRATION ONLY",
-        (0, 0, 480, 240),
+        (800, 400, 480, 240),
         object(),  # type: ignore[arg-type]
         frozenset({TARGET}),
         "/usr/bin/python3",
@@ -491,6 +496,8 @@ def _evidence(
         xtest_profile=measured_profile,
         synthetic_motion_transitions=measured_transitions,
         synthetic_motion_query=(987, 595, TARGET, 988, 596, 988, 596, TARGET),
+        synthetic_motion_seed=0,
+        synthetic_motion_plan=((0.0, 987, 595), (0.5, 988, 596)),
         synthetic_events=tuple(
             (record.event_class.value, record.source_device, record.detail)
             for record in records
@@ -536,9 +543,9 @@ def _evidence(
         game_geometry=game_geometry,
         target_executable="/usr/bin/python3",
         target_process_start="owned-target-start",
-        target_geometry=(0, 0, 480, 240),
+        target_geometry=(800, 400, 480, 240),
         managed_frame_xid=TARGET + 1,
-        managed_frame_geometry=(0, 0, 500, 260),
+        managed_frame_geometry=(790, 390, 500, 260),
         target_event_xids=(TARGET, TARGET + 1),
         synthetic_modifiers=(0, 0, 0),
         synthetic_echo_proof=(
@@ -623,7 +630,7 @@ def _event(
     )
 
 
-def _render_events(events: list[XI2Event]) -> str:
+def _render_events(events: list[XI2Event], *, motion_source: int | None = None) -> str:
     blocks: list[str] = []
     for event in events:
         lines = [f"EVENT type {event.type_number} ({event.event_class.value})"]
@@ -632,7 +639,8 @@ def _render_events(events: list[XI2Event]) -> str:
         if event.detail is not None:
             lines.append(f"    detail: {event.detail}")
         if event.event_class is EventClass.RAW_MOTION or (
-            event.event_class is EventClass.MOTION and event.source_device == 4
+            event.event_class is EventClass.MOTION
+            and event.source_device == (4 if motion_source is None else motion_source)
         ):
             lines.append("    valuators:")
             for axis, value, raw_value in event.valuators:
@@ -795,43 +803,26 @@ def test_guardian_rejects_unpaired_forwarded_motion_on_owned_target(tmp_path: Pa
         guardian.close()
 
 
-def test_owned_calibration_click_uses_owned_geometry_plus_local_offset(tmp_path: Path) -> None:
-    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
-    backend = object.__new__(X11Backend)
-    backend.profile = profile
-    backend.xauthority = profile.xauthority
-    backend.input_tool = fixture_input_tool(tmp_path / "tool")
-    backend._measured_anchors = {}
-    backend._xprop = lambda *_args: (
-        f'WM_NAME(STRING) = "CROWLEY INPUT CALIBRATION ONLY"\n_NET_WM_PID(CARDINAL) = {os.getpid()}\n'
+def test_synthetic_pointer_probe_is_typed_and_rejects_malformed_motion() -> None:
+    probe = SyntheticPointerProbe(
+        origin=(987, 595, TARGET),
+        requested_endpoint=(1002, 610),
+        final_observed=(1002, 610, TARGET),
+        emitted_transitions=((992, 600), (1002, 610)),
+        seed=17,
+        plan=((0.0, 987, 595), (0.1, 992, 600), (0.2, 1002, 610)),
     )
-    calls: list[tuple[str, int, int]] = []
-    backend.synthetic_calibration = lambda xid, x, y, **_kwargs: calls.append((xid, x, y))
-    driver = DesktopDriver(profile=profile, backend=backend, lease_path=tmp_path / "desktop.lock")
-    target = OwnedWindow(
-        os.getpid(),
-        TARGET,
-        OwnedGtkCalibrationWindow.TITLE,
-        (41, 59, 480, 240),
-        SimpleNamespace(poll=lambda: None),  # type: ignore[arg-type]
-        frozenset({TARGET}),
-        "/usr/bin/python3",
-        "owned-target-start",
-        TARGET + 1,
-        (0, 0, 540, 320),
-        frozenset({TARGET, TARGET + 1}),
-    )
-    try:
-        driver.begin_calibration_operation()
-        with pytest.raises(DriverError, match="exact calibration ticket"):
-            driver.synthetic_target_key_click(target)
-        ticket = driver.issue_calibration_ticket(target)
-        driver.synthetic_target_key_click(target, calibration_ticket=ticket)
-        # The harmless calibration point is the owned GTK center: local
-        # (240, 120), translated through the measured desktop geometry.
-        assert calls == [(hex(TARGET), 281, 179)]
-    finally:
-        driver.close()
+    assert probe.origin == (987, 595, TARGET)
+    assert probe.requested_endpoint == probe.final_observed[:2]
+    with pytest.raises(DriverError, match="motion plan"):
+        SyntheticPointerProbe(
+            origin=probe.origin,
+            requested_endpoint=probe.requested_endpoint,
+            final_observed=probe.final_observed,
+            emitted_transitions=probe.emitted_transitions,
+            seed=probe.seed,
+            plan=((0.0, 987, 595), (0.0, 992, 600)),
+        )
 
 
 def test_root_child_ticket_pins_layout_and_rejects_root_helper_and_sibling_targets(tmp_path: Path) -> None:
@@ -900,226 +891,6 @@ def test_root_child_ticket_pins_layout_and_rejects_root_helper_and_sibling_targe
             )
     finally:
         driver.close()
-
-
-def _synthetic_calibration_ticket() -> CalibrationTicket:
-    return CalibrationTicket(
-        epoch=1,
-        target_pid=os.getpid(),
-        target_xid=TARGET,
-        target_xids=frozenset({TARGET, TARGET_DESCENDANT, TARGET_FRAME}),
-        title="CROWLEY INPUT CALIBRATION ONLY",
-        geometry=(40, 60, 240, 160),
-    )
-
-
-@pytest.mark.parametrize(
-    "hit_xid",
-    [TARGET, TARGET_DESCENDANT, TARGET_FRAME],
-    ids=("target", "certified-descendant", "certified-frame-over-client-area"),
-)
-def test_synthetic_calibration_accepts_only_certified_origin_and_post_hits(
-    tmp_path: Path, hit_xid: int
-) -> None:
-    """The native producer must query ownership before and after its move."""
-
-    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
-    backend = object.__new__(X11Backend)
-    backend.profile = profile
-    backend.xauthority = profile.xauthority
-    backend._last_synthetic_motion_query = None
-    backend._last_synthetic_pointer_diagnostic = None
-    backend._calibration_focus_ticket = None
-    calls: list[list[str]] = []
-    pointer_reads = iter(((100, 100, hit_xid), (120, 120, hit_xid)))
-
-    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(list(args))
-        if args[:2] == ["xdotool", "getwindowgeometry"]:
-            return subprocess.CompletedProcess(
-                args, 0, "WINDOW=0x600119\nX=40\nY=60\nWIDTH=240\nHEIGHT=160\nSCREEN=0\n", ""
-            )
-        if args == ["xdotool", "getwindowfocus"]:
-            return subprocess.CompletedProcess(args, 0, "6291737\n", "")
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    backend._run = run  # type: ignore[method-assign]
-    backend.pointer_position = lambda **_kwargs: next(pointer_reads)  # type: ignore[method-assign]
-    backend.synthetic_calibration(
-        hex(TARGET),
-        120,
-        120,
-        calibration_ticket=_synthetic_calibration_ticket(),
-    )
-    assert backend._last_synthetic_motion_query == (100, 100, hit_xid, 120, 120, 120, 120, hit_xid)
-    assert backend._last_synthetic_pointer_diagnostic == {
-        "producer": "X11Backend.synthetic_calibration",
-        "targetXid": TARGET,
-        "targetGeometry": [40, 60, 240, 160],
-        "requested": [120, 120],
-        "origin": {"x": 100, "y": 100, "windowXid": hit_xid},
-        "originPredicates": {
-            "certifiedHitWindow": True,
-            "insideTargetGeometry": True,
-            "nonzeroDisplacement": True,
-        },
-        "post": {"x": 120, "y": 120, "windowXid": hit_xid},
-        "postPredicates": {
-            "matchesRequested": True,
-            "insideTargetGeometry": True,
-            "certifiedHitWindow": True,
-        },
-    }
-    assert [args[1] for args in calls if len(args) > 1] == [
-        "getwindowgeometry",
-        "windowactivate",
-        "getwindowfocus",
-        "key",
-        "mousemove",
-        "click",
-    ]
-
-
-@pytest.mark.parametrize(
-    ("origin", "certified", "inside"),
-    [
-        ((100, 100, FOREIGN), False, True),
-        ((100, 100, 0x374), False, True),
-        ((39, 100, TARGET_FRAME), True, False),
-    ],
-    ids=("unrelated-in-bounds", "root-in-bounds", "certified-frame-outside-client"),
-)
-def test_synthetic_calibration_refuses_uncertified_or_outside_origin_before_motion(
-    tmp_path: Path,
-    origin: tuple[int, int, int],
-    certified: bool,
-    inside: bool,
-) -> None:
-    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
-    backend = object.__new__(X11Backend)
-    backend.profile = profile
-    backend.xauthority = profile.xauthority
-    backend._last_synthetic_motion_query = None
-    backend._last_synthetic_pointer_diagnostic = None
-    backend._calibration_focus_ticket = None
-    calls: list[list[str]] = []
-
-    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(list(args))
-        if args[:2] == ["xdotool", "getwindowgeometry"]:
-            return subprocess.CompletedProcess(
-                args, 0, "WINDOW=0x600119\nX=40\nY=60\nWIDTH=240\nHEIGHT=160\nSCREEN=0\n", ""
-            )
-        if args == ["xdotool", "getwindowfocus"]:
-            return subprocess.CompletedProcess(args, 0, "6291737\n", "")
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    backend._run = run  # type: ignore[method-assign]
-    backend.pointer_position = lambda **_kwargs: origin  # type: ignore[method-assign]
-    with pytest.raises(DriverError, match="origin is outside"):
-        backend.synthetic_calibration(
-            hex(TARGET),
-            120,
-            120,
-            calibration_ticket=_synthetic_calibration_ticket(),
-        )
-    assert all(args[1] not in {"key", "mousemove", "click"} for args in calls if len(args) > 1)
-    assert backend._last_synthetic_pointer_diagnostic is not None
-    assert backend._last_synthetic_pointer_diagnostic["origin"] == {
-        "x": origin[0],
-        "y": origin[1],
-        "windowXid": origin[2],
-    }
-    assert backend._last_synthetic_pointer_diagnostic["originPredicates"] == {
-        "certifiedHitWindow": certified,
-        "insideTargetGeometry": inside,
-        "nonzeroDisplacement": True,
-    }
-    assert "post" not in backend._last_synthetic_pointer_diagnostic
-
-
-def test_synthetic_calibration_refuses_zero_displacement_before_f13_or_move(tmp_path: Path) -> None:
-    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
-    backend = object.__new__(X11Backend)
-    backend.profile = profile
-    backend.xauthority = profile.xauthority
-    backend._last_synthetic_motion_query = None
-    backend._last_synthetic_pointer_diagnostic = None
-    calls: list[list[str]] = []
-
-    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(list(args))
-        if args[:2] == ["xdotool", "getwindowgeometry"]:
-            return subprocess.CompletedProcess(
-                args, 0, "WINDOW=0x600119\nX=40\nY=60\nWIDTH=240\nHEIGHT=160\nSCREEN=0\n", ""
-            )
-        if args == ["xdotool", "getwindowfocus"]:
-            return subprocess.CompletedProcess(args, 0, "6291737\n", "")
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    backend._run = run  # type: ignore[method-assign]
-    backend.pointer_position = lambda **_kwargs: (120, 120, TARGET)  # type: ignore[method-assign]
-    with pytest.raises(DriverError, match="nonzero measured displacement"):
-        backend.synthetic_calibration(
-            hex(TARGET),
-            120,
-            120,
-            calibration_ticket=_synthetic_calibration_ticket(),
-        )
-    assert all(args[1] not in {"key", "mousemove", "click"} for args in calls if len(args) > 1)
-    assert backend._last_synthetic_pointer_diagnostic is not None
-    assert backend._last_synthetic_pointer_diagnostic["originPredicates"]["nonzeroDisplacement"] is False
-
-
-def test_synthetic_calibration_retains_post_failure_before_click(tmp_path: Path) -> None:
-    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
-    backend = object.__new__(X11Backend)
-    backend.profile = profile
-    backend.xauthority = profile.xauthority
-    backend._last_synthetic_motion_query = None
-    backend._last_synthetic_pointer_diagnostic = None
-    backend._calibration_focus_ticket = None
-    calls: list[list[str]] = []
-
-    def run(args: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append(list(args))
-        if args[:2] == ["xdotool", "getwindowgeometry"]:
-            return subprocess.CompletedProcess(
-                args, 0, "WINDOW=0x600119\nX=40\nY=60\nWIDTH=240\nHEIGHT=160\nSCREEN=0\n", ""
-            )
-        if args == ["xdotool", "getwindowfocus"]:
-            return subprocess.CompletedProcess(args, 0, "6291737\n", "")
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    backend._run = run  # type: ignore[method-assign]
-    pointer_reads = iter(((100, 100, TARGET), (120, 120, FOREIGN)))
-    backend.pointer_position = lambda **_kwargs: next(pointer_reads)  # type: ignore[method-assign]
-    with pytest.raises(DriverError, match="postcondition changed"):
-        backend.synthetic_calibration(
-            hex(TARGET),
-            120,
-            120,
-            calibration_ticket=_synthetic_calibration_ticket(),
-        )
-    assert [args[1] for args in calls if len(args) > 1] == [
-        "getwindowgeometry",
-        "windowactivate",
-        "getwindowfocus",
-        "key",
-        "mousemove",
-    ]
-    assert backend._last_synthetic_motion_query is None
-    assert backend._last_synthetic_pointer_diagnostic is not None
-    assert backend._last_synthetic_pointer_diagnostic["post"] == {
-        "x": 120,
-        "y": 120,
-        "windowXid": FOREIGN,
-    }
-    assert backend._last_synthetic_pointer_diagnostic["postPredicates"] == {
-        "matchesRequested": True,
-        "insideTargetGeometry": True,
-        "certifiedHitWindow": False,
-    }
 
 
 def test_calibration_gate_health_is_rechecked_after_registration_ack(tmp_path: Path) -> None:
@@ -1560,7 +1331,7 @@ def test_gtk_create_real_verifier_replays_startup_states_and_command_budget(
     or shutil.which("xdotool") is None
     or shutil.which("xprop") is None
     or shutil.which("xwininfo") is None
-    or not Path("/usr/bin/python3.13").is_file(),
+    or shutil.which("python3.13") is None,
     reason="private Xvfb/GTK fixture is unavailable",
 )
 @pytest.mark.parametrize(
@@ -1653,7 +1424,7 @@ def test_gtk_create_preserves_top_edge_pointer_through_guarded_focus(
             if argv == ["wmctrl", "-lp"]:
                 if not facts:
                     return ""
-                return f"0x{facts['xid']:x} -1 {facts['pid']} localhost {OwnedGtkCalibrationWindow.TITLE}\n"
+                return f"0x{facts['xid']:x} -1 {facts['pid']} {socket.gethostname()} {OwnedGtkCalibrationWindow.TITLE}\n"
             if argv[:2] == ["xprop", "-id"]:
                 if int(argv[2], 16) != facts["xid"]:
                     raise AssertionError(f"unowned xprop target: {argv!r}")
@@ -1770,6 +1541,574 @@ def test_gtk_create_preserves_top_edge_pointer_through_guarded_focus(
         if xdisplay:
             x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
             x11.XCloseDisplay(xdisplay)
+        xvfb.terminate()
+        xvfb.wait(timeout=3)
+
+
+@pytest.mark.skipif(
+    shutil.which("Xvfb") is None
+    or shutil.which("xdotool") is None
+    or shutil.which("wmctrl") is None
+    or shutil.which("xprop") is None
+    or shutil.which("xwininfo") is None
+    or shutil.which("xinput") is None
+    or shutil.which("python3.13") is None
+    or shutil.which("cc") is None,
+    reason="private Xvfb/GTK calibration fixture is unavailable",
+)
+def test_private_xvfb_calibration_workflow_captures_every_typed_motion_transition(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Run the owned workflow around a private GTK target and retain its full probe trace."""
+
+    from crowley.session import pointer_execution as pointer_execution_module
+
+    xvfb, display, x11, xdisplay = start_private_xvfb(
+        lambda display_fd: (
+            "Xvfb",
+            "-displayfd",
+            str(display_fd),
+            "-screen",
+            "0",
+            "1920x1080x24",
+            "-ac",
+        ),
+        popen_kwargs={
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.PIPE,
+            "start_new_session": True,
+        },
+    )
+    target: OwnedGtkCalibrationWindow | None = None
+    driver: DesktopDriver | None = None
+    wm_process: subprocess.Popen[bytes] | None = None
+    try:
+        python_executable = shutil.which("python3.13")
+        xdotool_executable = shutil.which("xdotool")
+        if python_executable is None or xdotool_executable is None:
+            pytest.skip("private calibration executables are unavailable")
+        xauthority = tmp_path / "private-calibration-Xauthority"
+        xauthority.touch(mode=0o600)
+        env = os.environ.copy()
+        env.update({"DISPLAY": display, "GDK_BACKEND": "x11", "XAUTHORITY": str(xauthority)})
+        wm_process = start_ewmh_window_manager(
+            display=display,
+            xauthority=str(xauthority),
+            workdir=tmp_path / "ewmh-window-manager",
+        )
+        subprocess.run(
+            ["xdotool", "mousemove", "100", "100"],
+            env=env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        rate_directory = tmp_path / "pointer-click-rate"
+        rate_directory.mkdir(mode=0o700)
+        monkeypatch.setattr(pointer_execution_module, "_session_state_directory", lambda: rate_directory)
+        profile = DriverProfile(display=display, xauthority=str(xauthority))
+        backend = X11Backend(
+            profile, input_tool=fixture_input_tool(tmp_path / "input-tool", xdotool_executable)
+        )
+        driver = DesktopDriver(profile=profile, backend=backend, lease_path=tmp_path / "desktop.lock")
+        backend.input_broker = driver.input_broker
+
+        actual_hierarchy = driver.input_hierarchy()
+        used_ids = {row[0] for row in actual_hierarchy}
+        human_pointer = max(used_ids) + 1
+        human_key = human_pointer + 1
+        pointer_master = next(
+            row[1] for row in actual_hierarchy if "pointer" in row[3].casefold() and row[2] == "master"
+        )
+        keyboard_master = next(
+            row[1] for row in actual_hierarchy if "keyboard" in row[3].casefold() and row[2] == "master"
+        )
+        hierarchy = (
+            *actual_hierarchy,
+            (human_pointer, pointer_master, "slave", "pointer:private human pointer"),
+            (human_key, keyboard_master, "slave", "keyboard:private human keyboard"),
+        )
+        synthetic_key_source, synthetic_pointer_source = xtest_sources(hierarchy)
+        monkeypatch.setattr(driver, "input_hierarchy", lambda **_kwargs: hierarchy)
+        game_identity = WindowIdentity(
+            0x700001,
+            os.getpid(),
+            python_executable,
+            "World of Warcraft",
+            "python3.13",
+            0x700002,
+            (0, 0, 1920, 1080),
+            (0, 0, 1920, 1080),
+            0x700002,
+            "private-game-start",
+            display,
+            "private-game-identity",
+            root_xid=0x1,
+            target_event_xids=frozenset({0x700001, 0x700002}),
+        )
+        monkeypatch.setattr(driver, "resolve_identity", lambda **_kwargs: game_identity)
+        operations = (
+            KeyboardProbeOperation(
+                "open_chat",
+                "",
+                (KeyboardProbeStep("press", "Return"), KeyboardProbeStep("release", "Return")),
+            ),
+        )
+        live_keymap = backend.observe_keymap()
+        return_detail = live_keymap.get("Return")
+        if not isinstance(return_detail, int) or return_detail <= 0:
+            pytest.skip("private Xvfb has no measurable Return key")
+        monkeypatch.setattr(driver, "calibration_keyboard_operations", lambda: operations)
+        monkeypatch.setattr(driver, "calibration_keyboard_keymap", lambda: {"Return": return_detail})
+
+        class Observer:
+            def __init__(self, callback: Callable[[XI2Event | None], None]) -> None:
+                self.callback = callback
+                self.events_seen: list[XI2Event] = []
+                self.synthetic_trace = ""
+                self.human_trace = ""
+
+            def _publish(self, event: XI2Event) -> None:
+                self.events_seen.append(event)
+                self.callback(event)
+
+            def collect_until(self, predicate, *, timeout: float) -> str:
+                del timeout
+                synthetic = parse_xi2_records(self.synthetic_trace, require_event=True)
+                for event in synthetic:
+                    self._publish(event)
+                if not predicate(self.events_seen):
+                    raise AssertionError("private calibration observer did not accept the typed probe trace")
+                return self.synthetic_trace
+
+            def wait_for_human(self, predicate, *, timeout: float) -> None:
+                del timeout
+                human = parse_xi2_records(self.human_trace, require_event=True)
+                for event in human:
+                    self._publish(event)
+                if not predicate(self.events_seen):
+                    raise AssertionError("private calibration observer did not accept the deliberate trace")
+
+            def events(self) -> list[XI2Event]:
+                return list(self.events_seen)
+
+            def stop(self) -> None:
+                return None
+
+        observer_box: list[Observer] = []
+        probe_box: list[SyntheticPointerProbe] = []
+
+        def start_observer(*, calibration: bool, callback: Callable[[XI2Event | None], None]):
+            if not calibration:
+                raise AssertionError("private calibration fixture requested a runtime observer")
+            observer = Observer(callback)
+            observer_box.append(observer)
+            return observer
+
+        monkeypatch.setattr(driver, "start_input_observer", start_observer)
+        monkeypatch.setattr(
+            driver,
+            "stop_input_observer",
+            lambda _observer, *, already_stopped=False: None,
+        )
+
+        facts: dict[str, int] = {}
+
+        def command(argv: list[str], *, display: str, xauthority: str, timeout: float = 5.0) -> str:
+            if argv == ["wmctrl", "-lp"]:
+                if not facts:
+                    return ""
+                return f"{hex(facts['xid'])} -1 {facts['pid']} {socket.gethostname()} {OwnedGtkCalibrationWindow.TITLE}\n"
+            result = subprocess.run(
+                argv,
+                env=env | {"DISPLAY": display, "XAUTHORITY": xauthority},
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=max(0.001, timeout),
+            )
+            if result.returncode:
+                raise subprocess.CalledProcessError(
+                    result.returncode, argv, output=result.stdout, stderr=result.stderr
+                )
+            return result.stdout
+
+        def event(
+            event_class: EventClass,
+            *,
+            master: int,
+            source: int,
+            timestamp: int,
+            detail: int | None,
+            child: int | None,
+            root_xy: tuple[float, float] | None = None,
+            event_xy: tuple[float, float] | None = None,
+            valuators: tuple[tuple[int, float, float | None], ...] = (),
+            root_xid: int | None = 0x1,
+            event_xid: int | None = 0x1,
+        ) -> XI2Event:
+            raw = event_class in {
+                EventClass.RAW_KEY_PRESS,
+                EventClass.RAW_KEY_RELEASE,
+                EventClass.RAW_BUTTON_PRESS,
+                EventClass.RAW_BUTTON_RELEASE,
+                EventClass.RAW_MOTION,
+            }
+            return XI2Event(
+                {
+                    EventClass.RAW_KEY_PRESS: 13,
+                    EventClass.KEY_PRESS: 2,
+                    EventClass.RAW_KEY_RELEASE: 14,
+                    EventClass.KEY_RELEASE: 3,
+                    EventClass.RAW_BUTTON_PRESS: 15,
+                    EventClass.BUTTON_PRESS: 4,
+                    EventClass.RAW_BUTTON_RELEASE: 16,
+                    EventClass.BUTTON_RELEASE: 5,
+                    EventClass.RAW_MOTION: 17,
+                    EventClass.MOTION: 6,
+                }[event_class],
+                event_class,
+                master,
+                source,
+                timestamp,
+                detail,
+                None if raw else root_xid,
+                None if raw else event_xid,
+                None if raw else child,
+                None if raw else root_xy,
+                None if raw else event_xy,
+                None if raw else (0, 0, 0),
+                valuators=valuators,
+                modifier_effective=None if raw else 0,
+            )
+
+        def install_probe_trace(probe: SyntheticPointerProbe, window: OwnedWindow) -> None:
+            observer = observer_box[0]
+            profile_capture = driver.xtest_input_profile(hierarchy)
+            if profile_capture.source_device != synthetic_pointer_source:
+                raise AssertionError("XTEST profile pointer source differs from the measured hierarchy")
+            keyboard_source = synthetic_key_source
+            keyboard_parent = next(row[1] for row in hierarchy if row[0] == keyboard_source)
+            records: list[XI2Event] = []
+            timestamp = 100
+            for key_event, _phase in (
+                (EventClass.RAW_KEY_PRESS, "press"),
+                (EventClass.KEY_PRESS, "press"),
+                (EventClass.RAW_KEY_RELEASE, "release"),
+                (EventClass.KEY_RELEASE, "release"),
+            ):
+                records.append(
+                    event(
+                        key_event,
+                        master=keyboard_parent if key_event.name.startswith("RAW") else keyboard_source,
+                        source=keyboard_source,
+                        timestamp=timestamp,
+                        detail=8 if key_event.name.startswith("RAW") else 8,
+                        child=window.xid,
+                    )
+                )
+                timestamp += 1
+            for phase in ("press", "release"):
+                raw_class = EventClass.RAW_KEY_PRESS if phase == "press" else EventClass.RAW_KEY_RELEASE
+                delivered_class = EventClass.KEY_PRESS if phase == "press" else EventClass.KEY_RELEASE
+                records.extend(
+                    (
+                        event(
+                            raw_class,
+                            master=keyboard_parent,
+                            source=keyboard_source,
+                            timestamp=timestamp,
+                            detail=return_detail,
+                            child=window.xid,
+                        ),
+                        event(
+                            delivered_class,
+                            master=keyboard_source,
+                            source=keyboard_source,
+                            timestamp=timestamp + 1,
+                            detail=return_detail,
+                            child=window.xid,
+                            root_xy=probe.origin[:2],
+                            event_xy=probe.origin[:2],
+                        ),
+                    )
+                )
+                timestamp += 2
+            previous = probe.origin[:2]
+            for endpoint in probe.emitted_transitions:
+                endpoint_float = (float(endpoint[0]), float(endpoint[1]))
+                records.extend(
+                    (
+                        event(
+                            EventClass.RAW_MOTION,
+                            master=profile_capture.parent_device,
+                            source=profile_capture.source_device,
+                            timestamp=timestamp,
+                            detail=0,
+                            child=window.xid,
+                            valuators=(
+                                (0, endpoint_float[0], endpoint_float[0]),
+                                (1, endpoint_float[1], endpoint_float[1]),
+                            ),
+                        ),
+                        event(
+                            EventClass.MOTION,
+                            master=profile_capture.source_device,
+                            source=profile_capture.source_device,
+                            timestamp=timestamp,
+                            detail=0,
+                            child=window.xid,
+                            root_xy=previous,
+                            event_xy=previous,
+                            valuators=(
+                                (0, endpoint_float[0], endpoint_float[0]),
+                                (1, endpoint_float[1], endpoint_float[1]),
+                            ),
+                            root_xid=profile_capture.root_xid,
+                            event_xid=profile_capture.root_xid,
+                        ),
+                    )
+                )
+                previous = endpoint_float
+                timestamp += 1
+            records.extend(
+                (
+                    event(
+                        EventClass.RAW_BUTTON_PRESS,
+                        master=profile_capture.parent_device,
+                        source=profile_capture.source_device,
+                        timestamp=timestamp,
+                        detail=1,
+                        child=window.xid,
+                    ),
+                    event(
+                        EventClass.BUTTON_PRESS,
+                        master=profile_capture.source_device,
+                        source=profile_capture.source_device,
+                        timestamp=timestamp + 1,
+                        detail=1,
+                        child=window.xid,
+                        root_xy=previous,
+                        event_xy=previous,
+                        root_xid=profile_capture.root_xid,
+                        event_xid=profile_capture.root_xid,
+                    ),
+                    event(
+                        EventClass.RAW_BUTTON_RELEASE,
+                        master=profile_capture.parent_device,
+                        source=profile_capture.source_device,
+                        timestamp=timestamp + 2,
+                        detail=1,
+                        child=window.xid,
+                    ),
+                    event(
+                        EventClass.BUTTON_RELEASE,
+                        master=profile_capture.source_device,
+                        source=profile_capture.source_device,
+                        timestamp=timestamp + 3,
+                        detail=1,
+                        child=window.xid,
+                        root_xy=previous,
+                        event_xy=previous,
+                        root_xid=profile_capture.root_xid,
+                        event_xid=profile_capture.root_xid,
+                    ),
+                )
+            )
+            human_timestamp = timestamp + 10
+            observer.synthetic_trace = _render_events(records, motion_source=synthetic_pointer_source)
+            human_records = [
+                event(
+                    EventClass.RAW_KEY_PRESS,
+                    master=keyboard_master,
+                    source=human_key,
+                    timestamp=human_timestamp,
+                    detail=38,
+                    child=window.xid,
+                ),
+                event(
+                    EventClass.KEY_PRESS,
+                    master=human_key,
+                    source=human_key,
+                    timestamp=human_timestamp + 1,
+                    detail=38,
+                    child=window.xid,
+                    root_xy=previous,
+                    event_xy=previous,
+                ),
+                event(
+                    EventClass.RAW_KEY_RELEASE,
+                    master=keyboard_master,
+                    source=human_key,
+                    timestamp=human_timestamp + 2,
+                    detail=38,
+                    child=window.xid,
+                ),
+                event(
+                    EventClass.KEY_RELEASE,
+                    master=human_key,
+                    source=human_key,
+                    timestamp=human_timestamp + 3,
+                    detail=38,
+                    child=window.xid,
+                    root_xy=previous,
+                    event_xy=previous,
+                ),
+                event(
+                    EventClass.MOTION,
+                    master=human_pointer,
+                    source=human_pointer,
+                    timestamp=human_timestamp + 4,
+                    detail=0,
+                    child=window.xid,
+                    root_xy=previous,
+                    event_xy=previous,
+                ),
+                event(
+                    EventClass.RAW_BUTTON_PRESS,
+                    master=pointer_master,
+                    source=human_pointer,
+                    timestamp=human_timestamp + 5,
+                    detail=1,
+                    child=window.xid,
+                ),
+                event(
+                    EventClass.BUTTON_PRESS,
+                    master=human_pointer,
+                    source=human_pointer,
+                    timestamp=human_timestamp + 6,
+                    detail=1,
+                    child=window.xid,
+                    root_xy=previous,
+                    event_xy=previous,
+                ),
+                event(
+                    EventClass.RAW_BUTTON_RELEASE,
+                    master=pointer_master,
+                    source=human_pointer,
+                    timestamp=human_timestamp + 7,
+                    detail=1,
+                    child=window.xid,
+                ),
+                event(
+                    EventClass.BUTTON_RELEASE,
+                    master=human_pointer,
+                    source=human_pointer,
+                    timestamp=human_timestamp + 8,
+                    detail=1,
+                    child=window.xid,
+                    root_xy=previous,
+                    event_xy=previous,
+                ),
+            ]
+            observer.human_trace = _render_events(human_records, motion_source=human_pointer)
+
+        original_synthetic = driver.synthetic_target_keyboard_profile
+
+        def synthetic_target_keyboard_profile(*args: object, **kwargs: object) -> SyntheticPointerProbe:
+            probe = original_synthetic(*args, **kwargs)
+            probe_box.append(probe)
+            install_probe_trace(probe, args[0])  # type: ignore[arg-type]
+            return probe
+
+        monkeypatch.setattr(driver, "synthetic_target_keyboard_profile", synthetic_target_keyboard_profile)
+        target = OwnedGtkCalibrationWindow(
+            display=display,
+            xauthority=str(xauthority),
+            python_executable=python_executable,
+            command=command,
+            layout_kind=OwnedGtkCalibrationWindow.LAYOUT_ROOT_CHILD,
+        )
+        original_verify = target._verify
+
+        x11.XWarpPointer.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_ulong,
+            ctypes.c_ulong,
+            ctypes.c_int,
+            ctypes.c_int,
+            ctypes.c_uint,
+            ctypes.c_uint,
+            ctypes.c_int,
+            ctypes.c_int,
+        ]
+        x11.XWarpPointer.restype = ctypes.c_int
+        x11.XFlush.argtypes = [ctypes.c_void_p]
+        x11.XFlush.restype = ctypes.c_int
+
+        def place_pointer_in_target(window: OwnedWindow) -> None:
+            _left, _top, width, height = window.geometry
+            x11.XWarpPointer(
+                xdisplay,
+                0,
+                ctypes.c_ulong(window.xid),
+                0,
+                0,
+                0,
+                0,
+                width // 2,
+                height // 2,
+            )
+            x11.XFlush(xdisplay)
+            deadline = time.monotonic() + 2.0
+            last_observation: tuple[int, int, int] | None = None
+            last_error: DriverError | None = None
+            while time.monotonic() < deadline:
+                try:
+                    observation = backend.pointer_position()
+                except DriverError as exc:
+                    last_error = exc
+                else:
+                    last_observation = observation
+                    if window.contains_xid(observation[2]):
+                        return
+                time.sleep(0.01)
+            if last_error is not None:
+                raise AssertionError(
+                    f"private Xvfb pointer did not enter target; last query failed: {last_error}"
+                ) from last_error
+            raise AssertionError(
+                f"private Xvfb pointer did not enter target; last observation: {last_observation!r}"
+            )
+
+        def capture_identity(pid: int, xid: int, process, **kwargs):
+            facts.update(pid=pid, xid=xid)
+            window = original_verify(pid, xid, process, **kwargs)
+            place_pointer_in_target(window)
+            return window
+
+        target._verify = capture_identity  # type: ignore[method-assign]
+        workflow = InputCalibrationWorkflow(
+            driver,
+            display=display,
+            window_factory=lambda: target,
+        )
+        evidence = workflow.run(human_timeout=1)
+        assert len(probe_box) == 1
+        probe = probe_box[0]
+        assert len(probe.emitted_transitions) >= 2
+        assert evidence.synthetic_motion_seed == probe.seed
+        assert evidence.synthetic_motion_plan == probe.plan
+        assert tuple(transition[10] for transition in evidence.synthetic_motion_transitions) == (
+            probe.emitted_transitions
+        )
+        assert len(
+            [
+                row
+                for row in evidence.event_proof
+                if row[0] == "RawMotion" and row[2] == evidence.synthetic_pointer_source
+            ]
+        ) == len(probe.emitted_transitions)
+    finally:
+        if target is not None and target.window is not None:
+            target.close()
+        if driver is not None:
+            driver.close()
+        if xdisplay:
+            x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
+            x11.XCloseDisplay(xdisplay)
+        if wm_process is not None:
+            stop_ewmh_window_manager(wm_process)
         xvfb.terminate()
         xvfb.wait(timeout=3)
 
@@ -3464,13 +3803,13 @@ class _WorkflowTarget:
             os.getpid(),
             TARGET,
             OwnedGtkCalibrationWindow.TITLE,
-            (0, 0, 480, 240),
+            (800, 400, 480, 240),
             SimpleNamespace(poll=lambda: None),  # type: ignore[arg-type]
             frozenset({TARGET}),
             "/usr/bin/python3",
             "owned-target-start",
             TARGET + 1,
-            (0, 0, 500, 260),
+            (800, 400, 500, 260),
             frozenset({TARGET, TARGET + 1}),
         )
         self.prompted = False
@@ -3495,18 +3834,7 @@ class _WorkflowDriver:
         # Mark this deterministic observer fixture as the native X11 path so
         # the workflow seals and replays its canonical raw/primary transition.
         self.backend = object.__new__(X11Backend)
-        self.backend._last_synthetic_motion_query = (
-            987,
-            595,
-            TARGET,
-            988,
-            596,
-            988,
-            596,
-            TARGET,
-        )
-        self.backend._last_synthetic_pointer_diagnostic = None
-        self.backend.pointer_position = lambda **_kwargs: (10, 10, TARGET)  # type: ignore[method-assign]
+        self.backend.pointer_position = lambda **_kwargs: (987, 595, TARGET)  # type: ignore[method-assign]
         self.observer: _WorkflowObserver | None = None
         self.revocations: list[str] = []
         self.queued_calibration_count = 0
@@ -3535,6 +3863,30 @@ class _WorkflowDriver:
             replace(
                 _event(EventClass.MOTION, master=4, source=4, timestamp=232007474, detail=0),
                 valuators=((0, 988.0, 988.0), (1, 596.0, 596.0)),
+            ),
+        )
+        self._records.insert(
+            9,
+            replace(
+                _event(EventClass.RAW_MOTION, master=2, source=4, timestamp=232007475, detail=0, child=None),
+                valuators=((0, 989.0, 989.0), (1, 597.0, 597.0)),
+            ),
+        )
+        self._records.insert(
+            10,
+            replace(
+                _event(
+                    EventClass.MOTION,
+                    master=4,
+                    source=4,
+                    timestamp=232007475,
+                    detail=0,
+                    root_xy=(988.0, 596.0),
+                    event_xy=(988.0, 596.0),
+                ),
+                valuators=((0, 989.0, 989.0), (1, 597.0, 597.0)),
+                root_xy=(988.0, 596.0),
+                event_xy=(988.0, 596.0),
             ),
         )
         self._keyboard_keymap = {"Return": 36}
@@ -3578,8 +3930,8 @@ class _WorkflowDriver:
                     timestamp=232007505,
                     detail=0,
                 ),
-                root_xy=(988.0, 596.0),
-                event_xy=(988.0, 596.0),
+                root_xy=(989.0, 597.0),
+                event_xy=(989.0, 597.0),
             ),
             _event(
                 EventClass.RAW_KEY_PRESS,
@@ -3716,20 +4068,24 @@ class _WorkflowDriver:
         self.observer = _WorkflowObserver(callback, self._records, self._human, outside=self.outside)
         return self.observer
 
-    def synthetic_target_key_click(self, window: OwnedWindow, *, calibration_ticket) -> None:
-        assert window.contains_xid(TARGET)
-        assert calibration_ticket is self.calibration_ticket
-
     def focus_calibration_target(self, window: OwnedWindow, *, calibration_ticket) -> None:
         assert window.contains_xid(TARGET)
         assert calibration_ticket is not None
 
     def synthetic_target_keyboard_profile(
         self, window: OwnedWindow, *, operations, calibration_ticket
-    ) -> None:
+    ) -> SyntheticPointerProbe:
         assert window.contains_xid(TARGET)
         assert tuple(operations) == self._keyboard_operations
         assert calibration_ticket is not None
+        return SyntheticPointerProbe(
+            origin=(987, 595, TARGET),
+            requested_endpoint=(989, 597),
+            final_observed=(989, 597, TARGET),
+            emitted_transitions=((988, 596), (989, 597)),
+            seed=17,
+            plan=((0.0, 987, 595), (0.1, 988, 596), (0.2, 989, 597)),
+        )
 
     def queue_delayed_calibration_action(
         self,
@@ -3787,6 +4143,90 @@ def test_complete_owned_workflow_preserves_exact_human_and_synthetic_pairs() -> 
     ]
     assert not driver.queued_calibration_count
     assert driver.queue_seen_before_ready
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("unpaired", "wrong-origin", "wrong-final", "outside-intermediate"),
+)
+def test_native_workflow_motion_sequence_rejects_transition_tampering(mutation: str) -> None:
+    """The workflow's captured multi-segment XTEST path remains fully sealed."""
+
+    workflow_driver = _WorkflowDriver(outside=False)
+    target = _WorkflowTarget().window
+    profile = workflow_driver.xtest_input_profile(workflow_driver.input_hierarchy())
+    probe = SyntheticPointerProbe(
+        origin=(987, 595, TARGET),
+        requested_endpoint=(989, 597),
+        final_observed=(989, 597, TARGET),
+        emitted_transitions=((988, 596), (989, 597)),
+        seed=17,
+        plan=((0.0, 987, 595), (0.1, 988, 596), (0.2, 989, 597)),
+    )
+    records = list(workflow_driver._records)
+    raw_motion = [
+        index
+        for index, event in enumerate(records)
+        if event.event_class is EventClass.RAW_MOTION and event.source_device == profile.source_device
+    ]
+    primary_motion = [
+        index
+        for index, event in enumerate(records)
+        if event.event_class is EventClass.MOTION and event.source_device == profile.source_device
+    ]
+    assert len(raw_motion) == len(primary_motion) == len(probe.emitted_transitions)
+    if mutation == "unpaired":
+        records.pop(primary_motion[0])
+    elif mutation == "wrong-origin":
+        records[primary_motion[0]] = replace(
+            records[primary_motion[0]],
+            root_xy=(900.0, 500.0),
+            event_xy=(900.0, 500.0),
+        )
+    elif mutation == "wrong-final":
+        records[raw_motion[-1]] = replace(
+            records[raw_motion[-1]],
+            valuators=((0, 990.0, 990.0), (1, 598.0, 598.0)),
+        )
+        records[primary_motion[-1]] = replace(
+            records[primary_motion[-1]],
+            valuators=((0, 990.0, 990.0), (1, 598.0, 598.0)),
+        )
+    else:
+        outside_endpoint = (1300.0, 700.0)
+        records[raw_motion[0]] = replace(
+            records[raw_motion[0]],
+            valuators=(
+                (0, outside_endpoint[0], outside_endpoint[0]),
+                (1, outside_endpoint[1], outside_endpoint[1]),
+            ),
+        )
+        records[primary_motion[0]] = replace(
+            records[primary_motion[0]],
+            root_xy=outside_endpoint,
+            event_xy=outside_endpoint,
+            valuators=(
+                (0, outside_endpoint[0], outside_endpoint[0]),
+                (1, outside_endpoint[1], outside_endpoint[1]),
+            ),
+        )
+        records[primary_motion[1]] = replace(
+            records[primary_motion[1]],
+            root_xy=outside_endpoint,
+            event_xy=outside_endpoint,
+        )
+        probe = replace(
+            probe,
+            emitted_transitions=((1300, 700), (989, 597)),
+            plan=((0.0, 987, 595), (0.1, 1300, 700), (0.2, 989, 597)),
+        )
+    with pytest.raises(CalibrationError):
+        InputCalibrationWorkflow._canonical_motion_transitions(
+            records,
+            target,
+            profile,
+            synthetic_motion_probe=probe,
+        )
 
 
 def test_workflow_refuses_pointer_above_measured_client_after_guarded_focus() -> None:
@@ -3991,7 +4431,7 @@ def test_active_x11_process_group_cancellation_releases_tracked_keys_and_buttons
 
     backend._cancel_active = CancellationFlag()
     backend._held_keys = {"F13"}
-    backend._held_buttons = {1}
+    backend._held_buttons = set()
     terminated: list[int] = []
     releases: list[list[str]] = []
 
@@ -4042,7 +4482,12 @@ def test_active_x11_process_group_cancellation_releases_tracked_keys_and_buttons
 
     def run() -> None:
         try:
-            backend._run(["xdotool", "click", "1"], timeout=5, generation=1, held_buttons={1})
+            backend._run(
+                ["xdotool", "keydown", "F13"],
+                timeout=5,
+                generation=1,
+                held_keys={"F13"},
+            )
         except Exception as exc:
             result["error"] = exc
 
@@ -4054,7 +4499,7 @@ def test_active_x11_process_group_cancellation_releases_tracked_keys_and_buttons
     assert not thread.is_alive()
     assert terminated and set(terminated) == {4242}
     assert ["xdotool", "keyup", "F13"] in releases
-    assert ["xdotool", "mouseup", "1"] in releases
+    assert ["xdotool", "mouseup", "1"] not in releases
     assert isinstance(result.get("error"), DriverError)
 
 
@@ -10025,7 +10470,12 @@ def test_spawn_registration_revoke_cannot_let_a_gated_child_escape(
     monkeypatch.setattr("crowley.session.driver.subprocess.Popen", spawn)
     try:
         with pytest.raises(DriverError, match="cancel"):
-            backend._run(["xdotool", "click", "1"], timeout=0.2, generation=1, held_buttons={1})
+            backend._run(
+                ["xdotool", "keydown", "F13"],
+                timeout=0.2,
+                generation=1,
+                held_keys={"F13"},
+            )
         assert child.returncode == -9
         assert terminated == []
         assert not backend._active_processes

@@ -99,6 +99,10 @@ def _encode_native_payload(value: dict) -> str:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     _reset_public_schema()
+    from crowley.server.db import migrate
+
+    with psycopg.connect(DB_URL) as conn:
+        migrate(conn)
     monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
@@ -145,6 +149,9 @@ def _install_legacy_scan_before_010() -> None:
             """,
             (house_id, at, at, json.dumps({})),
         )
+        from crowley.server.db import migrate
+
+        migrate(conn)
 
 
 @pytest.fixture

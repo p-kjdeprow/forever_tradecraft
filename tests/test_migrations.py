@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import resources
@@ -12,7 +14,13 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from crowley.server.db import migrate
+from crowley.server.db import (
+    MigrationStateError,
+    MigrationVerificationError,
+    migrate,
+    migration_status,
+    verify_current,
+)
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
@@ -30,6 +38,7 @@ MIGRATION_NAMES = tuple(
         (8, "trade_queue"),
         (9, "paper_capabilities"),
         (10, "house_integrity"),
+        (11, "migration_ledger"),
     )
 )
 
@@ -88,6 +97,7 @@ def _apply_migrations(conn: psycopg.Connection, names: tuple[str, ...]) -> None:
         with conn.transaction():
             conn.execute(_migration_sql(name))
             conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
+    conn.commit()
 
 
 def _insert_upgrade_fixture(conn: psycopg.Connection, *, include_paper_run: bool = True) -> _FixtureIds:
@@ -298,6 +308,7 @@ def test_upgrade_fixture_preserves_rows_and_drops_009_defaults() -> None:
         _apply_migrations(conn, MIGRATION_NAMES[:8])
         fixture = _insert_upgrade_fixture(conn)
         before = _affected_snapshot(conn, fixture)
+        conn.commit()
 
         assert migrate(conn) == list(MIGRATION_NAMES[8:])
         assert _affected_snapshot(conn, fixture) == before
@@ -320,6 +331,223 @@ def test_upgrade_fixture_preserves_rows_and_drops_009_defaults() -> None:
                 ).fetchone()[0]
                 is None
             )
+        assert (
+            conn.execute("SELECT count(*) FROM schema_migrations WHERE checksum IS NULL").fetchone()[0] == 0
+        )
+        assert (
+            conn.execute(
+                """
+            SELECT is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'schema_migrations'
+              AND column_name = 'checksum'
+            """
+            ).fetchone()[0]
+            == "NO"
+        )
+
+
+def test_checksum_mismatch_is_refused() -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+    with psycopg.connect(DB_URL) as conn:
+        assert migrate(conn) == list(MIGRATION_NAMES)
+        with conn.transaction():
+            conn.execute(
+                "UPDATE schema_migrations SET checksum = repeat('0', 64) WHERE name = %s",
+                (MIGRATION_NAMES[0],),
+            )
+        with pytest.raises(MigrationStateError, match="checksum mismatch"):
+            migrate(conn)
+
+
+def test_unknown_applied_migration_is_refused() -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+    with psycopg.connect(DB_URL) as conn:
+        with conn.transaction():
+            conn.execute(
+                "CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
+            )
+            conn.execute("INSERT INTO schema_migrations (name) VALUES ('999_future.sql')")
+        with pytest.raises(MigrationStateError, match="unknown to this package"):
+            migrate(conn)
+
+
+def test_status_and_startup_verification_are_read_only() -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+    with psycopg.connect(DB_URL) as conn:
+        _apply_migrations(conn, MIGRATION_NAMES[:10])
+        before = conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall()
+        status = migration_status(conn)
+        assert status.applied == MIGRATION_NAMES[:10]
+        assert status.pending == MIGRATION_NAMES[10:]
+        with pytest.raises(MigrationVerificationError, match="run `crowley-server migrate`"):
+            verify_current(conn)
+        after = conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall()
+        assert after == before
+
+
+def test_server_startup_refuses_pending_migrations_without_mutation(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+    with psycopg.connect(DB_URL) as conn:
+        _apply_migrations(conn, MIGRATION_NAMES[:10])
+        before_ledger = conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall()
+        before_tables = conn.execute(
+            """
+            SELECT table_name, table_type
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+            """
+        ).fetchall()
+        before_columns = conn.execute(
+            """
+            SELECT table_name, column_name, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            ORDER BY table_name, ordinal_position
+            """
+        ).fetchall()
+
+    monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
+    monkeypatch.setenv("CROWLEY_API_TOKEN", "startup-test-token")
+    monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
+    from fastapi.testclient import TestClient
+
+    from crowley.server.app import app
+    from crowley.server.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        with pytest.raises(MigrationVerificationError, match="run `crowley-server migrate`"):
+            with TestClient(app):
+                pass
+    finally:
+        get_settings.cache_clear()
+
+    with psycopg.connect(DB_URL) as conn:
+        assert conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall() == before_ledger
+        assert (
+            conn.execute(
+                """
+                SELECT table_name, table_type
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+                """
+            ).fetchall()
+            == before_tables
+        )
+        assert (
+            conn.execute(
+                """
+                SELECT table_name, column_name, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                ORDER BY table_name, ordinal_position
+                """
+            ).fetchall()
+            == before_columns
+        )
+
+
+def test_concurrent_apply_is_serialized_by_the_advisory_lock() -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+
+    def apply() -> list[str]:
+        with psycopg.connect(DB_URL, autocommit=True) as conn:
+            return migrate(conn)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: apply(), range(2)))
+    assert sorted(results, key=len) == [[], list(MIGRATION_NAMES)]
+
+
+def test_migration_status_reports_checksum_mismatch() -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+    with psycopg.connect(DB_URL) as conn:
+        assert migrate(conn) == list(MIGRATION_NAMES)
+        with conn.transaction():
+            conn.execute(
+                "UPDATE schema_migrations SET checksum = repeat('f', 64) WHERE name = %s",
+                (MIGRATION_NAMES[-1],),
+            )
+        status = migration_status(conn)
+        assert status.checksum_mismatch == (MIGRATION_NAMES[-1],)
+
+
+def test_status_command_prints_without_applying(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+    with psycopg.connect(DB_URL) as conn:
+        _apply_migrations(conn, MIGRATION_NAMES[:8])
+        before_ledger = conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall()
+        before_tables = conn.execute(
+            """
+            SELECT table_name, table_type
+            FROM information_schema.tables
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+            """
+        ).fetchall()
+        before_columns = conn.execute(
+            """
+            SELECT table_name, column_name, is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+            ORDER BY table_name, ordinal_position
+            """
+        ).fetchall()
+
+    from crowley.server.__main__ import main
+    from crowley.server.config import get_settings
+
+    monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
+    monkeypatch.setenv("CROWLEY_API_TOKEN", "status-test-token")
+    monkeypatch.setattr(sys, "argv", ["crowley-server", "migrate", "--status"])
+    get_settings.cache_clear()
+    try:
+        main()
+    finally:
+        get_settings.cache_clear()
+    output = capsys.readouterr().out
+    assert f"pending: {', '.join(MIGRATION_NAMES[8:])}" in output
+    assert "checksum-mismatch: none" in output
+
+    with psycopg.connect(DB_URL) as conn:
+        assert conn.execute("SELECT name FROM schema_migrations ORDER BY name").fetchall() == before_ledger
+        assert (
+            conn.execute(
+                """
+                SELECT table_name, table_type
+                FROM information_schema.tables
+                WHERE table_schema = 'public'
+                ORDER BY table_name
+                """
+            ).fetchall()
+            == before_tables
+        )
+        assert (
+            conn.execute(
+                """
+                SELECT table_name, column_name, is_nullable, column_default
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                ORDER BY table_name, ordinal_position
+                """
+            ).fetchall()
+            == before_columns
+        )
 
 
 def test_house_mismatch_is_rejected_by_named_constraint() -> None:
@@ -328,6 +556,7 @@ def test_house_mismatch_is_rejected_by_named_constraint() -> None:
     with psycopg.connect(DB_URL) as conn:
         _apply_migrations(conn, MIGRATION_NAMES[:9])
         fixture = _insert_upgrade_fixture(conn, include_paper_run=False)
+        conn.commit()
         assert migrate(conn) == list(MIGRATION_NAMES[9:])
         with pytest.raises(
             psycopg.errors.ForeignKeyViolation,
@@ -378,6 +607,7 @@ def test_migration_010_fails_on_preexisting_house_mismatch() -> None:
                 Jsonb({"rows": {}}),
             ),
         )
+        conn.commit()
         with pytest.raises(
             psycopg.errors.ForeignKeyViolation,
             match="market_observations_sweep_house_fkey",
@@ -394,6 +624,7 @@ def test_legacy_tables_are_read_only_but_readable() -> None:
     with psycopg.connect(DB_URL) as conn:
         _apply_migrations(conn, MIGRATION_NAMES[:9])
         fixture = _insert_upgrade_fixture(conn, include_paper_run=False)
+        conn.commit()
         assert migrate(conn) == list(MIGRATION_NAMES[9:])
         before = _affected_snapshot(conn, fixture)
         assert conn.execute("SELECT count(*) FROM scans").fetchone()[0] == 1

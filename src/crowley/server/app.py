@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -9,10 +8,8 @@ from crowley.core.game_target import packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
 
 from .config import get_settings
-from .db import create_pool, migrate
+from .db import create_pool, verify_current
 from .routes import account, addon, dashboard, health, houses, paper, queues, reference, scans
-
-log = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -23,12 +20,10 @@ async def lifespan(app: FastAPI):
     app.state.reference_item_ids = tuple(sorted(item.item_id for item in catalog.items))
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     pool = create_pool(settings.database_url)
-    with pool.connection() as conn:
-        applied = migrate(conn)
-        if applied:
-            log.info("applied migrations: %s", ", ".join(applied))
-    app.state.pool = pool
     try:
+        with pool.connection() as conn:
+            verify_current(conn)
+        app.state.pool = pool
         yield
     finally:
         pool.close()

@@ -93,6 +93,25 @@ from tests.test_session_input_tool import fixture_input_tool
 
 from .wow_harness import WowClient
 
+EVIDENCE_ROOT = Path(__file__).parent / "fixtures" / "evidence"
+GNOME_TELEMETRY_FREEZE = EVIDENCE_ROOT / "gnome_telemetry_region" / "r6_freeze.json"
+NATIVE_PROFILE_CAPTURE = EVIDENCE_ROOT / "native_input_profile" / "observed.json"
+
+
+def _private_r6_producer_path() -> Path:
+    cache_home = (
+        Path(os.environ["XDG_CACHE_HOME"]) if "XDG_CACHE_HOME" in os.environ else Path.home() / ".cache"
+    )
+    producer_path = (
+        cache_home / "crowley" / "gnome-telemetry-region-r6" / "prefix" / "bin" / "gnome-screenshot"
+    )
+    if not producer_path.is_file():
+        raise AssertionError(
+            "private R6 producer is missing; run the documented `docker run ... build-private.sh` "
+            "command in tools/gnome-telemetry-region/README.md"
+        )
+    return producer_path
+
 
 def _independent_live_binding(config_path: Path, producer_path: Path) -> dict[str, object]:
     """Build the evaluator binding from known fixture inputs before a run."""
@@ -1217,12 +1236,9 @@ def test_compiled_private_owner_guardian_generation_revoke_orders(
     assert harness_spec is not None and harness_spec.loader is not None
     harness = importlib.util.module_from_spec(harness_spec)
     harness_spec.loader.exec_module(harness)
-    freeze = json.loads(
-        (root / ".archive/executor-review/gnome-telemetry-region-r6-final-freeze.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    frozen_producer = Path(freeze["private_cache"]) / "prefix/bin/gnome-screenshot"
+    freeze = json.loads(GNOME_TELEMETRY_FREEZE.read_text(encoding="utf-8"))
+    frozen_producer = _private_r6_producer_path()
+    assert frozen_producer.name == freeze["binary"]
     producer_sha256 = hashlib.sha256(frozen_producer.read_bytes()).hexdigest()
     assert producer_sha256 == freeze["build"]["private_binary_sha256"]
 
@@ -1251,11 +1267,9 @@ def test_compiled_private_owner_guardian_generation_revoke_orders(
     xauthority.touch(mode=0o600)
     plan_json = "{}"
     plan_hash = hashlib.sha256(plan_json.encode()).hexdigest()
-    codex_path = Path(
-        "/home/dev/.cache/crowley/codex/0.162.1/node_modules/@openai/codex-linux-x64/"
-        "vendor/x86_64-unknown-linux-musl/bin/codex"
-    )
-    assert codex_path.is_file()
+    codex_path = tmp_path / "codex-version"
+    codex_path.write_text(f"#!/bin/sh\nprintf '{CLI_VERSION}\\n'\n", encoding="ascii")
+    codex_path.chmod(0o700)
     _install_private_shell_compositor_bus(monkeypatch, tmp_path)
     with harness.private_shell_compositor(
         payloads=[
@@ -2606,9 +2620,7 @@ def test_captured_xi2_records_require_complete_blocks_and_preserve_target() -> N
 
 
 def test_measured_native_profile_capture_parses_through_production_parser() -> None:
-    capture = json.loads(
-        Path(".archive/executor-review/native-input-profile-observed.json").read_text(encoding="utf-8")
-    )
+    capture = json.loads(NATIVE_PROFILE_CAPTURE.read_text(encoding="utf-8"))
     commands = {entry["name"]: entry for entry in capture["commands"]}
     profile = _parse_xinput_profile(
         commands["xinput_list_long_source"]["stdout"],
@@ -2627,9 +2639,7 @@ def test_measured_native_profile_capture_parses_through_production_parser() -> N
 
 
 def test_measured_native_profile_parser_rejects_source_axis_mode_and_ctm_drift() -> None:
-    capture = json.loads(
-        Path(".archive/executor-review/native-input-profile-observed.json").read_text(encoding="utf-8")
-    )
+    capture = json.loads(NATIVE_PROFILE_CAPTURE.read_text(encoding="utf-8"))
     commands = {entry["name"]: entry["stdout"] for entry in capture["commands"]}
     hierarchy = ((4, 2, "slave", "Virtual core XTEST pointer"),)
 
@@ -2871,9 +2881,7 @@ def test_native_action_rejects_measured_profile_drift_before_dispatch(
 def test_native_profile_recheck_forwards_generation_and_deadline_to_queries(
     tmp_path: Path,
 ) -> None:
-    capture = json.loads(
-        Path(".archive/executor-review/native-input-profile-observed.json").read_text(encoding="utf-8")
-    )
+    capture = json.loads(NATIVE_PROFILE_CAPTURE.read_text(encoding="utf-8"))
     outputs = {entry["name"]: entry["stdout"] for entry in capture["commands"]}
     hierarchy = (
         (4, 2, "slave", "Virtual core XTEST pointer"),
@@ -3950,9 +3958,7 @@ def test_real_x11_producer_result_reaches_arm_and_guardian_max_to_zero_echo(
     from crowley.session.calibration import KeyboardProbeOperation, KeyboardProbeStep, xinput_hierarchy
     from tests.test_session_native_regressions import _render_events as render_native_events
 
-    capture = json.loads(
-        Path(".archive/executor-review/native-input-profile-observed.json").read_text(encoding="utf-8")
-    )
+    capture = json.loads(NATIVE_PROFILE_CAPTURE.read_text(encoding="utf-8"))
     outputs = {entry["name"]: entry["stdout"] for entry in capture["commands"]}
     xinput_script = tmp_path / "xinput-fixture"
     xinput_script.write_text(

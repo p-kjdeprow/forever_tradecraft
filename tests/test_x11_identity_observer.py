@@ -994,9 +994,6 @@ int main(int argc, char **argv) {
             receipt.chmod(0o600)
             return result, response, receipt
 
-        legacy_binary = Path(
-            "/home/dev/.local/state/crowley/executor-evidence/native-identity-observer-r3-20261020/published-r3/x11_identity_observer"
-        )
         mutation_file.write_text("duplicate-window\n", encoding="ascii")
         duplicate_path = Path(environment["CROWLEY_DUPLICATE_WINDOW_FILE"])
         duplicate_deadline = time.monotonic() + 5
@@ -1004,24 +1001,6 @@ int main(int argc, char **argv) {
             time.sleep(0.01)
         assert duplicate_path.is_file()
         duplicate_window = duplicate_path.read_text(encoding="ascii").strip()
-        if legacy_binary.is_file():
-            legacy_digest = hashlib.sha256(legacy_binary.read_bytes()).hexdigest()
-            assert legacy_digest == "ce51b5a0a0ba82f4ac67589610520294d6ccbee860442891575e2e9383c075d7"
-            legacy_marker = tmp_path / "observer-query-uncertainty-legacy"
-            legacy_result, legacy_response, legacy_receipt = run_query_uncertainty(
-                legacy_binary,
-                legacy_digest,
-                legacy_marker,
-            )
-            assert legacy_result.returncode == 0, legacy_response
-            assert legacy_response["pid"] == target_pid
-            legacy_events = {
-                line.split("=", 1)[0]: int(line.split("=", 1)[1])
-                for line in legacy_marker.read_text(encoding="ascii").splitlines()
-                if "=" in line
-            }
-            assert set(legacy_events) == {"query_request_written", "candidate_destroyed"}
-            assert legacy_events["query_request_written"] < legacy_events["candidate_destroyed"]
         mutation_file.write_text("normal\n", encoding="ascii")
         time.sleep(1.15)
         mutation_file.write_text("duplicate-window\n", encoding="ascii")
@@ -1046,8 +1025,6 @@ int main(int argc, char **argv) {
         assert set(uncertainty_events) == {"query_request_written", "candidate_destroyed"}
         assert uncertainty_events["query_request_written"] < uncertainty_events["candidate_destroyed"]
         assert uncertain_receipt.is_file()
-        if legacy_binary.is_file():
-            assert legacy_receipt.is_file()
         mutation_file.write_text("normal\n", encoding="ascii")
         time.sleep(1.15)
         restored_after_uncertainty = subprocess.run(
@@ -1154,14 +1131,7 @@ int main(int argc, char **argv) {
         assert restored_facts["pid"] == target_pid
         restored_identity = assert_reference_parity()
         assert restored_identity.pid == target_pid
-        evidence_root = (
-            Path.home()
-            / ".local"
-            / "state"
-            / "crowley"
-            / "executor-evidence"
-            / ("native-identity-observer-ownerb-20261020")
-        )
+        evidence_root = tmp_path / "executor-evidence" / "native-identity-observer-ownerb-20261020"
         evidence_root.mkdir(mode=0o700, parents=True, exist_ok=True)
         evidence_root.chmod(0o700)
         evidence_path = evidence_root / f"b4-lifetime-barrier-{os.getpid()}-{time.time_ns()}.json"

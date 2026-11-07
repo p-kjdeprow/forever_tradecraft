@@ -80,6 +80,7 @@ FOREIGN = 0x1A00011
 TARGET_DESCENDANT = 0x60011A
 TARGET_FRAME = 0x60011B
 AUTHENTIC_CODEX_PATH = "/home/dev/.cache/crowley/codex/0.162.1/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
+NATIVE_ABSENCE_EVIDENCE = Path(__file__).parent / "fixtures" / "evidence" / "native_absence"
 
 
 def _xtest_profile(
@@ -4970,12 +4971,8 @@ def test_native_absence_classifier_rejects_combined_header_payload_and_loading_s
 def test_native_absence_fragments_reject_retained_negatives_and_accept_game_regions() -> None:
     """Check the fragment rule against retained decoder evidence and crops."""
 
-    evidence_dir = Path(
-        "/home/dev/.local/state/crowley/executor-evidence/runtime-relink/"
-        "native-admission-outcomes-r6-parent-20261018"
-    )
-    if not evidence_dir.is_dir():
-        pytest.skip("retained parent absence evidence is unavailable")
+    evidence_dir = NATIVE_ABSENCE_EVIDENCE
+    assert evidence_dir.is_dir()
     negative_names = (
         "black-loading.png",
         "encoded-header-and-payload-occlusion.png",
@@ -4984,8 +4981,7 @@ def test_native_absence_fragments_reject_retained_negatives_and_accept_game_regi
     )
     for name in negative_names:
         path = evidence_dir / name
-        if not path.is_file():
-            pytest.skip(f"retained parent image is unavailable: {name}")
+        assert path.is_file()
         assert daemon_module._strict_native_absence_image(path, expected_size=(256, 256)) is False
         decoder = PixelDecoder(crop=(80, 48, 256, 256))
         with Image.open(path) as image:
@@ -4995,8 +4991,7 @@ def test_native_absence_fragments_reject_retained_negatives_and_accept_game_regi
 
     for index in range(1, 5):
         path = evidence_dir / f"ordinary-game-region-{index}.png"
-        if not path.is_file():
-            pytest.skip(f"retained ordinary crop is unavailable: {path.name}")
+        assert path.is_file()
         assert daemon_module._strict_native_absence_image(path, expected_size=(256, 256)) is True
 
 

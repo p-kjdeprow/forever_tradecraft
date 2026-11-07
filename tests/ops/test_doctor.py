@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tomllib
 from dataclasses import replace
 from pathlib import Path
 
@@ -47,6 +48,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
         path.chmod(0o700)
         binaries[name] = path
     session = Path("deploy/config/session.toml").read_text(encoding="utf-8")
+    template_pins = tomllib.loads(session)["session"]
     session = session.replace(
         'wine_prefix = "/path/to/measured/wine-prefix"',
         f'wine_prefix = "{target.wine_prefix}"',
@@ -57,12 +59,12 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
         str(binaries["identity-observer"]),
     )
     session = session.replace(
-        "5f4cb94ba23d079885ac9aaf7034619f60cf59f33dd91ae2f91174631c675b58",
+        template_pins["identity_observer_executable_sha256"],
         hashlib.sha256(binaries["identity-observer"].read_bytes()).hexdigest(),
     )
     session = session.replace("/path/to/pinned/gnome-screenshot", str(binaries["telemetry-region"]))
     session = session.replace(
-        "cb938cab1bd99dc088d05f6f55c8a0443401320755e2037633e7f9ac6dbe2396",
+        template_pins["telemetry_region_executable_sha256"],
         hashlib.sha256(binaries["telemetry-region"].read_bytes()).hexdigest(),
     )
     session = session.replace(

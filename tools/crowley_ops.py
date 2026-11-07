@@ -28,6 +28,7 @@ from crowley.session import evidence
 from crowley.session.cli import _socket_request
 from crowley.session.config import load_config
 from tools import market_backup
+from tools.market_backup import BACKUP_ID_RE
 
 OPS_SCHEMA = "crowley.host-operations-v1"
 BACKUP_RECORD_SCHEMA = "crowley.host-last-good-backup-v1"
@@ -48,7 +49,6 @@ BACKUP_MAX_AGE_SECONDS = 75 * 60
 UPLOAD_MAX_AGE_SECONDS = 30 * 60
 WAIT_DUE_GRACE_SECONDS = 4 * 60
 SERVICE_TIMEOUT_SECONDS = 5.0
-BACKUP_ID_RE = re.compile(r"^beta-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_COMMAND_STATES = frozenset(
     {

@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
 from .api import CraftingCapabilities, Recipe
+from .canonical import sha256_canonical_json
 
 EMPTY_CAPABILITIES = CraftingCapabilities()
 
@@ -58,10 +57,7 @@ def capabilities_from_mapping(value: Mapping[str, Any] | None) -> CraftingCapabi
 
 
 def capabilities_hash(capabilities: CraftingCapabilities) -> str:
-    encoded = json.dumps(
-        capabilities.canonical, sort_keys=True, separators=(",", ":"), ensure_ascii=True
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return sha256_canonical_json(capabilities.canonical)
 
 
 def recipe_gate(

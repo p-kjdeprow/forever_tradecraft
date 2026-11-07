@@ -8,7 +8,7 @@ from crowley.analysis.books import Book, Group
 from crowley.analysis.metrics import compute_metrics
 from crowley.core.auction_rules import rules_for_house
 from crowley.core.house import House
-from crowley.trading.__main__ import _select_sweeps, _sweep_step_times
+from crowley.trading.__main__ import _select_sweeps
 from crowley.trading.accounts import Account, Mail
 from crowley.trading.api import (
     Buy,
@@ -20,10 +20,9 @@ from crowley.trading.api import (
     VendorBuy,
     VendorSell,
 )
-from crowley.trading.data import load_facts, precompute_statistics, validate_recipes
-from crowley.trading.engine import _mark_equity, run_backtest
+from crowley.trading.data import load_facts
+from crowley.trading.engine import _mark_equity_details, run_backtest
 from crowley.trading.execution import (
-    CLICK_BUDGET,
     CRAFT_SECONDS,
     TIME_BUDGET,
     ExecutionContext,
@@ -33,12 +32,38 @@ from crowley.trading.execution import (
     obtainable_units,
 )
 from crowley.trading.market import Market
+from crowley.trading.recipes import validate_recipes
 from crowley.trading.report import build_report, text_summary
+from crowley.trading.statistics import (
+    DemandStatistics,
+    FairStatistics,
+    RiskStatistics,
+    StatisticsPoint,
+    precompute_statistics,
+)
+from crowley.trading.steps import sweep_step_times
 from crowley.trading.strategies import crafting
 from crowley.trading.strategies.vendor_arb import VendorArbStrategy
 
 ITEM = 7
 RULES = rules_for_house(House("us", "normal", "alliance"))
+
+
+def statistics_point(fair: int, demand: int = 10, eligible_seconds: float = 0.0) -> StatisticsPoint:
+    return StatisticsPoint(
+        fair=FairStatistics(Fraction(fair), Fraction(fair - 10), Fraction(fair + 10), None, 20),
+        demand=DemandStatistics(
+            0.0,
+            Fraction(0),
+            0,
+            Fraction(0),
+            Fraction(demand),
+            None,
+            eligible_seconds,
+        ),
+        risk=RiskStatistics(None, 0.0, 0, None, None, 0),
+        books=1,
+    )
 
 
 def book(
@@ -424,7 +449,7 @@ def test_click_budget_rotation_and_one_step_per_recorded_sweep():
         ITEM: [book(100, [("a", 10, 1)], sweep_id=1)],
         8: [book(200, [("a", 10, 1)], item_id=8, sweep_id=1)],
     }
-    first = Script("first", {0: [VendorBuy(ITEM, 1)] * (CLICK_BUDGET // 2 + 1)})
+    first = Script("first", {0: [VendorBuy(ITEM, 1)] * (TIME_BUDGET // 2 + 1)})
     second = Script("second")
     result = run(
         books,
@@ -517,11 +542,7 @@ def test_partial_sweep_marks_latest_observation_and_reports_stale_items():
     }
 
     def point(fair):
-        return {
-            "fair": {"value": fair, "band": {"p25": fair - 10, "p75": fair + 10}, "n": 20},
-            "demand": {"purchased_units_per_day": 10},
-            "risk": {},
-        }
+        return statistics_point(fair)
 
     statistics = {
         stale_item: [point(100), point(100), point(500)],
@@ -572,11 +593,7 @@ def test_truncated_craft_posts_actual_output_quantity_on_the_next_step():
             for index, t in enumerate((0, 900, 1_800), start=1)
         ]
     }
-    trusted = {
-        "fair": {"value": 100, "band": {"p25": 90, "p75": 110}, "n": 20},
-        "demand": {"purchased_units_per_day": 188, "eligible_covered_seconds": 6 * 3_600},
-        "risk": {},
-    }
+    trusted = statistics_point(100, 188, 6 * 3_600)
     item_facts = {
         reagent: ItemFacts(reagent, 0, 1, 1, 20, 0),
         output: ItemFacts(output, 1, None, None, 20, 0),
@@ -627,7 +644,7 @@ def test_fractional_prices_and_summary_statistics_fail_loudly():
         Market(fractional, {}, facts(), (), rules=RULES)
 
     summary = compute_metrics(two_sweeps([("a", 10, 1)]))
-    with pytest.raises(ValueError, match="indexed"):
+    with pytest.raises(ValueError, match="cover every book"):
         run_backtest(
             two_sweeps([("a", 10, 1)]),
             summary,
@@ -686,7 +703,7 @@ def test_sweep_selection_uses_step_times_and_keeps_exclusion_counts_consistent()
 
 def test_non_integral_sweep_time_is_refused():
     with pytest.raises(ValueError, match="whole seconds"):
-        _sweep_step_times({ITEM: [book(0.5, [("a", 10, 1)], sweep_id=1)]})
+        sweep_step_times({ITEM: [book(0.5, [("a", 10, 1)], sweep_id=1)]})
 
 
 def test_fact_loading_filters_status_and_rejects_null_required_facts():
@@ -766,22 +783,14 @@ def test_account_view_counts_mail_as_in_transit_until_the_arrival_boundary():
 
 def test_liquidity_aware_mark_uses_purchase_net_and_vendor_for_excess():
     books = {ITEM: [book(0, [("cheap", 30, 15), ("a", 60, 20)], sweep_id=1)]}
-    statistics = {
-        ITEM: [
-            {
-                "fair": {"value": 100, "band": {"p25": 90, "p75": 110}, "n": 20},
-                "demand": {"purchased_units_per_day": 10},
-                "risk": {},
-            }
-        ]
-    }
+    statistics = {ITEM: [statistics_point(100)]}
     market = Market(books, statistics, facts(sell=10), (), rules=RULES)
     market.set_step(0, 0, {(ITEM, "cheap"): 15})
     account = Account("x", frozenset(), 0, 0)
     account.add_inventory(ITEM, 8)
     # The strategy-facing book has only the 60-copper level left: five units are
     # liquid at 60 * 95%, and the remaining three use the vendor value.
-    assert _mark_equity(account, market, 0, 0) == Fraction(315)
+    assert _mark_equity_details(account, market, 0)[0] == Fraction(315)
 
 
 def test_craft_time_truncates_and_then_rejects_when_no_time_fits():
@@ -875,7 +884,6 @@ def test_wind_down_rejection_does_not_consume_time_budget():
     context = ExecutionContext(market, [account], 0, 0, {}, wind_down=True, rules=RULES)
     assert not execute_intent(context, account, VendorBuy(ITEM, 1))
     assert context.time_used == 0
-    assert context.clicks_used == 0
     assert account.clicks == 0
     assert account.rejections == {"wind_down": 1}
 

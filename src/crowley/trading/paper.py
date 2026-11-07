@@ -7,10 +7,11 @@ import json
 import os
 import time
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import psycopg
 from psycopg.types.json import Jsonb
@@ -19,9 +20,12 @@ from crowley.core.auction_rules import rules_for_house
 from crowley.core.house import House
 
 from .api import CraftingCapabilities
-from .data import load_client_data, load_commodity_books, precompute_statistics
+from .data import load_client_data, load_commodity_books
 from .engine import BacktestResult, run_backtest
+from .numbers import as_fraction
 from .requirements import EMPTY_CAPABILITIES, capabilities_from_mapping, capabilities_hash
+from .statistics import precompute_statistics
+from .steps import sweep_step_times
 from .strategies import build
 
 DEFAULT_STRATEGIES = (
@@ -49,12 +53,81 @@ PAPER_RUN_COLUMNS: tuple[tuple[str, str], ...] = (
     ("ruleset", "h.ruleset"),
     ("faction", "h.faction"),
 )
-PAPER_RUN_COLUMN_INDEX = {name: index for index, (name, _expression) in enumerate(PAPER_RUN_COLUMNS)}
 PAPER_RUN_SELECT = ", ".join(f"{expression} AS {name}" for name, expression in PAPER_RUN_COLUMNS)
 
 
 class PaperError(RuntimeError):
     """A paper run cannot be created or advanced without operator action."""
+
+
+class _IdRow(NamedTuple):
+    id: int
+
+
+class _BuildRow(NamedTuple):
+    client_version: str
+    client_build: int | str
+    id: int
+    step_t: int
+
+
+class _SweepRow(NamedTuple):
+    client_version: str
+    client_build: int | str
+    id: int
+    started_at: object
+
+
+class _PaperRunRow(NamedTuple):
+    id: int
+    name: str
+    house_id: int
+    house: str
+    client_build: str
+    start_t: int
+    capital_copper: int
+    strategies: object
+    weights: object
+    demand_share: object
+    engine_digest: str
+    capabilities: object
+    capabilities_hash: str
+    region: str
+    ruleset: str
+    faction: str
+
+
+class _StoredStepRow(NamedTuple):
+    step_t: int
+    sweep_key: str
+    equity: object
+    realized: object
+    cash: object
+
+
+class _StoredIntentRow(NamedTuple):
+    strategy: str
+    ordinal: int
+    intent: object
+    outcome: str
+    detail: object
+
+
+class _LatestStepRow(NamedTuple):
+    step_t: int
+    equity: object
+
+
+class _StatusStepRow(NamedTuple):
+    step_t: int
+    equity: object
+    realized: object
+
+
+class _PendingRow(NamedTuple):
+    step_t: int
+    sweep_key: str
+    intents: object
 
 
 class _ReadOnlyLoaderConnection:
@@ -67,8 +140,6 @@ class _ReadOnlyLoaderConnection:
         return getattr(self._connection, name)
 
     def transaction(self):
-        from contextlib import nullcontext
-
         return nullcontext(self._connection)
 
 
@@ -79,24 +150,12 @@ def database_url(value: str | None = None) -> str:
     return resolved
 
 
-def _fraction(value: Any) -> Fraction:
-    return value if isinstance(value, Fraction) else Fraction(str(value))
+def _full_build(row: _BuildRow | _SweepRow) -> str:
+    return f"{row.client_version}.{row.client_build}"
 
 
-def _row(row: Any, key: str, index: int) -> Any:
-    return row[key] if isinstance(row, Mapping) else row[index]
-
-
-def _full_build(row: Any) -> str:
-    return f"{_row(row, 'client_version', 0)}.{_row(row, 'client_build', 1)}"
-
-
-def _paper_run_value(row: Any, column: str) -> Any:
-    return _row(row, column, PAPER_RUN_COLUMN_INDEX[column])
-
-
-def _build_rows(conn: Any, house_id: int) -> list[Any]:
-    return conn.execute(
+def _build_rows(conn: Any, house_id: int) -> list[_BuildRow]:
+    rows = conn.execute(
         """
         SELECT ms.client_version, ms.client_build, ms.id,
                MAX((mo.query ->> 'startedAt')::bigint) AS step_t
@@ -111,6 +170,7 @@ def _build_rows(conn: Any, house_id: int) -> list[Any]:
         """,
         (house_id,),
     ).fetchall()
+    return [_BuildRow(*row) for row in rows]
 
 
 def _source_digest() -> str:
@@ -165,9 +225,9 @@ def _parse_weights(value: str | Sequence[Any] | None, count: int) -> list[Fracti
         parts = [part.strip() for part in value.split(",")]
         if not parts or any(not part for part in parts):
             raise ValueError("weights must be a comma-separated list")
-        weights = [_fraction(part) for part in parts]
+        weights = [as_fraction(part) for part in parts]
     else:
-        weights = [_fraction(part) for part in value]
+        weights = [as_fraction(part) for part in value]
     if len(weights) != count:
         raise ValueError("weights must have one value per strategy")
     if any(weight <= 0 for weight in weights):
@@ -211,7 +271,7 @@ def create_run(
         raise ValueError("name must not be empty")
     names = _parse_strategies(strategies)
     parsed_weights = _parse_weights(weights, len(names))
-    parsed_demand_share = _fraction(demand_share)
+    parsed_demand_share = as_fraction(demand_share)
     if not 0 < parsed_demand_share <= 1:
         raise ValueError("demand-share must be in (0, 1]")
     start_t = _parse_start(start)
@@ -236,7 +296,7 @@ def create_run(
             house_row = conn.execute("SELECT id FROM houses WHERE key = %s", (house,)).fetchone()
             if house_row is None:
                 raise PaperError(f"unknown house {house!r}")
-            house_id = int(_row(house_row, "id", 0))
+            house_id = _IdRow(*house_row).id
             rows = _build_rows(conn, house_id)
             if not rows:
                 raise PaperError(f"no market sweeps found for house {house!r}")
@@ -266,36 +326,37 @@ def create_run(
                     capabilities_digest,
                 ),
             ).fetchone()
-            return int(_row(result, "id", 0))
+            return _IdRow(*result).id
 
 
-def _run_from_row(row: Any) -> dict[str, Any]:
-    raw_capabilities = _paper_run_value(row, "capabilities")
+def _run_from_row(row: tuple[object, ...]) -> dict[str, Any]:
+    parsed = _PaperRunRow(*row)
+    raw_capabilities = parsed.capabilities
     capabilities = capabilities_from_mapping(raw_capabilities)
     if raw_capabilities != capabilities.canonical:
         raise PaperError("paper run capabilities are not in canonical form")
-    stored_capabilities_hash = str(_paper_run_value(row, "capabilities_hash"))
+    stored_capabilities_hash = str(parsed.capabilities_hash)
     if stored_capabilities_hash != capabilities_hash(capabilities):
         raise PaperError("paper run capabilities changed or have an invalid hash")
     house_identity = House(
-        str(_paper_run_value(row, "region")),
-        str(_paper_run_value(row, "ruleset")),
-        str(_paper_run_value(row, "faction")),
+        str(parsed.region),
+        str(parsed.ruleset),
+        str(parsed.faction),
     )
     return {
-        "id": int(_paper_run_value(row, "id")),
-        "name": str(_paper_run_value(row, "name")),
-        "house_id": int(_paper_run_value(row, "house_id")),
-        "house": str(_paper_run_value(row, "house")),
+        "id": int(parsed.id),
+        "name": str(parsed.name),
+        "house_id": int(parsed.house_id),
+        "house": str(parsed.house),
         "house_identity": house_identity,
         "rules": rules_for_house(house_identity),
-        "client_build": str(_paper_run_value(row, "client_build")),
-        "start_t": int(_paper_run_value(row, "start_t")),
-        "capital_copper": int(_paper_run_value(row, "capital_copper")),
-        "strategies": list(_paper_run_value(row, "strategies")),
-        "weights": list(_paper_run_value(row, "weights")),
-        "demand_share": str(_paper_run_value(row, "demand_share")),
-        "engine_digest": str(_paper_run_value(row, "engine_digest")),
+        "client_build": str(parsed.client_build),
+        "start_t": int(parsed.start_t),
+        "capital_copper": int(parsed.capital_copper),
+        "strategies": list(parsed.strategies),
+        "weights": list(parsed.weights),
+        "demand_share": str(parsed.demand_share),
+        "engine_digest": str(parsed.engine_digest),
         "capabilities": capabilities,
         "capabilities_hash": stored_capabilities_hash,
     }
@@ -332,21 +393,6 @@ def _immutable_config(run: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def _book_step_times(books: Mapping[int, Sequence[Any]]) -> dict[int, int]:
-    """Return the represented step time for each loaded sweep."""
-
-    step_times: dict[int, int] = {}
-    for item_books in books.values():
-        for book in item_books:
-            if book.sweep_id is None:
-                continue
-            step_t = int(book.t)
-            sweep_id = int(book.sweep_id)
-            prior = step_times.get(sweep_id)
-            step_times[sweep_id] = step_t if prior is None else max(prior, step_t)
-    return step_times
-
-
 def _replay(db_url: str, name: str) -> tuple[dict[str, Any], BacktestResult, float]:
     started = time.monotonic()
     with psycopg.connect(database_url(db_url)) as conn:
@@ -368,18 +414,18 @@ def _replay(db_url: str, name: str) -> tuple[dict[str, Any], BacktestResult, flo
             ).fetchall()
             loader = _ReadOnlyLoaderConnection(conn)
             books = load_commodity_books(loader, run["house"])
-            represented_times = _book_step_times(books)
+            represented_times = sweep_step_times(books)
+            typed_rows = tuple(_SweepRow(*row) for row in rows)
             represented_sweeps = {
-                int(_row(row, "id", 2)): row
-                for row in rows
-                if int(_row(row, "id", 2)) in represented_times
-                and represented_times[int(_row(row, "id", 2))] >= run["start_t"]
+                row.id: row
+                for row in typed_rows
+                if row.id in represented_times and represented_times[row.id] >= run["start_t"]
             }
             for row in represented_sweeps.values():
                 if _full_build(row) != run["client_build"]:
                     raise PaperError("client build changed since run creation; launch will need a new run")
             names = _parse_strategies(run["strategies"])
-            weights = [_fraction(value) for value in run["weights"]]
+            weights = [as_fraction(value) for value in run["weights"]]
             facts, recipes = load_client_data(loader, run["house"], run["client_build"])
             statistics = precompute_statistics(books)
             strategies = [build(name) for name in names]
@@ -393,7 +439,7 @@ def _replay(db_url: str, name: str) -> tuple[dict[str, Any], BacktestResult, flo
                 run["capital_copper"],
                 start_t=run["start_t"],
                 wind_down_hours=0,
-                demand_share=_fraction(run["demand_share"]),
+                demand_share=as_fraction(run["demand_share"]),
                 capabilities=run["capabilities"],
                 rules=run["rules"],
             )
@@ -414,7 +460,7 @@ def _replay(db_url: str, name: str) -> tuple[dict[str, Any], BacktestResult, flo
 
 
 def _copper(value: Any) -> str:
-    amount = _fraction(value)
+    amount = as_fraction(value)
     return str(amount.numerator) if amount.denominator == 1 else f"{amount.numerator}/{amount.denominator}"
 
 
@@ -454,13 +500,14 @@ def _stored_steps(conn: Any, run_id: int) -> dict[int, dict[str, Any]]:
         (run_id,),
     ).fetchall()
     result: dict[int, dict[str, Any]] = {}
-    for row in rows:
-        result[int(_row(row, "step_t", 0))] = {
-            "t": int(_row(row, "step_t", 0)),
-            "sweep_key": str(_row(row, "sweep_key", 1)),
-            "equity": _row(row, "equity", 2),
-            "realized": _row(row, "realized", 3),
-            "cash": _row(row, "cash", 4),
+    for raw_row in rows:
+        row = _StoredStepRow(*raw_row)
+        result[row.step_t] = {
+            "t": row.step_t,
+            "sweep_key": row.sweep_key,
+            "equity": row.equity,
+            "realized": row.realized,
+            "cash": row.cash,
         }
     return result
 
@@ -476,13 +523,14 @@ def _stored_intents(conn: Any, run_id: int, step_t: int) -> dict[str, list[dict[
         (run_id, step_t),
     ).fetchall()
     result: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        strategy = str(_row(row, "strategy", 0))
+    for raw_row in rows:
+        row = _StoredIntentRow(*raw_row)
+        strategy = row.strategy
         result.setdefault(strategy, []).append(
             {
-                "intent": _row(row, "intent", 2),
-                "outcome": _row(row, "outcome", 3),
-                "detail": _row(row, "detail", 4),
+                "intent": row.intent,
+                "outcome": row.outcome,
+                "detail": row.detail,
             }
         )
     return result
@@ -546,7 +594,7 @@ def _write_records(conn: Any, run_id: int, records: Sequence[dict[str, Any]], ex
 
 
 def _gold(value: Any) -> str:
-    return f"{float(_fraction(value)) / 10_000:.2f}g"
+    return f"{float(as_fraction(value)) / 10_000:.2f}g"
 
 
 def _pending_intents(record: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -604,12 +652,15 @@ def step_run(db_url: str, name: str) -> str:
             else:
                 latest = conn.execute(
                     "SELECT step_t, equity FROM paper_steps WHERE run_id = %s ORDER BY step_t DESC LIMIT 1",
-                    (int(_row(live, "id", 0)),),
+                    (live_run["id"],),
                 ).fetchone()
-                latest_t = "none" if latest is None else int(_row(latest, "step_t", 0))
-                total = (
-                    _copper(run["capital_copper"]) if latest is None else _row(latest, "equity", 1)["total"]
-                )
+                if latest is None:
+                    latest_t = "none"
+                    total = _copper(run["capital_copper"])
+                else:
+                    latest_row = _LatestStepRow(*latest)
+                    latest_t = latest_row.step_t
+                    total = latest_row.equity["total"]
     output = (
         f"steps_added={added} latest_t={latest_t} total_equity={_gold(total)} "
         f"replay_seconds={replay_seconds:.2f}"
@@ -645,9 +696,10 @@ def status_run(db_url: str, name: str, last_intents: int = 20) -> str:
                 lines.append("latest_t=none")
                 lines.append(f"total_equity={_gold(run['capital_copper'])}")
             else:
-                step_t = int(_row(step, "step_t", 0))
-                equity = _row(step, "equity", 1)
-                realized = _row(step, "realized", 2)
+                status_step = _StatusStepRow(*step)
+                step_t = status_step.step_t
+                equity = status_step.equity
+                realized = status_step.realized
                 lines.append(f"latest_t={step_t}")
                 for strategy in run["strategies"]:
                     lines.append(
@@ -663,12 +715,13 @@ def status_run(db_url: str, name: str, last_intents: int = 20) -> str:
                     """,
                     (run["id"], step_t),
                 ).fetchall()
-                for row in intents[-last_intents:] if last_intents else ():
-                    intent = json.dumps(_row(row, "intent", 2), sort_keys=True, separators=(",", ":"))
-                    detail = json.dumps(_row(row, "detail", 4), sort_keys=True, separators=(",", ":"))
+                for raw_row in intents[-last_intents:] if last_intents else ():
+                    row = _StoredIntentRow(*raw_row)
+                    intent = json.dumps(row.intent, sort_keys=True, separators=(",", ":"))
+                    detail = json.dumps(row.detail, sort_keys=True, separators=(",", ":"))
                     lines.append(
-                        f"intent strategy={_row(row, 'strategy', 0)} ordinal={_row(row, 'ordinal', 1)} "
-                        f"intent={intent} outcome={_row(row, 'outcome', 3)} detail={detail}"
+                        f"intent strategy={row.strategy} ordinal={row.ordinal} "
+                        f"intent={intent} outcome={row.outcome} detail={detail}"
                     )
             pending = conn.execute(
                 """
@@ -679,12 +732,10 @@ def status_run(db_url: str, name: str, last_intents: int = 20) -> str:
                 (run["id"],),
             ).fetchone()
             if pending is not None:
+                pending_row = _PendingRow(*pending)
                 lines.append("pending (outcome not final):")
-                lines.append(
-                    f"pending_t={_row(pending, 'step_t', 0)} "
-                    f"pending_sweep_key={_row(pending, 'sweep_key', 1)}"
-                )
-                pending_values = _row(pending, "intents", 2)
+                lines.append(f"pending_t={pending_row.step_t} pending_sweep_key={pending_row.sweep_key}")
+                pending_values = pending_row.intents
                 for strategy, intent_list in pending_values.items():
                     for ordinal, intent_value in enumerate(intent_list):
                         intent = json.dumps(intent_value, sort_keys=True, separators=(",", ":"))

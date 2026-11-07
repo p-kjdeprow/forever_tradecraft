@@ -28,6 +28,25 @@ DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 RULES = rules_for_house(House("us", "normal", "alliance"))
 
 
+def test_vendor_supply_catalog_heuristic_matches_reviewed_ids() -> None:
+    assert vendor_supply_ids() == {
+        2320,
+        2321,
+        2325,
+        2605,
+        2678,
+        2692,
+        2880,
+        3371,
+        3372,
+        4289,
+        4291,
+        4470,
+        8343,
+        8925,
+    }
+
+
 def test_paper_defaults_use_the_provisional_measured_four_strategy_order(monkeypatch, capsys):
     expected = ("crafting_alchemy", "crafting_engineering", "dip_reversion", "vendor_arb")
     assert paper.DEFAULT_STRATEGIES == expected

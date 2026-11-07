@@ -7,7 +7,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Any
+from typing import Any, NamedTuple
 
 MAX_GAP = 1260
 EXPIRY_SLACK = 60
@@ -93,7 +93,7 @@ class Interval:
         return self.walk.reached_ceiling
 
 
-def _common_ceiling(left: Fraction | None, right: Fraction | None) -> Fraction | None:
+def common_ceiling(left: Fraction | None, right: Fraction | None) -> Fraction | None:
     if left is None:
         return right
     if right is None:
@@ -105,29 +105,14 @@ def _group_map(book: Book) -> dict[int | str, Group]:
     return {group.result_id: group for group in book.groups}
 
 
-def bottom_walk(
-    before: Book,
-    after: Book,
-    *,
-    ceiling: Fraction | None = None,
-    common_ceiling: Fraction | None = None,
-    dt: float | None = None,
-    max_gap: float = MAX_GAP,
-) -> BottomWalk:
+def bottom_walk(before: Book, after: Book, *, dt: float | None = None) -> BottomWalk:
     """Walk depletion from the cheapest retained groups.
 
-    ``ceiling`` is mainly useful for callers constructing an interval with a
-    precomputed common ceiling.  By default it is the common ceiling of the
-    two books.  The function intentionally does not try to infer purchases
-    above the first untouched or partially retained group.
+    The function intentionally does not try to infer purchases above the first
+    untouched or partially retained group.
     """
 
-    del max_gap  # The caller decides whether an interval is valid.
-    if ceiling is not None and common_ceiling is not None:
-        raise TypeError("pass only one of ceiling and common_ceiling")
-    common = common_ceiling if common_ceiling is not None else _common_ceiling(before.ceiling, after.ceiling)
-    if ceiling is not None:
-        common = ceiling
+    common = common_ceiling(before.ceiling, after.ceiling)
     elapsed = after.t - before.t if dt is None else dt
     after_by_id = _group_map(after)
     in_scope = sorted(
@@ -166,8 +151,8 @@ def valid_intervals(books: Iterable[Book], max_gap: float = MAX_GAP) -> list[Int
     for before, after in zip(ordered, ordered[1:], strict=False):
         dt = after.t - before.t
         if 0 < dt <= max_gap:
-            common = _common_ceiling(before.ceiling, after.ceiling)
-            intervals.append(Interval(before, after, dt, common, bottom_walk(before, after, ceiling=common)))
+            common = common_ceiling(before.ceiling, after.ceiling)
+            intervals.append(Interval(before, after, dt, common, bottom_walk(before, after)))
         else:
             intervals.append(None)
     return intervals
@@ -228,10 +213,19 @@ def _owners(row_data: Any) -> int:
     return owners
 
 
-def _row_value(row: Any, key: str, index: int) -> Any:
-    if isinstance(row, dict):
-        return row[key]
-    return row[index]
+class _CommodityRow(NamedTuple):
+    sweep_id: int
+    started_at: object
+    item_id: int
+    kind: str
+    coverage: str
+    cutoff: object
+    query: object
+    result_id: int | str | None
+    quantity: int
+    unit_numerator: int
+    unit_denominator: int
+    row_data: object
 
 
 def load_commodity_books(conn: Any, house_key: str) -> dict[int, list[Book]]:
@@ -266,19 +260,21 @@ def load_commodity_books(conn: Any, house_key: str) -> dict[int, list[Book]]:
             (house_key,),
         ).fetchall()
 
+    typed_rows = tuple(_CommodityRow(*row) for row in rows)
+
     grouped: dict[tuple[int, int], dict[str, Any]] = {}
-    for row in rows:
-        sweep_id = _row_value(row, "id", 0)
-        item_id = int(_row_value(row, "item_id", 2))
-        coverage = _row_value(row, "coverage", 4)
-        query = _json_value(_row_value(row, "query", 6))
+    for row in typed_rows:
+        sweep_id = row.sweep_id
+        item_id = int(row.item_id)
+        coverage = row.coverage
+        query = _json_value(row.query)
         if not isinstance(query, dict) or query.get("kind") != "queried":
             raise ValueError("commodity observation query must have kind 'queried'")
         started_at = query.get("startedAt")
         if type(started_at) is not int:
             raise ValueError("commodity observation query.startedAt must be an integer")
         started = float(started_at)
-        cutoff_value = _json_value(_row_value(row, "cutoff", 5))
+        cutoff_value = _json_value(row.cutoff)
         if not isinstance(cutoff_value, dict):
             raise ValueError("commodity observation cutoff is not an object")
         cutoff_kind = cutoff_value.get("kind")
@@ -303,12 +299,12 @@ def load_commodity_books(conn: Any, house_key: str) -> dict[int, list[Book]]:
                 "groups": {},
             },
         )
-        result_id = _row_value(row, "result_id", 7)
+        result_id = row.result_id
         if result_id is None:
             continue
-        quantity = int(_row_value(row, "quantity", 8))
-        unit = _fraction(_row_value(row, "unit_numerator", 9), _row_value(row, "unit_denominator", 10))
-        row_data = _row_value(row, "row_data", 11)
+        quantity = int(row.quantity)
+        unit = _fraction(row.unit_numerator, row.unit_denominator)
+        row_data = row.row_data
         time_left = _exact_seconds(row_data)
         owners = _owners(row_data)
         prior = entry["groups"].get(result_id)

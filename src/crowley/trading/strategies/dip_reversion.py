@@ -15,7 +15,6 @@ from crowley.trading.api import (
     MarketView,
     Post,
     Strategy,
-    VendorSell,
 )
 
 from .common import (
@@ -31,6 +30,7 @@ from .common import (
     net_proceeds_per_unit,
     target_sell_price,
     trustworthy_fair,
+    vendor_sell,
 )
 
 DEFAULT_PARAMS = {
@@ -58,10 +58,6 @@ class _Plan:
     item_id: int
     snapshot: ItemSnapshot
     facts: ItemFacts
-
-
-def _vendor_sell(item_id: int, quantity: int) -> VendorSell | None:
-    return VendorSell(item_id, quantity) if quantity > 0 else None
 
 
 def _twentieth_price(levels) -> int | None:
@@ -145,7 +141,7 @@ class DipReversionStrategy:
 
         for item_id, quantity in sorted(vendor_exits):
             plan = plans[item_id]
-            sell = _vendor_sell(item_id, quantity)
+            sell = vendor_sell(item_id, quantity)
             if sell is None:
                 continue
             intents.append(sell)

@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from fractions import Fraction
 from typing import Any
 
 from crowley.analysis.books import Book, Interval, valid_intervals
 from crowley.core.auction_rules import AuctionHouseRules
 
 from .api import ItemFacts, ItemSnapshot, Level, MarketView, Recipe
+from .fees import deposit
+from .numbers import as_fraction
+from .recipes import validate_recipes
+from .statistics import StatisticsPoint, precompute_statistics
 
 
 def _as_item_books(books: Mapping[int, Sequence[Book]] | Sequence[Book]) -> dict[int, list[Book]]:
@@ -43,51 +46,6 @@ def _sweep_key(book: Book) -> Any:
     return book.sweep_id if book.sweep_id is not None else ("timestamp", book.t)
 
 
-def _point_for(statistics: Mapping[Any, Any], item_id: int, index: int) -> Mapping[str, Any]:
-    raw = statistics.get(item_id)
-    if raw is None:
-        raw = statistics.get(str(item_id))
-    if raw is None:
-        raise ValueError(f"missing indexed statistics for item {item_id}")
-    if isinstance(raw, Mapping):
-        keys = set(raw)
-        expected = set(range(len(raw)))
-        if keys != expected or index not in raw:
-            raise ValueError(
-                "statistics must be an indexed per-book sequence; summary mappings are not accepted"
-            )
-        point = raw[index]
-    elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
-        if index >= len(raw):
-            raise ValueError(f"statistics for item {item_id} are not indexed for every book")
-        point = raw[index]
-    else:
-        raise ValueError("statistics must be indexed per book; summary mappings are not accepted")
-    if not isinstance(point, Mapping):
-        raise ValueError(f"statistics point {item_id}[{index}] is not a mapping")
-    return point
-
-
-def _metric_value(point: Mapping[str, Any], section: str, key: str) -> Any:
-    value = point.get(section)
-    if isinstance(value, Mapping):
-        return value.get(key)
-    return None
-
-
-def _fair_band(point: Mapping[str, Any]) -> tuple[Fraction, Fraction] | None:
-    band = _metric_value(point, "fair", "band")
-    if isinstance(band, Mapping):
-        low, high = band.get("p25"), band.get("p75")
-    elif isinstance(band, Sequence) and len(band) == 2:
-        low, high = band
-    else:
-        low = high = None
-    if low is None or high is None:
-        return None
-    return Fraction(low), Fraction(high)
-
-
 @dataclass(frozen=True)
 class _Sweep:
     key: Any
@@ -101,7 +59,7 @@ class Market:
     def __init__(
         self,
         books: Mapping[int, Sequence[Book]] | Sequence[Book],
-        statistics: Mapping[Any, Any] | None,
+        statistics: Mapping[int, Sequence[StatisticsPoint]] | None,
         facts: Mapping[int, ItemFacts],
         recipes: Sequence[Recipe],
         *,
@@ -112,21 +70,17 @@ class Market:
         self.rules = rules
         self.books = _as_item_books(books)
         if not statistics:
-            from .data import precompute_statistics
-
             statistics = precompute_statistics(self.books)
-        self.statistics: Mapping[Any, Any] = statistics
+        self.statistics: Mapping[int, Sequence[StatisticsPoint]] = statistics
         self._facts = {int(item_id): fact for item_id, fact in facts.items()}
         # Keep direct ExecutionContext users on the same validated recipe
         # contract as run_backtest; malformed requirement ids must never reach
         # a Craft mutation path.
-        from .data import validate_recipes
-
         self._recipes = validate_recipes(tuple(recipes))
         for item_books in self.books.values():
             for book in item_books:
                 for group in book.groups:
-                    unit = Fraction(group.unit)
+                    unit = as_fraction(group.unit)
                     if unit.denominator != 1:
                         raise ValueError(
                             f"commodity price for item {book.item_id} is not integral: {group.unit}"
@@ -168,19 +122,11 @@ class Market:
 
     def _validate_statistics(self) -> None:
         for item_id, item_books in self.books.items():
-            if item_id not in self.statistics and str(item_id) not in self.statistics:
+            points = self.statistics.get(item_id)
+            if points is None:
                 raise ValueError(f"missing indexed statistics for item {item_id}")
-            raw = self.statistics.get(item_id, self.statistics.get(str(item_id)))
-            if isinstance(raw, Mapping):
-                if set(raw) != set(range(len(item_books))):
-                    raise ValueError(
-                        "statistics must be an indexed per-book sequence; summary mappings are not accepted"
-                    )
-            elif isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
-                if len(raw) != len(item_books):
-                    raise ValueError(f"statistics for item {item_id} do not cover every book")
-            else:
-                raise ValueError("statistics must be indexed per book; summary mappings are not accepted")
+            if len(points) != len(item_books):
+                raise ValueError(f"statistics for item {item_id} do not cover every book")
 
     @property
     def times(self) -> tuple[float, ...]:
@@ -200,10 +146,6 @@ class Market:
 
     def book(self, item_id: int, index: int) -> Book:
         return self.books[item_id][index]
-
-    def next_book(self, item_id: int, index: int) -> Book | None:
-        item_books = self.books.get(item_id, [])
-        return item_books[index + 1] if index + 1 < len(item_books) else None
 
     def interval(self, item_id: int, sweep_index: int) -> Interval | None:
         return self._intervals.get((item_id, sweep_index))
@@ -233,13 +175,15 @@ class Market:
                 continue
             quantity = max(0, group.quantity - self._purchased_for(item_id, group.result_id))
             if quantity:
-                unit = Fraction(group.unit)
+                unit = as_fraction(group.unit)
                 if unit.denominator != 1:
                     raise ValueError(f"commodity price for item {item_id} is not integral: {unit}")
                 quantities.append(Level(unit.numerator, quantity))
-        point = _point_for(self.statistics, item_id, index)
-        fair_raw = _metric_value(point, "fair", "value")
-        fair = None if fair_raw is None else Fraction(fair_raw)
+        point = self.statistics[item_id][index]
+        fair = point.fair.value
+        fair_band = (
+            None if point.fair.p25 is None or point.fair.p75 is None else (point.fair.p25, point.fair.p75)
+        )
         return ItemSnapshot(
             item_id=item_id,
             t=_whole_seconds(book.t),
@@ -247,17 +191,13 @@ class Market:
             visible_min=quantities[0].unit_price if quantities else None,
             visible_units=sum(level.quantity for level in quantities),
             fair=fair,
-            fair_band=_fair_band(point),
-            fair_n=int(_metric_value(point, "fair", "n") or 0),
-            trend_per_day=_metric_value(point, "fair", "trend_per_day"),
-            demand_units_per_day=_fraction_or_none(_metric_value(point, "demand", "purchased_units_per_day")),
-            demand_eligible_seconds=float(
-                _metric_value(point, "demand", "eligible_covered_seconds")
-                or _metric_value(point, "demand", "covered_seconds")
-                or 0
-            ),
-            volatility_per_hour=_metric_value(point, "risk", "volatility_per_hour"),
-            half_life_hours=_metric_value(point, "risk", "half_life_hours"),
+            fair_band=fair_band,
+            fair_n=point.fair.n,
+            trend_per_day=point.fair.trend_per_day,
+            demand_units_per_day=point.demand.purchased_units_per_day,
+            demand_eligible_seconds=point.demand.eligible_covered_seconds,
+            volatility_per_hour=point.risk.volatility_per_hour,
+            half_life_hours=point.risk.half_life_hours,
         )
 
     def view(self) -> MarketView:
@@ -285,15 +225,7 @@ class Market:
             raise ValueError(f"unknown item facts: {item_id}")
         if quantity < 0:
             raise ValueError("quantity cannot be negative")
-        from .execution import deposit
-
         return deposit(fact.sell_price, quantity, duration_hours, self.rules)
-
-
-def _fraction_or_none(value: Any) -> Fraction | None:
-    if value is None:
-        return None
-    return value if isinstance(value, Fraction) else Fraction(value)
 
 
 class _MarketView:
@@ -329,12 +261,7 @@ class _MarketView:
             raise ValueError(f"unknown item facts: {item_id}")
         if quantity < 0:
             raise ValueError("quantity cannot be negative")
-        from .execution import deposit
-
         return deposit(fact.sell_price, quantity, duration_hours, self.rules)
 
 
-MarketViewImpl = _MarketView
-
-
-__all__ = ["Market", "MarketViewImpl"]
+__all__ = ["Market"]

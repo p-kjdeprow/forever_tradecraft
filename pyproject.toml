@@ -37,6 +37,7 @@ dev = [
 [tool.ruff]
 line-length = 110
 target-version = "py312"
+extend-exclude = [".archive"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
@@ -45,6 +46,13 @@ select = ["E", "F", "I", "B", "UP"]
 testpaths = ["tests"]
 addopts = ["-n", "16", "--dist", "worksteal"]
 tmp_path_retention_policy = "failed"
+markers = [
+    "native: tests requiring native helper binaries or native client contracts",
+    "process: tests that spawn or inspect external processes",
+    "x11: tests requiring an X11 display or input backend",
+    "db: tests requiring a database connection",
+    "slow: tests that are intentionally slower than the default unit-test path",
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["E501"]

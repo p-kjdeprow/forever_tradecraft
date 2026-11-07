@@ -1,0 +1,578 @@
+[
+  {
+    "category": "checkout-path",
+    "count": 1,
+    "match": "repos/pegasus",
+    "path": "README.md"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "http://127.0.0.1:8080",
+    "path": "README.md"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "localhost:8080/healthz",
+    "path": "README.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 3,
+    "match": "/home/dev",
+    "path": "README.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/you",
+    "path": "README.md"
+  },
+  {
+    "category": "machine-url",
+    "count": 2,
+    "match": "127.0.0.1",
+    "path": "deploy/.env.example"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "127.0.0.1:5432/crowley",
+    "path": "deploy/.env.example"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "http://127.0.0.1:8080",
+    "path": "deploy/config/companion.toml"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "deploy/config/companion.toml"
+  },
+  {
+    "category": "posix-home",
+    "count": 4,
+    "match": "/home/dev",
+    "path": "deploy/config/routes/stormwind.json"
+  },
+  {
+    "category": "checkout-path",
+    "count": 1,
+    "match": "repos/pegasus",
+    "path": "deploy/config/session.toml"
+  },
+  {
+    "category": "mutter-auth",
+    "count": 1,
+    "match": ".mutter-Xwaylandauth",
+    "path": "deploy/config/session.toml"
+  },
+  {
+    "category": "posix-home",
+    "count": 9,
+    "match": "/home/dev",
+    "path": "deploy/config/session.toml"
+  },
+  {
+    "category": "runtime-dir",
+    "count": 3,
+    "match": "/run/user/1000",
+    "path": "deploy/config/session.toml"
+  },
+  {
+    "category": "checkout-path",
+    "count": 3,
+    "match": "repos/pegasus",
+    "path": "deploy/crowley-companion.service"
+  },
+  {
+    "category": "posix-home",
+    "count": 3,
+    "match": "/home/dev",
+    "path": "deploy/crowley-companion.service"
+  },
+  {
+    "category": "systemd-absolute-path",
+    "count": 1,
+    "match": "/home/dev/.local/bin/uv",
+    "path": "deploy/crowley-companion.service"
+  },
+  {
+    "category": "systemd-absolute-path",
+    "count": 1,
+    "match": "/home/dev/repos/pegasus",
+    "path": "deploy/crowley-companion.service"
+  },
+  {
+    "category": "systemd-absolute-path",
+    "count": 1,
+    "match": "/home/dev/repos/pegasus/deploy/.env",
+    "path": "deploy/crowley-companion.service"
+  },
+  {
+    "category": "checkout-path",
+    "count": 3,
+    "match": "repos/pegasus",
+    "path": "deploy/crowley-health.service"
+  },
+  {
+    "category": "checkout-path",
+    "count": 3,
+    "match": "repos/pegasus",
+    "path": "deploy/crowley-market-backup.service"
+  },
+  {
+    "category": "checkout-path",
+    "count": 3,
+    "match": "repos/pegasus",
+    "path": "deploy/crowley-paper-trading.service"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "deploy/crowley-session.example.toml"
+  },
+  {
+    "category": "runtime-dir",
+    "count": 1,
+    "match": "/run/user/1000",
+    "path": "deploy/crowley-session.example.toml"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "127.0.0.1:5432",
+    "path": "deploy/docker-compose.yml"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "Localhost",
+    "path": "deploy/docker-compose.yml"
+  },
+  {
+    "category": "checkout-path",
+    "count": 1,
+    "match": "repos/pegasus",
+    "path": "docs/ARCHITECTURE.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "docs/ARCHITECTURE.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "docs/GAME_SETUP.md"
+  },
+  {
+    "category": "checkout-path",
+    "count": 1,
+    "match": "repos/pegasus",
+    "path": "docs/HANDOFF.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "docs/HANDOFF.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "docs/MARKET_RECOVERY.md"
+  },
+  {
+    "category": "checkout-path",
+    "count": 1,
+    "match": "repos/pegasus",
+    "path": "docs/REPEATING_SCANS.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "docs/REPEATING_SCANS.md"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/runtime-performance-decision.json",
+    "path": "docs/RUNTIME_PERFORMANCE.md"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/runtime-performance.json",
+    "path": "docs/RUNTIME_PERFORMANCE.md"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "127.0.0.1:55471/",
+    "path": "docs/TESTING.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 3,
+    "match": "/home/dev",
+    "path": "docs/TESTING.md"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "http://127.0.0.1:8080",
+    "path": "src/crowley/companion/config.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "src/crowley/data/game_target.json"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "127.0.0.1",
+    "path": "src/crowley/server/config.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "127.0.0.1:5432/crowley",
+    "path": "src/crowley/server/config.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "src/crowley/session/config.py"
+  },
+  {
+    "category": "runtime-dir",
+    "count": 3,
+    "match": "/run/user/1000",
+    "path": "src/crowley/session/config.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 4,
+    "match": "threading.local",
+    "path": "src/crowley/session/daemon.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "src/crowley/session/model.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/crowley-model-neutral",
+    "path": "src/crowley/session/model.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 3,
+    "match": "http://127.0.0.1:8080",
+    "path": "src/crowley/trading/__main__.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 3,
+    "match": "http://127.0.0.1:8080",
+    "path": "src/crowley/trading/queue_cli.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/stale-wow",
+    "path": "tests/test_companion.py"
+  },
+  {
+    "category": "checkout-path",
+    "count": 1,
+    "match": "repos/pegasus",
+    "path": "tests/test_crowley_ops.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "http://127.0.0.1:8080",
+    "path": "tests/test_launch_target.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 11,
+    "match": "/home/dev",
+    "path": "tests/test_launch_target.py"
+  },
+  {
+    "category": "docker-path",
+    "count": 4,
+    "match": "/var/lib/docker",
+    "path": "tests/test_market_backup.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "172.20.0.2",
+    "path": "tests/test_market_backup.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "172.30.0.1",
+    "path": "tests/test_market_backup.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "172.30.0.2",
+    "path": "tests/test_market_backup.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/object",
+    "path": "tests/test_market_backup.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/native-calibration-unused.sock",
+    "path": "tests/test_native_calibration_operator.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 2,
+    "match": "/tmp/neutral",
+    "path": "tests/test_session.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 4,
+    "match": "/tmp/test-Xauthority",
+    "path": "tests/test_session.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 2,
+    "match": "/tmp/test-wine-prefix",
+    "path": "tests/test_session.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/crowley-model-test",
+    "path": "tests/test_session_cli_motion.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 3,
+    "match": "/tmp/Xauthority",
+    "path": "tests/test_session_dispatch.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/private-Xauthority",
+    "path": "tests/test_session_dispatch.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 3,
+    "match": "/tmp/wine",
+    "path": "tests/test_session_driver_actions.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 2,
+    "match": "threading.local",
+    "path": "tests/test_session_executor_click.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/test-Xauthority",
+    "path": "tests/test_session_mail_loop_composition.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/test-wine-prefix",
+    "path": "tests/test_session_mail_loop_composition.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "threading.local",
+    "path": "tests/test_session_motion_integration.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "tests/test_session_native.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 17,
+    "match": "/tmp/Xauthority",
+    "path": "tests/test_session_native.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 2,
+    "match": "/tmp/observer",
+    "path": "tests/test_session_native.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 2,
+    "match": "/tmp/producer",
+    "path": "tests/test_session_native.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 2,
+    "match": "/tmp/wine",
+    "path": "tests/test_session_native.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "localhost",
+    "path": "tests/test_session_native_regressions.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "tests/test_session_native_regressions.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/input87-observer.Xauthority",
+    "path": "tests/test_session_native_regressions.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/stale-wine-prefix",
+    "path": "tests/test_session_regressions.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "tests/test_session_runtime.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 5,
+    "match": "/tmp/test-Xauthority",
+    "path": "tests/test_session_runtime.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 4,
+    "match": "/tmp/test-wine-prefix",
+    "path": "tests/test_session_runtime.py"
+  },
+  {
+    "category": "machine-url",
+    "count": 1,
+    "match": "localhost",
+    "path": "tests/test_session_startup.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "tests/test_session_transitions.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/capture",
+    "path": "tests/test_session_transitions.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/{run_name}-{ordinal}.json",
+    "path": "tests/test_trading_paper.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "tests/test_x11_identity_observer.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 2,
+    "match": "/tmp/ambient",
+    "path": "tests/test_x11_identity_observer.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/wine",
+    "path": "tests/test_x11_identity_observer.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 1,
+    "match": "/tmp/crowley-private-xvfb-startup.lock",
+    "path": "tests/x11_startup.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "tools/build_x11_identity_observer.py"
+  },
+  {
+    "category": "posix-home",
+    "count": 8,
+    "match": "/home/dev",
+    "path": "tools/gnome-telemetry-region/README.md"
+  },
+  {
+    "category": "posix-home",
+    "count": 2,
+    "match": "/home/dev",
+    "path": "tools/gnome-telemetry-region/manifest.example.json"
+  },
+  {
+    "category": "posix-home",
+    "count": 1,
+    "match": "/home/dev",
+    "path": "tools/gnome-telemetry-region/offline_harness.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 8,
+    "match": "/tmp/x",
+    "path": "tools/gnome-telemetry-region/offline_harness.py"
+  },
+  {
+    "category": "temporary-path",
+    "count": 2,
+    "match": "/tmp/y",
+    "path": "tools/gnome-telemetry-region/offline_harness.py"
+  }
+]

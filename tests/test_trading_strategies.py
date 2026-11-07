@@ -5,6 +5,8 @@ from fractions import Fraction
 
 import pytest
 
+from crowley.core.auction_rules import AuctionHouseRules, rules_for_house
+from crowley.core.house import House
 from crowley.trading.api import (
     AccountView,
     Buy,
@@ -21,6 +23,8 @@ from crowley.trading.api import (
     VendorSell,
 )
 from crowley.trading.strategies import common, crafting, dip_reversion, snipe_flip
+
+RULES = rules_for_house(House("us", "normal", "alliance"))
 
 
 def snapshot(
@@ -67,6 +71,7 @@ class FakeMarket:
     snapshots: dict[int, ItemSnapshot]
     fact_map: dict[int, ItemFacts]
     recipe_list: tuple[Recipe, ...] = ()
+    rules: AuctionHouseRules = field(kw_only=True)
     t: int = 1
     deposits: dict[int, int] = field(default_factory=dict)
     deposit_calls: list[tuple[int, int, int]] = field(default_factory=list)
@@ -121,6 +126,7 @@ def market_for(item_id: int = 1, *, item_facts: ItemFacts | None = None, **kwarg
     return FakeMarket(
         {item_id: snapshot(item_id, **kwargs)},
         {item_id: item_facts or facts(item_id)},
+        rules=RULES,
     )
 
 
@@ -153,6 +159,7 @@ def test_crafting_does_nothing_without_each_trustworthy_output(changes):
         {1: snapshot(1, **changes), 2: snapshot(2, levels=(Level(10, 20),))},
         {1: facts(1), 2: facts(2, bundle_size=5, bundle_price=5)},
         (recipe,),
+        rules=RULES,
     )
     assert crafting.build({"professions": ["alchemy"]}).decide(market, FakeAccount()) == []
 
@@ -223,7 +230,7 @@ def test_snipe_reprices_only_when_repost_deposit_is_reserved_and_sells_one_stack
 
 def test_snipe_emits_all_items_without_local_click_quotas_and_is_deterministic():
     snapshots = {item: snapshot(item, levels=(Level(50, 100),)) for item in range(1, 5)}
-    market = FakeMarket(snapshots, {item: facts(item) for item in snapshots})
+    market = FakeMarket(snapshots, {item: facts(item) for item in snapshots}, rules=RULES)
     account = FakeAccount(cash_value=100_000, inventory_map={item: 1 for item in snapshots})
     first = snipe_flip.build().decide(market, account)
     second = snipe_flip.build().decide(market, account)
@@ -239,6 +246,7 @@ def test_snipe_vendor_sells_fund_posts_before_acquisition():
             2: snapshot(2, levels=(Level(50, 10),), demand=Fraction(4)),
         },
         {1: facts(1, sell_price=100), 2: facts(2)},
+        rules=RULES,
     )
     market.deposits[2] = 50
     account = FakeAccount(cash_value=0, inventory_map={1: 1, 2: 1})
@@ -261,6 +269,7 @@ def test_snipe_acquisitions_are_ordered_by_expected_profit():
             2: snapshot(2, fair=Fraction(200), levels=(Level(50, 100),)),
         },
         {1: facts(1), 2: facts(2)},
+        rules=RULES,
     )
     assert snipe_flip.build().decide(market, FakeAccount(cash_value=100_000)) == [
         Buy(2, 150, 25),
@@ -382,6 +391,7 @@ def crafting_market(recipes: tuple[Recipe, ...], *, vendor: tuple[int, int] | No
         },
         {1: vendor_facts, 2: facts(2), 3: facts(3)},
         recipes,
+        rules=RULES,
     )
 
 
@@ -486,7 +496,7 @@ def test_crafting_posts_all_outputs_with_cash_projection():
         facts_map[item] = facts(item)
     account = FakeAccount(inventory_map={item: 1 for item in range(2, 6)}, cash_value=10_000)
     posts = crafting.CraftingStrategy({"professions": ["alchemy"]}).decide(
-        FakeMarket(snapshots, facts_map, (many,)), account
+        FakeMarket(snapshots, facts_map, (many,), rules=RULES), account
     )
     assert [intent.item_id for intent in posts if isinstance(intent, Post)] == [2, 3, 4, 5]
 

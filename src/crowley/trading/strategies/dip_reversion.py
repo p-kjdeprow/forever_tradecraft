@@ -136,11 +136,11 @@ class DipReversionStrategy:
                 if age <= 48 * SECONDS_PER_HOUR + SECONDS_PER_HOUR
                 else self._snipe_target(plan.snapshot)
             )
-            if not clears_vendor_floor(target, plan.facts):
+            if not clears_vendor_floor(market.rules, target, plan.facts):
                 vendor_exits.append((item_id, quantity))
                 continue
             deposit = market.deposit(item_id, quantity, 48)
-            proceeds = net_proceeds_per_unit(target, Fraction(deposit) / quantity) * quantity
+            proceeds = net_proceeds_per_unit(market.rules, target, Fraction(deposit) / quantity) * quantity
             post_exits.append((proceeds, item_id, quantity, deposit))
 
         for item_id, quantity in sorted(vendor_exits):
@@ -188,10 +188,10 @@ class DipReversionStrategy:
             if ref20 is None or ref20 > as_fraction(self.params["dip_ratio"]) * snapshot.fair:
                 continue
             target = ceil_fraction(as_fraction(self.params["exit_ratio"]) * snapshot.fair)
-            if not clears_vendor_floor(target, plan.facts):
+            if not clears_vendor_floor(market.rules, target, plan.facts):
                 continue
             deposit = deposit_per_unit(market, item_id, 48)
-            net = net_proceeds_per_unit(target, deposit)
+            net = net_proceeds_per_unit(market.rules, target, deposit)
             effective_limit = min(
                 floor_fraction(as_fraction(self.params["dip_ratio"]) * snapshot.fair),
                 floor_fraction(net / (1 + as_fraction(self.params["min_margin"]))),

@@ -8,6 +8,7 @@ from fractions import Fraction
 from typing import Any
 
 from crowley.analysis.books import Book, Interval, valid_intervals
+from crowley.core.auction_rules import AuctionHouseRules
 
 from .api import ItemFacts, ItemSnapshot, Level, MarketView, Recipe
 
@@ -103,7 +104,12 @@ class Market:
         statistics: Mapping[Any, Any] | None,
         facts: Mapping[int, ItemFacts],
         recipes: Sequence[Recipe],
+        *,
+        rules: AuctionHouseRules,
     ) -> None:
+        if not isinstance(rules, AuctionHouseRules):
+            raise TypeError("rules must be AuctionHouseRules")
+        self.rules = rules
         self.books = _as_item_books(books)
         if not statistics:
             from .data import precompute_statistics
@@ -267,6 +273,7 @@ class Market:
             snapshots=snapshots,
             facts=self._facts,
             recipes=self._recipes,
+            rules=self.rules,
         )
 
     def facts(self, item_id: int) -> ItemFacts | None:
@@ -280,7 +287,7 @@ class Market:
             raise ValueError("quantity cannot be negative")
         from .execution import deposit
 
-        return deposit(fact.sell_price, quantity, duration_hours)
+        return deposit(fact.sell_price, quantity, duration_hours, self.rules)
 
 
 def _fraction_or_none(value: Any) -> Fraction | None:
@@ -298,12 +305,14 @@ class _MarketView:
         snapshots: Mapping[int, ItemSnapshot],
         facts: Mapping[int, ItemFacts],
         recipes: Sequence[Recipe],
+        rules: AuctionHouseRules,
     ) -> None:
         self.t = t
         self.sweep_index = sweep_index
         self._snapshots = dict(snapshots)
         self._facts = dict(facts)
         self._recipes = tuple(recipes)
+        self.rules = rules
 
     def items(self) -> Mapping[int, ItemSnapshot]:
         return self._snapshots.copy()
@@ -322,7 +331,7 @@ class _MarketView:
             raise ValueError("quantity cannot be negative")
         from .execution import deposit
 
-        return deposit(fact.sell_price, quantity, duration_hours)
+        return deposit(fact.sell_price, quantity, duration_hours, self.rules)
 
 
 MarketViewImpl = _MarketView

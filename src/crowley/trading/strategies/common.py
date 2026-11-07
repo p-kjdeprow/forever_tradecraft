@@ -6,7 +6,8 @@ from collections.abc import Iterable, Mapping
 from fractions import Fraction
 from math import ceil, floor
 
-from crowley.trading.api import AH_CUT, AccountView, ItemFacts, ItemSnapshot, Level, MarketView
+from crowley.core.auction_rules import AuctionHouseRules
+from crowley.trading.api import AccountView, ItemFacts, ItemSnapshot, Level, MarketView
 
 SECONDS_PER_HOUR = 3_600
 MIN_DEMAND_ELIGIBLE_SECONDS = 6 * SECONDS_PER_HOUR
@@ -78,13 +79,18 @@ def deposit_per_unit(market: MarketView, item_id: int, duration_hours: int) -> F
     return Fraction(market.deposit(item_id, 1, duration_hours))
 
 
-def net_proceeds_per_unit(sale_price: int | Fraction, deposit: int | Fraction = 0) -> Fraction:
+def net_proceeds_per_unit(
+    rules: AuctionHouseRules,
+    sale_price: int | Fraction,
+    deposit: int | Fraction = 0,
+) -> Fraction:
     """Sale proceeds after the auction cut and a per-unit deposit."""
 
-    return as_fraction(sale_price) * (1 - AH_CUT) - as_fraction(deposit)
+    return as_fraction(sale_price) * (1 - rules.seller_cut) - as_fraction(deposit)
 
 
 def margin_clears(
+    rules: AuctionHouseRules,
     sale_price: int | Fraction,
     buy_price: int | Fraction,
     deposit: int | Fraction,
@@ -93,7 +99,9 @@ def margin_clears(
     """Whether net proceeds meet the requested profit as a fraction of cost."""
 
     buy = as_fraction(buy_price)
-    return buy > 0 and net_proceeds_per_unit(sale_price, deposit) >= buy * (1 + as_fraction(minimum_margin))
+    return buy > 0 and net_proceeds_per_unit(rules, sale_price, deposit) >= buy * (
+        1 + as_fraction(minimum_margin)
+    )
 
 
 def cost_to_buy_n_units(levels: Iterable[Level], quantity: int) -> Fraction | None:
@@ -178,14 +186,14 @@ def target_sell_price(
     return ceil_fraction(max(as_fraction(lower), min(as_fraction(upper), candidate)))
 
 
-def vendor_floor(facts: ItemFacts) -> Fraction:
+def vendor_floor(rules: AuctionHouseRules, facts: ItemFacts) -> Fraction:
     """Auction price whose post-cut proceeds equal the vendor sale price."""
 
-    return Fraction(facts.sell_price) / (1 - AH_CUT)
+    return Fraction(facts.sell_price) / (1 - rules.seller_cut)
 
 
-def clears_vendor_floor(unit_price: int, facts: ItemFacts) -> bool:
-    return Fraction(unit_price) >= vendor_floor(facts)
+def clears_vendor_floor(rules: AuctionHouseRules, unit_price: int, facts: ItemFacts) -> bool:
+    return Fraction(unit_price) >= vendor_floor(rules, facts)
 
 
 def vendor_purchase(facts: ItemFacts, quantity: int) -> tuple[int, int] | None:
@@ -216,7 +224,9 @@ def output_value(
 
     if quantity <= 0:
         return Fraction(0)
-    return Fraction(quantity) * unit_price * (1 - AH_CUT) - market.deposit(item_id, quantity, duration_hours)
+    return Fraction(quantity) * unit_price * (1 - market.rules.seller_cut) - market.deposit(
+        item_id, quantity, duration_hours
+    )
 
 
 __all__ = [

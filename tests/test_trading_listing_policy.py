@@ -12,6 +12,7 @@ from crowley.trading.strategies import crafting, snipe_flip
 from tests.test_trading_engine import facts as engine_facts
 from tests.test_trading_engine import two_sweeps
 from tests.test_trading_strategies import (
+    RULES,
     FakeAccount,
     FakeMarket,
     snapshot,
@@ -36,6 +37,7 @@ def output_market(*, demand: Fraction = Fraction(100)) -> FakeMarket:
         },
         {OUTPUT: strategy_facts(OUTPUT, sell_price=1), REAGENT: strategy_facts(REAGENT)},
         (output_recipe(),),
+        rules=RULES,
     )
 
 
@@ -85,11 +87,18 @@ def test_selected_duration_is_used_for_post_and_deposit_cost(duration):
     assert market.deposit_calls == [(OUTPUT, 2, duration)]
 
 
+def test_unsupported_listing_duration_is_rejected_by_auction_rules():
+    market = output_market()
+
+    with pytest.raises(ValueError, match="not supported by auction-house rules"):
+        strategy_for(listing_duration_hours=6).decide(market, FakeAccount(inventory_map={OUTPUT: 1}))
+
+
 def test_duration_oracle_changes_candidate_profit_and_purchase_plan():
     expected_plan: dict[int, bool] = {}
     for duration in (12, 24, 48):
         base = output_market()
-        market = DurationMarket(base.snapshots, base.fact_map, base.recipe_list)
+        market = DurationMarket(base.snapshots, base.fact_map, base.recipe_list, rules=RULES)
         market.deposits[OUTPUT] = 6
         market.snapshots[REAGENT] = snapshot(REAGENT, levels=(Level(62, 100),))
         gross_after_cut = Fraction(99 * 95, 100)
@@ -172,7 +181,7 @@ def test_actual_post_view_uses_epoch_seconds_for_crafting_reprice_age():
     market = output_market()
     market.t = epoch
     account = Account("x", frozenset({"alchemy"}), 10_000, 10_000, {OUTPUT: 2})
-    context = ExecutionContext(market, [account], epoch, 7)
+    context = ExecutionContext(market, [account], epoch, 7, rules=RULES)
     assert execute_intent(context, account, Post(OUTPUT, 120, 2, 24))
     listing = account.listings_by_id[1]
     assert listing.posted_t == epoch
@@ -191,10 +200,11 @@ def test_snipe_age_consumer_uses_actual_post_timestamp_without_source_change():
     market = FakeMarket(
         {1: snapshot(1, levels=(Level(50, 10), Level(80, 10)))},
         {1: strategy_facts(1, sell_price=1)},
+        rules=RULES,
         t=epoch,
     )
     account = Account("x", frozenset(), 10_000, 10_000, {1: 1})
-    context = ExecutionContext(market, [account], epoch, 0)
+    context = ExecutionContext(market, [account], epoch, 0, rules=RULES)
     assert execute_intent(context, account, Post(1, 120, 1, 24))
     strategy = snipe_flip.build()
     market.t = epoch + 4 * 3_600 - 1
@@ -250,7 +260,7 @@ def test_reprice_requires_material_undercut_and_orders_oldest_then_listing_id():
 
 
 def test_engine_cancel_loses_deposit_repost_pays_new_deposit_and_budget_is_shared():
-    market = Market(two_sweeps([("a", 10, 1)]), {}, engine_facts(sell=100), ())
+    market = Market(two_sweeps([("a", 10, 1)]), {}, engine_facts(sell=100), (), rules=RULES)
     market.set_step(0, 0, {})
     account = Account("x", frozenset(), 1_000, 1_000)
     account.listings_by_id[7] = Listing(
@@ -264,7 +274,7 @@ def test_engine_cancel_loses_deposit_repost_pays_new_deposit_and_budget_is_share
         expires_t=43_200,
         deposit_paid=30,
     )
-    context = ExecutionContext(market, [account], 0, 0, {}, next_listing_id=8)
+    context = ExecutionContext(market, [account], 0, 0, {}, next_listing_id=8, rules=RULES)
 
     assert execute_intent(context, account, Cancel(7))
     assert account.inventory_balance == {7: 2}
@@ -288,7 +298,15 @@ def test_engine_cancel_loses_deposit_repost_pays_new_deposit_and_budget_is_share
         expires_t=43_200,
         deposit_paid=15,
     )
-    constrained_context = ExecutionContext(market, [constrained], 0, 0, {}, time_used=TIME_BUDGET - 1)
+    constrained_context = ExecutionContext(
+        market,
+        [constrained],
+        0,
+        0,
+        {},
+        time_used=TIME_BUDGET - 1,
+        rules=RULES,
+    )
     assert not execute_intent(constrained_context, constrained, Cancel(8))
     assert 8 in constrained.listings_by_id
     assert constrained.inventory_balance == {}

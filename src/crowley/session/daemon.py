@@ -131,6 +131,7 @@ from .motion import (
 from .preferences import load_motion_profile
 from .protocol import ProtocolError, unsigned_delta
 from .route_walk import KINEMATICS_PROVENANCE, Pose, RouteFile, check_fix, plan_segment, walk_budget
+from .source_binding import SAFETY_MODULES, SourceBindingError, build_source_binding
 from .startup import (
     PASSIVE_STARTUP_TIMEOUT_SECONDS,
     TAKEOVER_DRILL_HUMAN_TIMEOUT_SECONDS,
@@ -276,16 +277,6 @@ def session_config_semantic_sha256(config: SessionConfig) -> str:
     return hashlib.sha256(_canonical_dataclass_json(config)).hexdigest()
 
 
-_RUNTIME_SOURCE_FILES = {
-    "daemon.py": Path("src/crowley/session/daemon.py"),
-    "driver.py": Path("src/crowley/session/driver.py"),
-    "cli.py": Path("src/crowley/session/cli.py"),
-    "decoder.py": Path("src/crowley/session/decoder.py"),
-    "protocol.py": Path("src/crowley/session/protocol.py"),
-    "offline_harness.py": Path("tools/gnome-telemetry-region/offline_harness.py"),
-    "session_performance.py": Path("tools/session_performance.py"),
-}
-_RUNTIME_SOURCE_MAX_BYTES = 4 * 1024 * 1024
 _DIAGNOSTIC_ERROR_MAX_CHARS = 512
 
 
@@ -294,124 +285,6 @@ def _bounded_diagnostic_error(value: Any) -> str:
     if len(text) > _DIAGNOSTIC_ERROR_MAX_CHARS:
         return text[: _DIAGNOSTIC_ERROR_MAX_CHARS - 3] + "..."
     return text
-
-
-def _runtime_source_root() -> Path:
-    """Derive the trusted project root from the installed daemon source."""
-
-    source = Path(__file__).absolute()
-    if source.is_symlink():
-        raise DriverError("runtime source descriptor is a symlink")
-    return source.resolve().parents[3]
-
-
-def _runtime_source_hashes(*, include_calibration: bool = False, only: str | None = None) -> dict[str, str]:
-    """Read the bounded runtime descriptors, refusing drift."""
-
-    root = _runtime_source_root()
-    source_files = dict(_RUNTIME_SOURCE_FILES)
-    if include_calibration:
-        source_files["calibration.py"] = Path("src/crowley/session/calibration.py")
-    if only is not None:
-        if only not in source_files:
-            raise DriverError(f"runtime source descriptor {only} is unknown")
-        source_files = {only: source_files[only]}
-    result: dict[str, str] = {}
-    for logical_name, relative in source_files.items():
-        path = root / relative
-        try:
-            before = path.lstat()
-            if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-                raise DriverError(f"runtime source {logical_name} is not a regular file")
-            if before.st_size > _RUNTIME_SOURCE_MAX_BYTES:
-                raise DriverError(f"runtime source {logical_name} exceeds its bounded size")
-            flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(path, flags)
-            try:
-                opened = os.fstat(descriptor)
-                if not stat.S_ISREG(opened.st_mode) or (
-                    opened.st_dev,
-                    opened.st_ino,
-                    opened.st_mode,
-                    opened.st_nlink,
-                    opened.st_size,
-                    opened.st_mtime_ns,
-                    opened.st_ctime_ns,
-                ) != (
-                    before.st_dev,
-                    before.st_ino,
-                    before.st_mode,
-                    before.st_nlink,
-                    before.st_size,
-                    before.st_mtime_ns,
-                    before.st_ctime_ns,
-                ):
-                    raise DriverError(f"runtime source {logical_name} changed during inspection")
-                digest = hashlib.sha256()
-                total = 0
-                while True:
-                    chunk = os.read(descriptor, min(1024 * 1024, _RUNTIME_SOURCE_MAX_BYTES + 1 - total))
-                    if not chunk:
-                        break
-                    total += len(chunk)
-                    if total > _RUNTIME_SOURCE_MAX_BYTES:
-                        raise DriverError(f"runtime source {logical_name} exceeds its bounded size")
-                    digest.update(chunk)
-                if total != opened.st_size:
-                    raise DriverError(f"runtime source {logical_name} exceeds its bounded size")
-                after = os.fstat(descriptor)
-                if (
-                    after.st_dev,
-                    after.st_ino,
-                    after.st_mode,
-                    after.st_nlink,
-                    after.st_size,
-                    after.st_mtime_ns,
-                    after.st_ctime_ns,
-                ) != (
-                    opened.st_dev,
-                    opened.st_ino,
-                    opened.st_mode,
-                    opened.st_nlink,
-                    opened.st_size,
-                    opened.st_mtime_ns,
-                    opened.st_ctime_ns,
-                ):
-                    raise DriverError(f"runtime source {logical_name} changed during inspection")
-                after_path = path.lstat()
-                if (
-                    stat.S_ISLNK(after_path.st_mode)
-                    or not stat.S_ISREG(after_path.st_mode)
-                    or (
-                        after_path.st_dev,
-                        after_path.st_ino,
-                        after_path.st_mode,
-                        after_path.st_nlink,
-                        after_path.st_size,
-                        after_path.st_mtime_ns,
-                        after_path.st_ctime_ns,
-                    )
-                    != (
-                        after.st_dev,
-                        after.st_ino,
-                        after.st_mode,
-                        after.st_nlink,
-                        after.st_size,
-                        after.st_mtime_ns,
-                        after.st_ctime_ns,
-                    )
-                ):
-                    raise DriverError(f"runtime source {logical_name} changed during inspection")
-            finally:
-                os.close(descriptor)
-        except FileNotFoundError as exc:
-            raise DriverError(f"runtime source {logical_name} is unavailable") from exc
-        except OSError as exc:
-            raise DriverError(f"runtime source {logical_name} cannot be inspected") from exc
-        result[logical_name] = digest.hexdigest()
-    if set(result) != set(source_files):
-        raise DriverError("runtime source descriptor map is incomplete")
-    return result
 
 
 class _IdentityLatencyCollector:
@@ -769,40 +642,22 @@ class _NativeObservationDiagnostic:
             self._offending_path = None
             self._persistence_error = None
             self._failure_payload = None
-            source_binding = getattr(self.daemon, "_runtime_source_binding", None)
-            self._source_binding = (
-                {str(key): str(value) for key, value in source_binding.items()}
-                if isinstance(source_binding, dict)
-                else None
-            )
-            if self._source_binding is not None:
-                canonical = json.dumps(
-                    self._source_binding, sort_keys=True, separators=(",", ":"), allow_nan=False
-                ).encode("utf-8")
-                self._source_binding_sha256 = hashlib.sha256(canonical).hexdigest()
-            else:
-                self._source_binding_sha256 = None
-            calibration_at_start = getattr(self.daemon, "_runtime_calibration_source_sha256", None)
-            self._calibration_source_sha256_at_start = (
-                calibration_at_start if isinstance(calibration_at_start, str) else None
-            )
+            source_binding = self.daemon._runtime_source_binding
+            self._source_binding = dict(source_binding)
+            self._source_binding_sha256 = self.daemon._runtime_source_binding_digest
+            self._calibration_source_sha256_at_start = source_binding["crowley.session.calibration"]
             self._source_binding_current = None
             self._source_binding_current_sha256 = None
             self._calibration_source_sha256_current = None
-            self._source_binding_start_error = getattr(self.daemon, "_runtime_source_binding_error", None)
-            self._calibration_source_error = getattr(self.daemon, "_runtime_calibration_source_error", None)
-            self._source_binding_error = self._source_binding_start_error
+            self._source_binding_start_error = None
+            self._calibration_source_error = None
+            self._source_binding_error = None
             try:
-                current = _runtime_source_hashes(include_calibration=True)
-                calibration_current = current.pop("calibration.py", None)
-                self._source_binding_current = current
-                self._calibration_source_sha256_current = calibration_current
-                if current:
-                    canonical_current = json.dumps(
-                        current, sort_keys=True, separators=(",", ":"), allow_nan=False
-                    ).encode("utf-8")
-                    self._source_binding_current_sha256 = hashlib.sha256(canonical_current).hexdigest()
-            except Exception as exc:
+                current = build_source_binding()
+                self._source_binding_current = dict(current.manifest)
+                self._source_binding_current_sha256 = current.digest
+                self._calibration_source_sha256_current = current.manifest["crowley.session.calibration"]
+            except SourceBindingError as exc:
                 self._source_binding_error = _bounded_diagnostic_error(exc)
             self._source_drift = (
                 self._source_binding_error is not None
@@ -1298,7 +1153,7 @@ class _NativeObservationDiagnostic:
             "source_binding_error": self._source_binding_error,
             "source_binding_start_error": self._source_binding_start_error,
             "calibration_source_error": self._calibration_source_error,
-            "protocol_sha256": source_binding.get("protocol.py") if source_binding else None,
+            "protocol_sha256": source_binding.get("crowley.session.protocol") if source_binding else None,
             "binary_sha256": binary_sha256,
             "config_semantic_sha256": config_sha256,
             "attempts": attempts,
@@ -1667,22 +1522,13 @@ class SessionDaemon:
         self._takeover_cancel = threading.Event()
         self._takeover_event: tuple[Any, int] | None = None
         self._takeover_drill_operation: dict[str, Any] = {"state": "idle", "failure": ""}
-        # Source evidence is optional for ordinary daemon operation. A source
-        # installation that cannot be inspected remains usable, but its
-        # paused diagnostic is refused when it reaches the qualification gate.
-        self._runtime_source_binding_error: str | None = None
-        self._runtime_calibration_source_error: str | None = None
         try:
-            self._runtime_source_binding = _runtime_source_hashes()
-        except DriverError as exc:
-            self._runtime_source_binding = None
-            self._runtime_source_binding_error = _bounded_diagnostic_error(exc)
-        try:
-            calibration_binding = _runtime_source_hashes(include_calibration=True, only="calibration.py")
-            self._runtime_calibration_source_sha256 = calibration_binding.get("calibration.py")
-        except DriverError as exc:
-            self._runtime_calibration_source_sha256 = None
-            self._runtime_calibration_source_error = _bounded_diagnostic_error(exc)
+            runtime_source_binding = build_source_binding()
+        except SourceBindingError as exc:
+            raise DriverError(f"mandatory runtime source binding failed: {exc}") from exc
+        self._runtime_source_binding = dict(runtime_source_binding.manifest)
+        self._runtime_source_binding_digest = runtime_source_binding.digest
+        self._runtime_calibration_source_sha256 = self._runtime_source_binding["crowley.session.calibration"]
         self._native_observation_diagnostic = _NativeObservationDiagnostic(self)
         self._motion_profiles = self._load_motion_profiles(self.config)
         self.capture_index = 0
@@ -2916,10 +2762,7 @@ class SessionDaemon:
         """Persist one bounded private hover failure without affecting its error path."""
 
         artifact = copy.deepcopy(context)
-        try:
-            artifact["sourceBindings"] = _runtime_source_hashes()
-        except Exception as exc:
-            artifact["sourceBindingsError"] = _bounded_diagnostic_error(exc)
+        artifact["sourceBindings"] = dict(build_source_binding().manifest)
         artifact["persistedAtNs"] = time.time_ns()
         artifact["artifact"] = "latest-takeover-hover-failure"
         encoded = json.dumps(artifact, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
@@ -2994,14 +2837,11 @@ class SessionDaemon:
             return
         if context.get("phase") != "pre_human" or context.get("readinessPublished"):
             return
-        try:
-            source_bindings = _runtime_source_hashes(include_calibration=True)
-        except Exception as exc:
-            source_bindings = {"error": _bounded_diagnostic_error(exc)}
+        source_bindings = dict(build_source_binding().manifest)
         artifact = copy.deepcopy(context)
         artifact["sourceBindings"] = source_bindings
         artifact["createdAt"] = int(time.time())
-        artifact["replayable"] = bool(artifact.get("replayable")) and not bool(source_bindings.get("error"))
+        artifact["replayable"] = bool(artifact.get("replayable"))
         artifact["artifact"] = "latest-pre-human-input-failure"
         try:
             encoded = json.dumps(artifact, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
@@ -7857,11 +7697,12 @@ class SessionDaemon:
             return result
 
     def _runtime_source_binding_for_diagnostic(self) -> dict[str, str]:
-        initial = getattr(self, "_runtime_source_binding", None)
-        if not isinstance(initial, dict) or set(initial) != set(_RUNTIME_SOURCE_FILES):
-            raise DriverError("paused region diagnostic source binding is unavailable")
-        current = _runtime_source_hashes()
-        if current != initial:
+        initial = self._runtime_source_binding
+        if set(initial) != SAFETY_MODULES:
+            raise DriverError("paused region diagnostic source binding is incomplete")
+        current_binding = build_source_binding()
+        current = dict(current_binding.manifest)
+        if current != initial or current_binding.digest != self._runtime_source_binding_digest:
             raise DriverError("paused region diagnostic source binding drifted")
         return dict(current)
 
@@ -10601,7 +10442,7 @@ class SessionDaemon:
         failure_record: dict[str, Any] = {}
         capture_returned: float | None = None
         motion_fence = None
-        source_binding: dict[str, str] | None = None
+        source_binding = dict(self._runtime_source_binding)
         model_calls_before: dict[str, int] | None = None
         model_calls_after: dict[str, int] | None = None
         model_call_delta: dict[str, int] | None = None
@@ -10620,8 +10461,6 @@ class SessionDaemon:
                 "capture_returned": None,
                 "attempt_retired": None,
             }
-        if isinstance(self._runtime_source_binding, dict):
-            source_binding = dict(self._runtime_source_binding)
         model_calls_before = self._model_call_snapshot()
         try:
             if (
@@ -10860,7 +10699,7 @@ class SessionDaemon:
                 guardian = self.driver.guardian
                 with _identity_latency_span("cleanup"):
                     cleanup = self._paused_region_cleanup_snapshot(output, backend, guardian)
-                if failure is None and source_binding is not None:
+                if failure is None:
                     try:
                         with _identity_latency_span("source_binding_after"):
                             source_after = self._runtime_source_binding_for_diagnostic()

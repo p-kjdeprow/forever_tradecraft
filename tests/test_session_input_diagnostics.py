@@ -391,7 +391,7 @@ def test_daemon_persists_actual_synthetic_origin_query(tmp_path: Path, monkeypat
     assert persisted["phase"] == "pre_human"
     assert persisted["stage"] == "synthetic"
     assert persisted["readinessPublished"] is False
-    assert persisted["sourceBindings"]["driver.py"]
+    assert len(persisted["sourceBindings"]["crowley.session.driver"]) == 64
     assert persisted["targetPlacement"] == {
         "producer": "InputCalibrationWorkflow.target_pointer_preflight",
         "targetXid": TARGET,
@@ -468,7 +468,7 @@ def test_daemon_failure_path_persists_actual_workflow_context(tmp_path: Path, mo
     persisted = json.loads(artifact.read_text())
     assert persisted["stage"] == "synthetic"
     assert persisted["readinessPublished"] is False
-    assert persisted["sourceBindings"]["driver.py"]
+    assert len(persisted["sourceBindings"]["crowley.session.driver"]) == 64
     assert persisted["observer"]["rawBlocks"]
     assert persisted["observer"]["partialRaw"]
     assert persisted["observer"]["parserFailure"]["reason"] == "RawMotion: missing blank-line delimiter"

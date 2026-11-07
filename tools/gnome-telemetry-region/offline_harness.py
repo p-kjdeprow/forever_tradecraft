@@ -31,6 +31,8 @@ from types import SimpleNamespace
 
 from PIL import Image
 
+from crowley.session.source_binding import SAFETY_MODULES, build_source_binding
+
 ROOT = Path(__file__).resolve().parents[2]
 STAGE = Path(
     os.environ.get("GNOME_TELEMETRY_REGION_STAGE", "/home/dev/.cache/crowley/gnome-telemetry-region-r6")
@@ -737,110 +739,10 @@ def _finite_time(value: object, label: str) -> float:
     return float(value)
 
 
-_RUNTIME_SOURCE_FILES = {
-    "daemon.py": Path("src/crowley/session/daemon.py"),
-    "driver.py": Path("src/crowley/session/driver.py"),
-    "cli.py": Path("src/crowley/session/cli.py"),
-    "decoder.py": Path("src/crowley/session/decoder.py"),
-    "protocol.py": Path("src/crowley/session/protocol.py"),
-    "offline_harness.py": Path("tools/gnome-telemetry-region/offline_harness.py"),
-    "session_performance.py": Path("tools/session_performance.py"),
-}
-_RUNTIME_SOURCE_MAX_BYTES = 4 * 1024 * 1024
-
-
 def _runtime_source_hashes() -> dict[str, str]:
-    """Hash the same seven trusted descriptors independently of the owner."""
+    """Return the package-derived production safety binding."""
 
-    result: dict[str, str] = {}
-    for logical_name, relative in _RUNTIME_SOURCE_FILES.items():
-        path = ROOT / relative
-        before = path.lstat()
-        if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
-            raise RuntimeError(f"observer source {logical_name} is not a regular file")
-        if before.st_size > _RUNTIME_SOURCE_MAX_BYTES:
-            raise RuntimeError(f"observer source {logical_name} exceeds its bounded size")
-        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0))
-        try:
-            opened = os.fstat(descriptor)
-            if (
-                opened.st_dev,
-                opened.st_ino,
-                opened.st_mode,
-                opened.st_nlink,
-                opened.st_size,
-                opened.st_mtime_ns,
-                opened.st_ctime_ns,
-            ) != (
-                before.st_dev,
-                before.st_ino,
-                before.st_mode,
-                before.st_nlink,
-                before.st_size,
-                before.st_mtime_ns,
-                before.st_ctime_ns,
-            ):
-                raise RuntimeError(f"observer source {logical_name} changed during inspection")
-            digest = hashlib.sha256()
-            total = 0
-            while True:
-                chunk = os.read(descriptor, min(1024 * 1024, _RUNTIME_SOURCE_MAX_BYTES + 1 - total))
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > _RUNTIME_SOURCE_MAX_BYTES:
-                    raise RuntimeError(f"observer source {logical_name} exceeds its bounded size")
-                digest.update(chunk)
-            after = os.fstat(descriptor)
-            after_path = path.lstat()
-            if (
-                total != opened.st_size
-                or (
-                    after.st_dev,
-                    after.st_ino,
-                    after.st_mode,
-                    after.st_nlink,
-                    after.st_size,
-                    after.st_mtime_ns,
-                    after.st_ctime_ns,
-                )
-                != (
-                    opened.st_dev,
-                    opened.st_ino,
-                    opened.st_mode,
-                    opened.st_nlink,
-                    opened.st_size,
-                    opened.st_mtime_ns,
-                    opened.st_ctime_ns,
-                )
-                or stat.S_ISLNK(after_path.st_mode)
-                or not stat.S_ISREG(after_path.st_mode)
-                or (
-                    after_path.st_dev,
-                    after_path.st_ino,
-                    after_path.st_mode,
-                    after_path.st_nlink,
-                    after_path.st_size,
-                    after_path.st_mtime_ns,
-                    after_path.st_ctime_ns,
-                )
-                != (
-                    after.st_dev,
-                    after.st_ino,
-                    after.st_mode,
-                    after.st_nlink,
-                    after.st_size,
-                    after.st_mtime_ns,
-                    after.st_ctime_ns,
-                )
-            ):
-                raise RuntimeError(f"observer source {logical_name} changed during inspection")
-        finally:
-            os.close(descriptor)
-        result[logical_name] = digest.hexdigest()
-    if set(result) != set(_RUNTIME_SOURCE_FILES):
-        raise RuntimeError("observer source descriptor map is incomplete")
-    return result
+    return dict(build_source_binding().manifest)
 
 
 def _status_from_ipc(config: object, *, timeout: float) -> dict[str, object]:
@@ -1111,7 +1013,7 @@ def _owner_png_bytes(
     source_binding = sample.get("source_binding")
     if (
         not isinstance(source_binding, dict)
-        or set(source_binding) != set(_RUNTIME_SOURCE_FILES)
+        or set(source_binding) != SAFETY_MODULES
         or any(
             not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
             for value in source_binding.values()
@@ -1589,9 +1491,9 @@ def _validate_owner_failure_payload(
         if item is not None and not isinstance(item, bool):
             raise RuntimeError(f"paused diagnostic owner failure {index} owner flag is malformed")
     source_binding = value.get("source_binding")
-    if source_binding is not None and (
+    if (
         not isinstance(source_binding, dict)
-        or set(source_binding) != set(_RUNTIME_SOURCE_FILES)
+        or set(source_binding) != SAFETY_MODULES
         or not all(_valid_sha256(item) for item in source_binding.values())
     ):
         raise RuntimeError(f"paused diagnostic owner failure {index} source binding is malformed")

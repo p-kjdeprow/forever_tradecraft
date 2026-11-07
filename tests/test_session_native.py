@@ -27,6 +27,7 @@ import pytest
 from PIL import Image
 
 import crowley.session.daemon as daemon_module
+import crowley.session.source_binding as source_binding_module
 import tools.session_performance as session_performance
 from crowley.core.game_target import GameTarget, packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
@@ -89,6 +90,7 @@ from crowley.session.input_events import (
 from crowley.session.model import CLI_VERSION
 from crowley.session.motion import MotionError, MotionFrame
 from crowley.session.protocol import ProtocolError, decode_frame, pack_cells
+from crowley.session.source_binding import SAFETY_MODULES, SourceBindingError, build_source_binding
 from tests.support.companion_state import write_companion_state
 from tests.test_session_input_tool import fixture_input_tool
 
@@ -117,19 +119,7 @@ def _private_r6_producer_path() -> Path:
 def _independent_live_binding(config_path: Path, producer_path: Path) -> dict[str, object]:
     """Build the evaluator binding from known fixture inputs before a run."""
 
-    root = Path(__file__).resolve().parents[1]
-    source_paths = {
-        "daemon.py": root / "src/crowley/session/daemon.py",
-        "driver.py": root / "src/crowley/session/driver.py",
-        "cli.py": root / "src/crowley/session/cli.py",
-        "decoder.py": root / "src/crowley/session/decoder.py",
-        "protocol.py": root / "src/crowley/session/protocol.py",
-        "offline_harness.py": root / "tools/gnome-telemetry-region/offline_harness.py",
-        "session_performance.py": root / "tools/session_performance.py",
-    }
-    accepted_source_hashes = {
-        name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in source_paths.items()
-    }
+    accepted_source_hashes = dict(build_source_binding().manifest)
     config = load_config(config_path)
     return {
         "schema": "crowley.runtime-performance-accepted-binding",
@@ -244,18 +234,7 @@ def test_identity_latency_sidecar_rejects_untrusted_descriptors_and_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     sidecar = _load_identity_latency_sidecar(Path(__file__).resolve().parents[1])
-    source_binding = {
-        name: "a" * 64
-        for name in (
-            "daemon.py",
-            "driver.py",
-            "cli.py",
-            "decoder.py",
-            "protocol.py",
-            "offline_harness.py",
-            "session_performance.py",
-        )
-    }
+    source_binding = {name: "a" * 64 for name in SAFETY_MODULES}
     collector = daemon_module._IdentityLatencyCollector(
         config_file_sha256="b" * 64,
         config_semantic_sha256="c" * 64,
@@ -304,7 +283,7 @@ def test_identity_latency_sidecar_rejects_untrusted_descriptors_and_manifest(
 
 def test_identity_latency_report_rejects_nonexact_persisted_barriers(tmp_path: Path) -> None:
     sidecar = _load_identity_latency_sidecar(Path(__file__).resolve().parents[1])
-    source_binding = {name: "a" * 64 for name in sidecar._SOURCE_NAMES}
+    source_binding = {name: "a" * 64 for name in sidecar.SAFETY_MODULES}
     expected = {
         "schema": "identity-latency-binding-v1",
         "source_binding": source_binding,
@@ -335,8 +314,14 @@ def test_identity_latency_report_rejects_nonexact_persisted_barriers(tmp_path: P
 
     complete_path = write_profile(tmp_path / "complete", partial=False)
     partial_path = write_profile(tmp_path / "partial", partial=True)
-    complete_response = {"ok": True, "sample": {"artifact_directory": str(complete_path.parent)}}
-    partial_response = {"ok": True, "sample": {"artifact_directory": str(partial_path.parent)}}
+    complete_response = {
+        "ok": True,
+        "sample": {"artifact_directory": str(complete_path.parent), "source_binding": source_binding},
+    }
+    partial_response = {
+        "ok": True,
+        "sample": {"artifact_directory": str(partial_path.parent), "source_binding": source_binding},
+    }
     complete_profile = sidecar.read_response_profile(complete_response, expected)
     partial_profile = sidecar.read_response_profile(partial_response, expected)
     assert complete_profile["reason"] == "ok"
@@ -480,7 +465,7 @@ def test_identity_latency_profile_preserves_truncation_in_sanitized_report(tmp_p
     with pytest.raises(sidecar.IdentityLatencyError, match="truncated trace"):
         sidecar.validate_artifact(invalid_complete)
 
-    source_binding = {name: "a" * 64 for name in sidecar._SOURCE_NAMES}
+    source_binding = {name: "a" * 64 for name in sidecar.SAFETY_MODULES}
     expected = {
         "schema": "identity-latency-binding-v1",
         "source_binding": source_binding,
@@ -502,7 +487,7 @@ def test_identity_latency_report_rejects_invalid_owner_return_tail_without_negat
     sidecar = _load_identity_latency_sidecar(Path(__file__).resolve().parents[1])
     expected = {
         "schema": "identity-latency-binding-v1",
-        "source_binding": {name: "a" * 64 for name in sidecar._SOURCE_NAMES},
+        "source_binding": {name: "a" * 64 for name in sidecar.SAFETY_MODULES},
         "config_file_sha256": "b" * 64,
         "config_semantic_sha256": "c" * 64,
         "producer_sha256": "d" * 64,
@@ -2014,7 +1999,7 @@ def test_paused_region_performance_receipt_preserves_all_boundaries_and_model_co
         "capture_returned": 15.0,
         "attempt_retired": True,
     }
-    source_binding = {name: "a" * 64 for name in harness._RUNTIME_SOURCE_FILES}
+    source_binding = {name: "a" * 64 for name in SAFETY_MODULES}
     sample = {
         "owner_entered": 10.0,
         "owner_returned": 17.0,
@@ -2094,7 +2079,7 @@ def test_paused_region_performance_failure_preserves_reached_boundaries() -> Non
         },
         "config_file_sha256": "e" * 64,
         "config_semantic_sha256": "f" * 64,
-        "source_binding": {name: "a" * 64 for name in harness._RUNTIME_SOURCE_FILES},
+        "source_binding": {name: "a" * 64 for name in SAFETY_MODULES},
         "model_calls_before": {"started": 3, "succeeded": 3, "failed": 0},
         "model_calls_after": {"started": 3, "succeeded": 3, "failed": 0},
         "model_call_delta": {"started": 0, "succeeded": 0, "failed": 0},
@@ -2197,7 +2182,7 @@ def test_paused_region_owner_failure_contract_rejects_cross_request_and_extra_fi
         "owner_config_semantic_sha256": "c" * 64,
         "lease_held": True,
         "armed": False,
-        "source_binding": {name: "d" * 64 for name in harness._RUNTIME_SOURCE_FILES},
+        "source_binding": {name: "d" * 64 for name in SAFETY_MODULES},
         "model_calls_before": {"started": 0, "succeeded": 0, "failed": 0},
         "model_calls_after": {"started": 0, "succeeded": 0, "failed": 0},
         "model_call_delta": {"started": 0, "succeeded": 0, "failed": 0},
@@ -2246,7 +2231,7 @@ def test_paused_region_performance_projection_counts_guardian_groups_and_require
     assert harness_spec is not None and harness_spec.loader is not None
     harness = importlib.util.module_from_spec(harness_spec)
     harness_spec.loader.exec_module(harness)
-    source = {name: "a" * 64 for name in harness._RUNTIME_SOURCE_FILES}
+    source = {name: "a" * 64 for name in SAFETY_MODULES}
     receipt = {
         "owner_entered": 10.0,
         "owner_returned": 16.0,
@@ -2298,44 +2283,28 @@ def test_paused_region_performance_projection_counts_guardian_groups_and_require
 def test_runtime_source_readers_reject_path_replacement_after_descriptor_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Both independent readers bind the pathname to the bytes they hashed."""
+    """The package binding propagates descriptor races from the bounded reader."""
 
-    root = Path(__file__).resolve().parents[1]
-    harness_spec = importlib.util.spec_from_file_location(
-        "region_source_reader_race", root / "tools/gnome-telemetry-region/offline_harness.py"
-    )
-    assert harness_spec is not None and harness_spec.loader is not None
-    harness = importlib.util.module_from_spec(harness_spec)
-    harness_spec.loader.exec_module(harness)
     source = tmp_path / "source.py"
     replacement = tmp_path / "replacement.py"
-    base_open = os.open
-    for module, expected_error in (
-        (daemon_module, DriverError),
-        (harness, RuntimeError),
-    ):
-        source.write_bytes(b"original source\n")
-        replacement.write_bytes(b"replacement source\n")
-        mapping = {"source.py": Path("source.py")}
-        monkeypatch.setattr(module, "_RUNTIME_SOURCE_FILES", mapping)
-        if module is daemon_module:
-            monkeypatch.setattr(module, "_runtime_source_root", lambda: tmp_path)
-        else:
-            monkeypatch.setattr(module, "ROOT", tmp_path)
-        replaced = False
+    source.write_bytes(b"value = 1\n")
+    replacement.write_bytes(b"value = 2\n")
+    monkeypatch.setattr(source_binding_module, "_module_path", lambda _module: source)
+    original_read = source_binding_module.privfs.os.read
+    replaced = False
 
-        def replacing_open(path, *args, **kwargs):  # type: ignore[no-untyped-def]
-            nonlocal replaced
-            descriptor = base_open(path, *args, **kwargs)
-            if Path(path) == source and not replaced:
-                source.unlink()
-                replacement.rename(source)
-                replaced = True
-            return descriptor
+    def replacing_read(descriptor: int, count: int) -> bytes:
+        nonlocal replaced
+        data = original_read(descriptor, count)
+        if not replaced:
+            source.unlink()
+            replacement.rename(source)
+            replaced = True
+        return data
 
-        monkeypatch.setattr(module.os, "open", replacing_open)
-        with pytest.raises(expected_error, match="changed during inspection"):
-            module._runtime_source_hashes()
+    monkeypatch.setattr(source_binding_module.privfs.os, "read", replacing_read)
+    with pytest.raises(SourceBindingError, match="source cannot be read"):
+        build_source_binding()
 
 
 def test_real_agent_pixel_decoder_motion_frame_binds_schema6_native_capability() -> None:
@@ -5211,7 +5180,10 @@ def test_native_runner_run_records_all_diagnostic_pipeline_spans(tmp_path: Path)
     harness = _NativeRunnerHarness(tmp_path)
     owner = SimpleNamespace(
         config=SimpleNamespace(journal=tmp_path / "session.json"),
-        _runtime_source_binding={"daemon.py": "a" * 64, "protocol.py": "b" * 64},
+        _runtime_source_binding={name: "a" * 64 for name in SAFETY_MODULES},
+        _runtime_source_binding_digest=source_binding_module.manifest_digest(
+            {name: "a" * 64 for name in SAFETY_MODULES}
+        ),
         _loaded_config_semantic_sha256="c" * 64,
         driver=harness.driver,
         controller=SimpleNamespace(status=lambda: SimpleNamespace(generation=7)),

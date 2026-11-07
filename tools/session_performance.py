@@ -40,6 +40,7 @@ from crowley.session.executor import (
     plan_single_click,
 )
 from crowley.session.protocol import ProtocolError
+from crowley.session.source_binding import SAFETY_MODULES
 
 MAX_SAMPLES = 1_000
 MAX_INPUTS = 16
@@ -67,15 +68,7 @@ SOURCE_FILES = (
     "src/crowley/session/protocol.py",
     "src/crowley/session/executor.py",
 )
-LIVE_SOURCE_FILES = (
-    "daemon.py",
-    "driver.py",
-    "cli.py",
-    "decoder.py",
-    "protocol.py",
-    "offline_harness.py",
-    "session_performance.py",
-)
+LIVE_SOURCE_FILES = SAFETY_MODULES
 LIVE_RUN_SCHEMA = "crowley.paused-region-performance-run"
 LIVE_BINDING_SCHEMA = "crowley.runtime-performance-accepted-binding"
 LIVE_TARGETS = 8

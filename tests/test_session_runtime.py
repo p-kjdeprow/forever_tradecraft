@@ -50,6 +50,7 @@ from crowley.session.input_events import EventClass, XI2Event
 from crowley.session.journal import DEFAULT_STATE, Journal, JournalError
 from crowley.session.model import ModelDecision, ModelObservation
 from crowley.session.protocol import decode_frame
+from crowley.session.source_binding import SAFETY_MODULES, manifest_digest
 from crowley.session.startup import (
     InvalidationCause,
     StartupEnvironment,
@@ -3278,12 +3279,11 @@ def _assert_native_provider_cleanup(
 
 
 def _diagnostic_fixture_daemon(root: Path) -> SimpleNamespace:
+    source_binding = {name: "a" * 64 for name in SAFETY_MODULES}
     return SimpleNamespace(
         config=SimpleNamespace(journal=root / "session.json"),
-        _runtime_source_binding={
-            "daemon.py": "a" * 64,
-            "protocol.py": "b" * 64,
-        },
+        _runtime_source_binding=source_binding,
+        _runtime_source_binding_digest=manifest_digest(source_binding),
         _loaded_config_semantic_sha256="c" * 64,
         driver=SimpleNamespace(profile=SimpleNamespace(telemetry_region_executable_sha256="d" * 64)),
         controller=SimpleNamespace(status=lambda: SimpleNamespace(generation=7)),
@@ -3362,7 +3362,7 @@ def test_runtime_native_observation_diagnostic_is_bounded_private_and_bound(tmp_
     assert stat.S_IMODE(failure.parent.stat().st_mode) == 0o700
     payload = json.loads(failure.read_text())
     assert payload["trace_schema"] == "native-observation-diagnostic-v1"
-    assert payload["protocol_sha256"] == payload["source_binding"]["protocol.py"]
+    assert payload["protocol_sha256"] == payload["source_binding"]["crowley.session.protocol"]
     assert isinstance(payload["source_binding_current"], dict)
     assert isinstance(payload["source_binding_current_sha256"], str)
     assert isinstance(payload["calibration_source_sha256_current"], str)

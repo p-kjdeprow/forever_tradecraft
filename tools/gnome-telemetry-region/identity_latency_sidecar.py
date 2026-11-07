@@ -17,32 +17,13 @@ from typing import Any
 from crowley.session.cli import _socket_request as _bounded_socket_request
 from crowley.session.config import load_config
 from crowley.session.daemon import session_config_semantic_sha256
+from crowley.session.source_binding import SAFETY_MODULES, build_source_binding
 
 # Keep the private reader bound aligned with the existing 512 KiB IPC record
 # bound.  The 256-event diagnostic cap must round-trip without silently
 # discarding the slowest profile behind the writer-failure token.
 _MAX_BYTES = 524288
 _SHA256 = 64
-_SOURCE_NAMES = frozenset(
-    {
-        "daemon.py",
-        "driver.py",
-        "cli.py",
-        "decoder.py",
-        "protocol.py",
-        "offline_harness.py",
-        "session_performance.py",
-    }
-)
-_SOURCE_RELATIVE_PATHS = {
-    "daemon.py": Path("src/crowley/session/daemon.py"),
-    "driver.py": Path("src/crowley/session/driver.py"),
-    "cli.py": Path("src/crowley/session/cli.py"),
-    "decoder.py": Path("src/crowley/session/decoder.py"),
-    "protocol.py": Path("src/crowley/session/protocol.py"),
-    "offline_harness.py": Path("tools/gnome-telemetry-region/offline_harness.py"),
-    "session_performance.py": Path("tools/session_performance.py"),
-}
 _BARRIERS = ("daemon_pre", "backend_pre", "backend_post", "daemon_post")
 _INTERVALS = ("owner_to_request_started", "capture_return_to_response_ready")
 _EVENT_NAMES = frozenset(
@@ -186,7 +167,7 @@ def load_expected_binding(path: Path, supplied_sha256: str) -> tuple[dict[str, A
     source_binding = value["source_binding"]
     if (
         not isinstance(source_binding, dict)
-        or set(source_binding) != _SOURCE_NAMES
+        or set(source_binding) != SAFETY_MODULES
         or not all(_is_sha(item) for item in source_binding.values())
         or not _is_sha(value["config_file_sha256"])
         or not _is_sha(value["config_semantic_sha256"])
@@ -272,17 +253,10 @@ def _hash_local_descriptor(path: Path, label: str) -> str:
         os.close(descriptor)
 
 
-def current_source_binding(root: Path | None = None) -> dict[str, str]:
-    """Hash the seven source descriptors independently of the manifest."""
+def current_source_binding() -> dict[str, str]:
+    """Return the package-derived production safety binding."""
 
-    if root is None:
-        root = Path(__file__).resolve().parents[2]
-    result: dict[str, str] = {}
-    for logical_name in sorted(_SOURCE_NAMES):
-        result[logical_name] = _hash_local_descriptor(
-            root / _SOURCE_RELATIVE_PATHS[logical_name], f"source {logical_name}"
-        )
-    return result
+    return dict(build_source_binding().manifest)
 
 
 def _current_config_binding(path: Path) -> tuple[str, str, str]:
@@ -570,7 +544,7 @@ def _binding_consistent(response: dict[str, Any], artifact: dict[str, Any], expe
         if response_binding.get(key) is not None and response_binding[key] != expected[key]:
             return False
     source = response_binding.get("source_binding")
-    return source is None or source == expected["source_binding"]
+    return isinstance(source, dict) and source == expected["source_binding"]
 
 
 def read_response_profile(
@@ -836,8 +810,7 @@ def _run_live(args: argparse.Namespace) -> dict[str, Any]:
         or current_producer_sha256 != expected["producer_sha256"]
     ):
         raise IdentityLatencyError("current config or producer binding differs from the reviewed manifest")
-    source_root = getattr(args, "source_root", None)
-    current_source = current_source_binding(Path(source_root) if source_root is not None else None)
+    current_source = current_source_binding()
     if current_source != expected["source_binding"]:
         raise IdentityLatencyError("current source binding differs from the reviewed manifest")
     _status_preflight(Path(args.socket), args.generation)

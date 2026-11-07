@@ -1100,9 +1100,9 @@ def test_live_source_and_producer_mismatches_retain_validly_parsed_attempts(tmp_
     binding = _live_binding()
     source_mismatch = _live_receipt(1, binding)
     source_mismatch["observer_source_hashes_after"] = dict(binding["accepted_source_hashes"])
-    source_mismatch["observer_source_hashes_after"]["daemon.py"] = hashlib.sha256(
-        b"changed daemon"
-    ).hexdigest()
+    source_mismatch["observer_source_hashes_after"][sorted(performance.LIVE_SOURCE_FILES)[0]] = (
+        hashlib.sha256(b"changed daemon").hexdigest()
+    )
     producer_mismatch = _live_receipt(2, binding)
     producer_mismatch["producer_binding"] = {
         "binary_sha256": hashlib.sha256(b"other binary").hexdigest(),
@@ -1119,9 +1119,9 @@ def test_live_source_and_producer_mismatches_retain_validly_parsed_attempts(tmp_
     values = [_live_receipt(index, binding) for index in range(15)]
     global_source_mismatch = _live_receipt(99, binding)
     global_source_mismatch["observer_source_hashes_after"] = dict(binding["accepted_source_hashes"])
-    global_source_mismatch["observer_source_hashes_after"]["daemon.py"] = hashlib.sha256(
-        b"changed daemon"
-    ).hexdigest()
+    global_source_mismatch["observer_source_hashes_after"][sorted(performance.LIVE_SOURCE_FILES)[0]] = (
+        hashlib.sha256(b"changed daemon").hexdigest()
+    )
     values.append(global_source_mismatch)
     globally_blocked = _evaluate_live(tmp_path / "global-mismatch", values, binding)
     assert globally_blocked["statistics"]["eligible_full_eight_sample_run_count"] == 15

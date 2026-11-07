@@ -1100,8 +1100,8 @@ int main(void) {
         artifact_path = tmp_path / "takeover-drill-diagnostics" / "latest-hover-failure.json"
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
         assert artifact["persistedAtNs"] > 0
-        assert {"daemon.py", "driver.py"} <= set(artifact["sourceBindings"])
-        assert all(len(value) == 64 for value in artifact["sourceBindings"].values())
+        assert len(artifact["sourceBindings"]["crowley.session.daemon"]) == 64
+        assert len(artifact["sourceBindings"]["crowley.session.driver"]) == 64
         assert artifact["cleanup"]["resourcesUnresolved"] is False
         assert artifact["cleanup"]["driverMonitorRegisteredAfterCleanup"] is False
         assert artifact["guardianBeforeCleanup"] == context["guardianBeforeCleanup"]

@@ -1367,16 +1367,6 @@ def _native_memory_measurement_digest(measurement: NativeMemoryMeasurement) -> s
     ).hexdigest()
 
 
-def _native_memory_failure_outcome_id(measurement: NativeMemoryMeasurement, failure: str) -> str:
-    payload = {
-        "kind": "native_memory_failures",
-        "measurement": measurement.to_dict(),
-        "failure": failure,
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
 def _native_memory_assessment_payload(measurement: NativeMemoryMeasurement) -> dict[str, Any]:
     """Return the canonical, failure-independent over-target assessment domain."""
 
@@ -1448,52 +1438,6 @@ class NativeMemoryAssessmentArchiveReceipt:
             or self.durable is not True
         ):
             raise CalibrationError("native resource assessment receipt is invalid")
-
-
-@dataclass(frozen=True)
-class NativeMemoryMeasurementArchiveReceipt:
-    """Durability acknowledgement for one rejected complete memory window."""
-
-    outcome_id: str
-    measurement_sha256: str
-    archive_ordinal: int
-    durable: bool
-
-    @classmethod
-    def from_archive(
-        cls, measurement: NativeMemoryMeasurement, archived: dict[str, Any]
-    ) -> NativeMemoryMeasurementArchiveReceipt:
-        if not isinstance(archived, dict):
-            raise CalibrationError("native failed-memory archive returned no record")
-        ordinal = archived.get("archiveOrdinal")
-        if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal <= 0:
-            raise CalibrationError("native failed-memory archive returned no ordinal")
-        outcome_id = archived.get("outcomeId")
-        if not isinstance(outcome_id, str):
-            raise CalibrationError("native failed-memory archive returned no outcome identity")
-        return cls(
-            outcome_id=outcome_id,
-            measurement_sha256=_native_memory_measurement_digest(measurement),
-            archive_ordinal=ordinal,
-            durable=True,
-        )
-
-    def verify(self, measurement: NativeMemoryMeasurement) -> None:
-        measurement.verify()
-        failure = f"native {measurement.phase} memory growth exceeds its limit"
-        if (
-            not isinstance(self.outcome_id, str)
-            or not re.fullmatch(r"[0-9a-f]{64}", self.outcome_id)
-            or self.outcome_id != _native_memory_failure_outcome_id(measurement, failure)
-            or not isinstance(self.measurement_sha256, str)
-            or not re.fullmatch(r"[0-9a-f]{64}", self.measurement_sha256)
-            or self.measurement_sha256 != _native_memory_measurement_digest(measurement)
-            or isinstance(self.archive_ordinal, bool)
-            or not isinstance(self.archive_ordinal, int)
-            or self.archive_ordinal <= 0
-            or self.durable is not True
-        ):
-            raise CalibrationError("native failed-memory archive receipt is invalid")
 
 
 @dataclass(frozen=True)
@@ -4786,26 +4730,6 @@ class InputCalibrationWorkflow:
             ):
                 raise CalibrationError("synthetic XTEST motion sequence left the certified target")
         return tuple(transitions)
-
-    @staticmethod
-    def _event_proof(records: list[XI2Event]) -> tuple[tuple[Any, ...], ...]:
-        return tuple(
-            (
-                event.event_class.value,
-                event.master_device,
-                event.source_device,
-                event.detail,
-                event.timestamp_ms,
-                event.root_xid,
-                event.event_xid,
-                event.child_xid,
-                event.root_xy,
-                event.event_xy,
-                event.modifiers,
-                event.modifier_effective,
-            )
-            for event in records
-        )
 
     @classmethod
     def _build_evidence(

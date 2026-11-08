@@ -874,13 +874,6 @@ class WindowIdentity:
 
 
 @dataclass(frozen=True)
-class Anchor:
-    x: int
-    y: int
-    identity_fingerprint: str
-
-
-@dataclass(frozen=True)
 class NamedStateObservation:
     """One bounded visual/state observation tied to a fresh client capture.
 
@@ -3478,20 +3471,11 @@ class X11Backend:
         self.last_identity = identity
         return identity
 
-    def _find_window(self) -> str:
-        return hex(self.resolve_identity().xid)
-
     def verify_identity(self, identity: WindowIdentity) -> WindowIdentity:
         fresh = self.resolve_identity()
         if fresh.fingerprint != identity.fingerprint:
             raise DriverError("verified client identity is stale")
         return fresh
-
-    def _verify_window(self, window: str) -> WindowIdentity:
-        identity = self.resolve_identity()
-        if int(window, 0) != identity.xid:
-            raise DriverError("window identity changed")
-        return identity
 
     def _focus(
         self,
@@ -6653,15 +6637,6 @@ class DesktopDriver:
     def retained_input_evidence(self) -> Any | None:
         return self._retained_input_evidence
 
-    def discard_retained_input_evidence(self) -> None:
-        self._retained_input_evidence = None
-
-    @property
-    def input_calibration_readiness(self) -> Any | None:
-        """Return owned GTK/observer proof while the human sample is pending."""
-
-        return self._input_calibration_readiness
-
     def notify_input_calibration_ready(self, readiness: Any) -> None:
         if not getattr(readiness, "target_pid", 0) or not getattr(readiness, "target_xid", 0):
             raise DriverError("calibration readiness has no owned target identity")
@@ -7072,15 +7047,6 @@ class DesktopDriver:
             raise DriverError("native anchor retained capture is unavailable") from exc
         if actual_hash != anchor.capture_sha256:
             raise DriverError("native anchor retained capture changed")
-
-    def measure_pointer_anchors(self) -> tuple[MeasuredAnchor, ...]:
-        """Reject the obsolete all-scenes anchor batch API.
-
-        Controls are mutually exclusive across scenes.  Callers must invoke
-        :meth:`measure_pointer_anchor` immediately before the named action.
-        """
-
-        raise DriverError("scene-local controls require measure_pointer_anchor(action)")
 
     def queue_delayed_calibration_action(
         self,
@@ -7583,24 +7549,6 @@ class DesktopDriver:
         ):
             raise DriverError("input calibration modifier record is malformed")
         return expected  # type: ignore[return-value]
-
-    def _expected_key_details(self, text: str, evidence: Any) -> tuple[int, ...]:
-        _event_classes, details, _modifiers = self._keyboard_sequence(
-            self._keyboard_operation_facts("type_allowlisted_command", text, evidence)
-        )
-        return details
-
-    def _expected_named_key_details(self, keysym: str, evidence: Any) -> tuple[int, ...]:
-        operation = {
-            "Return": "open_chat",
-            "Escape": "escape_command_buffer",
-        }.get(keysym)
-        if operation is None:
-            raise DriverError(f"named keysym {keysym!r} is not an owned runtime operation")
-        _event_classes, details, _modifiers = self._keyboard_sequence(
-            self._keyboard_operation_facts(operation, "", evidence)
-        )
-        return details
 
     def _expected_key_operation(
         self,
@@ -9387,11 +9335,6 @@ class DesktopDriver:
         if name == "executor_click":
             return copy.deepcopy(pointer_receipt) if pointer_receipt is not None else None
 
-    def flush_queued(self) -> None:
-        queued, self._queued = self._queued, []
-        for generation, name, kwargs in queued:
-            self.run(name, generation, **kwargs)
-
     def run_takeover_hover(self, generation: int, evidence: RuntimeInputEvidence) -> HumanPointerPlan:
         """Emit one guarded clickless curved hover for the takeover drill."""
 
@@ -9884,24 +9827,13 @@ class DesktopDriver:
         except Exception as exc:
             raise DriverError(str(exc)) from exc
 
-    def input_calibration(self, evidence: Any | None = None, **legacy: Any) -> str:
-        if legacy:
-            raise DriverError("source sets and caller booleans cannot arm input")
+    def input_calibration(self, evidence: Any) -> str:
         try:
             evidence.verify_seal()
         except Exception as exc:
             raise DriverError("input calibration must come from the owned live workflow") from exc
         self._input_evidence = evidence
         return evidence.fingerprint
-
-    def calibrate_input_events(self, output: str, **legacy: Any) -> Any:
-        if legacy:
-            raise DriverError("caller-supplied source/correlation flags are not calibration evidence")
-        try:
-            parse_xi2_records(output, require_event=True)
-        except InputEventError as exc:
-            raise DriverError(str(exc)) from exc
-        raise DriverError("captured trace alone cannot arm; run owned input calibration")
 
     def synthetic_target_keyboard_profile(
         self,
@@ -10121,7 +10053,6 @@ class DesktopDriver:
 
 
 __all__ = [
-    "Anchor",
     "Backend",
     "CalibrationTicket",
     "DesktopDriver",

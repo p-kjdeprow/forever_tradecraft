@@ -812,20 +812,6 @@ def _style_from_recordings(
     return style, excluded
 
 
-def _button_pairs(recording: _Recording, button: int) -> list[tuple[float, float]]:
-    start: float | None = None
-    pairs: list[tuple[float, float]] = []
-    for event in recording.inputs:
-        if event.kind != "button" or event.button != button:
-            continue
-        if event.down and start is None:
-            start = event.mono
-        elif not event.down and start is not None and event.mono > start:
-            pairs.append((start, event.mono))
-            start = None
-    return pairs
-
-
 def _jump_airtime(recordings: Sequence[_Recording]) -> float:
     estimates: list[float] = []
     for recording in recordings:
@@ -1070,17 +1056,6 @@ def _polyline_distance(x: float, y: float, waypoints: Sequence[tuple[float, floa
     return best
 
 
-def _polyline_position(waypoints: Sequence[tuple[float, float]], distance: float) -> tuple[float, float]:
-    remaining = max(0.0, distance)
-    for first, second in zip(waypoints, waypoints[1:], strict=False):
-        length = math.dist(first, second)
-        if remaining <= length or second == waypoints[-1]:
-            fraction = 0.0 if length <= _EPS else min(1.0, remaining / length)
-            return first[0] + fraction * (second[0] - first[0]), first[1] + fraction * (second[1] - first[1])
-        remaining -= length
-    return waypoints[-1]
-
-
 def _nearest_progress(position: tuple[float, float], waypoints: Sequence[tuple[float, float]]) -> float:
     best_distance = math.inf
     best_progress = 0.0
@@ -1104,12 +1079,6 @@ def _nearest_progress(position: tuple[float, float], waypoints: Sequence[tuple[f
             best_progress = candidate_progress
         progress += math.sqrt(length2)
     return best_progress
-
-
-def _lookahead(
-    position: tuple[float, float], waypoints: Sequence[tuple[float, float]], lookahead: float = 2.0
-) -> tuple[float, float]:
-    return _polyline_position(waypoints, _nearest_progress(position, waypoints) + lookahead)
 
 
 def _turn_rate(key: str, kinematics: Kinematics) -> float:

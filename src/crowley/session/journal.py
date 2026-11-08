@@ -523,12 +523,6 @@ class Journal:
         metadata["lastArchivedAt"] = item["archivedAt"]
         return item, True
 
-    def _find_archive_outcome(self, kind: str, outcome_id: str) -> dict[str, Any]:
-        for item in self._read_archive_artifacts(kind):
-            if item.get("outcomeId") == outcome_id:
-                return _copy(item)
-        raise JournalError(f"archive outcome {outcome_id!r} is incomplete in {kind!r}")
-
     @staticmethod
     def _write_json_artifact(destination: Path, value: dict[str, Any], directory: Path) -> None:
         fd, temporary = tempfile.mkstemp(prefix=f".{destination.name}.", dir=directory)

@@ -1516,7 +1516,7 @@ def test_paused_restart_requires_fresh_live_input_evidence(tmp_path: Path) -> No
         scanner_idle=True,
         stable_scan_ids=set(),
         stable_sweep_ids=set(),
-        stable_format2_verified=True,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
         expected_generation=reconcile_fence.generation,
@@ -1862,8 +1862,6 @@ def test_xi2_calibration_requires_real_sources_and_forwarded_correlation(tmp_pat
     with pytest.raises(DriverError, match="synthetic sourceid fixture"):
         XI2Observer.sources(trace)
     driver = DesktopDriver(backend=RecordingBackend(), lease_path=tmp_path / "desktop.lock")
-    with pytest.raises(DriverError):
-        driver.calibrate_input_events(trace)
     driver.close()
 
 
@@ -1887,7 +1885,6 @@ def test_native_pointer_action_requires_a_seeded_planned_gesture(tmp_path: Path)
         action_anchors={},
     )
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))
-    backend._find_window = lambda: "window"  # type: ignore[method-assign]
     backend._run = lambda args, timeout=5.0: type("Result", (), {"stdout": "", "returncode": 0})()  # type: ignore[method-assign]
     with pytest.raises(DriverError, match="validated planned gesture"):
         backend.action("logout", generation=1)

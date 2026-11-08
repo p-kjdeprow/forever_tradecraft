@@ -3024,8 +3024,8 @@ def test_runtime_reconcile_ready_scanner_is_idle_with_pending_saved_uid(tmp_path
         facts = daemon._reconcile_durable_files(snapshot)
         assert facts["scanner_phase"] == "ready"
         assert facts["scanner_idle"] is True
-        assert facts["stable_format2_uid"] == uid
-        assert facts["stable_format2_evidence"] is not None
+        assert facts["stable_scan_uid"] == uid
+        assert facts["stable_scan_evidence"] is not None
     finally:
         daemon.request_shutdown()
         driver.close()

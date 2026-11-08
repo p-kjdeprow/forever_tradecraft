@@ -17,9 +17,7 @@ from crowley.core.watchlist import load_catalog
 
 from .journal import JournalError, stable_file
 
-BASELINE_UID = "beta-normal-alliance-1792040351-Arthur-6643"
 BASELINE_MEDIAN_SECONDS = 1
-BASELINE_RANGE_SECONDS = (0, 2)
 _TARGET = packaged_game_target()
 _CANONICAL_CATALOG = load_catalog()
 _CANONICAL_PLAN = target_scan_plan(_CANONICAL_CATALOG, _TARGET)
@@ -501,8 +499,6 @@ def queues_empty(
 
 __all__ = [
     "BASELINE_MEDIAN_SECONDS",
-    "BASELINE_RANGE_SECONDS",
-    "BASELINE_UID",
     "EvidenceError",
     "SweepEvidence",
     "qualify_saved_scan",

@@ -37,7 +37,6 @@ from .calibration import (
     NativeMemoryArchiveReceipt,
     NativeMemoryAssessmentArchiveReceipt,
     NativeMemoryMeasurement,
-    NativeMemoryMeasurementArchiveReceipt,
     NativePreconstructionEvidence,
     NativeRenderObservation,
     NativeRestorationReceipt,
@@ -264,17 +263,18 @@ def _strict_native_absence_image(path: Path, *, expected_size: tuple[int, int]) 
         return False
 
 
-def _canonical_dataclass_json(value: Any) -> bytes:
+def _canonical_dataclass_sha256(value: Any) -> str:
     if not is_dataclass(value) or isinstance(value, type):
         raise TypeError("session config binding requires a dataclass instance")
     normalized = _canonical_semantic_value(asdict(value))
-    return json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    payload = json.dumps(normalized, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def session_config_semantic_sha256(config: SessionConfig) -> str:
     """Hash the loaded semantic config independently of TOML formatting."""
 
-    return hashlib.sha256(_canonical_dataclass_json(config)).hexdigest()
+    return _canonical_dataclass_sha256(config)
 
 
 _DIAGNOSTIC_ERROR_MAX_CHARS = 512
@@ -1241,11 +1241,6 @@ class _NativeIdentityLatencySink:
                 self._active_boundary = previous_boundary
                 self._active_span_token = previous_token
                 self._active_caller = previous_caller
-
-    @contextmanager
-    def named_span(self, name: str):
-        with self._named_span(name, caller="NativeCalibrationRunner.capture_observation"):
-            yield
 
     def instant(self, _name: str) -> None:
         return None
@@ -2884,17 +2879,8 @@ class SessionDaemon:
                 os.fchmod(fd, 0o600)
             finally:
                 os.close(fd)
-            try:
-                os.replace(temporary, destination)
-            except Exception:
-                # The O_EXCL create makes this path ours.  Remove only that
-                # owned slot after an unsuccessful replacement; an existing
-                # valid latest artifact must remain untouched.  If removal
-                # itself fails, the fixed slot blocks future writers rather
-                # than allowing unbounded diagnostic files to accumulate.
-                raise
-            else:
-                temporary_owned = False
+            os.replace(temporary, destination)
+            temporary_owned = False
             os.chmod(destination, 0o600)
         except Exception as exc:
             if "temporary_owned" in locals() and temporary_owned:
@@ -2936,15 +2922,9 @@ class SessionDaemon:
     @staticmethod
     def _native_construction_profile_fingerprint(profile: Any) -> str:
         try:
-            payload = json.dumps(
-                _canonical_semantic_value(asdict(profile)),
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            ).encode("utf-8")
+            return _canonical_dataclass_sha256(profile)
         except (TypeError, ValueError) as exc:
             raise DriverError("native construction profile cannot be canonicalized") from exc
-        return hashlib.sha256(payload).hexdigest()
 
     @staticmethod
     def _native_construction_positive_generation(value: Any) -> bool:
@@ -4966,77 +4946,6 @@ class SessionDaemon:
         )
         self.driver.native_memory_meter = meter
         return meter
-
-    def _archive_native_memory_failure(
-        self,
-        meter: LinuxProcStatusVmHwmReset5,
-        measurement: NativeMemoryMeasurement,
-        failure: str,
-    ) -> NativeMemoryMeasurementArchiveReceipt:
-        """Durably retain one complete over-limit window under live ownership."""
-
-        expected_failure = f"native {measurement.phase} memory growth exceeds its limit"
-        measurement.verify()
-        if failure != expected_failure or measurement.growth_bytes <= measurement.limit_bytes:
-            raise DriverError("native failed-memory outcome is not an over-limit rejection")
-        if (
-            measurement.method != meter.METHOD
-            or measurement.pid != meter.pid
-            or measurement.process_start != meter.process_start
-            or measurement.process_executable != meter.process_executable
-            or measurement.identity_fingerprint != meter.identity_fingerprint
-            or measurement.uid != meter.expected_uid
-            or measurement.kernel_release != meter.kernel_release
-            or not meter.completion_matches(measurement)
-        ):
-            raise DriverError("native failed-memory measurement is not bound to its completing meter")
-
-        with self.controller.lock:
-            if self.controller.status().state != ControllerState.NATIVE_CALIBRATION:
-                raise DriverError("native failed-memory archive requires NATIVE_CALIBRATION")
-            if self.driver.native_memory_meter is not meter:
-                raise DriverError("native failed-memory meter ownership changed")
-            identity = self.driver.resolve_identity()
-            if (
-                identity.fingerprint != measurement.identity_fingerprint
-                or identity.pid != measurement.pid
-                or identity.process_start != measurement.process_start
-            ):
-                raise DriverError("native failed-memory client identity changed")
-            meter._verify_identity()
-
-            kind = "native_memory_failures"
-            measurement_payload = measurement.to_dict()
-            outcome_payload = {
-                "kind": kind,
-                "measurement": measurement_payload,
-                "failure": failure,
-            }
-            outcome_id = hashlib.sha256(
-                json.dumps(outcome_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
-            payload = {
-                "schema": 1,
-                "outcomeId": outcome_id,
-                "phase": measurement.phase,
-                "ordinal": measurement.ordinal,
-                "decision": "rejected_over_limit",
-                "qualifies": False,
-                "failure": failure,
-                "measurement": measurement_payload,
-            }
-            archived = self.controller.journal.append_archive(kind, payload)
-            if (
-                not isinstance(archived, dict)
-                or set(archived) != set(payload) | {"archiveOrdinal", "archivedAt"}
-                or any(archived.get(key) != value for key, value in payload.items())
-                or isinstance(archived.get("archivedAt"), bool)
-                or not isinstance(archived.get("archivedAt"), int)
-            ):
-                raise DriverError("native failed-memory archive result is invalid")
-            receipt = NativeMemoryMeasurementArchiveReceipt.from_archive(measurement, archived)
-            receipt.verify(measurement)
-            return receipt
 
     def _archive_native_memory_assessment(
         self,
@@ -7794,10 +7703,7 @@ class SessionDaemon:
         return deadline
 
     def _remaining_motion_budget(self, deadline: float) -> float:
-        try:
-            remaining = float(deadline) - self._native_clock()
-        except Exception:
-            raise
+        remaining = float(deadline) - self._native_clock()
         if not math.isfinite(remaining) or remaining <= 0:
             raise DriverError("motion intent exceeded its bounded deadline")
         return remaining
@@ -11078,7 +10984,7 @@ class SessionDaemon:
                 scanner_idle=False,
                 stable_scan_ids=frozenset(),
                 stable_sweep_ids=frozenset(),
-                stable_format2_verified=False,
+                stable_scan_verified=False,
                 stable_files_complete=True,
                 observed_scene="character_select",
                 expected_generation=current.generation,
@@ -11155,7 +11061,7 @@ class SessionDaemon:
                 scanner_idle=False,
                 stable_scan_ids=frozenset(),
                 stable_sweep_ids=frozenset(),
-                stable_format2_verified=False,
+                stable_scan_verified=False,
                 stable_files_complete=False,
                 observed_scene=scene,
                 observed_modal=observed_modal,
@@ -12361,10 +12267,9 @@ class SessionDaemon:
             "scanner_idle": phase in {"ready", "scheduled"} and not active_sweep,
             "stable_scan_ids": stable_scan_ids,
             "stable_sweep_ids": stable_sweep_ids,
-            "stable_format2_uid": stable_uid,
-            "stable_format2_evidence": stable_evidence,
-            "stable_saved_uid": stable_uid,
-            "stable_format2_verified": bool(stable_evidence is not None and stable_evidence.stable_verified),
+            "stable_scan_uid": stable_uid,
+            "stable_scan_evidence": stable_evidence,
+            "stable_scan_verified": bool(stable_evidence is not None and stable_evidence.stable_verified),
             "stable_files_complete": True,
             "uploaded_ids": frozenset(uploads),
             "upload_timestamps": dict(uploads),
@@ -13605,7 +13510,7 @@ class SessionDaemon:
             raise EvidenceError("telemetry cursor is outside the configured scan plan")
 
     def _saved_scan_kwargs(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        """Return the immutable identity contract for format-2 evidence."""
+        """Return the immutable identity contract for stable scan evidence."""
 
         plan_hash = self.config.plan_hash or str(snapshot.get("plan", {}).get("hash", ""))
         if not plan_hash:
@@ -13635,7 +13540,7 @@ class SessionDaemon:
             capability = self.controller.mail_cycle_capability()
             if cycle.get("phase") not in {"none", "complete", "blocked"}:
                 if capability is None:
-                    return self.status_dict()
+                    return
                 self._mail_cycle_context.cycle_id = capability.cycle_id
                 try:
                     self._mail_loop_step(snapshot, capability)
@@ -13668,7 +13573,7 @@ class SessionDaemon:
                 # A blocked/uncertain executor outcome retains the durable
                 # interaction fence. A fresh owner must reconcile it; this
                 # process never turns it into a retry or ordinary resume.
-                return self.status_dict()
+                return
             context = snapshot.get("context", {})
             world_ready = (
                 isinstance(context, dict)
@@ -13719,8 +13624,8 @@ class SessionDaemon:
             "reconciliationRequired"
         ):
             stable_facts = self._reconcile_durable_files(snapshot)
-            if stable_facts.get("stable_format2_evidence") is not None:
-                self.current_evidence = stable_facts["stable_format2_evidence"]
+            if stable_facts.get("stable_scan_evidence") is not None:
+                self.current_evidence = stable_facts["stable_scan_evidence"]
             uploads = stable_facts["uploaded_ids"]
             data_ids = stable_facts["data_ack_ids"]
             loaded_ids = set(snapshot.get("loaded", {}).get("ackedIds", []))
@@ -13774,9 +13679,8 @@ class SessionDaemon:
                     scanner_idle=stable_facts["scanner_idle"],
                     stable_scan_ids=stable_facts["stable_scan_ids"],
                     stable_sweep_ids=stable_facts["stable_sweep_ids"],
-                    stable_format2_uid=stable_facts["stable_format2_uid"],
-                    stable_format2_evidence=stable_facts["stable_format2_evidence"],
-                    stable_saved_uid=stable_facts["stable_saved_uid"],
+                    stable_scan_uid=stable_facts["stable_scan_uid"],
+                    stable_scan_evidence=stable_facts["stable_scan_evidence"],
                     stable_upload_timestamp=stable_upload_timestamp,
                     stable_data_ack_uid=stable_data_ack_uid,
                     stable_companion_uploaded_uid=stable_companion_uploaded_uid,
@@ -13784,7 +13688,7 @@ class SessionDaemon:
                     loaded_at=loaded_at,
                     loaded_boot=loaded_boot,
                     loaded_sequence=loaded_sequence,
-                    stable_format2_verified=stable_facts["stable_format2_verified"],
+                    stable_scan_verified=stable_facts["stable_scan_verified"],
                     stable_files_complete=stable_facts["stable_files_complete"],
                     observed_scene=scene,
                     observed_modal=observed_modal,
@@ -13812,7 +13716,7 @@ class SessionDaemon:
                 # Read-only restart reconciliation owns this frame.  Never
                 # relog or issue a named action while its effect remains
                 # unproved, including a character-select observation.
-                return self.status_dict()
+                return
             self.controller.reconcile(
                 identity_ok=True,
                 world_ready=character_ready,
@@ -14015,7 +13919,7 @@ class SessionDaemon:
             # post-reload proof uses fresh addon loaded/pending telemetry plus
             # the durable stage values recorded before dispatch.
             if status.last_uid in loaded and status.last_uid not in pending:
-                # Reconstruct the complete stable format-2 object before
+                # Reconstruct the complete stable scan object before
                 # clearing ACK_RELOAD_WAIT.  A loaded UID without its exact
                 # evidence is unresolved; it must never be parked for a
                 # future sweep or move the controller to REOPEN first.
@@ -14031,7 +13935,7 @@ class SessionDaemon:
                         **self._saved_scan_kwargs(snapshot),
                     )
                 if evidence.uid != status.last_uid or not evidence.stable_verified:
-                    raise EvidenceError("acknowledgement lacks complete stable format-2 evidence")
+                    raise EvidenceError("acknowledgement lacks complete stable scan evidence")
                 self.current_evidence = evidence
                 completed = self.controller.ack_reload_complete(
                     pending_ids=pending,

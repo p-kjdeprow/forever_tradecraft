@@ -7,7 +7,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from crowley.core.game_target import packaged_game_target
 from crowley.session import protocol
 from crowley.session.controller import Controller, ControllerState, SessionMode
 from crowley.session.journal import Journal, JournalError
@@ -17,10 +16,11 @@ from crowley.session.mail_loop import (
     MailOperationBounds,
     admit_mail_cycle,
 )
+from tests.support.config import fixture_target
 
 from .wow_harness import WowClient
 
-TARGET = packaged_game_target()
+TARGET = fixture_target()
 
 
 class _RecoveryDriver:

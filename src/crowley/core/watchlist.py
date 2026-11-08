@@ -13,11 +13,11 @@ from collections import Counter
 from functools import lru_cache
 from importlib import resources
 from pathlib import Path
-from typing import Any, Literal, get_args
+from typing import Any, Literal, cast, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
-from .game_target import FIXED_COLLECTION_CADENCE_SECONDS
+from .game_target import FIXED_COLLECTION_CADENCE_SECONDS, CatalogLike, packaged_game_target, target_scan_plan
 
 Status = Literal["active", "research", "excluded"]
 Category = Literal[
@@ -144,9 +144,7 @@ def load_catalog(*, enforce_target: bool = True) -> Catalog:
     source = resources.files("crowley.data").joinpath("first_run.json")
     catalog = _read_catalog(source)
     if enforce_target:
-        from .game_target import packaged_game_target
-
-        packaged_game_target().validate_catalog(catalog)
+        packaged_game_target().validate_catalog(cast(CatalogLike, catalog))
     return catalog
 
 
@@ -170,9 +168,7 @@ def main() -> None:
     )
     if args.command == "export":
         if args.catalog is None:
-            from .game_target import target_scan_plan
-
-            plan = target_scan_plan(catalog)
+            plan = target_scan_plan(cast(CatalogLike, catalog))
         else:
             plan = catalog.scan_plan()
         print(json.dumps(plan, indent=2))

@@ -7,22 +7,25 @@ import logging
 
 import httpx
 
-from .config import CompanionSettings, config_path, state_path
+from .config import CompanionSettings, config_path
 from .sync import State, state_file_lock
 
 
 def cmd_doctor(_: argparse.Namespace) -> None:
-    print(f"config file: {config_path()} ({'exists' if config_path().exists() else 'missing'})")
-    print(f"state file:  {state_path()}")
+    config_file = config_path()
+    print(f"config file: {config_file} ({'exists' if config_file.exists() else 'missing'})")
     settings = CompanionSettings()
-    with state_file_lock(state_path()):
-        state = State.load(state_path())
+    if settings.state_file is None:
+        raise ValueError("resolved companion state_file is required")
+    print(f"state file:  {settings.state_file}")
+    with state_file_lock(settings.state_file):
+        state = State.load(settings.state_file)
     print(f"wow_dir: {settings.wow_path} ({'ok' if settings.wow_path.is_dir() else 'MISSING'})")
     print(f"wtf_account: {settings.wtf_account}")
     for name in ("Crowley", "Crowley_Data"):
         target = settings.addons_dir / name
         print(f"addon {name}: {'installed' if target.exists() else 'not installed'}")
-    files = settings.saved_variables_files()
+    files = [settings.saved_variables]
     print(f"SavedVariables files: {len(files) or 'none yet (log in and /reload once)'}")
     for path in files:
         print(f"  {path}")

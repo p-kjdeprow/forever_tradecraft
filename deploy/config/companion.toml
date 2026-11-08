@@ -1,5 +1,3 @@
-# Crowley companion settings. The installer renders the selected productDir.
-# The API token comes only from CROWLEY_API_TOKEN in secrets.env.
-wow_dir = "/path/to/World of Warcraft/_classic_beta_"
-server_url = "http://127.0.0.1:8080"
-wtf_account = "850981908#1"
+[companion]
+poll_seconds = 3.0
+refresh_minutes = 5.0

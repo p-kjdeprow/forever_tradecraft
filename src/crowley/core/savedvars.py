@@ -32,7 +32,10 @@ class _Parser:
         return SavedVariablesError(f"{message} at line {line}")
 
     def skip(self) -> None:
-        self.pos = _WS_OR_COMMENT.match(self.text, self.pos).end()
+        match = _WS_OR_COMMENT.match(self.text, self.pos)
+        if match is None:
+            raise self.error("unable to skip whitespace or comments")
+        self.pos = match.end()
 
     def expect(self, char: str) -> None:
         self.skip()
@@ -85,7 +88,10 @@ class _Parser:
                 return "".join(parts)
             esc = text[self.pos]
             if esc.isdigit():
-                digits = re.match(r"\d{1,3}", text[self.pos : self.pos + 3]).group()
+                digits_match = re.match(r"\d{1,3}", text[self.pos : self.pos + 3])
+                if digits_match is None:
+                    raise self.error("invalid numeric escape")
+                digits = digits_match.group()
                 parts.append(chr(int(digits)))
                 self.pos += len(digits)
             elif esc in _ESCAPES:

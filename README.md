@@ -27,16 +27,20 @@ starts targeted sweeps every 900 seconds while the AH is open, with bounded reta
 ## Quickstart (server and game on one Linux machine)
 
 ```sh
-# 1. Install the package and render the target-specific configuration.
+# 1. Create the untracked host contract, then install the package.
 uv tool install .
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-crowley-ops install --game-root "/path/to/World of Warcraft"
+mkdir -p "$XDG_CONFIG_HOME/crowley"
+cp deploy/templates/host.example.toml "$XDG_CONFIG_HOME/crowley/host.toml"
+$EDITOR "$XDG_CONFIG_HOME/crowley/host.toml"
+crowley-ops install
 
-# 2. Fill the rendered templates. The account directory is literal and may
-# coexist with other accounts under WTF/Account.
+# 2. Review the tunable templates. Identity and paths stay in host.toml.
 $EDITOR "$XDG_CONFIG_HOME/crowley/companion.toml"
 $EDITOR "$XDG_CONFIG_HOME/crowley/session.toml"
 $EDITOR "$XDG_CONFIG_HOME/crowley/secrets.env"
+# The session service also needs CROWLEY_CODEX_PATH set to the reviewed,
+# absolute Codex CLI executable in its runtime environment.
 # Put CROWLEY_API_TOKEN, CROWLEY_DB_PASSWORD, CROWLEY_IMAGE_VERSION,
 # CROWLEY_DATABASE_URL, CROWLEY_BIND and CROWLEY_PAPER_RUN only in secrets.env.
 chmod 600 "$XDG_CONFIG_HOME/crowley/secrets.env"
@@ -81,7 +85,7 @@ confirmed sale. Confirmed own sales are recorded separately only after a full ow
 ## Game and server on different machines (Tailscale)
 
 1. On the server, set `CROWLEY_BIND` in `$XDG_CONFIG_HOME/crowley/secrets.env` to `tailscale ip -4` and restart Compose with that env file.
-2. On the game machine, set `server_url = "http://<server-tailnet-name>:8080"` and run the companion there.
+2. On the game machine, set `server_url = "http://<server-tailnet-name>:8080"` in `host.toml` and run the companion there.
 
 ## Deployment notes
 

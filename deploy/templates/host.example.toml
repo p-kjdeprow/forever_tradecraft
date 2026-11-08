@@ -1,0 +1,20 @@
+# Copy this file to $XDG_CONFIG_HOME/crowley/host.toml and replace every
+# placeholder with facts measured for this machine. game_root is absolute;
+# it is intentionally not interpreted relative to wine_prefix.
+wine_prefix = "/absolute/path/to/wine-prefix"
+game_root = "/absolute/path/to/world-of-warcraft"
+wtf_account = "account#1"
+character = "Character"
+display = ":0"
+server_url = "http://server.example.invalid:8080"
+window_title = "World of Warcraft"
+client_x = 0
+client_y = 0
+client_width = 1920
+client_height = 1080
+outer_width = 1928
+outer_height = 1092
+window_client_offset = [0, 0]
+canvas_origin = [80, 48]
+canvas_crop = [80, 48, 256, 256]
+model_crop = [80, 48, 1760, 984]

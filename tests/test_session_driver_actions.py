@@ -2099,6 +2099,7 @@ def test_session_daemon_default_constructs_the_pinned_production_backend(
         plan_hash=hashlib.sha256(plan_json.encode()).hexdigest(),
         plan_json=plan_json,
         codex_path=str(codex),
+        model_neutral_dir=tmp_path / "model-neutral",
     )
     monkeypatch.setattr(PinnedInputTool, "load", lambda: fixture_input_tool(tmp_path / "daemon-tool"))
     monkeypatch.setenv("CROWLEY_DESKTOP_LEASE", str(tmp_path / "desktop.lock"))

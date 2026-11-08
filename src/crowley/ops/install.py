@@ -12,13 +12,20 @@ import shutil
 import stat
 import subprocess
 import tempfile
-import tomllib
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
 
+from crowley.config import (
+    HostConfig,
+    HostConfigError,
+    OpsTunables,
+    host_config_path,
+    load_host_config,
+    resolve_ops,
+)
 from crowley.core.game_target import GameTarget, packaged_game_target
 from crowley.platform import privfs
 from crowley.platform.paths import XdgDirs
@@ -28,7 +35,6 @@ MANIFEST_SCHEMA = "crowley-install-v2"
 MAX_RESOURCE_BYTES = 32 * 1024 * 1024
 _MUTABLE_ADDON_FILES = frozenset({"addon/Crowley_Data/Data.lua", "addon/Crowley_Data/Queue.lua"})
 _CONFIG_FILES = ("companion.toml", "session.toml")
-_ROUTE_FILES = ("routes/stormwind.json",)
 _LAUNCHER_NAME = "crowley-world-of-warcraft"
 _DOCKER_TAG_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\Z")
 
@@ -313,16 +319,17 @@ def _resource_template(name: str, replacements: Mapping[bytes, bytes]) -> bytes:
     return rendered
 
 
-def render_launcher(target: GameTarget, game_root: Path) -> bytes:
+def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path) -> bytes:
     """Render the reviewed launcher from the target identity and game root."""
 
     resolved_game_root = _absolute_path(game_root, "launcher game root")
     expected_argv0 = rf"C:\Program Files (x86)\World of Warcraft\{target.product_dir}\{target.executable}"
+    resolved_wine_prefix = _absolute_path(wine_prefix, "launcher Wine prefix")
     replacements = {
         b"{{GAME_ROOT}}": shlex.quote(str(resolved_game_root)).encode("utf-8"),
         b"{{PRODUCT_DIR}}": shlex.quote(target.product_dir).encode("utf-8"),
         b"{{EXECUTABLE}}": shlex.quote(target.executable).encode("utf-8"),
-        b"{{WINE_PREFIX}}": shlex.quote(target.wine_prefix).encode("utf-8"),
+        b"{{WINE_PREFIX}}": shlex.quote(str(resolved_wine_prefix)).encode("utf-8"),
         b"{{EXPECTED_ARGV0}}": shlex.quote(expected_argv0).encode("utf-8"),
     }
     return _resource_template("launcher/crowley-world-of-warcraft.sh.in", replacements)
@@ -349,27 +356,30 @@ def _absolute_path(value: Path, label: str) -> Path:
     return value
 
 
-def _companion_game_root(xdg: XdgDirs, target: GameTarget) -> Path:
-    config_path = xdg.crowley_config / "companion.toml"
+def _host_for_install(xdg: XdgDirs) -> HostConfig:
+    config_path = host_config_path(
+        {
+            "XDG_CONFIG_HOME": str(xdg.config_home),
+            "HOME": str(xdg.config_home.parent),
+        }
+    )
     try:
-        raw = tomllib.loads(privfs.read_bounded(config_path, 64 * 1024).decode("utf-8"))
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError, privfs.PrivateFileError) as exc:
-        raise InstallError(f"companion config is unavailable: {config_path}") from exc
-    value = raw.get("wow_dir")
-    if not isinstance(value, str) or not value:
-        raise InstallError("companion.toml must contain wow_dir")
-    flavor = _absolute_path(Path(value).expanduser(), "configured wow_dir")
-    if flavor.name != target.product_dir:
-        raise InstallError(f"configured wow_dir must end in target productDir {target.product_dir!r}")
-    return flavor.parent
+        return load_host_config(config_path)
+    except HostConfigError as exc:
+        raise InstallError(
+            f"host.toml is required at {config_path}; copy deploy/templates/host.example.toml there: {exc}"
+        ) from exc
 
 
-def resolve_game_root(requested: Path | None, xdg: XdgDirs, target: GameTarget) -> Path:
-    """Resolve the explicit game root or the existing companion config."""
+def resolve_game_root(requested: Path | None, host: HostConfig) -> Path:
+    """Resolve the host-owned absolute game root."""
 
+    configured = _absolute_path(host.game_root_path, "host.game_root")
     if requested is not None:
-        return _absolute_path(requested.expanduser(), "--game-root")
-    return _companion_game_root(xdg, target)
+        explicit = _absolute_path(requested.expanduser(), "--game-root")
+        if explicit != configured:
+            raise InstallError("--game-root must match host.toml game_root")
+    return configured
 
 
 def _safe_relative(path: str) -> Path:
@@ -596,61 +606,10 @@ def _check_foreign(plan: InstallPlan, previous: Mapping[str, object], force: boo
                 raise InstallError(f"refusing to overwrite foreign file: {item.destination}")
 
 
-def _render_config(name: str, target: GameTarget, flavor_dir: Path, config_dir: Path) -> bytes:
-    rendered = _resource_bytes(f"config/{name}")
+def _render_config(name: str) -> bytes:
+    """Return the tracked tunables template without rewriting its contents."""
 
-    def toml_string(value: str) -> str:
-        return json.dumps(value, ensure_ascii=False, allow_nan=False)
-
-    def replace_once(old: str, new: str, expected: int) -> None:
-        nonlocal rendered
-        old_bytes = old.encode("utf-8")
-        count = rendered.count(old_bytes)
-        if count != expected:
-            raise InstallError(
-                f"config template {name} has {count} occurrences of {old!r}; expected {expected}"
-            )
-        rendered = rendered.replace(old_bytes, new.encode("utf-8"))
-
-    if name == "companion.toml":
-        replace_once(
-            'wow_dir = "/path/to/World of Warcraft/_classic_beta_"',
-            f"wow_dir = {toml_string(str(flavor_dir))}",
-            1,
-        )
-    elif name == "session.toml":
-        replace_once(
-            'wine_prefix = "/path/to/measured/wine-prefix"',
-            f"wine_prefix = {toml_string(target.wine_prefix)}",
-            1,
-        )
-        replace_once(
-            (
-                'saved_variables = "/path/to/World of Warcraft/_classic_beta_/'
-                'WTF/Account/850981908#1/SavedVariables/Crowley.lua"'
-            ),
-            "saved_variables = "
-            + toml_string(
-                str(flavor_dir / "WTF" / "Account" / "850981908#1" / "SavedVariables" / "Crowley.lua")
-            ),
-            1,
-        )
-        replace_once(
-            'data_lua = "/path/to/World of Warcraft/_classic_beta_/Interface/AddOns/Crowley_Data/Data.lua"',
-            "data_lua = "
-            + toml_string(str(flavor_dir / "Interface" / "AddOns" / "Crowley_Data" / "Data.lua")),
-            1,
-        )
-        replace_once(
-            'routes_file = "/path/to/reviewed/routes/stormwind.json"',
-            f"routes_file = {toml_string(str(config_dir / 'routes/stormwind.json'))}",
-            1,
-        )
-    else:
-        raise InstallError(f"unsupported config template: {name}")
-    if b"{{" in rendered or b"}}" in rendered:
-        raise InstallError(f"config template contains an unresolved placeholder: {name}")
-    return rendered
+    return _resource_bytes(f"config/{name}")
 
 
 def _plan_file(
@@ -672,10 +631,18 @@ def _plan_file(
     )
 
 
-def _build_plan(request: InstallRequest, xdg: XdgDirs, target: GameTarget, home: Path) -> InstallPlan:
-    game_root = resolve_game_root(request.game_root, xdg, target)
+def _build_plan(
+    request: InstallRequest,
+    xdg: XdgDirs,
+    target: GameTarget,
+    home: Path,
+    *,
+    host: HostConfig,
+) -> InstallPlan:
+    resolved = resolve_ops(target, host, OpsTunables(), xdg=xdg)
+    game_root = resolve_game_root(request.game_root, host)
     _require_directory(game_root, "game root")
-    flavor_dir = game_root / target.product_dir
+    flavor_dir = resolved.flavor_dir
     _require_directory(flavor_dir, "target product directory")
     addons_dir = flavor_dir / "Interface" / "AddOns"
     _require_directory(addons_dir, "addon directory")
@@ -700,24 +667,13 @@ def _build_plan(request: InstallRequest, xdg: XdgDirs, target: GameTarget, home:
         _plan_file(
             config_dir / name,
             f"config/{name}",
-            _render_config(name, target, flavor_dir, config_dir),
+            _render_config(name),
             "config",
             mutable=True,
             mode=0o600,
         )
         for name in _CONFIG_FILES
     ]
-    for name in _ROUTE_FILES:
-        config_files.append(
-            _plan_file(
-                config_dir / name,
-                f"config/{name}",
-                _resource_bytes(f"config/{name}"),
-                "config",
-                mutable=True,
-                mode=0o600,
-            )
-        )
     config_files.append(
         _plan_file(
             config_dir / "secrets.env",
@@ -777,7 +733,7 @@ def _build_plan(request: InstallRequest, xdg: XdgDirs, target: GameTarget, home:
     launcher = _plan_file(
         launcher_dir / _LAUNCHER_NAME,
         f"launcher/{_LAUNCHER_NAME}",
-        render_launcher(target, game_root),
+        render_launcher(target, game_root, host.wine_prefix_path),
         "launcher",
         mode=0o700,
     )
@@ -802,7 +758,12 @@ def _build_plan(request: InstallRequest, xdg: XdgDirs, target: GameTarget, home:
     )
 
 
-def build_plan(request: InstallRequest, environ: Mapping[str, str] | None = None) -> InstallPlan:
+def build_plan(
+    request: InstallRequest,
+    environ: Mapping[str, str] | None = None,
+    *,
+    host: HostConfig | None = None,
+) -> InstallPlan:
     """Resolve an install without writing anything."""
 
     environment = os.environ if environ is None else environ
@@ -815,7 +776,8 @@ def build_plan(request: InstallRequest, environ: Mapping[str, str] | None = None
     except ValueError as exc:
         raise InstallError(f"XDG paths are invalid: {exc}") from exc
     target = packaged_game_target()
-    plan = _build_plan(request, xdg, target, home)
+    resolved_host = _host_for_install(xdg) if host is None else host
+    plan = _build_plan(request, xdg, target, home, host=resolved_host)
     _check_foreign(plan, load_manifest(plan.manifest_path), request.force)
     return plan
 

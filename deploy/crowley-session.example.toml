@@ -1,67 +1,8 @@
-# Copy outside the repository and review each measured identity before install.
-[profile]
-display = ":0"
-# Leave xauthority empty to inherit the current user-session environment; do
-# not pin a changing display-manager filename.
-xauthority = ""
-# Fill this with the measured Wine prefix for the one configured client.
-wine_prefix = "/path/to/measured/wine-prefix"
-window_title = "World of Warcraft"
-window_class = "wowb.exe"
-client_build = "70450"
-interface = 16001
-client_version = "1.60.1"
-addon_version = "0.2.0"
-player_faction = "Alliance"
-locale = "enUS"
-client_width = 1920
-client_height = 1080
-outer_width = 1928
-outer_height = 1092
-window_client_offset = [0, 0]
-canvas_origin = [80, 48]
-canvas_crop = [80, 48, 256, 256]
-# Fill this only after live client-area calibration.  This larger crop is a
-# game-child crop for the bounded login adapter, separate from the 256px status
-# canvas and never the GNOME desktop.
-model_crop = [80, 48, 1760, 984]
-character = "Arthur"
-realm = "Classic Beta PvE 2"
-house = "beta-normal-alliance"
-plan_count = 428
-# Pin the exact canonical scan plan delivered by Crowley_Data before arming.
-# plan_hash = "<64 lowercase hex characters>"
-# plan_json = "<canonical planJSON string>"
-
-# Pointer anchors are produced by the live native visual calibration provider.
-# Do not enter guessed coordinates or copied identity fingerprints here.
-
+# Copy deploy/config/session.toml to $XDG_CONFIG_HOME/crowley/session.toml.
+# Identity, installation paths, character facts, and measured geometry belong
+# in $XDG_CONFIG_HOME/crowley/host.toml.
 [session]
-mode = "repeat"
-cadence_seconds = 900
-sweep_cap_seconds = 600
 quiet_margin_seconds = 15
 upload_deadline_seconds = 60
 reload_deadline_seconds = 45
 ack_deadline_seconds = 60
-model = "gpt-6-luna"
-cli_version = "codex-cli 0.162.1"
-# Select the provisioned pinned binary; the global CLI can update independently.
-codex_path = "~/.cache/crowley/codex/codex"
-# Persistent restart intent, intervention history, and acceptance evidence.
-journal = "~/.local/state/crowley/session.json"
-socket = "~/.local/run/crowley/session.sock"
-# Set these to the exact paths used by the existing companion and WoW client.
-saved_variables = "/path/to/WTF/Account/<account>/SavedVariables/Crowley.lua"
-companion_state = "~/.local/state/crowley/companion-state.json"
-data_lua = "/path/to/Wow/Interface/AddOns/Crowley_Data/Data.lua"
-# Optional reviewed native telemetry producer.  Leave both unset for stock
-# full-desktop capture; never select this binary through PATH.
-# telemetry_region_executable = "~/.cache/crowley/gnome-telemetry-region/gnome-screenshot"
-# telemetry_region_executable_sha256 = "cb938cab1bd99dc088d05f6f55c8a0443401320755e2037633e7f9ac6dbe2396"
-
-[native]
-canvas_width = 128
-canvas_height = 128
-cell_physical_pixels = 2
-frame_capacity_bytes = 2048

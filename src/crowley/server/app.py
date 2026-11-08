@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from typing import cast
 
 from fastapi import FastAPI
 
-from crowley.core.game_target import packaged_game_target, target_scan_plan
+from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
 
 from .config import get_settings
@@ -16,7 +17,7 @@ from .routes import account, addon, dashboard, health, houses, paper, queues, re
 async def lifespan(app: FastAPI):
     settings = get_settings()
     catalog = load_catalog()  # Fail at startup if the shipped plan is invalid.
-    app.state.canonical_scan_plan = target_scan_plan(catalog, packaged_game_target())
+    app.state.canonical_scan_plan = target_scan_plan(cast(CatalogLike, catalog), packaged_game_target())
     app.state.reference_item_ids = tuple(sorted(item.item_id for item in catalog.items))
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     pool = create_pool(settings.database_url)

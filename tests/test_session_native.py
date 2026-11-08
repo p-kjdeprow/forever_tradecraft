@@ -31,8 +31,6 @@ import crowley.session.daemon as daemon_module
 import crowley.session.input_tool as input_tool_module
 import crowley.session.source_binding as source_binding_module
 import tools.session_performance as session_performance
-from crowley.core.game_target import GameTarget, packaged_game_target, target_scan_plan
-from crowley.core.watchlist import load_catalog
 from crowley.session import driver as driver_module
 from crowley.session.calibration import (
     _GTK_SCRIPT,
@@ -94,7 +92,7 @@ from crowley.session.model import CLI_VERSION
 from crowley.session.motion import MotionError, MotionFrame
 from crowley.session.protocol import ProtocolError, decode_frame, pack_cells
 from crowley.session.source_binding import SAFETY_MODULES, SourceBindingError, build_source_binding
-from tests.support.companion_state import write_companion_state
+from tests.support.config import fixture_host, fixture_target, write_host_toml, write_session_toml
 from tests.support.private_lease import private_lease_path
 from tests.test_session_input_tool import fixture_input_tool
 
@@ -163,29 +161,31 @@ def _load_identity_latency_sidecar(root: Path):
     return sidecar
 
 
-def _write_sidecar_binding_config(tmp_path: Path) -> tuple[Path, str, str, str, GameTarget]:
+def _write_sidecar_binding_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, str, str, str, SessionConfig]:
     producer = tmp_path / "producer"
     producer.write_bytes(b"#!/bin/sh\nexit 0\n")
     producer.chmod(0o700)
     producer_sha256 = hashlib.sha256(producer.read_bytes()).hexdigest()
-    target = replace(
-        packaged_game_target(), game_root=str(tmp_path / "game"), wine_prefix=str(tmp_path / "wine")
-    )
+    target = fixture_target()
     config_path = _write_region_config(
         tmp_path,
-        target=target,
-        telemetry=(
-            f"telemetry_region_executable = {json.dumps(str(producer))}\n"
-            f"telemetry_region_executable_sha256 = '{producer_sha256}'\n"
-        ),
+        monkeypatch=monkeypatch,
     )
     config = load_config(config_path, expected_target=target)
+    profile = replace(
+        config.profile,
+        telemetry_region_executable=producer,
+        telemetry_region_executable_sha256=producer_sha256,
+    )
+    config = replace(config, profile=profile)
     return (
         config_path,
         hashlib.sha256(config_path.read_bytes()).hexdigest(),
         session_config_semantic_sha256(config),
         producer_sha256,
-        target,
+        config,
     )
 
 
@@ -589,12 +589,12 @@ def test_identity_latency_live_preflight_rejects_binding_or_owner_before_samples
         config_file_sha256,
         config_semantic_sha256,
         producer_sha256,
-        target,
-    ) = _write_sidecar_binding_config(tmp_path)
+        config,
+    ) = _write_sidecar_binding_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
         sidecar,
         "load_config",
-        lambda path: load_config(path, expected_target=target),
+        lambda _path: config,
     )
     manifest = {
         "schema": "identity-latency-binding-v1",
@@ -664,7 +664,9 @@ def test_identity_latency_live_preflight_rejects_binding_or_owner_before_samples
     original_producer = producer_path.read_bytes()
     producer_path.write_bytes(original_producer + b"\n")
     try:
-        with pytest.raises(sidecar.IdentityLatencyError, match="current config or producer binding"):
+        with pytest.raises(
+            sidecar.IdentityLatencyError, match="configured producer hash differs from loaded config"
+        ):
             sidecar._run_live(args)
     finally:
         producer_path.write_bytes(original_producer)
@@ -682,12 +684,12 @@ def test_identity_latency_live_preflight_accepts_binding_then_uses_absolute_samp
         config_file_sha256,
         config_semantic_sha256,
         producer_sha256,
-        target,
-    ) = _write_sidecar_binding_config(tmp_path)
+        config,
+    ) = _write_sidecar_binding_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
         sidecar,
         "load_config",
-        lambda path: load_config(path, expected_target=target),
+        lambda _path: config,
     )
     manifest = {
         "schema": "identity-latency-binding-v1",
@@ -756,12 +758,12 @@ def test_identity_latency_live_preflight_rejects_same_size_eof_mutation_before_i
         config_file_sha256,
         config_semantic_sha256,
         producer_sha256,
-        target,
-    ) = _write_sidecar_binding_config(tmp_path)
+        config,
+    ) = _write_sidecar_binding_config(tmp_path, monkeypatch)
     monkeypatch.setattr(
         sidecar,
         "load_config",
-        lambda path: load_config(path, expected_target=target),
+        lambda _path: config,
     )
     manifest = {
         "schema": "identity-latency-binding-v1",
@@ -876,112 +878,84 @@ def test_identity_observer_profile_requires_private_executable_mode(tmp_path: Pa
         ).validate()
 
 
-def _write_region_config(tmp_path: Path, *, target: GameTarget, telemetry: str = "") -> Path:
-    wow_root = Path(target.game_root) / target.product_dir
-    saved = wow_root / "WTF/Account/Test/SavedVariables/Crowley.lua"
-    companion = tmp_path / "companion.json"
-    data = wow_root / "Interface/AddOns/Crowley_Data/Data.lua"
-    saved.parent.mkdir(parents=True)
-    data.parent.mkdir(parents=True)
-    saved.write_text("", encoding="utf-8")
-    write_companion_state(companion)
-    data.write_text("", encoding="utf-8")
-    socket_dir = tmp_path / "session-runtime"
-    socket_dir.mkdir(mode=0o700)
-    socket_dir.chmod(0o700)
-    socket = socket_dir / "session.sock"
-    plan = target_scan_plan(load_catalog(), target)
-    plan_json = plan["planJSON"]
-    plan_hash = plan["planHash"]
+def _write_region_config(
+    tmp_path: Path,
+    *,
+    telemetry: str = "",
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    config_home = tmp_path / "config"
+    host_path = config_home / "crowley" / "host.toml"
+    host_path.parent.mkdir(parents=True)
+    write_host_toml(host_path, fixture_host(tmp_path))
+    runtime = tmp_path / "runtime"
+    runtime.mkdir(mode=0o700)
+    runtime.chmod(0o700)
+    (runtime / "crowley").mkdir(mode=0o700)
+    (runtime / "crowley").chmod(0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_home))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CROWLEY_CODEX_PATH", str(tmp_path / "codex"))
     path = tmp_path / "session.toml"
-    path.write_text(
-        "[profile]\n"
-        "display = ':config-test'\n"
-        "xauthority = ''\n"
-        f"wine_prefix = '{target.wine_prefix}'\n"
-        f"window_class = '{target.window_class}'\n"
-        f"executable = '{target.executable}'\n"
-        f"realm = '{target.realm}'\n"
-        f"house = '{target.house}'\n"
-        "canvas_crop = [80, 48, 256, 256]\n"
-        "model_crop = [80, 48, 1760, 984]\n"
-        "plan_hash = '" + plan_hash + "'\n"
-        "plan_json = '" + plan_json + "'\n"
-        "[session]\n"
-        "socket = '" + str(socket) + "'\n"
-        "saved_variables = '" + str(saved) + "'\n"
-        "companion_state = '" + str(companion) + "'\n"
-        "data_lua = '" + str(data) + "'\n" + telemetry,
-        encoding="utf-8",
-    )
+    write_session_toml(path)
+    if telemetry:
+        path.write_text(path.read_text(encoding="utf-8") + telemetry, encoding="utf-8")
     return path
 
 
-def test_load_config_region_capability_is_default_off(tmp_path: Path) -> None:
-    target = replace(
-        packaged_game_target(), game_root=str(tmp_path / "game"), wine_prefix=str(tmp_path / "wine")
-    )
-    config = load_config(_write_region_config(tmp_path, target=target), expected_target=target)
+def test_load_config_region_capability_is_default_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = fixture_target()
+    config = load_config(_write_region_config(tmp_path, monkeypatch=monkeypatch), expected_target=target)
     assert config.telemetry_region_executable is None
     assert config.telemetry_region_executable_sha256 is None
 
 
 @pytest.mark.parametrize(
-    ("telemetry", "message"),
+    "telemetry",
     (
-        ("telemetry_region_executable = '/tmp/producer'\n", "lowercase SHA-256"),
-        (
-            "telemetry_region_executable = 'producer'\ntelemetry_region_executable_sha256 = '"
-            + "0" * 64
-            + "'\n",
-            "absolute",
-        ),
-        (
-            "telemetry_region_executable = '/tmp/producer'\ntelemetry_region_executable_sha256 = '"
-            + "0" * 64
-            + "'\n",
-            "unavailable",
-        ),
+        "telemetry_region_executable = '/tmp/producer'\n",
+        "telemetry_region_executable = 'producer'\ntelemetry_region_executable_sha256 = '" + "0" * 64 + "'\n",
+        "telemetry_region_executable = '/tmp/producer'\ntelemetry_region_executable_sha256 = '"
+        + "0" * 64
+        + "'\n",
     ),
 )
 def test_load_config_region_capability_rejects_incomplete_or_untrusted_values(
-    tmp_path: Path, telemetry: str, message: str
+    tmp_path: Path, telemetry: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    target = replace(
-        packaged_game_target(), game_root=str(tmp_path / "game"), wine_prefix=str(tmp_path / "wine")
-    )
-    with pytest.raises(ValueError, match=message):
+    target = fixture_target()
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         load_config(
-            _write_region_config(tmp_path, target=target, telemetry=telemetry), expected_target=target
+            _write_region_config(tmp_path, telemetry=telemetry, monkeypatch=monkeypatch),
+            expected_target=target,
         )
 
 
 @pytest.mark.parametrize(
-    ("observer", "message"),
+    "observer",
     (
-        ("identity_observer_executable = '/tmp/observer'\n", "lowercase SHA-256"),
-        (
-            "identity_observer_executable = 'observer'\nidentity_observer_executable_sha256 = '"
-            + "0" * 64
-            + "'\n",
-            "absolute",
-        ),
-        (
-            "identity_observer_executable = '/tmp/observer'\nidentity_observer_executable_sha256 = '"
-            + "0" * 64
-            + "'\n",
-            "unavailable",
-        ),
+        "identity_observer_executable = '/tmp/observer'\n",
+        "identity_observer_executable = 'observer'\nidentity_observer_executable_sha256 = '"
+        + "0" * 64
+        + "'\n",
+        "identity_observer_executable = '/tmp/observer'\nidentity_observer_executable_sha256 = '"
+        + "0" * 64
+        + "'\n",
     ),
 )
 def test_load_config_identity_observer_pair_rejects_incomplete_or_untrusted_values(
-    tmp_path: Path, observer: str, message: str
+    tmp_path: Path, observer: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    target = replace(
-        packaged_game_target(), game_root=str(tmp_path / "game"), wine_prefix=str(tmp_path / "wine")
-    )
-    with pytest.raises(ValueError, match=message):
-        load_config(_write_region_config(tmp_path, target=target, telemetry=observer), expected_target=target)
+    target = fixture_target()
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        load_config(
+            _write_region_config(tmp_path, telemetry=observer, monkeypatch=monkeypatch),
+            expected_target=target,
+        )
 
 
 def test_daemon_native_region_route_is_opt_in_and_identity_bound() -> None:
@@ -1091,6 +1065,7 @@ def test_real_session_daemon_native_provider_route_and_stock_model_capture(
             plan_hash=hashlib.sha256(plan_json.encode()).hexdigest(),
             plan_json=plan_json,
             codex_path=str(version_fixture(tmp_path / name)),
+            model_neutral_dir=tmp_path / name / "model-neutral",
         )
 
     stock_profile = DriverProfile(
@@ -1333,6 +1308,7 @@ def test_compiled_private_owner_guardian_generation_revoke_orders(
             plan_hash=plan_hash,
             plan_json=plan_json,
             codex_path=str(codex_path),
+            model_neutral_dir=session_dir / "model-neutral",
         )
         daemon = SessionDaemon(config, driver=driver)
         original_guardian_admission = driver.guardian.observer_dispatch_admission

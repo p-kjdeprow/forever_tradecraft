@@ -968,6 +968,7 @@ def _ipc_motion_fixture(
         plan_hash="ipc-test-plan",
         plan_json="{}",
         codex_path=str(_fixture_codex(tmp_path)),
+        model_neutral_dir=tmp_path / "model-neutral",
     )
     daemon = SessionDaemon(config, controller=controller, driver=driver)
 

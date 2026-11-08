@@ -166,10 +166,10 @@
     }
   },
   "sources": [
-    "/home/dev/.local/state/crowley/routes/stormwind-ah-mailbox-20261022T181223Z",
-    "/home/dev/.local/state/crowley/routes/stormwind-ah-mailbox-20261022T173756Z",
-    "/home/dev/.local/state/crowley/routes/stormwind-ah-mailbox-20261022T174507Z",
-    "/home/dev/.local/state/crowley/routes/stormwind-ah-mailbox-20261022T173407Z",
+    "routes/stormwind-ah-mailbox-20261022T181223Z",
+    "routes/stormwind-ah-mailbox-20261022T173756Z",
+    "routes/stormwind-ah-mailbox-20261022T174507Z",
+    "routes/stormwind-ah-mailbox-20261022T173407Z",
     "jump_airtime estimated from jump-press-to-next-grounded telemetry",
     "heading convention verified on forward-only grounded W spans",
     "excluded 0 forward_hold samples shorter than 0.03s",

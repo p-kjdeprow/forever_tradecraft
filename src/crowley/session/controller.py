@@ -15,9 +15,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from crowley.core.game_target import packaged_game_target, target_scan_plan
+from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
 
 from . import protocol
@@ -29,7 +29,10 @@ from .mail_loop import MailBudget, MailLoopBinding, MailLoopBoundary, MailOperat
 from .startup import InvalidationCause, RuntimeInputEvidence, TakeoverDrillRecord
 
 _TARGET = packaged_game_target()
-_CANONICAL_PLAN = target_scan_plan(load_catalog(), _TARGET)
+_CANONICAL_PLAN = cast(
+    dict[str, Any],
+    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
+)
 _PLAN_COUNT = len(_CANONICAL_PLAN["itemIDs"])
 
 

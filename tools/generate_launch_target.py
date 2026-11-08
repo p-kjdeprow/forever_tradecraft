@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and render the packaged game target and its derived artifacts.
-
-The default operation is ``--check``.  ``--write`` only writes generated source
-artifacts under the repository (and an explicitly requested staging directory);
-it never edits live deployment files, game files, routes, or evidence.
-"""
+"""Validate and render target-derived Lua, TOC, and catalog artifacts."""
 
 from __future__ import annotations
 
@@ -12,18 +7,22 @@ import argparse
 import ast
 import json
 import re
-import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from crowley.core import companion_state, queue, scanformat
-from crowley.core.game_target import GameTarget, GameTargetError, load_game_target, target_catalog
+from crowley.core.game_target import (
+    GameTarget,
+    GameTargetError,
+    load_game_target,
+    selected_target,
+    target_catalog,
+)
 from crowley.core.watchlist import Catalog
 from crowley.server.routes.addon import AddonDataResponse
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_TARGET = ROOT / "src" / "crowley" / "data" / "game_target.json"
 DEFAULT_CATALOG = ROOT / "src" / "crowley" / "data" / "first_run.json"
 
 
@@ -184,21 +183,42 @@ def render_generated_schemas() -> str:
     return "\n".join(lines)
 
 
-def _compact_entries(plan: dict[str, Any]) -> str:
-    pools = plan["pools"]
-    pool_by_id = {int(item_id): 0 for item_id in pools["core"]}
-    pool_by_id.update({int(item_id): 1 for item_id in pools["discovery"]})
+def _default_target_path() -> Path:
+    selected = selected_target()
+    path = ROOT / "src" / "crowley" / "data" / "targets" / f"{selected.target_id}.json"
+    try:
+        packaged = load_game_target(path)
+    except (OSError, GameTargetError) as exc:
+        raise GenerationError(f"selected target source is unavailable: {path}: {exc}") from exc
+    if packaged != selected:
+        raise GenerationError("targets/selected does not identify the default target source")
+    return path
+
+
+def _compact_entries(plan: Mapping[str, object]) -> str:
+    pools_value = plan.get("pools")
+    item_ids_value = plan.get("itemIDs")
+    if not isinstance(pools_value, dict) or not isinstance(item_ids_value, list):
+        raise GenerationError("scan plan is missing pools or itemIDs")
+    pools = cast(dict[str, object], pools_value)
+    core = pools.get("core")
+    discovery = pools.get("discovery")
+    if not isinstance(core, list) or not isinstance(discovery, list):
+        raise GenerationError("scan plan pools are malformed")
+    pool_by_id = {int(item_id): 0 for item_id in core}
+    pool_by_id.update({int(item_id): 1 for item_id in discovery})
     previous = 0
     entries: list[str] = []
-    for item_id in plan["itemIDs"]:
-        item_id = int(item_id)
-        delta = item_id - previous
+    for raw_item_id in item_ids_value:
+        if isinstance(raw_item_id, bool) or not isinstance(raw_item_id, int):
+            raise GenerationError("scan plan item IDs must be integers")
+        delta = raw_item_id - previous
         if delta <= 0:
             raise GenerationError("scan plan item IDs must be strictly increasing")
-        if item_id not in pool_by_id:
-            raise GenerationError(f"scan plan item {item_id} is missing from its pool")
-        entries.append(f"{delta}:{pool_by_id[item_id]}")
-        previous = item_id
+        if raw_item_id not in pool_by_id:
+            raise GenerationError(f"scan plan item {raw_item_id} is missing from its pool")
+        entries.append(f"{delta}:{pool_by_id[raw_item_id]}")
+        previous = raw_item_id
     return ",".join(entries)
 
 
@@ -207,7 +227,7 @@ def _lua_string(value: str) -> str:
 
 
 def render_target_json(target: GameTarget) -> str:
-    """Render the selected target as the packaged source artifact."""
+    """Render the identity-only packaged target source artifact."""
 
     value = {
         "schemaVersion": 1,
@@ -220,10 +240,6 @@ def render_target_json(target: GameTarget) -> str:
             "product": target.product,
             "productDir": target.product_dir,
             "locale": target.locale,
-        },
-        "installation": {
-            "gameRoot": target.game_root,
-            "winePrefix": target.wine_prefix,
         },
         "context": {
             "region": target.region,
@@ -245,9 +261,12 @@ def render_target_json(target: GameTarget) -> str:
     return json.dumps(value, indent=2, ensure_ascii=False) + "\n"
 
 
-def render_generated_lua(target: GameTarget, plan: dict[str, Any]) -> str:
+def render_generated_lua(target: GameTarget, plan: Mapping[str, object]) -> str:
     entries = _compact_entries(plan)
-    values = [
+    item_ids = plan.get("itemIDs")
+    if not isinstance(item_ids, list):
+        raise GenerationError("scan plan itemIDs are malformed")
+    values: list[tuple[str, object]] = [
         ("targetId", target.target_id),
         ("fullBuild", target.full_build),
         ("clientVersion", target.client_version),
@@ -265,15 +284,15 @@ def render_generated_lua(target: GameTarget, plan: dict[str, Any]) -> str:
         ("faction", target.faction),
         ("house", target.house),
         ("routeProvenance", target.route_provenance),
-        ("schema", int(plan["schemaVersion"])),
-        ("id", plan["id"]),
-        ("revision", int(plan["revision"])),
-        ("catalogHash", plan["catalogHash"]),
-        ("planHash", plan["planHash"]),
-        ("count", len(plan["itemIDs"])),
-        ("cadenceSeconds", int(plan["cadenceSeconds"])),
+        ("schema", cast(int, plan["schemaVersion"])),
+        ("id", cast(str, plan["id"])),
+        ("revision", cast(int, plan["revision"])),
+        ("catalogHash", cast(str, plan["catalogHash"])),
+        ("planHash", cast(str, plan["planHash"])),
+        ("count", len(item_ids)),
+        ("cadenceSeconds", cast(int, plan["cadenceSeconds"])),
         ("sweepCapSeconds", target.sweep_cap_seconds),
-        ("initialPriceLevels", int(plan["initialPriceLevels"])),
+        ("initialPriceLevels", cast(int, plan["initialPriceLevels"])),
         ("planEntries", entries),
     ]
     lines = [
@@ -291,8 +310,7 @@ def render_generated_lua(target: GameTarget, plan: dict[str, Any]) -> str:
 
 def _replace_toc_interface(text: str, interface: int) -> str:
     pattern = re.compile(r"(?m)^## Interface: \d+$")
-    replacement = f"## Interface: {interface}"
-    result, count = pattern.subn(replacement, text)
+    result, count = pattern.subn(f"## Interface: {interface}", text)
     if count != 1:
         raise GenerationError("addon TOC must contain exactly one Interface header")
     return result
@@ -316,121 +334,6 @@ def _validate_toc_load_order(text: str, name: str) -> None:
             raise GenerationError(f"{name} must load GeneratedTarget.lua before {dependency}")
 
 
-def _toml_value(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _replace_section_key(text: str, section: str, key: str, value: Any) -> str:
-    section_match = re.search(rf"(?ms)^\[{re.escape(section)}\]\n(?P<body>.*?)(?=^\[|\Z)", text)
-    if section_match is None:
-        raise GenerationError(f"staged TOML is missing [{section}]")
-    body = section_match.group("body")
-    line = f"{key} = {_toml_value(value)}"
-    key_pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
-    body, count = key_pattern.subn(line, body)
-    if count == 0:
-        body = line + "\n" + body
-    return text[: section_match.start("body")] + body + text[section_match.end("body") :]
-
-
-def _replace_root_key(text: str, key: str, value: Any, *, required: bool = True) -> str:
-    line = f"{key} = {_toml_value(value)}"
-    key_pattern = re.compile(rf"(?m)^{re.escape(key)}\s*=.*$")
-    text, count = key_pattern.subn(line, text)
-    if required and count != 1:
-        raise GenerationError(f"staged TOML must contain exactly one root {key} key")
-    if not required and count > 1:
-        raise GenerationError(f"staged TOML must contain at most one root {key} key")
-    return text
-
-
-def _absolute_config_path(value: Any, where: str) -> Path:
-    if not isinstance(value, str) or not value:
-        raise GenerationError(f"{where} must be a non-empty absolute path")
-    path = Path(value).expanduser()
-    if not path.is_absolute() or path == Path("/") or ".." in path.parts:
-        raise GenerationError(f"{where} must be an absolute non-root path without traversal")
-    return path
-
-
-def _rewrite_install_path(value: Any, *, old_root: Path, new_root: Path, where: str) -> str:
-    path = _absolute_config_path(value, where)
-    try:
-        suffix = path.relative_to(old_root)
-    except ValueError as exc:
-        raise GenerationError(f"{where} is not under the configured companion wow_dir") from exc
-    if not suffix.parts:
-        raise GenerationError(f"{where} must name a file below the configured companion wow_dir")
-    return str(new_root / suffix)
-
-
-def render_session_config(
-    text: str,
-    target: GameTarget,
-    plan: dict[str, Any],
-    *,
-    old_wow_dir: Path | None = None,
-) -> str:
-    values = {
-        "client_build": target.native_build,
-        "interface": target.interface,
-        "client_version": target.client_version,
-        "wine_prefix": target.wine_prefix,
-        "player_faction": target.faction,
-        "locale": target.locale,
-        "window_class": target.window_class,
-        "executable": target.executable,
-        "realm": target.realm,
-        "house": target.house,
-        "plan_count": len(plan["itemIDs"]),
-        "plan_hash": plan["planHash"],
-        "plan_json": plan["planJSON"],
-    }
-    for key, value in values.items():
-        text = _replace_section_key(text, "profile", key, value)
-    for key, value in {
-        "cadence_seconds": target.cadence_seconds,
-        "sweep_cap_seconds": target.sweep_cap_seconds,
-    }.items():
-        text = _replace_section_key(text, "session", key, value)
-    if old_wow_dir is not None:
-        try:
-            parsed = tomllib.loads(text)
-        except tomllib.TOMLDecodeError as exc:
-            raise GenerationError(f"session.toml is invalid: {exc}") from exc
-        session = parsed.get("session")
-        if not isinstance(session, dict):
-            raise GenerationError("staged TOML is missing [session]")
-        new_wow_dir = Path(target.game_root) / target.product_dir
-        for key in ("saved_variables", "data_lua"):
-            if key not in session:
-                raise GenerationError(f"session.{key} is required for staged launch config")
-            value = _rewrite_install_path(
-                session[key],
-                old_root=old_wow_dir,
-                new_root=new_wow_dir,
-                where=f"session.{key}",
-            )
-            text = _replace_section_key(text, "session", key, value)
-    return text
-
-
-def render_companion_config(text: str, target: GameTarget) -> str:
-    try:
-        values = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise GenerationError(f"companion.toml is invalid: {exc}") from exc
-    _absolute_config_path(values.get("wow_dir"), "companion.wow_dir")
-    new_wow_dir = Path(target.game_root) / target.product_dir
-    text = _replace_root_key(text, "wow_dir", str(new_wow_dir))
-    house_key = values.get("house_key")
-    if house_key is not None and not isinstance(house_key, str):
-        raise GenerationError("companion.house_key must be a string when configured")
-    if isinstance(house_key, str) and house_key:
-        text = _replace_root_key(text, "house_key", target.house)
-    return text
-
-
 def _read_catalog(path: Path) -> Catalog:
     try:
         return Catalog.model_validate_json(path.read_text(encoding="utf-8"))
@@ -438,14 +341,14 @@ def _read_catalog(path: Path) -> Catalog:
         raise GenerationError(f"catalog is invalid: {path}: {exc}") from exc
 
 
-def _source_artifacts(root: Path) -> dict[str, Path]:
+def _source_artifacts(root: Path, target_id: str) -> dict[Path, str]:
     return {
-        "target": root / "src" / "crowley" / "data" / "game_target.json",
-        "catalog": root / "src" / "crowley" / "data" / "first_run.json",
-        "generated_lua": root / "addon" / "Crowley" / "GeneratedTarget.lua",
-        "generated_schemas": root / "addon" / "Crowley" / "GeneratedSchemas.lua",
-        "crowley_toc": root / "addon" / "Crowley" / "Crowley.toc",
-        "data_toc": root / "addon" / "Crowley_Data" / "Crowley_Data.toc",
+        root / "src" / "crowley" / "data" / "targets" / f"{target_id}.json": "target",
+        root / "src" / "crowley" / "data" / "first_run.json": "catalog",
+        root / "addon" / "Crowley" / "GeneratedTarget.lua": "generated_lua",
+        root / "addon" / "Crowley" / "GeneratedSchemas.lua": "generated_schemas",
+        root / "addon" / "Crowley" / "Crowley.toc": "crowley_toc",
+        root / "addon" / "Crowley_Data" / "Crowley_Data.toc": "data_toc",
     }
 
 
@@ -460,103 +363,33 @@ def _render(root: Path, target_path: Path, catalog_path: Path) -> dict[Path, str
     except (AttributeError, GameTargetError) as exc:
         raise GenerationError(f"catalog identity cannot be bound to target: {exc}") from exc
     plan = bound.scan_plan(cadence_seconds=target.cadence_seconds)
-    if len(plan["itemIDs"]) <= 0:
+    item_ids = plan.get("itemIDs")
+    if not isinstance(item_ids, list) or not item_ids:
         raise GenerationError("target-bound scan plan must contain active items")
     if plan["id"] != target.catalog_id or plan["revision"] != target.catalog_revision:
         raise GenerationError("generated plan identity does not match target")
     catalog_json = json.dumps(bound.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n"
-    artifacts = _source_artifacts(root)
-    templates = _source_artifacts(ROOT)
-    if not templates["crowley_toc"].is_file() or not templates["data_toc"].is_file():
-        raise GenerationError("generator requires both checkout addon TOC templates")
-    toc = templates["crowley_toc"].read_text(encoding="utf-8")
-    data_toc = templates["data_toc"].read_text(encoding="utf-8")
+    artifacts = _source_artifacts(root, target.target_id)
+    templates = _source_artifacts(ROOT, target.target_id)
+    toc_path = next(path for path, kind in templates.items() if kind == "crowley_toc")
+    data_toc_path = next(path for path, kind in templates.items() if kind == "data_toc")
+    toc = toc_path.read_text(encoding="utf-8")
+    data_toc = data_toc_path.read_text(encoding="utf-8")
     _validate_toc_load_order(toc, "checkout addon/Crowley/Crowley.toc")
     return {
-        artifacts["target"]: render_target_json(target),
-        artifacts["catalog"]: catalog_json,
-        artifacts["generated_lua"]: render_generated_lua(target, plan),
-        artifacts["generated_schemas"]: render_generated_schemas(),
-        artifacts["crowley_toc"]: _replace_toc_interface(toc, target.interface),
-        artifacts["data_toc"]: _replace_toc_interface(data_toc, target.interface),
+        path: {
+            "target": render_target_json(target),
+            "catalog": catalog_json,
+            "generated_lua": render_generated_lua(target, plan),
+            "generated_schemas": render_generated_schemas(),
+            "crowley_toc": _replace_toc_interface(toc, target.interface),
+            "data_toc": _replace_toc_interface(data_toc, target.interface),
+        }[kind]
+        for path, kind in artifacts.items()
     }
 
 
-def _render_staged_configs(
-    root: Path, stage_dir: Path, target: GameTarget, plan: dict[str, Any]
-) -> dict[Path, str]:
-    config_root = root / "deploy" / "config"
-    session_source = config_root / "session.toml"
-    companion_source = config_root / "companion.toml"
-    if not session_source.is_file() or not companion_source.is_file():
-        raise GenerationError(
-            "staged config rendering requires deploy/config/session.toml and companion.toml"
-        )
-    companion = companion_source.read_text(encoding="utf-8")
-    try:
-        companion_values = tomllib.loads(companion)
-    except tomllib.TOMLDecodeError as exc:
-        raise GenerationError(f"companion.toml is invalid: {exc}") from exc
-    old_wow_dir = _absolute_config_path(companion_values.get("wow_dir"), "companion.wow_dir")
-    session = render_session_config(
-        session_source.read_text(encoding="utf-8"),
-        target,
-        plan,
-        old_wow_dir=old_wow_dir,
-    )
-    companion = render_companion_config(companion, target)
-    return {
-        stage_dir / "session.toml": session,
-        stage_dir / "companion.toml": companion,
-    }
-
-
-def _protected_roots(root: Path, target: GameTarget) -> tuple[Path, ...]:
-    protected = {
-        ROOT / "deploy" / "config",
-        Path.home() / ".config" / "crowley",
-        root / "deploy" / "config",
-        Path(target.game_root),
-        Path(target.wine_prefix),
-    }
-    actual_session = ROOT / "deploy" / "config" / "session.toml"
-    actual_companion = ROOT / "deploy" / "config" / "companion.toml"
-    try:
-        if actual_session.is_file():
-            session = tomllib.loads(actual_session.read_text(encoding="utf-8"))
-            profile = session.get("profile")
-            if isinstance(profile, dict) and profile.get("wine_prefix") is not None:
-                protected.add(_absolute_config_path(profile["wine_prefix"], "profile.wine_prefix"))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise GenerationError(f"cannot inspect current session installation path: {exc}") from exc
-    try:
-        if actual_companion.is_file():
-            companion = tomllib.loads(actual_companion.read_text(encoding="utf-8"))
-            wow_dir = _absolute_config_path(companion.get("wow_dir"), "companion.wow_dir")
-            protected.update((wow_dir, wow_dir.parent))
-    except (OSError, tomllib.TOMLDecodeError) as exc:
-        raise GenerationError(f"cannot inspect current companion installation path: {exc}") from exc
-    return tuple(path.resolve(strict=False) for path in protected)
-
-
-def _preflight_destinations(destinations: list[Path], *, root: Path, target: GameTarget) -> None:
-    protected = _protected_roots(root, target)
-    for destination in destinations:
-        probe = destination
-        while True:
-            if probe.is_symlink():
-                raise GenerationError(f"refusing to write symlink destination: {destination}")
-            if probe.parent == probe:
-                break
-            probe = probe.parent
-        resolved = destination.resolve(strict=False)
-        if any(resolved == guard or guard in resolved.parents for guard in protected):
-            raise GenerationError(
-                f"refusing to write live deploy/config or protected installation/config path: {destination}"
-            )
-
-
-def _write_or_check(artifacts: dict[Path, str], *, write: bool) -> list[str]:
+def _write_or_check(artifacts: Mapping[Path, str], *, write: bool) -> list[str]:
     errors: list[str] = []
     for path, expected in artifacts.items():
         actual = path.read_text(encoding="utf-8") if path.is_file() else None
@@ -571,47 +404,23 @@ def _write_or_check(artifacts: dict[Path, str], *, write: bool) -> list[str]:
     return errors
 
 
-def _write_staged(artifacts: dict[Path, str]) -> None:
-    for path, text in artifacts.items():
-        if path.is_symlink():
-            raise GenerationError(f"refusing to write staged config symlink: {path}")
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        path.chmod(0o600)
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", type=Path, default=DEFAULT_TARGET)
+    parser.add_argument("--target", type=Path)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG)
     parser.add_argument("--output-root", type=Path, default=ROOT)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--check", action="store_true", help="check generated bytes without writing (default)")
     mode.add_argument("--write", action="store_true", help="write generated source artifacts")
-    parser.add_argument("--stage-config-dir", type=Path)
     args = parser.parse_args(argv)
     write = bool(args.write)
     try:
         output_root = args.output_root.absolute()
-        artifacts = _render(output_root, args.target.absolute(), args.catalog.absolute())
+        target_path = _default_target_path() if args.target is None else args.target.absolute()
+        artifacts = _render(output_root, target_path, args.catalog.absolute())
         errors = _write_or_check(artifacts, write=False) if not write else []
-        target = load_game_target(args.target)
-        catalog = _read_catalog(args.catalog)
-        plan = target_catalog(catalog, target).scan_plan(cadence_seconds=target.cadence_seconds)
-        staged: dict[Path, str] = {}
-        if args.stage_config_dir is not None:
-            if not write:
-                raise GenerationError("--stage-config-dir requires --write")
-            staged = _render_staged_configs(output_root, args.stage_config_dir.absolute(), target, plan)
         if write:
-            _preflight_destinations(
-                [*artifacts, *staged],
-                root=output_root,
-                target=target,
-            )
             errors = _write_or_check(artifacts, write=True)
-            if staged:
-                _write_staged(staged)
         if errors:
             raise GenerationError("generated artifacts drifted: " + ", ".join(errors))
     except (GenerationError, GameTargetError, OSError, ValueError) as exc:

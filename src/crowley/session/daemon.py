@@ -24,10 +24,10 @@ from dataclasses import asdict, dataclass, is_dataclass, replace
 from functools import wraps
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, cast
 
 from crowley.core import savedvars
-from crowley.core.game_target import packaged_game_target, target_scan_plan
+from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
 
 from . import protocol
@@ -143,7 +143,10 @@ from .startup import (
 
 _LOGGER = logging.getLogger(__name__)
 _TARGET = packaged_game_target()
-_CANONICAL_PLAN = target_scan_plan(load_catalog(), _TARGET)
+_CANONICAL_PLAN = cast(
+    dict[str, Any],
+    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
+)
 
 
 def _canonical_semantic_value(value: Any) -> Any:
@@ -1715,6 +1718,7 @@ class SessionDaemon:
         self._closeout_scan_candidate: tuple[int, str] | None = None
         self._closeout_fence_observation: tuple[str, int] | None = None
         self.model = LunaAdapter(
+            neutral_dir=self.config.model_neutral_dir,
             model=self.config.model,
             cli_version=self.config.cli_version,
             codex_path=self.config.codex_path,

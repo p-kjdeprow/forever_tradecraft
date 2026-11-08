@@ -1,6 +1,5 @@
 import json
 import time
-from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -34,6 +33,7 @@ from crowley.core.companion_state import (
     parse_bytes,
     upgrade_legacy_state_bytes,
 )
+from crowley.core.game_target import load_game_target
 from crowley.core.luawriter import render_assignment
 from crowley.core.queue import build_queue, render_queue_lua
 from crowley.core.watchlist import load_catalog
@@ -42,6 +42,7 @@ from .test_core import raw_scan
 from .wow_harness import WowClient
 
 FIXTURE = Path(__file__).parent / "fixtures/native-construction-unknown-savedvars.lua"
+TARGET_FIXTURE = Path(__file__).parent / "fixtures/targets/verified-beta.json"
 
 
 def write_savedvars(path, scans, probe=None, reference=None, account=None, executions=None):
@@ -60,11 +61,7 @@ def write_savedvars(path, scans, probe=None, reference=None, account=None, execu
 @pytest.fixture
 def companion(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    target = replace(
-        companion_config._TARGET,
-        game_root=str(tmp_path),
-        wine_prefix=str(tmp_path / "wine"),
-    )
+    target = load_game_target(TARGET_FIXTURE)
     monkeypatch.setattr(companion_config, "_TARGET", target)
     wow_dir = tmp_path / target.product_dir
     settings = CompanionSettings(
@@ -72,6 +69,7 @@ def companion(tmp_path, monkeypatch):
         server_url="http://test",
         api_token="test-token",
         wtf_account="Test",
+        state_file=tmp_path / "state" / "companion.json",
     )
     saved = wow_dir / "WTF/Account/Test/SavedVariables/Crowley.lua"
     saved.parent.mkdir(parents=True)
@@ -85,13 +83,11 @@ def companion(tmp_path, monkeypatch):
 
 
 def test_companion_settings_reject_stale_target_identity():
-    from crowley.core.game_target import packaged_game_target
-
-    target = packaged_game_target()
-    expected_wow_dir = Path(target.game_root) / target.product_dir
+    target = load_game_target(TARGET_FIXTURE)
+    expected_wow_dir = Path("fixture") / target.product_dir
     with pytest.raises(ValueError, match="wow_dir"):
         CompanionSettings(
-            wow_dir=Path("/tmp/stale-wow"),
+            wow_dir=Path("stale-wow"),
             server_url="http://test",
             wtf_account="Test",
             api_token="test-token",
@@ -376,7 +372,7 @@ def test_account_upload_permanent_rejection_waits_for_operator_retry(companion):
 
 def test_queue_lua_is_written_only_when_content_changes(companion, monkeypatch):
     instance, _ = companion
-    instance.settings.house_key = "us-normal-alliance"
+    instance.settings.house_key = companion_config._TARGET.house
     instance.settings.character = "Tester"
     queue = build_queue(
         {

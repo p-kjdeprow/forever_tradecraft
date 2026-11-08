@@ -337,14 +337,14 @@ def compare_observations(
         "commodityReplenishmentUnits": 0,
     }
     if kind == "commodity":
-        before: defaultdict[Fraction, int] = defaultdict(int)
-        after: defaultdict[Fraction, int] = defaultdict(int)
+        commodity_before: defaultdict[Fraction, int] = defaultdict(int)
+        commodity_after: defaultdict[Fraction, int] = defaultdict(int)
         for row in left_rows:
-            before[_ratio(row["unitPrice"])] += row["quantity"]
+            commodity_before[_ratio(row["unitPrice"])] += row["quantity"]
         for row in right_rows:
-            after[_ratio(row["unitPrice"])] += row["quantity"]
-        for price in set(before) | set(after):
-            delta = before[price] - after[price]
+            commodity_after[_ratio(row["unitPrice"])] += row["quantity"]
+        for price in set(commodity_before) | set(commodity_after):
+            delta = commodity_before[price] - commodity_after[price]
             if delta > 0:
                 result["commodityDepletionUnits"] += delta
             elif delta < 0:
@@ -393,8 +393,16 @@ def compare_observations(
     # Detect persistent identity changes against all retained rows before applying
     # the common ceiling. A repriced ID outside that prefix cannot become a sale
     # merely because the new row is filtered out.
-    before_all = {row.get("resultID"): row for row in left_rows_all if isinstance(row.get("resultID"), int)}
-    after_all = {row.get("resultID"): row for row in right_rows_all if isinstance(row.get("resultID"), int)}
+    before_all: dict[int, dict[str, Any]] = {}
+    for row in left_rows_all:
+        result_id = row.get("resultID")
+        if isinstance(result_id, int):
+            before_all[result_id] = row
+    after_all: dict[int, dict[str, Any]] = {}
+    for row in right_rows_all:
+        result_id = row.get("resultID")
+        if isinstance(result_id, int):
+            after_all[result_id] = row
     inconsistent_ids: set[int] = set()
     for auction_id in before_all.keys() & after_all.keys():
         if _row_fingerprint(before_all[auction_id]) != _row_fingerprint(after_all[auction_id]):

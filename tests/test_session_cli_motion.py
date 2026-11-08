@@ -338,9 +338,9 @@ def test_socket_request_allows_only_bounded_capture_failure_evidence_grace(tmp_p
     assert not worker.is_alive()
 
 
-def _model_for_process_test() -> LunaAdapter:
+def _model_for_process_test(neutral_dir: Path) -> LunaAdapter:
     adapter = LunaAdapter.__new__(LunaAdapter)
-    adapter.neutral_dir = Path("/tmp/crowley-model-test")
+    adapter.neutral_dir = neutral_dir
     adapter.timeout = 1.0
     adapter.model = "gpt-6-luna"
     adapter.cli_version = CLI_VERSION
@@ -354,7 +354,7 @@ def _model_for_process_test() -> LunaAdapter:
 
 
 def test_model_cancel_before_process_registration_is_not_cleared(monkeypatch, tmp_path: Path) -> None:
-    adapter = _model_for_process_test()
+    adapter = _model_for_process_test(tmp_path / "model-neutral")
 
     class Process:
         pid = 4242
@@ -399,7 +399,7 @@ def test_model_cancel_before_process_registration_is_not_cleared(monkeypatch, tm
 
 
 def test_model_near_deadline_cleanup_is_bounded_and_retains_live_owner(monkeypatch, tmp_path: Path) -> None:
-    adapter = _model_for_process_test()
+    adapter = _model_for_process_test(tmp_path / "model-neutral")
 
     class Process:
         pid = 4343
@@ -430,7 +430,7 @@ def test_model_near_deadline_cleanup_is_bounded_and_retains_live_owner(monkeypat
 def test_model_retained_live_owner_blocks_next_call_and_shutdown_reaps_it(
     monkeypatch, tmp_path: Path
 ) -> None:
-    adapter = _model_for_process_test()
+    adapter = _model_for_process_test(tmp_path / "model-neutral")
 
     class Process:
         pid = 4444

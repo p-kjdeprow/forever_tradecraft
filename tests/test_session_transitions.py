@@ -1307,25 +1307,9 @@ def test_ready_empty_dispatched_scan_is_a_truthful_rejected_attempt(tmp_path: Pa
 def test_runtime_durable_empty_scan_facts_reject_without_stable_scan_proof(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import tests.test_session_runtime as runtime_fixtures
     from crowley.core.luawriter import render_assignment
     from crowley.core.watchlist import load_catalog
     from tests.test_session_runtime import _runtime_daemon, _snapshot
-
-    # Keep the real adapter/version guard while giving this fixture the
-    # authentic private pinned CLI.  The helper's default intentionally
-    # models the host config and may point at a newer development binary.
-    pinned_cli = Path(
-        "/home/dev/.cache/crowley/codex/0.162.1/node_modules/"
-        "@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
-    )
-    assert pinned_cli.is_file()
-    config_type = runtime_fixtures.SessionConfig
-
-    def pinned_config(**kwargs: object):
-        return config_type(**kwargs, codex_path=str(pinned_cli))
-
-    monkeypatch.setattr(runtime_fixtures, "SessionConfig", pinned_config)
 
     daemon, _backend, driver, controller, config, _clock = _runtime_daemon(
         tmp_path,

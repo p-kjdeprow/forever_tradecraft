@@ -235,12 +235,6 @@
   },
   {
     "category": "temporary-path",
-    "count": 1,
-    "match": "/tmp/{run_name}-{ordinal}.json",
-    "path": "tests/test_trading_paper.py"
-  },
-  {
-    "category": "temporary-path",
     "count": 2,
     "match": "/tmp/ambient",
     "path": "tests/test_x11_identity_observer.py"

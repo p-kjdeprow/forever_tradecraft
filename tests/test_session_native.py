@@ -5197,6 +5197,28 @@ class _NativeRunnerHarness:
         self.child.wait(timeout=3)
 
 
+def test_native_runner_mixed_clock_failure_then_shared_clock_success(tmp_path: Path) -> None:
+    """The real runner rejects mixed reset/release clocks and accepts one shared domain."""
+
+    harness = _NativeRunnerHarness(tmp_path)
+    try:
+        harness.meter._monotonic = lambda: 2000.0
+        with pytest.raises(
+            CalibrationError,
+            match="native construction work started before bootstrap release",
+        ):
+            harness.run()
+        assert harness.meter._pending_window is None
+
+        harness.meter._monotonic = lambda: harness.clock[0]
+        evidence = harness.run()
+        evidence.verify_seal()
+        assert harness.preconstruction_evidence is not None
+        assert harness.preconstruction_evidence.bootstrap_release_monotonic >= harness.reset_time
+    finally:
+        harness.close()
+
+
 @pytest.mark.parametrize(
     "fault",
     [

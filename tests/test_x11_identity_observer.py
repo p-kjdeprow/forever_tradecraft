@@ -110,9 +110,12 @@ def test_hermetic_builder_publishes_binary_manifest(tmp_path: Path) -> None:
         check=True,
     )
     manifest = json.loads(result.stdout)
-    assert output.is_file() and output.stat().st_mode & 0o111
-    assert output.with_suffix(".manifest.json").stat().st_mode & 0o777 == 0o600
-    assert manifest["binary_sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
+    published = output.parent
+    binary = published / "current" / output.name
+    manifest_path = published / "current" / output.with_suffix(".manifest.json").name
+    assert binary.is_file() and binary.stat().st_mode & 0o111
+    assert manifest_path.stat().st_mode & 0o777 == 0o600
+    assert manifest["binary_sha256"] == hashlib.sha256(binary.read_bytes()).hexdigest()
     assert set(manifest["source_sha256"]) == {
         "native/x11_identity_observer/Cargo.toml",
         "native/x11_identity_observer/Cargo.lock",
@@ -289,7 +292,7 @@ def test_protocol_inputs_are_bounded_and_explicit(tmp_path: Path, mutation: str)
 def test_observer_reads_real_xvfb_process_and_window_tree(tmp_path: Path) -> None:
     published = tmp_path / "published" / "observer"
     builder.build_observer(published)
-    binary = published
+    binary = published.parent / "current" / published.name
     source = tmp_path / "wine_preloader.c"
     source.write_text(
         r"""
@@ -768,7 +771,7 @@ int main(int argc, char **argv) {
     subprocess.run(["cc", str(query_wrapper_source), "-o", str(query_wrapper)], check=True)
     query_wrapper.chmod(0o700)
     pinned_xdotool_root = builder.build_xdotool(builder.VENDORED_SOURCE_ARCHIVE, tmp_path / "pinned-xdotool")
-    pinned_xdotool = pinned_xdotool_root / pins.XDOTOOL_ARTIFACT_NAME
+    pinned_xdotool = pinned_xdotool_root / "current" / pins.XDOTOOL_ARTIFACT_NAME
     gate_source = tmp_path / "fixture_x_gate.c"
     gate_source.write_text(
         r"""

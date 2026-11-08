@@ -37,10 +37,16 @@ _TEST_BUILD_INPUTS = {
 def _artifact_copy(tmp_path: Path, executable_source: str = "") -> Path:
     root = tmp_path / "xdotool"
     root.mkdir(mode=0o700, parents=True)
-    shutil.copyfile(executable_source or "/bin/true", root / PRIVATE_TOOL_BASENAME)
-    shutil.copyfile(VENDORED_SOURCE_ARCHIVE, root / ARCHIVE_BASENAME)
-    digest = hashlib.sha256((root / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest()
-    (root / MANIFEST_BASENAME).write_text(
+    executable = Path(executable_source or "/bin/true")
+    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+    releases = root / "releases"
+    releases.mkdir(mode=0o700)
+    releases.chmod(0o700)
+    release = releases / digest
+    release.mkdir(mode=0o700)
+    shutil.copyfile(executable, release / PRIVATE_TOOL_BASENAME)
+    shutil.copyfile(VENDORED_SOURCE_ARCHIVE, release / ARCHIVE_BASENAME)
+    (release / MANIFEST_BASENAME).write_text(
         json.dumps(
             {
                 "commit": PINNED_COMMIT,
@@ -53,11 +59,16 @@ def _artifact_copy(tmp_path: Path, executable_source: str = "") -> Path:
         ),
         encoding="utf-8",
     )
-    for child in root.iterdir():
+    for child in release.iterdir():
         child.chmod(
             stat.S_IRUSR | stat.S_IWUSR | (stat.S_IXUSR if child.name == PRIVATE_TOOL_BASENAME else 0)
         )
+    (root / "current").symlink_to(Path("releases") / digest)
     return root
+
+
+def _current_release(root: Path) -> Path:
+    return root / "current"
 
 
 def fixture_input_tool(tmp_path: Path, executable_source: str = "/bin/true") -> PinnedInputTool:
@@ -443,7 +454,7 @@ def test_sealed_image_executes_after_published_path_is_removed(tmp_path: Path) -
     root = _artifact_copy(tmp_path, "/bin/true")
     tool = PinnedInputTool.from_root(root)
     try:
-        (root / PRIVATE_TOOL_BASENAME).unlink()
+        (_current_release(root) / PRIVATE_TOOL_BASENAME).unlink()
         result = subprocess.run(
             [tool.proc_path, "ignored"],
             check=False,
@@ -494,7 +505,7 @@ def test_publication_drift_revokes_actual_driver_and_clears_evidence(tmp_path: P
     driver._input_calibration_readiness = evidence
     try:
         driver.guardian.arm(evidence)
-        executable = root / PRIVATE_TOOL_BASENAME
+        executable = _current_release(root) / PRIVATE_TOOL_BASENAME
         executable.write_bytes(executable.read_bytes() + b"drift")
         with pytest.raises(DriverError, match="publication drifted|digest changed"):
             backend._check_published_tool()
@@ -760,10 +771,10 @@ def test_builder_rechecks_existing_artifact_linkage(tmp_path: Path) -> None:
 def test_builder_idempotent_existing_artifact_rechecks_real_static_call_path(tmp_path: Path) -> None:
     destination = tmp_path / "built"
     first = native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, destination)
-    digest = hashlib.sha256((first / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest()
+    digest = hashlib.sha256((first / "current" / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest()
     second = native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, destination)
     assert second == destination
-    assert hashlib.sha256((second / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest() == digest
+    assert hashlib.sha256((second / "current" / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest() == digest
 
 
 def test_builder_rejects_existing_dynamic_libxdo_dependency(tmp_path: Path) -> None:
@@ -790,7 +801,9 @@ def test_builder_rejects_existing_dynamic_libxdo_dependency(tmp_path: Path) -> N
         ],
         check=True,
     )
-    root = _artifact_copy(tmp_path / "artifact", str(executable))
+    artifact_root = tmp_path / "artifact"
+    artifact_root.mkdir(mode=0o700)
+    root = _artifact_copy(artifact_root, str(executable))
     with pytest.raises(RuntimeError, match="static XTEST linkage"):
         native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, root)
 
@@ -803,7 +816,9 @@ def test_builder_rejects_existing_non_xtest_move_call_path(tmp_path: Path) -> No
         encoding="utf-8",
     )
     subprocess.run(["cc", "-O2", str(source), "-o", str(executable)], check=True)
-    root = _artifact_copy(tmp_path / "artifact", str(executable))
+    artifact_root = tmp_path / "artifact"
+    artifact_root.mkdir(mode=0o700)
+    root = _artifact_copy(artifact_root, str(executable))
     with pytest.raises(RuntimeError, match="static XTEST linkage"):
         native_build.build_xdotool(VENDORED_SOURCE_ARCHIVE, root)
 
@@ -838,7 +853,7 @@ int main(int argc, char **argv) {
     marker = tmp_path / "released"
     driver = None
     try:
-        published_executable = root / PRIVATE_TOOL_BASENAME
+        published_executable = _current_release(root) / PRIVATE_TOOL_BASENAME
         published_executable.unlink()
         shutil.copyfile("/bin/true", published_executable)
         published_executable.chmod(0o700)
@@ -998,7 +1013,7 @@ int main(int argc, char **argv) {
 @pytest.mark.parametrize("mutation", ["symlink", "writable", "tampered", "foreign"])
 def test_private_artifact_rejects_tampering(tmp_path: Path, mutation: str) -> None:
     root = _artifact_copy(tmp_path)
-    executable = root / PRIVATE_TOOL_BASENAME
+    executable = _current_release(root) / PRIVATE_TOOL_BASENAME
     if mutation == "symlink":
         executable.unlink()
         executable.symlink_to("/bin/true")
@@ -1016,18 +1031,18 @@ def test_private_artifact_rejects_tampering(tmp_path: Path, mutation: str) -> No
 
 def test_manifest_rejects_unknown_fields(tmp_path: Path) -> None:
     root = _artifact_copy(tmp_path)
-    manifest = json.loads((root / MANIFEST_BASENAME).read_text(encoding="utf-8"))
+    manifest = json.loads((_current_release(root) / MANIFEST_BASENAME).read_text(encoding="utf-8"))
     manifest["fallback"] = "/usr/bin/xdotool"
-    (root / MANIFEST_BASENAME).write_text(json.dumps(manifest), encoding="utf-8")
+    (_current_release(root) / MANIFEST_BASENAME).write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(InputToolError, match="fields"):
         verify_artifact(root)
 
 
 def test_manifest_rejects_legacy_missing_build_inputs(tmp_path: Path) -> None:
     root = _artifact_copy(tmp_path)
-    manifest = json.loads((root / MANIFEST_BASENAME).read_text(encoding="utf-8"))
+    manifest = json.loads((_current_release(root) / MANIFEST_BASENAME).read_text(encoding="utf-8"))
     del manifest[pins.XDOTOOL_BUILD_INPUTS_KEY]
-    (root / MANIFEST_BASENAME).write_text(json.dumps(manifest), encoding="utf-8")
+    (_current_release(root) / MANIFEST_BASENAME).write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(InputToolError, match="fields"):
         verify_artifact(root)
 

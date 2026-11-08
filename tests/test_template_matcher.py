@@ -28,8 +28,9 @@ MANIFEST_NAME = pins.MATCHER_MANIFEST_NAME
 
 
 def _verify_configured_artifact(binary: Path) -> None:
+    root = binary.parent.parent if binary.parent.name == "current" else binary.parent
     try:
-        runtime = matcher_runtime.TemplateMatcherRuntime(binary.parent)
+        runtime = matcher_runtime.TemplateMatcherRuntime(root)
     except matcher_runtime.ArtifactError as error:
         raise AssertionError(str(error)) from error
     else:
@@ -517,8 +518,8 @@ def test_configured_artifact_requires_private_current_manifest_and_digest(tmp_pa
     publication = tmp_path / "publication"
     publication.mkdir(mode=0o700)
     native_build.build_matcher(publication)
-    binary = publication / ARTIFACT_NAME
-    manifest_path = publication / MANIFEST_NAME
+    binary = publication / "current" / ARTIFACT_NAME
+    manifest_path = publication / "current" / MANIFEST_NAME
     _verify_configured_artifact(binary)
 
     reviewed_artifact = binary.read_bytes()
@@ -601,8 +602,8 @@ def test_builder_ignores_contaminated_cargo_configuration_and_wrappers(tmp_path:
         env=clean_environment,
     )
     assert clean_result.returncode == 0, f"{clean_result.stdout}\n{clean_result.stderr}"
-    clean_binary = (output / ARTIFACT_NAME).read_bytes()
-    clean_manifest = (output / MANIFEST_NAME).read_bytes()
+    clean_binary = (output / "current" / ARTIFACT_NAME).read_bytes()
+    clean_manifest = (output / "current" / MANIFEST_NAME).read_bytes()
     environment = {
         **os.environ,
         "HOME": str(tmp_path / "contaminated-builder-home"),
@@ -624,9 +625,9 @@ def test_builder_ignores_contaminated_cargo_configuration_and_wrappers(tmp_path:
     )
     assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
     assert not marker.exists()
-    assert (output / MANIFEST_NAME).is_file()
-    assert (output / ARTIFACT_NAME).read_bytes() == clean_binary
-    assert (output / MANIFEST_NAME).read_bytes() == clean_manifest
+    assert (output / "current" / MANIFEST_NAME).is_file()
+    assert (output / "current" / ARTIFACT_NAME).read_bytes() == clean_binary
+    assert (output / "current" / MANIFEST_NAME).read_bytes() == clean_manifest
 
 
 @pytest.mark.parametrize("poison", ["Cargo.toml", ".cargo/config.toml"])
@@ -715,10 +716,10 @@ def test_matcher_accepts_relative_private_root_and_rejects_symlink_binary(
     runtime = matcher_runtime.TemplateMatcherRuntime(Path("publication"))
     runtime.close()
 
-    real_binary = publication / "real-matcher"
-    real_binary.write_bytes((publication / ARTIFACT_NAME).read_bytes())
+    real_binary = tmp_path / "real-matcher"
+    real_binary.write_bytes((publication / "current" / ARTIFACT_NAME).read_bytes())
     real_binary.chmod(0o700)
-    (publication / ARTIFACT_NAME).unlink()
-    (publication / ARTIFACT_NAME).symlink_to(real_binary)
+    (publication / "current" / ARTIFACT_NAME).unlink()
+    (publication / "current" / ARTIFACT_NAME).symlink_to(real_binary)
     with pytest.raises(matcher_runtime.ArtifactError, match="unavailable|regular"):
         matcher_runtime.TemplateMatcherRuntime(publication)

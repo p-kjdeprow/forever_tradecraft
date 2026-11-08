@@ -239,7 +239,7 @@ def _copy_pinned_xdotool_to_composed_cache(source_root: Path, cache_home: Path) 
 
     destination = cache_home / "crowley" / "xdotool"
     destination.parent.mkdir(mode=0o700)
-    shutil.copytree(source_root, destination, copy_function=shutil.copy2)
+    shutil.copytree(source_root, destination, copy_function=shutil.copy2, symlinks=True)
 
 
 def test_identity_latency_sidecar_rejects_untrusted_descriptors_and_manifest(

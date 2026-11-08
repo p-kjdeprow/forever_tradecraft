@@ -95,6 +95,7 @@ from crowley.session.motion import MotionError, MotionFrame
 from crowley.session.protocol import ProtocolError, decode_frame, pack_cells
 from crowley.session.source_binding import SAFETY_MODULES, SourceBindingError, build_source_binding
 from tests.support.companion_state import write_companion_state
+from tests.support.private_lease import private_lease_path
 from tests.test_session_input_tool import fixture_input_tool
 
 from .wow_harness import WowClient
@@ -4457,9 +4458,9 @@ def test_guardian_releases_physical_input_before_revoke_callbacks(tmp_path: Path
         guardian.close()
 
 
-def test_guardian_rejects_wrong_target_source_and_detail() -> None:
+def test_guardian_rejects_wrong_target_source_and_detail(tmp_path: Path) -> None:
     guardian = InputGuardian(
-        Path("/tmp") / f"crowley-native-test-{os.getpid()}.lock", parent_pid=os.getppid()
+        private_lease_path(tmp_path, "crowley-native-test.lock"), parent_pid=os.getppid()
     )
     generation = guardian.arm(_evidence())
     guardian.begin_action(
@@ -4492,9 +4493,9 @@ def test_guardian_rejects_wrong_target_source_and_detail() -> None:
     guardian.close()
 
 
-def test_guardian_correlates_actual_raw_and_delivered_device_pairs() -> None:
+def test_guardian_correlates_actual_raw_and_delivered_device_pairs(tmp_path: Path) -> None:
     guardian = InputGuardian(
-        Path("/tmp") / f"crowley-native-pair-{os.getpid()}.lock", parent_pid=os.getppid()
+        private_lease_path(tmp_path, "crowley-native-pair.lock"), parent_pid=os.getppid()
     )
     generation = guardian.arm(_evidence())
     guardian.begin_action(
@@ -4516,9 +4517,9 @@ def test_guardian_correlates_actual_raw_and_delivered_device_pairs() -> None:
     guardian.close()
 
 
-def test_guardian_correlates_pointer_device_change_and_button_pair() -> None:
+def test_guardian_correlates_pointer_device_change_and_button_pair(tmp_path: Path) -> None:
     guardian = InputGuardian(
-        Path("/tmp") / f"crowley-native-pointer-{os.getpid()}.lock", parent_pid=os.getppid()
+        private_lease_path(tmp_path, "crowley-native-pointer.lock"), parent_pid=os.getppid()
     )
     generation = guardian.arm(_evidence())
     guardian.begin_action(
@@ -4549,9 +4550,9 @@ def test_guardian_correlates_pointer_device_change_and_button_pair() -> None:
     guardian.close()
 
 
-def test_pointer_guardian_accepts_measured_motion_and_device_change_records() -> None:
+def test_pointer_guardian_accepts_measured_motion_and_device_change_records(tmp_path: Path) -> None:
     guardian = InputGuardian(
-        Path("/tmp") / f"crowley-native-pointer-extra-{os.getpid()}.lock", parent_pid=os.getppid()
+        private_lease_path(tmp_path, "crowley-native-pointer-extra.lock"), parent_pid=os.getppid()
     )
     generation = guardian.arm(_evidence())
     guardian.begin_action(

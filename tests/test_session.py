@@ -1400,7 +1400,7 @@ def test_pixel_decoder_uses_strict_black_white_cells_and_freshness() -> None:
 
 def test_controller_validation_seed_and_closeout_without_fourth_scan() -> None:
     with tempfile.TemporaryDirectory() as directory:
-        driver = make_test_driver(RecordingBackend())
+        driver = make_test_driver(RecordingBackend(), lease_path=Path(directory) / "desktop.lock")
         try:
             controller = Controller(Path(directory) / "session.json", driver=driver)
             assert controller.start(SessionMode.VALIDATION).state == ControllerState.NATIVE_CALIBRATION
@@ -1422,7 +1422,7 @@ def test_controller_validation_seed_and_closeout_without_fourth_scan() -> None:
 
 def test_stop_flag_preserves_inflight_phase_until_native_save() -> None:
     with tempfile.TemporaryDirectory() as directory:
-        driver = make_test_driver(RecordingBackend())
+        driver = make_test_driver(RecordingBackend(), lease_path=Path(directory) / "desktop.lock")
         try:
             controller = Controller(Path(directory) / "session.json", driver=driver)
             controller.start()
@@ -1439,7 +1439,7 @@ def test_stop_flag_preserves_inflight_phase_until_native_save() -> None:
 def test_pause_revokes_driver_and_ipc_rejects_stale_generation() -> None:
     with tempfile.TemporaryDirectory() as directory:
         backend = RecordingBackend()
-        driver = DesktopDriver(backend=backend)
+        driver = DesktopDriver(backend=backend, lease_path=Path(directory) / "desktop.lock")
         try:
             controller = Controller(Path(directory) / "session.json", driver=driver)
             controller.start()
@@ -1456,7 +1456,7 @@ def test_pause_revokes_driver_and_ipc_rejects_stale_generation() -> None:
 def test_unix_socket_controls_the_same_durable_controller() -> None:
     with tempfile.TemporaryDirectory() as directory:
         backend = RecordingBackend()
-        driver = DesktopDriver(backend=backend)
+        driver = DesktopDriver(backend=backend, lease_path=Path(directory) / "desktop.lock")
         try:
             controller = Controller(Path(directory) / "session.json", driver=driver)
             socket_path = Path(directory) / "session.sock"
@@ -1480,7 +1480,7 @@ def test_unix_socket_controls_the_same_durable_controller() -> None:
 
 def test_socket_exposes_only_owned_calibration_workflows() -> None:
     with tempfile.TemporaryDirectory() as directory:
-        driver = DesktopDriver(backend=RecordingBackend())
+        driver = DesktopDriver(backend=RecordingBackend(), lease_path=Path(directory) / "desktop.lock")
         try:
             controller = Controller(Path(directory) / "session.json", driver=driver)
             started = controller.start()
@@ -1857,14 +1857,24 @@ def test_model_boundary_rejects_non_scalar_decision_and_observation_enums() -> N
             LunaAdapter._parse_observation(stream({"state": state, "facts": facts, "anchor": anchor}))
 
 
-def test_xi2_calibration_requires_real_sources_and_forwarded_correlation() -> None:
+def test_xi2_calibration_requires_real_sources_and_forwarded_correlation(tmp_path: Path) -> None:
     trace = "    sourceid: 4\n    sourceid: 5\n    sourceid: 7\n"
     with pytest.raises(DriverError, match="synthetic sourceid fixture"):
         XI2Observer.sources(trace)
-    driver = DesktopDriver(backend=RecordingBackend())
+    driver = DesktopDriver(backend=RecordingBackend(), lease_path=tmp_path / "desktop.lock")
     with pytest.raises(DriverError):
         driver.calibrate_input_events(trace)
     driver.close()
+
+
+def test_driver_requires_an_explicit_runtime_lease_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("CROWLEY_DESKTOP_LEASE", raising=False)
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+
+    with pytest.raises(DriverError, match="XDG_RUNTIME_DIR or CROWLEY_DESKTOP_LEASE"):
+        DesktopDriver(backend=RecordingBackend())
 
 
 def test_native_pointer_action_requires_a_seeded_planned_gesture(tmp_path: Path) -> None:

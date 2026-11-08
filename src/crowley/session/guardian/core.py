@@ -1,481 +1,50 @@
-"""Process-lifetime input lease and cancellation guardian.
+"""Core input guardian lifecycle and ordered event observation.
 
-The lease is acquired before a session can own a journal/socket and remains held
-until the driver process closes.  Revocation only increments the generation and
-releases physical input; it never unlocks the ownership file.  This prevents a
-second daemon from taking over while the first daemon is still unwinding a
-blocking capture or model call.
+Lock hierarchy:
+
+1. InputLease._lock protects the lease descriptor and is acquired only by
+   lease acquire/release. It is never acquired while InputGuardian._lock is
+   held.
+2. InputGuardian._lock protects generation, action state, physical holds,
+   process registries, calibration tickets, and watchdog publication. The
+   watchdog state write and acknowledgement run under this lock. Blocking
+   ancestry lookups, physical release, revocation callbacks, process waits,
+   and other external I/O run outside it. The bounded ``start`` and
+   ``release_admission_gate`` admission callbacks execute under it and must be
+   nonblocking so registration remains linearized.
+3. The independent watchdog owns its pipe-state and release state in its
+   process; it never acquires the guardian or lease locks.
+
+Observation takes a snapshot under InputGuardian._lock, performs the ordered
+correlation phases without that lock, then commits only if the same generation
+and action are still current under the lock. Revocation releases physical input
+before invoking callbacks.
 """
 
 from __future__ import annotations
 
 import atexit
-import fcntl
 import json
 import math
 import os
 import select
-import signal
-import subprocess
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .input_events import (
+from ..input_events import (
     RAW_MOTION_DETAIL,
-    RawMotionPairing,
     decode_xtest_motion_transition,
     xi2_timestamp_elapsed,
     xi2_timestamp_forward,
     xi2_timestamp_valid,
 )
-from .input_tool import NativeReleaseSpec
-
-
-class GuardianError(RuntimeError):
-    """Lease, generation, deadline, or parent-death failure."""
-
-
-class InputLease:
-    """One process-lifetime non-blocking flock."""
-
-    def __init__(self, path: str | os.PathLike[str]):
-        self.path = Path(path)
-        self._fd: int | None = None
-        self._lock = threading.Lock()
-
-    @property
-    def held(self) -> bool:
-        return self._fd is not None
-
-    def acquire(self) -> None:
-        with self._lock:
-            if self._fd is not None:
-                return
-            self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            fd = os.open(self.path, os.O_RDWR | os.O_CREAT, 0o600)
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError as exc:
-                os.close(fd)
-                raise GuardianError("another process owns the desktop input lease") from exc
-            self._fd = fd
-
-    def release(self) -> None:
-        with self._lock:
-            fd, self._fd = self._fd, None
-            if fd is None:
-                return
-            try:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-            finally:
-                os.close(fd)
-
-
-@dataclass
-class ActionCorrelation:
-    generation: int
-    target_xid: int
-    source_device: int
-    master_device: int
-    event_classes: frozenset[str]
-    detail: int | None
-    started_monotonic: float
-    deadline_monotonic: float
-    device_by_class: tuple[tuple[str, int], ...] = ()
-    target_ancestor: Callable[[int], bool] | None = None
-    required_sequence: tuple[str, ...] = ()
-    optional_classes: frozenset[str] = frozenset()
-    sequence_index: int = 0
-    observed_detail: int | None = None
-    observed_details: dict[int, int] = field(default_factory=dict)
-    observed_modifiers: dict[int, tuple[int, int, int] | None] = field(default_factory=dict)
-    expected_modifiers: tuple[int, int, int] | None = None
-    expected_details: tuple[int, ...] = ()
-    expected_modifier_sequence: tuple[tuple[int, int, int], ...] = ()
-    require_motion_before_button: bool = True
-    expected_coordinates: tuple[float, float] | None = None
-    expected_event_coordinates: tuple[float, float] | None = None
-    expected_press_coordinates: tuple[float, float] | None = None
-    expected_press_event_coordinates: tuple[float, float] | None = None
-    expected_release_coordinates: tuple[float, float] | None = None
-    expected_release_event_coordinates: tuple[float, float] | None = None
-    expected_motion_trace: tuple[tuple[int, int, int, int], ...] = ()
-    expected_positioning_trace: tuple[tuple[int, int, int, int], ...] = ()
-    initial_origin: tuple[int, int, int, int] | None = None
-    expected_root_xid: int | None = None
-    expected_event_xid: int | None = None
-    expected_child_xids: frozenset[int] = frozenset()
-    canonical_motion: bool = False
-    positioning_index: int = 0
-    motion_index: int = 0
-    # Planned holds are an allowlist for the exact native command that will
-    # be admitted later.  They are deliberately separate from the physical
-    # sets below: planning an input never authorizes a release for an input
-    # that was not emitted.
-    planned_held_keys: frozenset[str] = frozenset()
-    planned_held_buttons: frozenset[int] = frozenset()
-    require_motion_before_release: bool = False
-    release_started: bool = False
-    # Keyboard probe rows describe one raw/delivered pair for each physical
-    # transition (two events); pointer rows describe press/release pairs (four
-    # events).  Keep the historical pointer default while allowing a sealed
-    # keyboard profile to pin modifiers for every transition.
-    modifier_group_size: int = 4
-    echo_proof: tuple[tuple[Any, ...], ...] = ()
-    echo_index: int = 0
-    require_delivered_modifiers: bool = True
-    echo_sources: frozenset[int] = frozenset()
-    # Canonical planned source-4 motions may each produce one separately
-    # forwarded source-7 record. Keep exact outstanding pairs until the relay
-    # is observed; canonical queue length is bounded by the finite motion plan,
-    # and each pair is accepted only inside the correlation window.
-    pending_echoes: list[
-        tuple[
-            int,
-            int | None,
-            tuple[float, float] | None,
-            tuple[float, float] | None,
-            tuple[int, int, int] | None,
-        ]
-    ] = field(default_factory=list)
-    # RawMotion is diagnostic ancestry only. Each observed raw record must
-    # pair one-to-one with a following primary delivered Motion carrying the
-    # exact same XI2 server timestamp before the action can finish.
-    raw_motion_pairing: RawMotionPairing = field(default_factory=RawMotionPairing)
-    emitted_motion_count: int = 0
-    current_motion_timestamp: int | None = None
-    current_motion_target: int | None = None
-    current_motion_root_xy: tuple[float, float] | None = None
-    current_motion_event_xy: tuple[float, float] | None = None
-    current_motion_modifiers: tuple[int, int, int] | None = None
-    last_accepted_endpoint: tuple[int, int, int, int] | None = None
-
-    def expected_device(self, event_class: str) -> int:
-        for name, device in self.device_by_class:
-            if name == event_class:
-                return device
-        return self.master_device
-
-    @property
-    def complete(self) -> bool:
-        return (
-            self.sequence_index >= len(self.required_sequence)
-            and (
-                not self.echo_sources
-                or (self.echo_index >= self.emitted_motion_count and not self.pending_echoes)
-            )
-            and self.positioning_index >= len(self.expected_positioning_trace)
-            and self.motion_index >= len(self.expected_motion_trace)
-            and not self.raw_motion_pairing.pending
-        )
-
-
-def _watchdog_entry(
-    owner_pid: int,
-    owner_start: str | None,
-    read_fd: int,
-    interval: float,
-    release_command: tuple[str, ...],
-    release_env: dict[str, str],
-    write_fd: int | None = None,
-    release_fd: int | None = None,
-    ready_fd: int | None = None,
-    release_spec: NativeReleaseSpec | None = None,
-    ack_fd: int | None = None,
-) -> None:
-    """Independent owner-death watchdog; it must not import the driver."""
-
-    # ``spawn`` transports descriptors as reduction wrappers.  Accept both
-    # those wrappers and plain integers so the entrypoint remains usable by a
-    # small isolated process smoke test.
-    if hasattr(read_fd, "detach"):
-        read_fd = read_fd.detach()
-    if hasattr(write_fd, "detach"):
-        write_fd = write_fd.detach()
-    if hasattr(release_fd, "detach"):
-        release_fd = release_fd.detach()
-    if hasattr(ready_fd, "detach"):
-        ready_fd = ready_fd.detach()
-    if hasattr(ack_fd, "detach"):
-        ack_fd = ack_fd.detach()
-    if release_spec is not None and hasattr(release_spec.fd, "detach"):
-        release_spec = NativeReleaseSpec(release_spec.fd.detach(), release_spec.digest, release_spec.version)
-
-    if release_spec is not None:
-        try:
-            release_spec.verify_image()
-        except Exception:
-            for descriptor in (read_fd, release_spec.fd, ack_fd, ready_fd):
-                if isinstance(descriptor, int) and descriptor >= 0:
-                    try:
-                        os.close(descriptor)
-                    except OSError:
-                        pass
-            return
-    elif release_fd is not None:
-        # Native release capabilities must be typed. A bare descriptor is
-        # accepted nowhere in production and is closed before startup.
-        try:
-            os.close(release_fd)
-        except OSError:
-            pass
-        release_fd = None
-
-    held = False
-    held_keys: tuple[str, ...] = ()
-    held_buttons: tuple[int, ...] = ()
-    active_groups: tuple[int, ...] = ()
-
-    # The owner keeps only the write end; close the child's copy so owner
-    # shutdown reaches EOF on the command channel.
-    if write_fd is not None:
-        try:
-            os.close(write_fd)
-        except OSError:
-            pass
-    # Retain only its command channel and standard descriptors; the watchdog
-    # never needs unrelated application descriptors.
-    if write_fd is not None:
-        try:
-            inherited = os.listdir("/proc/self/fd")
-        except OSError:
-            inherited = ()
-        for value in inherited:
-            try:
-                fd = int(value)
-            except ValueError:
-                continue
-            retained = {read_fd, write_fd, ready_fd, ack_fd}
-            if release_spec is not None:
-                retained.add(release_spec.fd)
-            if fd <= 2 or fd in retained:
-                continue
-            try:
-                os.close(fd)
-            except OSError:
-                pass
-
-    def terminate_groups() -> bool:
-        nonlocal active_groups
-        succeeded = True
-        for pgid in active_groups:
-            if pgid <= 0 or pgid == os.getpgrp():
-                succeeded = False
-                continue
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-                # The group is owned by the session wrapper.  Escalate in the
-                # watchdog itself so an owner crash cannot leave a command
-                # running after it ignores the polite termination.
-                os.killpg(pgid, signal.SIGKILL)
-            except ProcessLookupError:
-                continue
-            except OSError:
-                succeeded = False
-        if succeeded:
-            active_groups = ()
-        return succeeded
-
-    def release() -> bool:
-        nonlocal held, held_keys, held_buttons
-        if not held:
-            return True
-        commands: list[tuple[str, ...]] = []
-        # The native driver gives the watchdog the exact keys/buttons that were
-        # held when the owner died. ``xdotool keyup --all`` is unsupported on
-        # several installed versions and would also release unrelated input.
-        native_release = release_spec is not None
-        if native_release:
-            executable = f"/proc/self/fd/{release_spec.fd}"
-            commands.extend((executable, "keyup", key) for key in held_keys)
-            commands.extend((executable, "mouseup", str(button)) for button in held_buttons)
-        elif release_command:
-            # Fake/test guardians may provide a complete helper command. The
-            # native production mode above is the only item-expanding path.
-            commands.append(release_command)
-        if not commands:
-            # A malformed native held-state message must never be treated as
-            # proof that physical input is released.  Retain the watchdog
-            # until the owner can publish the exact tracked items or an
-            # operator closes the lease safely.
-            return False
-        succeeded = True
-        for command in commands:
-            try:
-                pass_fds = (release_spec.fd,) if native_release else ()
-                result = subprocess.run(
-                    list(command),
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    env=release_env,
-                    timeout=3,
-                    pass_fds=pass_fds,
-                )
-                if result.returncode != 0:
-                    succeeded = False
-            except (OSError, subprocess.SubprocessError):
-                succeeded = False
-        if succeeded:
-            held = False
-            held_keys = ()
-            held_buttons = ()
-        return succeeded
-
-    if ready_fd is not None:
-        try:
-            os.write(ready_fd, b"READY\n")
-        except OSError:
-            return
-        finally:
-            try:
-                os.close(ready_fd)
-            except OSError:
-                pass
-
-    def acknowledge() -> bool:
-        if ack_fd is None:
-            return True
-        try:
-            return os.write(ack_fd, b"ACK\n") == 4
-        except OSError:
-            return False
-
-    def apply_message(message: bytes) -> bool:
-        nonlocal held, held_keys, held_buttons, active_groups
-        if not message:
-            return True
-        if message.startswith(b"S"):
-            while active_groups and not terminate_groups():
-                time.sleep(min(interval, 0.25))
-            while held and not release():
-                time.sleep(min(interval, 0.25))
-            return True
-        if message.startswith(b"T"):
-            try:
-                state = json.loads(message[1:].decode("utf-8"))
-                groups = state.get("groups", ())
-                keys = state.get("keys", ())
-                buttons = state.get("buttons", ())
-                if (
-                    not isinstance(groups, list)
-                    or not isinstance(keys, list)
-                    or not isinstance(buttons, list)
-                ):
-                    raise ValueError("watchdog state lists are malformed")
-                active_groups = tuple(sorted({int(group) for group in groups if int(group) > 0}))
-                held_keys = tuple(str(key) for key in keys)
-                held_buttons = tuple(int(button) for button in buttons)
-                held = bool(held_keys or held_buttons)
-            except (ValueError, TypeError, KeyError, json.JSONDecodeError):
-                return False
-            # A lost ACK channel must not discard this complete state. The
-            # owner will fail closed; the watchdog must retain the latest
-            # state for an eventual EOF/owner-death release.
-            acknowledge()
-            return True
-        if message.startswith(b"P"):
-            try:
-                state = json.loads(message[1:].decode("utf-8"))
-                active_groups = tuple(sorted({int(group) for group in state if int(group) > 0}))
-            except (ValueError, TypeError, json.JSONDecodeError):
-                return False
-            acknowledge()
-            return True
-        if message.startswith(b"R"):
-            held = False
-            held_keys = ()
-            held_buttons = ()
-            acknowledge()
-            return True
-        if not message.startswith(b"H"):
-            return False
-        if message == b"H":
-            held = True
-            held_keys = ()
-            held_buttons = ()
-            acknowledge()
-            return True
-        try:
-            state = json.loads(message[1:].decode("utf-8"))
-            if not isinstance(state, dict):
-                raise ValueError("watchdog hold state is malformed")
-            held_keys = tuple(str(key) for key in state.get("keys", ()))
-            held_buttons = tuple(int(button) for button in state.get("buttons", ()))
-        except (ValueError, TypeError, json.JSONDecodeError):
-            return False
-        held = True
-        acknowledge()
-        return True
-
-    def cleanup() -> None:
-        while active_groups and not terminate_groups():
-            time.sleep(min(interval, 0.25))
-        while not release():
-            time.sleep(min(interval, 0.25))
-
-    try:
-        pending = b""
-        os.set_blocking(read_fd, False)
-        while True:
-            ready, _, _ = select.select([read_fd], [], [], interval)
-            if ready:
-                try:
-                    message = os.read(read_fd, 4096)
-                except BlockingIOError:
-                    message = None
-                if message is None:
-                    continue
-                if message == b"":
-                    # EOF is reached only after all bytes in the pipe have
-                    # been consumed. Complete newline-framed records are
-                    # applied; an incomplete final frame is discarded safely.
-                    while b"\n" in pending:
-                        line, pending = pending.split(b"\n", 1)
-                        if not apply_message(line):
-                            cleanup()
-                            return
-                    cleanup()
-                    return
-                pending += message
-                while b"\n" in pending:
-                    line, pending = pending.split(b"\n", 1)
-                    if not apply_message(line):
-                        cleanup()
-                        return
-            current = InputGuardian._proc_start(owner_pid)
-            if current is None or (owner_start is not None and current != owner_start):
-                # Drain all complete records queued before owner death before
-                # touching the held state. This closes the final-H race.
-                while True:
-                    try:
-                        extra = os.read(read_fd, 4096)
-                    except BlockingIOError:
-                        break
-                    if not extra:
-                        break
-                    pending += extra
-                while b"\n" in pending:
-                    line, pending = pending.split(b"\n", 1)
-                    if not apply_message(line):
-                        break
-                cleanup()
-                return
-    finally:
-        try:
-            os.close(read_fd)
-        except OSError:
-            pass
-        for descriptor in (ack_fd, release_spec.fd if release_spec is not None else None):
-            if descriptor is not None:
-                try:
-                    os.close(descriptor)
-                except OSError:
-                    pass
+from ..input_tool import NativeReleaseSpec
+from .correlation import ActionCorrelation, _Observation
+from .lease import GuardianError, InputLease
+from .watchdog import _watchdog_entry as _watchdog_entry_impl
 
 
 class InputGuardian:
@@ -1331,8 +900,38 @@ class InputGuardian:
             action = self._action
             prior_timestamp = self._last_event_time_ms
             generation = self.generation
-        event_class = getattr(event.event_class, "value", event.event_class)
-        target = getattr(event, "target_xid", None)
+        observation = _Observation(
+            event=event,
+            action=action,
+            prior_timestamp=prior_timestamp,
+            generation=generation,
+            event_class=getattr(event.event_class, "value", event.event_class),
+            target=getattr(event, "target_xid", None),
+        )
+        self._observe_target_phase(observation)
+        self._observe_admission_phase(observation)
+        self._observe_constraint_phase(observation)
+        self._observe_record_phase(observation)
+        self._observe_commit_phase(observation)
+        if observation.allowed:
+            return True
+        self.revoke(
+            "unattributed XI2 event "
+            f"class={getattr(event.event_class, 'value', event.event_class)} "
+            f"source={getattr(event, 'source_device', '?')} "
+            f"target={getattr(event, 'target_xid', '?')}"
+        )
+        return False
+
+    def _observe_target_phase(self, observation: _Observation) -> None:
+        """Validate target ancestry and correlate canonical/forwarded motion."""
+
+        action = observation.action
+        if action is None:
+            return
+        event = observation.event
+        event_class = observation.event_class
+        target = observation.target
         target_ok = False
         echo_match = False
         motion_match_index: int | None = None
@@ -1341,213 +940,228 @@ class InputGuardian:
         canonical_motion_checked = False
         canonical_raw_queued = False
         canonical_endpoint: tuple[int, int] | None = None
-        if action is not None:
-            # Raw and device-change records describe device transitions and
-            # deliberately have no delivered target.  A forged/raw block that
-            # carries a child XID must not inherit the delivered target proof.
-            if (getattr(event, "is_raw", False) or event_class == "DeviceChanged") and target not in (
-                None,
-                0,
-            ):
+        # Raw and device-change records describe device transitions and
+        # deliberately have no delivered target.  A forged/raw block that
+        # carries a child XID must not inherit the delivered target proof.
+        if (getattr(event, "is_raw", False) or event_class == "DeviceChanged") and target not in (
+            None,
+            0,
+        ):
+            target_ok = False
+        else:
+            target_ok = target == action.target_xid
+        if (
+            not target_ok
+            and target not in (None, 0)
+            and not getattr(event, "is_raw", False)
+            and event_class != "DeviceChanged"
+            and action.target_ancestor is not None
+        ):
+            try:
+                # X11 ancestry lookup may execute xwininfo; never hold the
+                # guardian lock while doing that blocking operation.
+                target_ok = bool(action.target_ancestor(target))
+            except Exception:
                 target_ok = False
+        if (
+            not target_ok
+            and target in (None, 0)
+            and event_class in action.optional_classes
+            and event_class in {"Enter", "Leave"}
+        ):
+            # XI2 crossing records legitimately report child=0 while
+            # transitioning through a managed frame.  They remain bounded optional
+            # records; raw/device transitions do not receive this exception.
+            target_ok = True
+        if (
+            not target_ok
+            and target in (None, 0)
+            and (getattr(event, "is_raw", False) or event_class == "DeviceChanged")
+        ):
+            target_ok = True
+        if action.canonical_motion and (
+            event_class == "RawMotion"
+            or (event_class == "Motion" and event.source_device == action.source_device)
+        ):
+            if action.positioning_index < len(action.expected_positioning_trace):
+                expected_transition = action.expected_positioning_trace[action.positioning_index]
+                positioning_phase = True
+            elif action.motion_index < len(action.expected_motion_trace):
+                expected_transition = action.expected_motion_trace[action.motion_index]
+                positioning_phase = False
             else:
-                target_ok = target == action.target_xid
-            if (
-                not target_ok
-                and target not in (None, 0)
-                and not getattr(event, "is_raw", False)
-                and event_class != "DeviceChanged"
-                and action.target_ancestor is not None
-            ):
+                expected_transition = None
+                positioning_phase = False
+            if expected_transition is None:
+                target_ok = False
+            elif event_class == "RawMotion":
+                raw_endpoint_rows = {axis: value for axis, value, _raw in getattr(event, "valuators", ())}
+                if (
+                    event.source_device != action.source_device
+                    or event.master_device != action.master_device
+                    or event.detail != RAW_MOTION_DETAIL
+                    or set(raw_endpoint_rows) != {0, 1}
+                    or any(
+                        isinstance(value, bool)
+                        or not isinstance(value, float)
+                        or not math.isfinite(value)
+                        or not value.is_integer()
+                        for value in raw_endpoint_rows.values()
+                    )
+                    or (int(raw_endpoint_rows[0]), int(raw_endpoint_rows[1])) != expected_transition[:2]
+                    or not action.raw_motion_pairing.queue_raw(
+                        event.timestamp_ms,
+                        expected_transition[:2],
+                    )
+                ):
+                    target_ok = False
+                else:
+                    canonical_raw_queued = True
+            elif event.source_device == action.source_device:
+                canonical_motion_checked = True
                 try:
-                    # X11 ancestry lookup may execute xwininfo; never hold the
-                    # guardian lock while doing that blocking operation.
-                    target_ok = bool(action.target_ancestor(target))
+                    transition = decode_xtest_motion_transition(
+                        event,
+                        expected_source=action.source_device,
+                        expected_parent=action.master_device,
+                        expected_root_xid=action.expected_root_xid,
+                        expected_child_xids=action.expected_child_xids,
+                        planned_endpoint=expected_transition[:2],
+                    )
                 except Exception:
                     target_ok = False
-            if (
-                not target_ok
-                and target in (None, 0)
-                and event_class in action.optional_classes
-                and event_class in {"Enter", "Leave"}
-            ):
-                # XI2 crossing records legitimately report child=0 while
-                # transitioning through a managed frame.  They remain
-                # bounded optional records; raw/device transitions do not
-                # receive this exception.
-                target_ok = True
-            if (
-                not target_ok
-                and target in (None, 0)
-                and (getattr(event, "is_raw", False) or event_class == "DeviceChanged")
-            ):
-                target_ok = True
-            if action.canonical_motion and (
-                event_class == "RawMotion"
-                or (event_class == "Motion" and event.source_device == action.source_device)
-            ):
-                if action.positioning_index < len(action.expected_positioning_trace):
-                    expected_transition = action.expected_positioning_trace[action.positioning_index]
-                    positioning_phase = True
-                elif action.motion_index < len(action.expected_motion_trace):
-                    expected_transition = action.expected_motion_trace[action.motion_index]
-                    positioning_phase = False
                 else:
-                    expected_transition = None
-                    positioning_phase = False
-                if expected_transition is None:
-                    target_ok = False
-                elif event_class == "RawMotion":
-                    raw_endpoint_rows = {axis: value for axis, value, _raw in getattr(event, "valuators", ())}
+                    origin = action.last_accepted_endpoint
                     if (
-                        event.source_device != action.source_device
-                        or event.master_device != action.master_device
-                        or event.detail != RAW_MOTION_DETAIL
-                        or set(raw_endpoint_rows) != {0, 1}
-                        or any(
-                            isinstance(value, bool)
-                            or not isinstance(value, float)
-                            or not math.isfinite(value)
-                            or not value.is_integer()
-                            for value in raw_endpoint_rows.values()
-                        )
-                        or (int(raw_endpoint_rows[0]), int(raw_endpoint_rows[1])) != expected_transition[:2]
-                        or not action.raw_motion_pairing.queue_raw(
-                            event.timestamp_ms,
-                            expected_transition[:2],
-                        )
+                        not target_ok
+                        or origin is None
+                        or transition.origin_root != origin[:2]
+                        or transition.origin_event != origin[2:]
+                    ):
+                        target_ok = False
+                    elif (
+                        not action.raw_motion_pairing.pending_endpoints
+                        or action.raw_motion_pairing.pending_endpoints[0] != transition.endpoint_root
                     ):
                         target_ok = False
                     else:
-                        canonical_raw_queued = True
-                elif event.source_device == action.source_device:
-                    canonical_motion_checked = True
-                    try:
-                        transition = decode_xtest_motion_transition(
-                            event,
-                            expected_source=action.source_device,
-                            expected_parent=action.master_device,
-                            expected_root_xid=action.expected_root_xid,
-                            expected_child_xids=action.expected_child_xids,
-                            planned_endpoint=expected_transition[:2],
-                        )
-                    except Exception:
-                        target_ok = False
-                    else:
-                        origin = action.last_accepted_endpoint
-                        if (
-                            not target_ok
-                            or origin is None
-                            or transition.origin_root != origin[:2]
-                            or transition.origin_event != origin[2:]
-                        ):
-                            target_ok = False
-                        elif (
-                            not action.raw_motion_pairing.pending_endpoints
-                            or action.raw_motion_pairing.pending_endpoints[0] != transition.endpoint_root
-                        ):
-                            target_ok = False
+                        canonical_endpoint = transition.endpoint_root
+                        if positioning_phase:
+                            positioning_match_index = action.positioning_index
                         else:
-                            canonical_endpoint = transition.endpoint_root
-                            if positioning_phase:
-                                positioning_match_index = action.positioning_index
-                            else:
-                                motion_match_index = action.motion_index
-                            action.emitted_motion_count += 1
-                            if action.echo_sources:
-                                # The forwarded record may arrive after a
-                                # later planned primary. Preserve each exact
-                                # pair and consume it in FIFO order below.
-                                action.pending_echoes.append(
-                                    (
-                                        event.timestamp_ms,
-                                        target,
-                                        transition.endpoint_root,
-                                        transition.endpoint_event,
-                                        event.modifiers,
-                                    )
+                            motion_match_index = action.motion_index
+                        action.emitted_motion_count += 1
+                        if action.echo_sources:
+                            # The forwarded record may arrive after a
+                            # later planned primary. Preserve each exact
+                            # pair and consume it in FIFO order below.
+                            action.pending_echoes.append(
+                                (
+                                    event.timestamp_ms,
+                                    target,
+                                    transition.endpoint_root,
+                                    transition.endpoint_event,
+                                    event.modifiers,
                                 )
-            if action.release_started and event_class in {"Motion", "RawMotion"}:
-                target_ok = False
-            if (
-                target_ok
-                and event_class == "Motion"
-                and event.source_device in action.echo_sources
-                and action.pending_echoes
-            ):
-                # The calibration proof establishes only the source
-                # relationship. Runtime admission must pair each forwarded
-                # record with an outstanding source-4 operation; old
-                # calibration coordinates/timestamps are never replayed.
-                if action.canonical_motion:
-                    pending_items = ((0, action.pending_echoes[0]),) if action.pending_echoes else ()
-                else:
-                    pending_items = tuple(enumerate(action.pending_echoes))
-                for index, pending in pending_items:
-                    (
-                        current_motion_timestamp,
-                        current_motion_target,
-                        current_root,
-                        current_event,
-                        current_modifiers,
-                    ) = pending
-                    elapsed = xi2_timestamp_elapsed(current_motion_timestamp, event.timestamp_ms)
-                    if (
-                        event.master_device == event.source_device
-                        and elapsed is not None
-                        and elapsed <= 250
-                        and target == current_motion_target
-                        and (
-                            not action.canonical_motion
-                            or (
-                                getattr(event, "root_xid", None) == action.expected_root_xid
-                                and getattr(event, "event_xid", None) == action.expected_event_xid
                             )
+        if action.release_started and event_class in {"Motion", "RawMotion"}:
+            target_ok = False
+        if (
+            target_ok
+            and event_class == "Motion"
+            and event.source_device in action.echo_sources
+            and action.pending_echoes
+        ):
+            # The calibration proof establishes only the source
+            # relationship. Runtime admission must pair each forwarded
+            # record with an outstanding source-4 operation; old
+            # calibration coordinates/timestamps are never replayed.
+            if action.canonical_motion:
+                pending_items = ((0, action.pending_echoes[0]),) if action.pending_echoes else ()
+            else:
+                pending_items = tuple(enumerate(action.pending_echoes))
+            for index, pending in pending_items:
+                (
+                    current_motion_timestamp,
+                    current_motion_target,
+                    current_root,
+                    current_event,
+                    current_modifiers,
+                ) = pending
+                elapsed = xi2_timestamp_elapsed(current_motion_timestamp, event.timestamp_ms)
+                if (
+                    event.master_device == event.source_device
+                    and elapsed is not None
+                    and elapsed <= 250
+                    and target == current_motion_target
+                    and (
+                        not action.canonical_motion
+                        or (
+                            getattr(event, "root_xid", None) == action.expected_root_xid
+                            and getattr(event, "event_xid", None) == action.expected_event_xid
                         )
-                        and current_root is not None
-                        and current_event is not None
-                        and getattr(event, "root_xy", None) == current_root
-                        and getattr(event, "event_xy", None) == current_event
-                        and getattr(event, "modifiers", None) == current_modifiers
-                    ):
-                        echo_match = True
-                        echo_pending_index = index
-                        break
-            if (
-                target_ok
-                and action is not None
-                and event_class == "Motion"
-                and event.source_device in action.echo_sources
-                and not echo_match
-            ):
-                # A forwarded source is meaningful only as the exact echo of
-                # the oldest outstanding primary. Letting a mismatched source-7
-                # Motion continue through the ordinary optional-Motion path
-                # would silently accept wrong root/event identities or an
-                # unpaired human record.
-                target_ok = False
-            if target_ok and event_class == "Motion" and not echo_match and not canonical_motion_checked:
-                root_xy = getattr(event, "root_xy", None)
-                event_xy = getattr(event, "event_xy", None)
-                if action.sequence_index < 2:
-                    pre_trace = action.expected_positioning_trace or action.expected_motion_trace
-                    pre_index = (
-                        action.positioning_index if action.expected_positioning_trace else action.motion_index
                     )
-                    for index in range(pre_index, len(pre_trace)):
-                        expected = pre_trace[index]
-                        if root_xy == expected[:2] and event_xy == expected[2:]:
-                            if action.expected_positioning_trace:
-                                positioning_match_index = index
-                            else:
-                                motion_match_index = index
-                            break
-                elif action.sequence_index >= 2 and action.expected_motion_trace:
-                    for index in range(action.motion_index, len(action.expected_motion_trace)):
-                        expected = action.expected_motion_trace[index]
-                        if root_xy == expected[:2] and event_xy == expected[2:]:
+                    and current_root is not None
+                    and current_event is not None
+                    and getattr(event, "root_xy", None) == current_root
+                    and getattr(event, "event_xy", None) == current_event
+                    and getattr(event, "modifiers", None) == current_modifiers
+                ):
+                    echo_match = True
+                    echo_pending_index = index
+                    break
+        if (
+            target_ok
+            and action is not None
+            and event_class == "Motion"
+            and event.source_device in action.echo_sources
+            and not echo_match
+        ):
+            # A forwarded source is meaningful only as the exact echo of
+            # the oldest outstanding primary. Letting a mismatched source-7
+            # Motion continue through the ordinary optional-Motion path
+            # would silently accept wrong root/event identities or an
+            # unpaired human record.
+            target_ok = False
+        if target_ok and event_class == "Motion" and not echo_match and not canonical_motion_checked:
+            root_xy = getattr(event, "root_xy", None)
+            event_xy = getattr(event, "event_xy", None)
+            if action.sequence_index < 2:
+                pre_trace = action.expected_positioning_trace or action.expected_motion_trace
+                pre_index = (
+                    action.positioning_index if action.expected_positioning_trace else action.motion_index
+                )
+                for index in range(pre_index, len(pre_trace)):
+                    expected = pre_trace[index]
+                    if root_xy == expected[:2] and event_xy == expected[2:]:
+                        if action.expected_positioning_trace:
+                            positioning_match_index = index
+                        else:
                             motion_match_index = index
-                            break
+                        break
+            elif action.sequence_index >= 2 and action.expected_motion_trace:
+                for index in range(action.motion_index, len(action.expected_motion_trace)):
+                    expected = action.expected_motion_trace[index]
+                    if root_xy == expected[:2] and event_xy == expected[2:]:
+                        motion_match_index = index
+                        break
+        observation.target_ok = target_ok
+        observation.echo_match = echo_match
+        observation.motion_match_index = motion_match_index
+        observation.positioning_match_index = positioning_match_index
+        observation.echo_pending_index = echo_pending_index
+        observation.canonical_motion_checked = canonical_motion_checked
+        observation.canonical_raw_queued = canonical_raw_queued
+        observation.canonical_endpoint = canonical_endpoint
+
+    def _observe_admission_phase(self, observation: _Observation) -> None:
+        """Apply the sequence, timestamp, generation, and deadline gates."""
+
+        action = observation.action
+        event = observation.event
+        event_class = observation.event_class
+        target_ok = observation.target_ok
+        echo_match = observation.echo_match
         sequence_ok = True
         if action is not None and action.required_sequence:
             if event_class in action.optional_classes:
@@ -1567,7 +1181,11 @@ class InputGuardian:
         )
         timestamp_ok = bool(
             xi2_timestamp_valid(timestamp)
-            and (echo_match or pending_raw_primary or xi2_timestamp_forward(prior_timestamp, timestamp))
+            and (
+                echo_match
+                or pending_raw_primary
+                or xi2_timestamp_forward(observation.prior_timestamp, timestamp)
+            )
         )
         allowed = bool(
             self.armed
@@ -1592,13 +1210,13 @@ class InputGuardian:
                     action.sequence_index < 2
                     and (
                         not (action.expected_positioning_trace or action.expected_motion_trace)
-                        or positioning_match_index is not None
-                        or motion_match_index is not None
+                        or observation.positioning_match_index is not None
+                        or observation.motion_match_index is not None
                     )
                 )
                 or (
                     action.sequence_index >= 2
-                    and (not action.expected_motion_trace or motion_match_index is not None)
+                    and (not action.expected_motion_trace or observation.motion_match_index is not None)
                 )
             )
             and not (
@@ -1612,6 +1230,20 @@ class InputGuardian:
                 )
             )
         )
+        observation.sequence_ok = sequence_ok
+        observation.now = now
+        observation.timestamp = timestamp
+        observation.pending_raw_primary = pending_raw_primary
+        observation.timestamp_ok = timestamp_ok
+        observation.allowed = allowed
+
+    def _observe_constraint_phase(self, observation: _Observation) -> None:
+        """Apply detail, modifier, coordinate, and release constraints."""
+
+        action = observation.action
+        event = observation.event
+        event_class = observation.event_class
+        allowed = observation.allowed
         detail_events = {
             "RawKeyPress",
             "KeyPress",
@@ -1682,9 +1314,12 @@ class InputGuardian:
             allowed
             and action is not None
             and event_class == "Motion"
-            and not echo_match
+            and not observation.echo_match
             and action.raw_motion_pairing.pending_timestamps
-            and (timestamp is None or action.raw_motion_pairing.pending_timestamps[0] != timestamp)
+            and (
+                observation.timestamp is None
+                or action.raw_motion_pairing.pending_timestamps[0] != observation.timestamp
+            )
         ):
             # A raw trace is useful only as the same-timestamp ancestry of the
             # delivered endpoint.  A different or missing timestamp is an
@@ -1727,7 +1362,7 @@ class InputGuardian:
             allowed
             and action is not None
             and event_class in {"ButtonPress", "ButtonRelease", "Motion"}
-            and not echo_match
+            and not observation.echo_match
             and not (event_class == "Motion" and action.expected_motion_trace)
             and action.expected_coordinates is not None
             and (
@@ -1747,18 +1382,20 @@ class InputGuardian:
             allowed
             and action is not None
             and event_class == "Motion"
-            and not echo_match
+            and not observation.echo_match
             and event.source_device == action.source_device
             and not action.canonical_motion
         ):
             if action.sequence_index < 2:
                 pre_trace = action.expected_positioning_trace or action.expected_motion_trace
                 pre_match = (
-                    positioning_match_index if action.expected_positioning_trace else motion_match_index
+                    observation.positioning_match_index
+                    if action.expected_positioning_trace
+                    else observation.motion_match_index
                 )
                 if pre_trace and pre_match is None:
                     allowed = False
-            elif action.expected_motion_trace and motion_match_index is None:
+            elif action.expected_motion_trace and observation.motion_match_index is None:
                 allowed = False
         if allowed and action is not None and event_class == "RawMotion" and action.release_started:
             allowed = False
@@ -1777,18 +1414,27 @@ class InputGuardian:
                 allowed = False
             if expected_event is not None and getattr(event, "event_xy", None) != expected_event:
                 allowed = False
+        observation.allowed = allowed
+
+    def _observe_record_phase(self, observation: _Observation) -> None:
+        """Record accepted motion ancestry and validate delivered modifiers."""
+
+        action = observation.action
+        event = observation.event
+        event_class = observation.event_class
+        allowed = observation.allowed
         if (
             allowed
             and action is not None
             and event_class == "Motion"
-            and not echo_match
+            and not observation.echo_match
             and event.source_device == action.source_device
             and not action.canonical_motion
         ):
             # Save only the current operation's complete source-4 facts.  A
             # later source-7 record must match this bounded pair exactly.
-            action.current_motion_timestamp = timestamp
-            action.current_motion_target = target
+            action.current_motion_timestamp = observation.timestamp
+            action.current_motion_target = observation.target
             action.current_motion_root_xy = getattr(event, "root_xy", None)
             action.current_motion_event_xy = getattr(event, "event_xy", None)
             modifiers = getattr(event, "modifiers", None)
@@ -1797,17 +1443,22 @@ class InputGuardian:
             if action.echo_sources:
                 action.pending_echoes.append(
                     (
-                        timestamp,
-                        target,
+                        observation.timestamp,
+                        observation.target,
                         action.current_motion_root_xy,
                         action.current_motion_event_xy,
                         action.current_motion_modifiers,
                     )
                 )
-            if not action.raw_motion_pairing.observe_delivered(timestamp):
+            if not action.raw_motion_pairing.observe_delivered(observation.timestamp):
                 allowed = False
-        if allowed and action is not None and event_class == "RawMotion" and not canonical_raw_queued:
-            if not action.raw_motion_pairing.queue_raw(timestamp):
+        if (
+            allowed
+            and action is not None
+            and event_class == "RawMotion"
+            and not observation.canonical_raw_queued
+        ):
+            if not action.raw_motion_pairing.queue_raw(observation.timestamp):
                 allowed = False
         if (
             allowed
@@ -1838,53 +1489,55 @@ class InputGuardian:
             )
         ):
             allowed = False
-        if allowed:
-            with self._lock:
-                if self.generation != generation or self._action is not action:
-                    allowed = False
-                else:
-                    if not echo_match:
-                        if pending_raw_primary and prior_timestamp is not None:
-                            # The FIFO-head primary may be older in scalar
-                            # form than a later raw arrival. Retain the
-                            # arrival-domain clock instead of moving it back.
-                            self._last_event_time_ms = (
-                                prior_timestamp
-                                if not xi2_timestamp_forward(prior_timestamp, timestamp)
-                                else timestamp
-                            )
-                        else:
-                            self._last_event_time_ms = timestamp
-                    if echo_match and echo_pending_index is not None:
-                        action.pending_echoes.pop(echo_pending_index)
-                        action.echo_index += 1
-                    if motion_match_index is not None:
-                        action.motion_index = motion_match_index + 1
-                    if positioning_match_index is not None:
-                        action.positioning_index = positioning_match_index + 1
-                    if action.canonical_motion and canonical_endpoint is not None and event_class == "Motion":
-                        if not action.raw_motion_pairing.observe_delivered(timestamp):
-                            allowed = False
-                        else:
-                            action.last_accepted_endpoint = (
-                                canonical_endpoint[0],
-                                canonical_endpoint[1],
-                                canonical_endpoint[0],
-                                canonical_endpoint[1],
-                            )
-                    if action.required_sequence and event_class not in action.optional_classes:
-                        action.sequence_index += 1
-                    if event_class == "RawButtonRelease":
-                        action.release_started = True
-        if allowed:
-            return True
-        self.revoke(
-            "unattributed XI2 event "
-            f"class={getattr(event.event_class, 'value', event.event_class)} "
-            f"source={getattr(event, 'source_device', '?')} "
-            f"target={getattr(event, 'target_xid', '?')}"
-        )
-        return False
+        observation.allowed = allowed
+
+    def _observe_commit_phase(self, observation: _Observation) -> None:
+        """Commit correlation counters only for the same action generation."""
+
+        if not observation.allowed:
+            return
+        with self._lock:
+            action = observation.action
+            if self.generation != observation.generation or self._action is not action:
+                observation.allowed = False
+            else:
+                if not observation.echo_match:
+                    if observation.pending_raw_primary and observation.prior_timestamp is not None:
+                        # The FIFO-head primary may be older in scalar
+                        # form than a later raw arrival. Retain the
+                        # arrival-domain clock instead of moving it back.
+                        self._last_event_time_ms = (
+                            observation.prior_timestamp
+                            if not xi2_timestamp_forward(observation.prior_timestamp, observation.timestamp)
+                            else observation.timestamp
+                        )
+                    else:
+                        self._last_event_time_ms = observation.timestamp
+                if observation.echo_match and observation.echo_pending_index is not None:
+                    action.pending_echoes.pop(observation.echo_pending_index)
+                    action.echo_index += 1
+                if observation.motion_match_index is not None:
+                    action.motion_index = observation.motion_match_index + 1
+                if observation.positioning_match_index is not None:
+                    action.positioning_index = observation.positioning_match_index + 1
+                if (
+                    action.canonical_motion
+                    and observation.canonical_endpoint is not None
+                    and observation.event_class == "Motion"
+                ):
+                    if not action.raw_motion_pairing.observe_delivered(observation.timestamp):
+                        observation.allowed = False
+                    else:
+                        action.last_accepted_endpoint = (
+                            observation.canonical_endpoint[0],
+                            observation.canonical_endpoint[1],
+                            observation.canonical_endpoint[0],
+                            observation.canonical_endpoint[1],
+                        )
+                if action.required_sequence and observation.event_class not in action.optional_classes:
+                    action.sequence_index += 1
+                if observation.event_class == "RawButtonRelease":
+                    action.release_started = True
 
     def revoke(self, reason: str) -> int:
         callbacks: list[Callable[[str, int], None]]
@@ -2062,6 +1715,37 @@ class InputGuardian:
         if self._atexit_registered:
             atexit.unregister(self._close_at_exit)
             self._atexit_registered = False
+
+
+def _watchdog_entry(
+    owner_pid: int,
+    owner_start: str | None,
+    read_fd: int,
+    interval: float,
+    release_command: tuple[str, ...],
+    release_env: dict[str, str],
+    write_fd: int | None = None,
+    release_fd: int | None = None,
+    ready_fd: int | None = None,
+    release_spec: NativeReleaseSpec | None = None,
+    ack_fd: int | None = None,
+) -> None:
+    """Preserve the historical watchdog entrypoint and process-start seam."""
+
+    _watchdog_entry_impl(
+        owner_pid,
+        owner_start,
+        read_fd,
+        interval,
+        release_command,
+        release_env,
+        write_fd,
+        release_fd,
+        ready_fd,
+        release_spec,
+        ack_fd,
+        InputGuardian._proc_start,
+    )
 
 
 __all__ = ["ActionCorrelation", "GuardianError", "InputGuardian", "InputLease"]

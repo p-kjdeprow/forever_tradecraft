@@ -38,6 +38,7 @@ from crowley.session.model import ModelObservation
 from crowley.session.route_walk import KeyEvent, Pose, Route, RouteFile, simulate
 from crowley.session.startup import StartupEnvironment, mint_runtime_evidence
 from tests.support.companion_state import write_companion_state
+from tests.support.private_lease import private_lease_path
 
 from .test_session_runtime import (
     LifecycleBackend,
@@ -969,7 +970,7 @@ def _make_case(tmp_path: Path, *, armed: bool, max_messages: int):
         profile=DriverProfile(xauthority="/tmp/test-Xauthority", wine_prefix="/tmp/test-wine-prefix"),
         backend=backend,
         monotonic=clock.monotonic,
-        lease_path=tmp_path / "desktop.lock",
+        lease_path=private_lease_path(tmp_path),
     )
     driver.input_broker = InputBroker.for_tests(
         clock=clock.monotonic,

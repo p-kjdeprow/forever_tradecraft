@@ -77,6 +77,7 @@ from tests.support.ewmh_window_manager import (
     start_ewmh_window_manager,
     stop_ewmh_window_manager,
 )
+from tests.support.private_lease import private_lease_path
 from tests.test_session_input_tool import fixture_input_tool
 from tests.x11_startup import start_private_xvfb
 
@@ -5096,7 +5097,9 @@ def _native_driver(tmp_path: Path) -> tuple[DesktopDriver, WindowIdentity, subpr
         target_event_xids=frozenset({1, 2}),
     )
     backend.resolve_identity = lambda **_kwargs: identity
-    driver = DesktopDriver(profile=profile, backend=backend, lease_path=tmp_path / "native.lock")
+    driver = DesktopDriver(
+        profile=profile, backend=backend, lease_path=private_lease_path(tmp_path, "native.lock")
+    )
     native_clock = [time.monotonic()]
     driver._native_test_clock = native_clock  # type: ignore[attr-defined]
     driver.input_hierarchy = lambda **_kwargs: _evidence(tmp_path).xinput_hierarchy  # type: ignore[method-assign]

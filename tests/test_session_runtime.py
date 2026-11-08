@@ -59,6 +59,7 @@ from crowley.session.startup import (
     mint_runtime_evidence,
 )
 from tests.support.companion_state import write_companion_state
+from tests.support.private_lease import private_lease_path
 from tests.test_session_input_tool import fixture_input_tool
 
 from .wow_harness import Auction, WowClient
@@ -1684,7 +1685,7 @@ def _runtime_daemon(
     virtual_clock = _VirtualMonotonic()
     backend = backend or LifecycleBackend(root)
     backend.virtual_clock = virtual_clock
-    effective_lease_path = lease_path or root / "desktop.lock"
+    effective_lease_path = lease_path or private_lease_path(root)
     driver = DesktopDriver(
         profile=DriverProfile(xauthority="/tmp/test-Xauthority", wine_prefix="/tmp/test-wine-prefix"),
         backend=backend,

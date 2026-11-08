@@ -5321,10 +5321,18 @@ class DesktopDriver:
         watchdog_env: dict[str, str] = {}
         watchdog_release_spec = None
         try:
-            if lease_path is None and not isinstance(self.backend, X11Backend):
-                lease_path = Path(tempfile.gettempdir()) / f"crowley-desktop-test-{uuid.uuid4().hex}.lock"
-            default_lease = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp")) / "crowley" / "desktop.lock"
-            self.lease_path = Path(lease_path or os.environ.get("CROWLEY_DESKTOP_LEASE", str(default_lease)))
+            if lease_path is None:
+                configured_lease = os.environ.get("CROWLEY_DESKTOP_LEASE")
+                if configured_lease is not None:
+                    if not configured_lease:
+                        raise DriverError("CROWLEY_DESKTOP_LEASE must not be empty")
+                    lease_path = Path(configured_lease)
+                else:
+                    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+                    if not runtime_dir:
+                        raise DriverError("desktop lease requires XDG_RUNTIME_DIR or CROWLEY_DESKTOP_LEASE")
+                    lease_path = Path(runtime_dir) / "crowley" / "desktop.lock"
+            self.lease_path = Path(lease_path)
             if isinstance(self.backend, X11Backend):
                 if not hasattr(self.backend, "input_tool"):
                     try:

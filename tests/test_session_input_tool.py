@@ -415,6 +415,30 @@ def test_guardian_closes_release_spec_when_lease_is_already_held(tmp_path: Path)
         tool.close()
 
 
+def test_input_lease_rejects_a_symlinked_lock_path(tmp_path: Path) -> None:
+    from crowley.session.guardian import GuardianError, InputLease
+
+    target = tmp_path / "target.lock"
+    target.write_bytes(b"")
+    lock_path = tmp_path / "lease.lock"
+    lock_path.symlink_to(target)
+
+    with pytest.raises(GuardianError, match="private owned regular file"):
+        InputLease(lock_path).acquire()
+
+
+def test_input_lease_rejects_a_symlinked_parent_directory(tmp_path: Path) -> None:
+    from crowley.session.guardian import GuardianError, InputLease
+
+    real_parent = tmp_path / "real-parent"
+    real_parent.mkdir()
+    linked_parent = tmp_path / "linked-parent"
+    linked_parent.symlink_to(real_parent, target_is_directory=True)
+
+    with pytest.raises(GuardianError, match="private directory"):
+        InputLease(linked_parent / "lease.lock").acquire()
+
+
 def test_sealed_image_executes_after_published_path_is_removed(tmp_path: Path) -> None:
     root = _artifact_copy(tmp_path, "/bin/true")
     tool = PinnedInputTool.from_root(root)

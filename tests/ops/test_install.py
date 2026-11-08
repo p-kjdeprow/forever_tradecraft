@@ -34,7 +34,7 @@ def _write_host(config_home: Path, game_root: Path, wine_prefix: Path) -> None:
                 f"game_root = {json.dumps(str(game_root))}",
                 'wtf_account = "850981908#1"',
                 'character = "Arthur"',
-                'display = ":0"',
+                'display = ":crowley-test"',
                 'server_url = "http://server.invalid:8080"',
                 'window_title = "World of Warcraft"',
                 "client_x = 0",
@@ -170,6 +170,36 @@ def test_hostile_paths_are_escaped_in_launcher_and_tunables(tmp_path: Path) -> N
     assert launcher is not None
     assert "$(touch" in launcher.decode("utf-8")
     assert not marker.exists()
+
+
+def test_launcher_uses_host_display_and_requires_xauthority(tmp_path: Path) -> None:
+    environment, game_root, _runtime = _environment(tmp_path)
+    plan = install.build_plan(install.InstallRequest(game_root=game_root), environment)
+    launcher = next(
+        item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
+    )
+    assert launcher is not None
+    rendered = launcher.decode("utf-8")
+    assert "DISPLAY_VALUE=:crowley-test" in rendered
+    assert "${DISPLAY" not in rendered
+    assert "${XAUTHORITY:-" not in rendered
+    assert ":-" not in rendered
+
+    launcher_path = tmp_path / "launcher"
+    launcher_path.write_bytes(launcher)
+    launcher_path.chmod(0o700)
+    child_environment = dict(environment)
+    child_environment["CROWLEY_WINE"] = "/bin/true"
+    child_environment.pop("XAUTHORITY", None)
+    completed = subprocess.run(
+        [str(launcher_path)],
+        env=child_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode != 0
+    assert "set XAUTHORITY" in completed.stderr
 
 
 def test_install_copies_addon_units_and_manifest_and_is_idempotent(
@@ -437,9 +467,9 @@ def test_compose_config_accepts_dummy_required_environment(tmp_path: Path) -> No
     environment = dict(
         os.environ,
         CROWLEY_DB_PASSWORD="dummy",
-        CROWLEY_DATABASE_URL="postgresql://crowley:host-only@" + "127.0." + "0.1" + ":5432/crowley",
+        CROWLEY_DATABASE_URL="postgresql://crowley:host-only@db.invalid:5432/crowley",
         CROWLEY_API_TOKEN="dummy",
-        CROWLEY_BIND="127.0." + "0.1",
+        CROWLEY_BIND="0.0.0.0",
         CROWLEY_IMAGE_VERSION="0.1.0",
         XDG_CONFIG_HOME=str(config_home),
     )
@@ -462,8 +492,23 @@ def test_compose_config_accepts_dummy_required_environment(tmp_path: Path) -> No
     assert "build:" not in completed.stdout
     assert "image: crowley-server:0.1.0" in completed.stdout
     assert "postgresql://crowley:dummy@db:5432/crowley" in completed.stdout
-    host_endpoint = "127.0." + "0.1" + ":5432"
+    compose_text = Path("src/crowley/ops/resources/docker-compose.yml").read_text(encoding="utf-8")
+    assert "CROWLEY_HOST: 0.0.0.0" in compose_text
+    assert '"${CROWLEY_BIND:?set CROWLEY_BIND in secrets.env}:8080:8080"' in compose_text
+    host_endpoint = "db.invalid:5432"
     assert host_endpoint not in completed.stdout
+
+
+def test_packaged_compose_keeps_container_host_and_host_bind_variable() -> None:
+    compose_text = Path("src/crowley/ops/resources/docker-compose.yml").read_text(encoding="utf-8")
+    server_marker = "\n  server:\n"
+    assert server_marker in compose_text
+    server_text = compose_text.split(server_marker, 1)[1]
+    volumes_marker = "\nvolumes:\n"
+    assert volumes_marker in server_text
+    server_text = server_text.split(volumes_marker, 1)[0]
+    assert "CROWLEY_HOST: 0.0.0.0" in server_text
+    assert '"${CROWLEY_BIND:?set CROWLEY_BIND in secrets.env}:8080:8080"' in server_text
 
 
 def test_image_build_from_wheel_stages_only_packaged_inputs(tmp_path: Path) -> None:

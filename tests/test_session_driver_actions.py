@@ -2361,7 +2361,7 @@ def test_pinned_observer_protocol_requires_version_and_timings(tmp_path: Path) -
         "exe": "WowB.exe",
         "statusName": "WowB.exe",
         "loader": "wine-preloader",
-        "winePrefix": "/tmp/wine",
+        "winePrefix": str(tmp_path / "wine"),
         "xid": 100,
         "title": "World of Warcraft",
         "class": "wowb.exe,wowb.exe",
@@ -2412,7 +2412,7 @@ def test_pinned_identity_rejects_wrong_outer_parent(tmp_path: Path) -> None:
     profile = DriverProfile(
         display=":0",
         xauthority=str(tmp_path / "Xauthority"),
-        wine_prefix="/tmp/wine",
+        wine_prefix=str(tmp_path / "wine"),
         executable="WowB.exe",
     )
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))
@@ -2425,7 +2425,7 @@ def test_pinned_identity_rejects_wrong_outer_parent(tmp_path: Path) -> None:
         "exe": "WowB.exe",
         "statusName": "WowB.exe",
         "loader": "wine-preloader",
-        "winePrefix": "/tmp/wine",
+        "winePrefix": str(tmp_path / "wine"),
         "xid": 100,
         "title": "World of Warcraft",
         "class": "wowb.exe,wowb.exe",

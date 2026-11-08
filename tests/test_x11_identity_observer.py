@@ -14,6 +14,7 @@ import pytest
 from crowley.native import build as builder
 from crowley.native import pins
 from crowley.session.driver import DriverError, DriverProfile, X11Backend
+from tests.support.fake_host import FAKE_WINE_PREFIX
 from tests.test_session_input_tool import fixture_input_tool
 from tests.x11_startup import start_private_xvfb
 
@@ -72,7 +73,7 @@ def _request(**overrides: object) -> str:
         "title": "World of Warcraft",
         "class": "wowb.exe",
         "executable": "WowB.exe",
-        "winePrefix": "/tmp/wine",
+        "winePrefix": str(FAKE_WINE_PREFIX),
         "loader": "wine-preloader",
         "outerWidth": 1928,
         "outerHeight": 1092,
@@ -163,7 +164,7 @@ def test_hermetic_builder_rejects_ambient_ancestor_cargo_configuration(tmp_path:
         (source / relative).write_text("reviewed\n", encoding="utf-8")
     (source.parents[2] / ".cargo").mkdir()
     (source.parents[2] / ".cargo" / "config.toml").write_text(
-        "[build]\ntarget-dir = '/tmp/ambient'\n", encoding="utf-8"
+        f"[build]\ntarget-dir = '{tmp_path / 'ambient'}'\n", encoding="utf-8"
     )
     with pytest.raises(RuntimeError, match="ancestor Cargo config"):
         builder._refuse_ancestor_build_inputs(source.parent)
@@ -178,7 +179,7 @@ def test_hermetic_build_rejects_configuration_above_actual_build_cwd(
     source.mkdir(parents=True)
     (build_root / ".cargo").mkdir()
     (build_root / ".cargo" / config_name).write_text(
-        "[build]\ntarget-dir = '/tmp/ambient'\n", encoding="utf-8"
+        f"[build]\ntarget-dir = '{tmp_path / 'ambient'}'\n", encoding="utf-8"
     )
     called = False
 

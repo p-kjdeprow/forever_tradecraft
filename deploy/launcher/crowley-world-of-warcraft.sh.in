@@ -10,18 +10,8 @@ EXECUTABLE={{EXECUTABLE}}
 PREFIX={{WINE_PREFIX}}
 WINE="${CROWLEY_WINE:?set CROWLEY_WINE to the reviewed Wine executable}"
 
-DISPLAY_VALUE="${DISPLAY:-:0}"
-XAUTHORITY_VALUE="${XAUTHORITY:-}"
-if [ -z "$XAUTHORITY_VALUE" ]; then
-    : "${XDG_RUNTIME_DIR:?set XDG_RUNTIME_DIR in the authenticated graphical session}"
-    AUTH_PREFIX=".mutter-Xway"
-    AUTH_SUFFIX="landauth"
-    for candidate in "$XDG_RUNTIME_DIR"/"$AUTH_PREFIX$AUTH_SUFFIX".*; do
-        [ -r "$candidate" ] || continue
-        XAUTHORITY_VALUE=$candidate
-        break
-    done
-fi
+DISPLAY_VALUE={{DISPLAY}}
+XAUTHORITY_VALUE="${XAUTHORITY:?set XAUTHORITY to the reviewed Xwayland authorization file}"
 [ -r "$XAUTHORITY_VALUE" ] || { printf '%s\n' 'No readable Xauthority for the active desktop.' >&2; exit 1; }
 
 BATTLE_NET="$PREFIX/drive_c/Program Files (x86)/Battle.net/Battle.net.exe"
@@ -42,7 +32,7 @@ for proc in /proc/[0-9]*; do
     exit 0
 done
 
-LOGDIR="${XDG_STATE_HOME:-$HOME/.local/state}/crowley/executor-evidence"
+LOGDIR="${XDG_STATE_HOME:?set XDG_STATE_HOME in the authenticated graphical session}/crowley/executor-evidence"
 mkdir -p -m 0700 "$LOGDIR"
 chmod 700 "$LOGDIR"
 exec env DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" \

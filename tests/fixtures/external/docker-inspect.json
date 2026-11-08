@@ -1,0 +1,13 @@
+{
+  "volume_mountpoints": {
+    "crowley_db": "/var/lib/docker/volumes/crowley_db/_data",
+    "crowley_raw": "/var/lib/docker/volumes/crowley_raw/_data",
+    "db": "/var/lib/docker/volumes/db/_data",
+    "raw": "/var/lib/docker/volumes/raw/_data"
+  },
+  "network_addresses": {
+    "drill_server": "172.30.0.2",
+    "drill_gateway": "172.30.0.1",
+    "none_network": "172.20.0.2"
+  }
+}

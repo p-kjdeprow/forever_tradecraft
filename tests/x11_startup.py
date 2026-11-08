@@ -8,13 +8,14 @@ import fcntl
 import os
 import select
 import subprocess
+import tempfile
 import time
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-_PRIVATE_XVFB_START_LOCK = Path("/tmp/crowley-private-xvfb-startup.lock")
+_PRIVATE_XVFB_START_LOCK = Path(tempfile.gettempdir()) / "crowley-private-xvfb-startup.lock"
 
 
 def _stderr_text(server: subprocess.Popen[Any]) -> str:

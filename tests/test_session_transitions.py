@@ -524,7 +524,7 @@ def test_fence_rejects_same_state_result_after_new_intent(tmp_path: Path) -> Non
     controller.set_action_intent(ActionKind.OPEN_AH.value)
 
     result = controller.record_model_proof(
-        {"capturePath": "/tmp/capture", "text": "private model output"},
+        {"capturePath": str(tmp_path / "capture"), "text": "private model output"},
         fence=fence,
     )
 

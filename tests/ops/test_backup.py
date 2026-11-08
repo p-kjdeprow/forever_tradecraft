@@ -8,10 +8,11 @@ import os
 import runpy
 import subprocess
 import tarfile
+import tempfile
 import uuid
 import zipfile
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +25,39 @@ from crowley.server.db import migrate
 from crowley.server.ingest import _logical_digest
 
 raw_scan = runpy.run_path(Path(__file__).parents[1] / "test_core.py")["raw_scan"]
+
+
+@dataclass(frozen=True, slots=True)
+class _DockerInspectFixture:
+    volume_mountpoints: dict[str, str]
+    network_addresses: dict[str, str]
+
+
+def _load_docker_inspect_fixture() -> _DockerInspectFixture:
+    path = Path(__file__).parents[1] / "fixtures" / "external" / "docker-inspect.json"
+    raw: object = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise AssertionError("docker inspect fixture must be an object")
+
+    def section(name: str) -> dict[str, str]:
+        value = raw.get(name)
+        if not isinstance(value, dict) or not all(
+            isinstance(key, str) and isinstance(item, str) for key, item in value.items()
+        ):
+            raise AssertionError(f"docker inspect fixture section {name!r} must map strings to strings")
+        return {key: item for key, item in value.items()}
+
+    return _DockerInspectFixture(
+        volume_mountpoints=section("volume_mountpoints"),
+        network_addresses=section("network_addresses"),
+    )
+
+
+_DOCKER_INSPECT = _load_docker_inspect_fixture()
+
+
+def _docker_volume_mount(name: str) -> str:
+    return _DOCKER_INSPECT.volume_mountpoints[name]
 
 
 def _manifest(raw_bytes: bytes, dump_bytes: bytes = b"custom dump") -> dict:
@@ -49,10 +83,10 @@ def _manifest(raw_bytes: bytes, dump_bytes: bytes = b"custom dump") -> dict:
                 },
             },
             "volumes": {
-                "database": {"name": "crowley_db", "mountpoint": "/var/lib/docker/volumes/crowley_db/_data"},
+                "database": {"name": "crowley_db", "mountpoint": _docker_volume_mount("crowley_db")},
                 "raw_archive": {
                     "name": "crowley_raw",
-                    "mountpoint": "/var/lib/docker/volumes/crowley_raw/_data",
+                    "mountpoint": _docker_volume_mount("crowley_raw"),
                 },
             },
             "networks": [{"name": "crowley_default", "id": "9" * 64}],
@@ -341,7 +375,12 @@ def test_raw_paths_require_exact_data_prefix_and_inventory_membership():
         backup.raw_reference_path("/data/raw/format2/ab/object.json.gz", inventory)
         == "raw/format2/ab/object.json.gz"
     )
-    for value in ("/datax/raw/format2/ab/object.json.gz", "/tmp/object", "/data/../escape", "/data/missing"):
+    for value in (
+        "/datax/raw/format2/ab/object.json.gz",
+        str(Path(tempfile.gettempdir()) / "object"),
+        "/data/../escape",
+        "/data/missing",
+    ):
         with pytest.raises(backup.BackupError):
             backup.raw_reference_path(value, inventory)
 
@@ -756,7 +795,9 @@ def test_compose_isolation_rejects_fixed_ports_and_wrong_live_project():
         backup.validate_compose_isolation(bad, bad["name"])
     with pytest.raises(backup.BackupError, match="mounts"):
         bad = _valid_compose()
-        bad["services"]["server"]["volumes"].append({"type": "bind", "source": "/tmp", "target": "/extra"})
+        bad["services"]["server"]["volumes"].append(
+            {"type": "bind", "source": tempfile.gettempdir(), "target": "/extra"}
+        )
         backup.validate_compose_isolation(bad, bad["name"])
     with pytest.raises(backup.BackupError, match="isolated"):
         backup.validate_compose_isolation(config, "crowley")
@@ -919,7 +960,13 @@ def test_target_guard_requires_recorded_images_and_exact_distinct_mounts(bad_mou
         )
     elif bad_mount == "extra_bind":
         target["containers"]["server"]["mounts"].append(
-            {"Type": "bind", "Name": "", "Source": "/tmp", "Destination": "/extra", "RW": True}
+            {
+                "Type": "bind",
+                "Name": "",
+                "Source": tempfile.gettempdir(),
+                "Destination": "/extra",
+                "RW": True,
+            }
         )
     elif bad_mount == "swapped_roles":
         target["volumes"][0]["labels"]["com.docker.compose.volume"] = "crowley-raw"
@@ -1168,7 +1215,10 @@ def test_container_identity_allows_endpoint_changes_but_rejects_network_id_drift
     running = deepcopy(created)
     running["state"] = "running"
     running["networks"]["crowley-drill-test_default"].update(
-        NetworkID="network-id", EndpointID="endpoint-id", IPAddress="172.30.0.2", Gateway="172.30.0.1"
+        NetworkID="network-id",
+        EndpointID="endpoint-id",
+        IPAddress=_DOCKER_INSPECT.network_addresses["drill_server"],
+        Gateway=_DOCKER_INSPECT.network_addresses["drill_gateway"],
     )
     assert backup._same_container_identity(created, running)
     expected_network = {"crowley-drill-test_default": "network-id"}
@@ -1194,7 +1244,7 @@ def test_helper_cleanup_requires_exact_builtin_none_network_and_no_endpoint():
     wrong_id["networks"]["none"]["NetworkID"] = "other-network-id"
     assert not backup._helper_uses_only_none_network(wrong_id, "none-network-id")
     connected = deepcopy(exited)
-    connected["networks"]["none"]["IPAddress"] = "172.20.0.2"
+    connected["networks"]["none"]["IPAddress"] = _DOCKER_INSPECT.network_addresses["none_network"]
     assert not backup._helper_uses_only_none_network(connected, "none-network-id")
     extra_network = deepcopy(exited)
     extra_network["networks"]["crowley"] = {"NetworkID": "project-network-id"}
@@ -1363,8 +1413,8 @@ def _verified_receipt():
     net_name = project + "_default"
     db_volume = project + "_crowley-db"
     raw_volume = project + "_crowley-raw"
-    db_mountpoint = "/var/lib/docker/volumes/db/_data"
-    raw_mountpoint = "/var/lib/docker/volumes/raw/_data"
+    db_mountpoint = _docker_volume_mount("db")
+    raw_mountpoint = _docker_volume_mount("raw")
     database_image = "sha256:database-image"
     server_image = "sha256:server-image"
     target = receipt["target"]

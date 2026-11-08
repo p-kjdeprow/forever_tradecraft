@@ -39,7 +39,7 @@ run with xdist workers before collection, so this cannot silently race or skip
 the database coverage.
 
 ```sh
-CROWLEY_TEST_DATABASE_URL='postgresql://crowley:testonly@127.0.0.1:55471/<fresh_test_database>' \
+CROWLEY_TEST_DATABASE_URL='<fresh disposable database URL>' \
   flock "$CROWLEY_TEST_LOCK" uv run pytest -n0 tests/test_server.py tests/test_client_data.py tests/test_trading_paper.py
 ```
 

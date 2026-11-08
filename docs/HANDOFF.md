@@ -157,12 +157,11 @@ These steps apply at launch, after the relevant deployment/input authorization.
 
 ## Entrypoints
 
-- Python: `/home/dev/repos/pegasus/.venv/bin/python`; session CLI `~/.local/bin/crowley-session` (editable install
-  of this checkout); config `deploy/config/session.toml` (linked from `~/.config/crowley/session.toml`).
-- Tests: `CROWLEY_RUST_TOOLCHAIN=~/.cache/crowley/rust-toolchain-1.85.1/toolchain/bin uv run pytest` (the default
+- Python: the installed package's Python entry point; session CLI `~/.local/bin/crowley-session` (installed
+  from the package); config `$XDG_CONFIG_HOME/crowley/session.toml`.
+- Tests: `CROWLEY_RUST_TOOLCHAIN=<reviewed-toolchain>/toolchain/bin uv run pytest` (the default
   uses sixteen bounded xdist workers with work-stealing; add `CROWLEY_TEST_DATABASE_URL` only for the documented serial DB run in
   [TESTING](TESTING.md)).
 - Backups: `systemctl --user start crowley-market-backup.service`; restore drills via `crowley-ops drill`.
-- Pinned binaries: `~/.cache/crowley/{xdotool,x11-identity-observer,template-matcher,gnome-telemetry-region-r6,
-  codex,rust-toolchain-1.85.1}`. Parts of `gnome-telemetry-region-r3/r5` are root-owned stale builds
-  (remove with sudo).
+- Pinned binaries: the paths reported by `crowley-ops doctor` under the XDG cache directory. Stale
+  diagnostic builds should be removed only through the package's normal cache-management procedure.

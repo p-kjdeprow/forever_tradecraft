@@ -477,7 +477,7 @@ def _attach_recording_anchor_provider(driver: DesktopDriver, root: Path) -> None
 class LifecycleBackend(X11Backend):
     def __init__(self, root: Path):
         super().__init__(
-            DriverProfile(xauthority="/tmp/test-Xauthority", wine_prefix="/tmp/test-wine-prefix"),
+            DriverProfile(xauthority=str(root / "Xauthority"), wine_prefix=str(root / "wine-prefix")),
             input_tool=fixture_input_tool(root / "tool"),
         )
         self.root = root
@@ -1689,7 +1689,7 @@ def _runtime_daemon(
     backend.virtual_clock = virtual_clock
     effective_lease_path = lease_path or private_lease_path(root)
     driver = DesktopDriver(
-        profile=DriverProfile(xauthority="/tmp/test-Xauthority", wine_prefix="/tmp/test-wine-prefix"),
+        profile=DriverProfile(xauthority=str(root / "Xauthority"), wine_prefix=str(root / "wine-prefix")),
         backend=backend,
         monotonic=virtual_clock.monotonic,
         lease_path=effective_lease_path,
@@ -2402,7 +2402,9 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
     backend.virtual_clock = virtual_clock
 
     driver = DesktopDriver(
-        profile=DriverProfile(xauthority="/tmp/test-Xauthority", wine_prefix="/tmp/test-wine-prefix"),
+        profile=DriverProfile(
+            xauthority=str(tmp_path / "Xauthority"), wine_prefix=str(tmp_path / "wine-prefix")
+        ),
         backend=backend,
         monotonic=virtual_clock.monotonic,
         lease_path=tmp_path / "desktop.lock",
@@ -2983,8 +2985,8 @@ def test_native_preconstruction_release_waits_for_reset_boundary(
 
 def test_live_daemon_binds_owned_visual_and_render_providers(tmp_path: Path) -> None:
     profile = DriverProfile(
-        xauthority="/tmp/test-Xauthority",
-        wine_prefix="/measured/wine-prefix",
+        xauthority=str(tmp_path / "Xauthority"),
+        wine_prefix=str(tmp_path / "wine-prefix"),
     )
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))
     driver = DesktopDriver(profile=profile, backend=backend, lease_path=tmp_path / "desktop.lock")
@@ -3024,7 +3026,9 @@ def test_default_native_meter_binds_real_child_and_closes_on_retry(
     stat = Path(f"/proc/{child.pid}/stat").read_text(encoding="ascii")
     process_start = stat[stat.rfind(")") + 2 :].split()[19]
     linux_executable = os.path.realpath(os.readlink(f"/proc/{child.pid}/exe"))
-    profile = DriverProfile(xauthority="/tmp/test-Xauthority", wine_prefix="/tmp/test-wine-prefix")
+    profile = DriverProfile(
+        xauthority=str(tmp_path / "Xauthority"), wine_prefix=str(tmp_path / "wine-prefix")
+    )
     backend = object.__new__(X11Backend)
     backend.profile = profile
     backend.xauthority = profile.xauthority

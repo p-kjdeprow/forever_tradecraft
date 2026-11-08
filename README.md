@@ -48,11 +48,11 @@ chmod 600 "$XDG_CONFIG_HOME/crowley/secrets.env"
 # 3. Build the server image from this checkout (or pass an explicit wheel instead).
 crowley-ops image build --source "$PWD"
 
-# 4. Server + database. Compose uses CROWLEY_DB_PASSWORD for its internal db:5432 DSN;
-# CROWLEY_DATABASE_URL remains the host-facing URL used by doctor and paper trading.
+# 4. Server + database. Compose uses the values in secrets.env for its internal DSN;
+# CROWLEY_DATABASE_URL is also the URL used by doctor and paper trading.
 docker compose --env-file "$XDG_CONFIG_HOME/crowley/secrets.env" \
   -f "$(crowley-ops compose-file)" up -d
-curl localhost:8080/healthz
+# Verify the health endpoint at the server_url configured in host.toml.
 
 # 5. Copy units, timers, launcher and packaged addon files, then inspect every check.
 crowley-ops doctor
@@ -84,8 +84,8 @@ confirmed sale. Confirmed own sales are recorded separately only after a full ow
 
 ## Game and server on different machines (Tailscale)
 
-1. On the server, set `CROWLEY_BIND` in `$XDG_CONFIG_HOME/crowley/secrets.env` to `tailscale ip -4` and restart Compose with that env file.
-2. On the game machine, set `server_url = "http://<server-tailnet-name>:8080"` in `host.toml` and run the companion there.
+1. On the server, set `CROWLEY_BIND` in `$XDG_CONFIG_HOME/crowley/secrets.env` to the selected Tailscale address and restart Compose with that env file.
+2. On the game machine, set `server_url` in `host.toml` to the server endpoint and run the companion there.
 
 ## Deployment notes
 

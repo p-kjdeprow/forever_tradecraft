@@ -77,6 +77,7 @@ from tests.support.ewmh_window_manager import (
     start_ewmh_window_manager,
     stop_ewmh_window_manager,
 )
+from tests.support.fake_host import FAKE_XAUTHORITY
 from tests.support.private_lease import private_lease_path
 from tests.test_session_input_tool import fixture_input_tool
 from tests.x11_startup import start_private_xvfb
@@ -2181,7 +2182,7 @@ def test_root_child_verifier_replays_input87_tree_and_rejects_unobserved_subtree
 
     target = OwnedGtkCalibrationWindow(
         display=":input87-observer",
-        xauthority="/tmp/input87-observer.Xauthority",
+        xauthority=str(FAKE_XAUTHORITY),
         layout_kind=OwnedGtkCalibrationWindow.LAYOUT_ROOT_CHILD,
         command=lambda argv, **_kwargs: command(argv),
     )

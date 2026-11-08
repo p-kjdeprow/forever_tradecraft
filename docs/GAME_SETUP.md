@@ -18,6 +18,24 @@ it invokes the wrapper directly rather than depending on the deleted Lutris game
 registration. It checks exact process identity, owner and prefix to avoid a
 second beta client. Startup still requires the authenticated desktop session.
 
+Before starting the launcher, provide the required host-session environment:
+
+```sh
+export CROWLEY_WINE="/path/to/reviewed/wine/bin/wine"
+export XAUTHORITY="/path/to/reviewed/xauthority"
+export XDG_STATE_HOME="/path/to/crowley-state"
+```
+
+The launcher takes `DISPLAY` from `display` in the selected `host.toml`; do not
+override it through the shell environment. Missing `CROWLEY_WINE`,
+`XAUTHORITY`, or `XDG_STATE_HOME` causes the launcher to fail loudly, and an
+unreadable Xauthority file is also refused.
+
+The Battle.net `--exec='launch WoW'` handoff to an already-running Battle.net is
+UNVERIFIED for Forever: a live test on 2026-11-08 started a second Battle.net
+that crashed. Until that handoff is verified, press Play in the running
+Battle.net instead.
+
 The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).
 Render it from the selected target and preserve executable mode 0700 on the
 installed wrapper. Keep recovery evidence private under the XDG state directory.

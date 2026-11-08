@@ -1,5 +1,7 @@
 import json
 import stat
+from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -17,6 +19,7 @@ from crowley.core.queue import (
     validate_execution_record,
     validate_queue,
 )
+from crowley.trading import __main__ as trading_main
 from crowley.trading import queue_cli
 from crowley.trading.queue_cli import (
     QueueCLIError,
@@ -26,6 +29,26 @@ from crowley.trading.queue_cli import (
     reconcile_queue,
 )
 from tests.wow_harness import WowClient
+
+SERVER_URL = "http://test"
+
+
+def test_trading_server_url_prefers_explicit_value_or_host_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(trading_main, "host_config_path", lambda: Path("host.toml"))
+    monkeypatch.setattr(
+        trading_main,
+        "load_host_config",
+        lambda path: (
+            SimpleNamespace(server_url="http://configured")
+            if path == Path("host.toml")
+            else pytest.fail(f"unexpected host path: {path}")
+        ),
+    )
+
+    assert trading_main._server_url("http://explicit") == "http://explicit"
+    assert trading_main._server_url(None) == "http://configured"
 
 
 def queue_spec(**overrides):
@@ -222,7 +245,7 @@ def test_armed_publish_requires_confirmation_before_network(monkeypatch):
     monkeypatch.setattr("crowley.trading.queue_cli._client", fail_client)
     armed_queue = build_queue(queue_spec(armed=True))
     with pytest.raises(QueueCLIError, match="--confirm-real-trades <queueId>"):
-        publish_spec(armed_queue, armed=True)
+        publish_spec(armed_queue, server_url=SERVER_URL, armed=True)
 
 
 @pytest.mark.parametrize("armed", ["false", 1])
@@ -245,14 +268,14 @@ def test_preview_writes_exact_queue_and_refuses_overwrite(tmp_path, monkeypatch,
 def test_armed_publish_of_minimal_spec_requires_preview_file(monkeypatch):
     monkeypatch.setattr(queue_cli, "_client", lambda *_args, **_kwargs: pytest.fail("network called"))
     with pytest.raises(QueueCLIError, match="queue preview --armed --out"):
-        publish_spec(queue_spec(), armed=True, confirm_real_trades="anything")
+        publish_spec(queue_spec(), server_url=SERVER_URL, armed=True, confirm_real_trades="anything")
 
 
 def test_armed_publish_previews_exact_final_queue_before_confirmation_error(monkeypatch, capsys):
     monkeypatch.setattr(queue_cli, "_client", lambda *_args, **_kwargs: pytest.fail("network called"))
     armed_queue = build_queue(queue_spec(armed=True))
     with pytest.raises(QueueCLIError, match="<queueId>"):
-        publish_spec(armed_queue, armed=True)
+        publish_spec(armed_queue, server_url=SERVER_URL, armed=True)
     output = capsys.readouterr().out
     assert '"armed": true' in output
     assert armed_queue["queueId"] in output
@@ -263,7 +286,7 @@ def test_armed_publish_rejects_nonmatching_confirmation_without_network(monkeypa
     monkeypatch.setattr(queue_cli, "_client", lambda *_args, **_kwargs: pytest.fail("network called"))
     armed_queue = build_queue(queue_spec(armed=True))
     with pytest.raises(QueueCLIError, match="full queueId"):
-        publish_spec(armed_queue, armed=True, confirm_real_trades=confirmation)
+        publish_spec(armed_queue, server_url=SERVER_URL, armed=True, confirm_real_trades=confirmation)
 
 
 def test_armed_publish_submits_the_previewed_file_with_full_confirmation(tmp_path, monkeypatch, capsys):
@@ -284,7 +307,12 @@ def test_armed_publish_submits_the_previewed_file_with_full_confirmation(tmp_pat
     output = tmp_path / "armed-queue.json"
     preview_spec(queue_spec(), output, armed=True)
     armed_queue = json.loads(output.read_text())
-    published = publish_spec(armed_queue, armed=True, confirm_real_trades=armed_queue["queueId"])
+    published = publish_spec(
+        armed_queue,
+        server_url=SERVER_URL,
+        armed=True,
+        confirm_real_trades=armed_queue["queueId"],
+    )
     assert posted[0][1] == {
         **armed_queue,
         "source": "spec",
@@ -302,13 +330,18 @@ def test_publish_rejects_armed_flag_file_mismatch(monkeypatch, queue_armed, flag
     monkeypatch.setattr(queue_cli, "_client", lambda *_args, **_kwargs: pytest.fail("network called"))
     queue = build_queue(queue_spec(armed=queue_armed))
     with pytest.raises(QueueCLIError):
-        publish_spec(queue, armed=flag_armed, confirm_real_trades=queue["queueId"] if flag_armed else None)
+        publish_spec(
+            queue,
+            server_url=SERVER_URL,
+            armed=flag_armed,
+            confirm_real_trades=queue["queueId"] if flag_armed else None,
+        )
 
 
 def test_spec_cannot_arm_without_cli_flag(monkeypatch):
     monkeypatch.setattr(queue_cli, "_client", lambda *_args, **_kwargs: pytest.fail("network called"))
     with pytest.raises(QueueCLIError, match="requires --armed"):
-        publish_spec(queue_spec(armed=True))
+        publish_spec(queue_spec(armed=True), server_url=SERVER_URL)
 
 
 def test_from_paper_publish_is_always_unarmed(monkeypatch):
@@ -333,7 +366,7 @@ def test_from_paper_publish_is_always_unarmed(monkeypatch):
 
     monkeypatch.setattr(queue_cli, "_paper_pending", lambda *_args: ("us-normal-alliance", pending))
     monkeypatch.setattr(queue_cli, "_client", lambda *_args, **_kwargs: Client())
-    queue, skipped, _ = queue_cli.from_paper("unused", "run", "Tester")
+    queue, skipped, _ = queue_cli.from_paper("unused", "run", "Tester", server_url=SERVER_URL)
     assert queue["armed"] is False
     assert posted[0]["armed"] is False
     assert skipped and skipped[0]["intent"]["type"] == "Cancel"

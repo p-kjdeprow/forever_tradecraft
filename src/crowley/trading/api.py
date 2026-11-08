@@ -153,7 +153,7 @@ class MarketView(Protocol):
     """One decision step per recorded sweep, taken when that sweep finished (``t``)."""
 
     t: int
-    sweep_index: int
+    replay_ordinal: int
     rules: AuctionHouseRules
 
     def items(self) -> Mapping[int, ItemSnapshot]:
@@ -258,10 +258,18 @@ Intent = Buy | Post | Cancel | VendorSell | VendorBuy | Craft
 
 
 class Strategy(Protocol):
-    """Strategies are deterministic given their inputs and keep no hidden market state
-    beyond what they derive from views; the engine executes intents in the order given."""
+    """A deterministic strategy with an explicit replay-state contract."""
 
     name: str
     professions: frozenset[str]
+    params: Mapping[str, object]
 
     def decide(self, market: MarketView, account: AccountView) -> Sequence[Intent]: ...
+
+    def checkpoint(self) -> Mapping[str, object]:
+        """Return exactly the mutable state needed by the next decision."""
+        ...
+
+    def restore(self, state: Mapping[str, object]) -> None:
+        """Restore a state previously returned by :meth:`checkpoint`."""
+        ...

@@ -12,8 +12,10 @@ from crowley.server.db import MigrationManifest, MigrationManifestError
 def test_packaged_manifest_contains_the_new_ledger_migration() -> None:
     manifest = MigrationManifest.from_package()
 
-    assert manifest.names[-1] == "011_migration_ledger.sql"
-    assert len(manifest.migrations[-1].sha256) == 64
+    assert "011_migration_ledger.sql" in manifest.names
+    assert tuple(int(name[:3]) for name in manifest.names) == tuple(range(1, len(manifest.names) + 1))
+    ledger = manifest.migrations[manifest.names.index("011_migration_ledger.sql")]
+    assert len(ledger.sha256) == 64
 
 
 def test_manifest_is_ordered_and_hashes_exact_bytes() -> None:

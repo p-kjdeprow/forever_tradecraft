@@ -21,6 +21,7 @@ from crowley.server.db import (
     migration_status,
     verify_current,
 )
+from crowley.trading import paper
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
@@ -39,6 +40,7 @@ MIGRATION_NAMES = tuple(
         (9, "paper_capabilities"),
         (10, "house_integrity"),
         (11, "migration_ledger"),
+        (12, "paper_engine_state"),
     )
 )
 
@@ -239,6 +241,21 @@ def _insert_upgrade_fixture(conn: psycopg.Connection, *, include_paper_run: bool
                 "c" * 64,
             ),
         )
+        run_id = conn.execute("SELECT id FROM paper_runs WHERE name = 'upgrade-paper-run'").fetchone()[0]
+        conn.execute(
+            """
+            INSERT INTO paper_steps (run_id, step_t, sweep_key, equity, realized, cash)
+            VALUES (%s, 1760000000, 'legacy-sweep', %s, %s, %s)
+            """,
+            (run_id, Jsonb({"vendor_arb": "1"}), Jsonb({"vendor_arb": "0"}), Jsonb({"vendor_arb": "1"})),
+        )
+        conn.execute(
+            """
+            INSERT INTO paper_pending (run_id, step_t, sweep_key, intents)
+            VALUES (%s, 1760000000, 'legacy-sweep', %s)
+            """,
+            (run_id, Jsonb({"vendor_arb": []})),
+        )
     return _FixtureIds(alliance_house_id, horde_house_id, scan_id, sweep_id)
 
 
@@ -299,6 +316,23 @@ def test_all_migrations_apply_to_an_empty_database() -> None:
     with psycopg.connect(DB_URL) as conn:
         assert migrate(conn) == list(MIGRATION_NAMES)
         assert migrate(conn) == []
+        columns = conn.execute(
+            """
+            SELECT column_name, is_nullable
+            FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = 'paper_engine_state'
+            ORDER BY ordinal_position
+            """
+        ).fetchall()
+        assert columns == [
+            ("run_id", "NO"),
+            ("replay_ordinal", "NO"),
+            ("step_t", "NO"),
+            ("state_version", "NO"),
+            ("state", "NO"),
+            ("state_digest", "NO"),
+            ("recorded_at", "NO"),
+        ]
 
 
 def test_upgrade_fixture_preserves_rows_and_drops_009_defaults() -> None:
@@ -312,6 +346,25 @@ def test_upgrade_fixture_preserves_rows_and_drops_009_defaults() -> None:
 
         assert migrate(conn) == list(MIGRATION_NAMES[8:])
         assert _affected_snapshot(conn, fixture) == before
+        paper_step = conn.execute(
+            """
+            SELECT replay_ordinal, previous_digest, step_digest
+            FROM paper_steps
+            WHERE run_id = (SELECT id FROM paper_runs WHERE name = 'upgrade-paper-run')
+            """
+        ).fetchone()
+        assert paper_step == (None, None, None)
+        assert conn.execute(
+            """
+            SELECT replay_ordinal FROM paper_pending
+            WHERE run_id = (SELECT id FROM paper_runs WHERE name = 'upgrade-paper-run')
+            """
+        ).fetchone() == (None,)
+        assert conn.execute(
+            "SELECT engine_contract FROM paper_runs WHERE name='upgrade-paper-run'"
+        ).fetchone() == ("legacy",)
+        with pytest.raises(paper.PaperError, match="legacy paper runs are read-only and cannot be resumed"):
+            paper.step_run(DB_URL, "upgrade-paper-run")
         paper_run = conn.execute(
             "SELECT capabilities, capabilities_hash FROM paper_runs WHERE name='upgrade-paper-run'"
         ).fetchone()
@@ -346,6 +399,28 @@ def test_upgrade_fixture_preserves_rows_and_drops_009_defaults() -> None:
             ).fetchone()[0]
             == "NO"
         )
+
+
+def test_legacy_paper_pending_without_a_step_upgrades_read_only() -> None:
+    _reset_public_schema()
+    assert DB_URL is not None
+    with psycopg.connect(DB_URL) as conn:
+        _apply_migrations(conn, MIGRATION_NAMES[:8])
+        _insert_upgrade_fixture(conn, include_paper_run=True)
+        run_id = conn.execute("SELECT id FROM paper_runs WHERE name = 'upgrade-paper-run'").fetchone()[0]
+        conn.execute("DELETE FROM paper_pending WHERE run_id = %s", (run_id,))
+        conn.execute(
+            "INSERT INTO paper_pending (run_id, step_t, sweep_key, intents) VALUES (%s, %s, 'orphan', %s)",
+            (run_id, 1760000001, Jsonb({})),
+        )
+        conn.commit()
+        assert migrate(conn) == list(MIGRATION_NAMES[8:])
+        assert conn.execute("SELECT engine_contract FROM paper_runs WHERE id = %s", (run_id,)).fetchone() == (
+            "legacy",
+        )
+        assert conn.execute(
+            "SELECT replay_ordinal FROM paper_pending WHERE run_id = %s", (run_id,)
+        ).fetchone() == (None,)
 
 
 def test_checksum_mismatch_is_refused() -> None:

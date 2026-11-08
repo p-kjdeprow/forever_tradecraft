@@ -170,9 +170,17 @@ def test_reports_bind_capabilities_and_gate_counts() -> None:
     class Strategy:
         name = "crafting_engineering"
         professions = frozenset({"engineering"})
+        params = {}
 
         def decide(self, market, account):
             return []
+
+        def checkpoint(self):
+            return {}
+
+        def restore(self, state):
+            if state:
+                raise ValueError("strategy state must be empty")
 
     books = {
         11: [
@@ -350,6 +358,7 @@ def test_stored_capabilities_must_be_canonical_even_when_hash_matches() -> None:
         "us",
         "normal",
         "alliance",
+        "replay-v1",
     )
     with pytest.raises(paper.PaperError, match="canonical"):
         paper._run_from_row(row)
@@ -374,6 +383,7 @@ def test_step_refuses_recreated_or_changed_run_before_writes(
         "engine_digest": "a" * 64,
         "capabilities": capabilities,
         "capabilities_hash": capabilities_hash(capabilities),
+        "engine_contract": "replay-v1",
     }
     live_id = 2 if change == "identity" else 1
     live_capital = 101 if change == "config" else 100
@@ -394,6 +404,7 @@ def test_step_refuses_recreated_or_changed_run_before_writes(
         "us",
         "normal",
         "alliance",
+        "replay-v1",
     )
 
     class Connection:

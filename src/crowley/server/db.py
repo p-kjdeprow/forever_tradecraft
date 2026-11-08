@@ -8,6 +8,9 @@ runner-owned transaction, all NULL checksums are filled from the packaged file
 bytes and the column is changed to NOT NULL.  This sequence is only reachable
 through :func:`migrate` / :func:`apply_pending`; startup and ``--status`` only
 read the ledger.
+
+Application connections use the one server statement timeout defined by
+``crowley.store.connection.STATEMENT_TIMEOUT_MS`` (30 seconds).
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ import psycopg
 from psycopg.pq import TransactionStatus
 from psycopg.sql import SQL
 from psycopg_pool import ConnectionPool
+
+from crowley.store.connection import STATEMENT_TIMEOUT_MS
 
 log = logging.getLogger(__name__)
 
@@ -174,7 +179,11 @@ class MigrationStatus:
 
 def create_pool(database_url: str) -> ConnectionPool[psycopg.Connection[tuple[object, ...]]]:
     pool: ConnectionPool[psycopg.Connection[tuple[object, ...]]] = ConnectionPool(
-        database_url, min_size=1, max_size=8, open=False
+        database_url,
+        kwargs={"options": f"-c statement_timeout={STATEMENT_TIMEOUT_MS}"},
+        min_size=1,
+        max_size=8,
+        open=False,
     )
     pool.open(wait=True, timeout=30)
     return pool

@@ -15,6 +15,7 @@ from typing import NamedTuple
 import httpx
 import psycopg
 
+from crowley.config import host_config_path, load_host_config
 from crowley.core.auction_rules import rules_for_house
 from crowley.core.house import House
 from crowley.core.queue import QueueFormatError
@@ -104,6 +105,14 @@ def _capabilities(
     }
     values.update({key: value for key, value in overrides.items() if value is not None})
     return capabilities_from_mapping(values)
+
+
+def _server_url(explicit: str | None) -> str:
+    """Resolve a queue API URL from the explicit option or host contract."""
+
+    if explicit is not None:
+        return explicit
+    return load_host_config(host_config_path()).server_url
 
 
 class _SweepRow(NamedTuple):
@@ -216,9 +225,7 @@ def main(argv: list[str] | None = None) -> int:
     queue_publish.add_argument("--spec", type=Path, required=True)
     queue_publish.add_argument("--armed", action="store_true")
     queue_publish.add_argument("--confirm-real-trades")
-    queue_publish.add_argument(
-        "--server-url", default=os.environ.get("CROWLEY_SERVER_URL", "http://127.0.0.1:8080")
-    )
+    queue_publish.add_argument("--server-url")
     queue_publish.add_argument("--api-token", default=os.environ.get("CROWLEY_API_TOKEN"))
     queue_preview = queue_sub.add_parser("preview")
     queue_preview.add_argument("--spec", type=Path, required=True)
@@ -229,16 +236,12 @@ def main(argv: list[str] | None = None) -> int:
     queue_paper.add_argument("--character", required=True)
     queue_paper.add_argument("--expires-minutes", type=int, default=30)
     queue_paper.add_argument("--database-url", default=os.environ.get("CROWLEY_DATABASE_URL"))
-    queue_paper.add_argument(
-        "--server-url", default=os.environ.get("CROWLEY_SERVER_URL", "http://127.0.0.1:8080")
-    )
+    queue_paper.add_argument("--server-url")
     queue_paper.add_argument("--api-token", default=os.environ.get("CROWLEY_API_TOKEN"))
     queue_status_parser = queue_sub.add_parser("status")
     queue_status_parser.add_argument("--house", required=True)
     queue_status_parser.add_argument("--character", required=True)
-    queue_status_parser.add_argument(
-        "--server-url", default=os.environ.get("CROWLEY_SERVER_URL", "http://127.0.0.1:8080")
-    )
+    queue_status_parser.add_argument("--server-url")
     queue_status_parser.add_argument("--api-token", default=os.environ.get("CROWLEY_API_TOKEN"))
     queue_reconcile = queue_sub.add_parser("reconcile")
     queue_reconcile.add_argument("--queue", dest="queue_id", required=True)
@@ -249,7 +252,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.queue_command == "publish":
                 result = publish_spec(
                     json.loads(args.spec.read_text(encoding="utf-8")),
-                    server_url=args.server_url,
+                    server_url=_server_url(args.server_url),
                     api_token=args.api_token,
                     armed=args.armed,
                     confirm_real_trades=args.confirm_real_trades,
@@ -269,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.run,
                     args.character,
                     expires_minutes=args.expires_minutes,
-                    server_url=args.server_url,
+                    server_url=_server_url(args.server_url),
                     api_token=args.api_token,
                 )
                 print(json.dumps(result, indent=2, sort_keys=True))
@@ -277,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
                 queue_status(
                     args.house,
                     args.character,
-                    server_url=args.server_url,
+                    server_url=_server_url(args.server_url),
                     api_token=args.api_token,
                 )
             else:

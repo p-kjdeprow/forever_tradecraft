@@ -172,7 +172,7 @@ def preview_spec(
 def publish_spec(
     spec: Mapping[str, Any],
     *,
-    server_url: str = "http://127.0.0.1:8080",
+    server_url: str,
     api_token: str | None = None,
     armed: bool = False,
     confirm_real_trades: str | None = None,
@@ -221,7 +221,7 @@ def from_paper(
     character: str,
     *,
     expires_minutes: int = 30,
-    server_url: str = "http://127.0.0.1:8080",
+    server_url: str,
     api_token: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, Any]]:
     if expires_minutes <= 0:
@@ -249,7 +249,7 @@ def status(
     house: str,
     character: str,
     *,
-    server_url: str = "http://127.0.0.1:8080",
+    server_url: str,
     api_token: str | None = None,
 ) -> Any:
     with _client(server_url, api_token) as client:

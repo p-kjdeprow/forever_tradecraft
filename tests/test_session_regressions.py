@@ -389,7 +389,7 @@ def test_session_config_uses_canonical_target_identity(
 @pytest.mark.parametrize(
     ("field", "replacement"),
     [
-        ("wine_prefix", "/tmp/stale-wine-prefix"),
+        ("wine_prefix", "stale-wine-prefix"),
         ("window_class", "stale-window-class"),
         ("executable", "Stale.exe"),
         ("realm", "Stale realm"),
@@ -402,6 +402,8 @@ def test_session_tunables_reject_removed_identity_keys(
     replacement: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    if field == "wine_prefix":
+        replacement = str(tmp_path / replacement)
     config_dir = tmp_path / "config"
     (config_dir / "crowley").mkdir(parents=True)
     write_host_toml(config_dir / "crowley" / "host.toml", fixture_host(tmp_path))

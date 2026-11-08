@@ -120,7 +120,7 @@ def test_scan_text_aggregates_findings_by_exact_key() -> None:
     ("text", "match"),
     [
         (_fragmented("path=/home/", "_build"), _fragmented("/home/", "_build")),
-        (_fragmented("path=/tmp/", ".crowley.sock"), _fragmented("/tmp/", ".crowley.sock")),
+        (_fragmented("path=/t", "mp/", ".crowley.sock"), _fragmented("/t", "mp/", ".crowley.sock")),
         (_fragmented("path=/Users/", "Jane Doe"), _fragmented("/Users/", "Jane Doe")),
         (
             _fragmented("path=C:\\Use", "rs\\", "Jane Doe"),
@@ -131,6 +131,31 @@ def test_scan_text_aggregates_findings_by_exact_key() -> None:
 def test_scan_text_supports_path_segment_edge_cases(text: str, match: str) -> None:
     findings = scan_text("synthetic.txt", text)
     assert any(finding.match == match for finding in findings)
+
+
+def test_scan_text_detects_bare_temporary_directories_with_token_boundaries() -> None:
+    tmp = _fragmented("/", "tmp")
+    var_tmp = _fragmented("/var/", "tmp")
+    nested_tmp = _fragmented("/", "tmp/one/two")
+    nested_var_tmp = _fragmented("/var/", "tmp/one/two")
+    tmpfs = _fragmented("/", "tmpfs")
+    cases = (
+        (f'path="{tmp}"', tmp),
+        (f"path={tmp} value", tmp),
+        (f"path={var_tmp}", var_tmp),
+        (f"path={tmp}:socket", tmp),
+        (f'path="{nested_tmp}"', nested_tmp),
+        (f"path={nested_var_tmp} value", nested_var_tmp),
+        (f"Use `{nested_tmp}` here.", nested_tmp),
+        (f"See <{nested_var_tmp}>.", nested_var_tmp),
+        (f"(`{tmp}`)", tmp),
+        (f"[{nested_tmp}](link)", nested_tmp),
+        (f"a {nested_tmp}, b", nested_tmp),
+        (f"a {tmp}; b", tmp),
+    )
+    for text, match in cases:
+        assert Finding("synthetic.txt", "temporary-path", match, 1) in scan_text("synthetic.txt", text)
+    assert scan_text("synthetic.txt", f"path={tmpfs}") == ()
 
 
 @pytest.mark.parametrize(
@@ -206,6 +231,30 @@ def test_scan_text_detects_combined_systemd_execstart_prefixes() -> None:
 def test_scan_text_detects_machine_specific_urls(text: str, match: str) -> None:
     findings = scan_text("synthetic.txt", text)
     assert Finding("synthetic.txt", "machine-url", match, 1) in findings
+
+
+def test_scan_text_ignores_python_local_attribute_but_flags_real_local_hosts() -> None:
+    python_attribute = _fragmented("threading.", "local()")
+    assert scan_text("synthetic.py", python_attribute) == ()
+    string_literals = (
+        (_fragmented('"printer.', 'local"'), _fragmented("printer.", "local")),
+        (_fragmented('"http://box.', 'local"'), _fragmented("http://box.", "local")),
+        (_fragmented('"foo.', 'local:8080"'), _fragmented("foo.", "local:8080")),
+        (_fragmented('x = "a.', 'local"'), _fragmented("a.", "local")),
+    )
+    for source, match in string_literals:
+        assert Finding("synthetic.py", "machine-url", match, 1) in scan_text("synthetic.py", source)
+
+
+def test_scan_text_exempts_only_recorded_external_fixture_directory() -> None:
+    recorded = (
+        _fragmented("/var/lib/do", "cker/volumes/crowley_db/_data") + " " + _fragmented("172.20.", "0.2")
+    )
+    assert scan_text("tests/fixtures/external/docker-inspect.json", recorded) == ()
+    assert scan_text("tests/fixtures/external/nested/docker-inspect.json", recorded) == ()
+    docker_path = _fragmented("/var/lib/", "docker")
+    finding = Finding("tests/fixtures/external-data/docker-inspect.json", "docker-path", docker_path, 1)
+    assert finding in scan_text("tests/fixtures/external-data/docker-inspect.json", recorded)
 
 
 def test_scan_text_counts_each_machine_url_occurrence() -> None:

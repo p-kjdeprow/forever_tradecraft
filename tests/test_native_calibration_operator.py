@@ -4004,11 +4004,11 @@ def test_spawned_watchdog_entry_acknowledges_owned_state_and_empty_clear():
     assert not watchdog._process.is_alive()
 
 
-def test_watchdog_and_cancellation_actor_have_independent_sessions():
+def test_watchdog_and_cancellation_actor_have_independent_sessions(tmp_path: Path):
     tool = operator.PinnedInputTool.load()
     watchdog = operator.Watchdog(tool, interval=0.02, environment={})
     actor = operator.CancellationActor(
-        Path("/tmp/native-calibration-unused.sock"),
+        tmp_path / "native-calibration-unused.sock",
         generation=7,
         reservation_id="session-check",
         deadline=time.monotonic() + 8.0,

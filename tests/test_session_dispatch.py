@@ -260,7 +260,7 @@ def test_runtime_evidence_keyboard_dispatch_guards_shifted_text_punctuation_and_
         hierarchy,
     )
     backend = X11Backend(
-        DriverProfile(display=":dispatch", xauthority="/tmp/private-Xauthority"),
+        DriverProfile(display=":dispatch", xauthority=str(tmp_path / "private-Xauthority")),
         input_tool=fixture_input_tool(tmp_path / "runtime-keyboard-tool"),
     )
     driver = DesktopDriver(
@@ -1930,7 +1930,7 @@ def test_production_pointer_dispatch_pairs_current_motion_with_forwarded_echo(
     from crowley.session.pointer_execution import plan_human_pointer
     from crowley.session.startup import StartupEnvironment, mint_runtime_evidence
 
-    profile = DriverProfile(display=":test", xauthority="/tmp/Xauthority")
+    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))
     identity = WindowIdentity(
         0x700100,
@@ -2270,7 +2270,7 @@ def test_world_pointer_probe_completes_with_forwarded_echo(
     from crowley.session.pointer_execution import plan_human_pointer
     from crowley.session.startup import StartupEnvironment, mint_runtime_evidence
 
-    profile = DriverProfile(display=":test", xauthority="/tmp/Xauthority")
+    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "world-tool"))
     identity = WindowIdentity(
         0x710100,
@@ -2474,7 +2474,7 @@ def test_production_camera_drag_entrypoint_seals_press_motion_release_contract(
         plan_camera_drag,
     )
 
-    profile = DriverProfile(display=":test", xauthority="/tmp/Xauthority")
+    profile = DriverProfile(display=":test", xauthority=str(tmp_path / "Xauthority"))
     backend = RecordingBackend()
     driver = DesktopDriver(profile=profile, backend=backend, lease_path=tmp_path / "camera-entry.lock")
     identity = WindowIdentity(

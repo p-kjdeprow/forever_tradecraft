@@ -283,8 +283,8 @@ top of [HANDOFF.md](HANDOFF.md).
 
 ## Installed deployment status (2026-10-15)
 
-Game, companion, API and database run on Linux host `3080servermach`; the repository is at
-`/home/dev/repos/pegasus`. WoW 1.60.1 build 70374/interface 16001 runs locally through
+Game, companion, API and database run on the configured Linux host; the repository is at the
+configured checkout. WoW 1.60.1 build 70374/interface 16001 runs locally through
 Lutris/Wine. `Crowley` is a repo
 symlink and generated `Crowley_Data` has the curated 428-active-ID, 900-second, 20-level plan.
 The house is `beta-normal-alliance`; Sunshine and the fullscreen watcher are disabled. The

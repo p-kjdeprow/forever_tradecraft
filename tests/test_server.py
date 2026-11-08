@@ -107,6 +107,7 @@ def client(tmp_path, monkeypatch):
         migrate(conn)
     monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
+    monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
     from crowley.server.app import app
     from crowley.server.config import get_settings
@@ -161,6 +162,7 @@ def legacy_client(tmp_path, monkeypatch):
     _install_legacy_scan_before_010()
     monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
+    monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
     from crowley.server.app import app
     from crowley.server.config import get_settings

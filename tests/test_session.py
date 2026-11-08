@@ -33,6 +33,7 @@ from crowley.session.driver import DesktopDriver, DriverError, DriverProfile, Re
 from crowley.session.evidence import SweepEvidence
 from crowley.session.model import LunaAdapter, ModelError
 from crowley.session.protocol import ProtocolError, decode_frame, encode_frame, pack_cells, unpack_cells
+from tests.support.fake_host import FAKE_MODEL_DIR, FAKE_WINE_PREFIX, FAKE_XAUTHORITY
 from tests.test_session_input_tool import fixture_input_tool
 
 from .wow_harness import WowClient
@@ -388,8 +389,8 @@ def native_calibration(*, process_start: str = "test-start") -> NativeCalibratio
         capture_path=str(capture_path),
         capture_sha256=capture_sha256,
         capture_monotonic=1.0,
-        xauthority="/tmp/test-Xauthority",
-        wine_prefix="/tmp/test-wine-prefix",
+        xauthority=str(FAKE_XAUTHORITY),
+        wine_prefix=str(FAKE_WINE_PREFIX),
         preconstruction_fingerprint="preconstruction-test",
     )
 
@@ -478,7 +479,7 @@ def input_calibration(*, game_identity: str = "game-test-identity") -> InputCali
         human_events=(("KeyPress", 9, 8), ("ButtonPress", 7, 1)),
         forwarded_events=(("Motion", 7, 1),),
         driver_version="native-x11-3",
-        xauthority="/tmp/test-Xauthority",
+        xauthority=str(FAKE_XAUTHORITY),
         event_proof=tuple(event_proof),
         game_identity_fingerprint=game_identity,
         game_geometry=(0, 0, 1920, 1080),
@@ -521,7 +522,7 @@ def make_test_driver(backend: RecordingBackend, *, lease_path: Path | None = Non
     """Use the same explicit Xauthority identity as sealed test evidence."""
 
     return DesktopDriver(
-        profile=DriverProfile(xauthority="/tmp/test-Xauthority"), backend=backend, lease_path=lease_path
+        profile=DriverProfile(xauthority=str(FAKE_XAUTHORITY)), backend=backend, lease_path=lease_path
     )
 
 
@@ -1550,7 +1551,7 @@ def test_same_process_pause_resume_retains_live_calibration(tmp_path: Path) -> N
 
 
 def test_model_boundary_contains_exact_disables_and_rejects_tool_events() -> None:
-    command = LunaAdapter.command(Path("schema.json"), Path("screen.png"), Path("/tmp/neutral"))
+    command = LunaAdapter.command(Path("schema.json"), Path("screen.png"), FAKE_MODEL_DIR)
     assert "--ignore-user-config" in command and "--ignore-rules" in command
     assert "--model" in command and command[command.index("--model") + 1] == "gpt-6-luna"
     with pytest.raises(ModelError):
@@ -1570,9 +1571,7 @@ def test_model_boundary_contains_exact_disables_and_rejects_tool_events() -> Non
 
 def test_model_command_appends_prompt_without_orphan_mcp_override() -> None:
     prompt = "bounded prompt regression"
-    command = LunaAdapter.command(
-        Path("schema.json"), Path("screen.png"), Path("/tmp/neutral"), prompt=prompt
-    )
+    command = LunaAdapter.command(Path("schema.json"), Path("screen.png"), FAKE_MODEL_DIR, prompt=prompt)
 
     assert command[-1] == prompt
     assert "mcp_servers.openaiDeveloperDocs.enabled=false" not in command
@@ -1880,8 +1879,8 @@ def test_native_pointer_action_requires_a_seeded_planned_gesture(tmp_path: Path)
 
     profile = DriverProfile(
         display=":test",
-        xauthority="/tmp/test-Xauthority",
-        wine_prefix="/tmp/test-wine-prefix",
+        xauthority=str(FAKE_XAUTHORITY),
+        wine_prefix=str(FAKE_WINE_PREFIX),
         action_anchors={},
     )
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))

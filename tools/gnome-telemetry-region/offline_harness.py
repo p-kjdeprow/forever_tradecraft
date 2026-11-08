@@ -2099,7 +2099,7 @@ def run_paused_diagnostic(config_path: Path, output_dir: Path) -> dict[str, obje
     return receipt
 
 
-def _compiled_parser_checks() -> None:
+def _compiled_parser_checks(temporary_dir: Path) -> None:
     binary = _binary_path()
     if not binary.is_file():
         raise RuntimeError(f"private binary missing: {binary}")
@@ -2123,7 +2123,7 @@ def _compiled_parser_checks() -> None:
             "--telemetry-nonce",
             "n",
             "--file",
-            "/tmp/x",
+            str(temporary_dir / "x"),
             "--area",
         ],
         [
@@ -2162,7 +2162,7 @@ def _compiled_parser_checks() -> None:
             "--telemetry-nonce",
             "n",
             "--file",
-            "/tmp/x",
+            str(temporary_dir / "x"),
             "--telemetry-xfoo",
         ],
         [
@@ -2182,9 +2182,9 @@ def _compiled_parser_checks() -> None:
             "--telemetry-nonce",
             "n",
             "--file",
-            "/tmp/x",
+            str(temporary_dir / "x"),
             "-f",
-            "/tmp/y",
+            str(temporary_dir / "y"),
         ],
         [
             "--telemetry-region",
@@ -2203,7 +2203,7 @@ def _compiled_parser_checks() -> None:
             "--telemetry-nonce",
             "n",
             "-f",
-            "/tmp/x",
+            str(temporary_dir / "x"),
             "-d",
             "0",
         ],
@@ -2224,7 +2224,7 @@ def _compiled_parser_checks() -> None:
             "--telemetry-nonce",
             "n",
             "--file",
-            "/tmp/x",
+            str(temporary_dir / "x"),
         ],
     ]
     for args in cases:
@@ -2233,7 +2233,7 @@ def _compiled_parser_checks() -> None:
             raise RuntimeError(f"compiled parser accepted invalid telemetry argv: {args}")
 
 
-def self_check() -> None:
+def self_check(temporary_dir: Path) -> None:
     text = PATCH.read_text(encoding="utf-8")
     for required in ("ScreenshotArea", "telemetry_owner_fd", "primary_owner", "flash"):
         assert required in text, required
@@ -2255,7 +2255,7 @@ def self_check() -> None:
             "--telemetry-nonce",
             "n",
             "--file",
-            "/tmp/x",
+            str(temporary_dir / "x"),
         ]
     ):
         raise RuntimeError("offline typed option model rejected the valid contract")
@@ -2277,13 +2277,19 @@ def self_check() -> None:
             "--telemetry-nonce",
             "n",
             "--file",
-            "/tmp/x",
+            str(temporary_dir / "x"),
         ]
     ):
         raise RuntimeError("offline typed option model accepted wrong dimensions")
     for invalid in (
         ["--telemetry-region", "--telemetry-x", "010", "--telemetry-y", "2"],
-        ["--telemetry-region", "--file", "/tmp/x", "-f", "/tmp/y"],
+        [
+            "--telemetry-region",
+            "--file",
+            str(temporary_dir / "x"),
+            "-f",
+            str(temporary_dir / "y"),
+        ],
         ["--telemetry-region", "-d", "0"],
     ):
         if _strict_argv(invalid):
@@ -2333,12 +2339,14 @@ def main() -> int:
         parser.error("--config and --evidence-dir require --paused-diagnostic")
     if not options.self_test and not options.self_check:
         parser.error("choose --self-test and/or --self-check")
-    if options.self_check:
-        self_check()
-    if options.self_test:
-        _compiled_parser_checks()
-        _protocol_fixture()
-        _compiled_private_shell_fixture()
+    with tempfile.TemporaryDirectory(prefix="crowley-offline-harness-") as temporary_root:
+        temporary_dir = Path(temporary_root)
+        if options.self_check:
+            self_check(temporary_dir)
+        if options.self_test:
+            _compiled_parser_checks(temporary_dir)
+            _protocol_fixture()
+            _compiled_private_shell_fixture()
     binary = _binary_path()
     print(
         json.dumps(

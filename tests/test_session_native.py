@@ -93,6 +93,7 @@ from crowley.session.motion import MotionError, MotionFrame
 from crowley.session.protocol import ProtocolError, decode_frame, pack_cells
 from crowley.session.source_binding import SAFETY_MODULES, SourceBindingError, build_source_binding
 from tests.support.config import fixture_host, fixture_target, write_host_toml, write_session_toml
+from tests.support.fake_host import FAKE_WINE_PREFIX, FAKE_XAUTHORITY
 from tests.support.private_lease import private_lease_path
 from tests.test_session_input_tool import fixture_input_tool
 
@@ -193,14 +194,14 @@ def _install_private_shell_compositor_bus(monkeypatch: pytest.MonkeyPatch, tmp_p
     """Keep the owned compositor bus free of host service activation."""
 
     monkeypatch.setenv("NO_AT_BRIDGE", "1")
-    bus_dir = tmp_path / "private-session-bus"
+    bus_dir = tmp_path / "bus"
     bus_dir.mkdir(mode=0o700)
     bus_dir.chmod(0o700)
     config_path = bus_dir / "session.conf"
     config_path.write_text(
-        """<busconfig>
+        f"""<busconfig>
   <type>session</type>
-  <listen>unix:tmpdir=/tmp</listen>
+  <listen>unix:tmpdir={bus_dir}</listen>
   <auth>EXTERNAL</auth>
   <policy context=\"default\">
     <allow send_destination=\"*\" eavesdrop=\"true\"/>
@@ -917,9 +918,9 @@ def test_load_config_region_capability_is_default_off(
 @pytest.mark.parametrize(
     "telemetry",
     (
-        "telemetry_region_executable = '/tmp/producer'\n",
+        "telemetry_region_executable = '__producer_path__'\n",
         "telemetry_region_executable = 'producer'\ntelemetry_region_executable_sha256 = '" + "0" * 64 + "'\n",
-        "telemetry_region_executable = '/tmp/producer'\ntelemetry_region_executable_sha256 = '"
+        "telemetry_region_executable = '__producer_path__'\ntelemetry_region_executable_sha256 = '"
         + "0" * 64
         + "'\n",
     ),
@@ -928,6 +929,7 @@ def test_load_config_region_capability_rejects_incomplete_or_untrusted_values(
     tmp_path: Path, telemetry: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = fixture_target()
+    telemetry = telemetry.replace("__producer_path__", str(tmp_path / "producer"))
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         load_config(
             _write_region_config(tmp_path, telemetry=telemetry, monkeypatch=monkeypatch),
@@ -938,11 +940,11 @@ def test_load_config_region_capability_rejects_incomplete_or_untrusted_values(
 @pytest.mark.parametrize(
     "observer",
     (
-        "identity_observer_executable = '/tmp/observer'\n",
+        "identity_observer_executable = '__observer_path__'\n",
         "identity_observer_executable = 'observer'\nidentity_observer_executable_sha256 = '"
         + "0" * 64
         + "'\n",
-        "identity_observer_executable = '/tmp/observer'\nidentity_observer_executable_sha256 = '"
+        "identity_observer_executable = '__observer_path__'\nidentity_observer_executable_sha256 = '"
         + "0" * 64
         + "'\n",
     ),
@@ -951,6 +953,7 @@ def test_load_config_identity_observer_pair_rejects_incomplete_or_untrusted_valu
     tmp_path: Path, observer: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = fixture_target()
+    observer = observer.replace("__observer_path__", str(tmp_path / "observer"))
     with pytest.raises(ValueError, match="Extra inputs are not permitted"):
         load_config(
             _write_region_config(tmp_path, telemetry=observer, monkeypatch=monkeypatch),
@@ -2527,7 +2530,7 @@ def _evidence() -> InputCalibrationEvidence:
             ("ButtonRelease", 7, 0x600119),
         ),
         driver_version="test",
-        xauthority="/tmp/Xauthority",
+        xauthority=str(FAKE_XAUTHORITY),
         game_identity_fingerprint="game-test-identity",
         game_geometry=(0, 0, 1920, 1080),
         target_executable="/usr/bin/python3",
@@ -3816,7 +3819,7 @@ def test_workflow_built_native_evidence_arms_and_accepts_endpoint_echo(
         plan=((0.0, 1, 1), (0.5, 20, 30)),
     )
     driver = DesktopDriver(
-        profile=DriverProfile(display=":test", xauthority="/tmp/Xauthority"),
+        profile=DriverProfile(display=":test", xauthority=str(FAKE_XAUTHORITY)),
         backend=RecordingBackend(),
         lease_path=tmp_path / "workflow-built-evidence.lock",
     )
@@ -3833,7 +3836,7 @@ def test_workflow_built_native_evidence_arms_and_accepts_endpoint_echo(
                 driver.driver_version,
                 hierarchy=hierarchy,
                 display=":test",
-                xauthority="/tmp/Xauthority",
+                xauthority=str(FAKE_XAUTHORITY),
                 synthetic_key_source=5,
                 synthetic_pointer_source=4,
                 game_identity_fingerprint="game-test-identity",
@@ -4648,7 +4651,7 @@ def test_independent_watchdog_releases_on_fake_owner_death(tmp_path: Path) -> No
 def test_native_runner_uses_real_agent_bytes_and_reset5_identity_bound_updates(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    profile = DriverProfile(xauthority="/tmp/Xauthority", wine_prefix="/tmp/wine")
+    profile = DriverProfile(xauthority=str(FAKE_XAUTHORITY), wine_prefix=str(FAKE_WINE_PREFIX))
     backend = object.__new__(X11Backend)
     backend.profile = profile
     backend.xauthority = profile.xauthority
@@ -4869,7 +4872,7 @@ class _NativeRunnerHarness:
     """Real Agent producer with injectable runner-boundary faults."""
 
     def __init__(self, tmp_path: Path, *, fault: str | None = None) -> None:
-        profile = DriverProfile(xauthority="/tmp/Xauthority", wine_prefix="/tmp/wine")
+        profile = DriverProfile(xauthority=str(FAKE_XAUTHORITY), wine_prefix=str(FAKE_WINE_PREFIX))
         backend = object.__new__(X11Backend)
         backend.profile = profile
         backend.xauthority = profile.xauthority
@@ -6325,7 +6328,7 @@ def test_owned_gtk_identity_verification_is_read_only_and_checks_identity_geomet
         raise AssertionError(process_pid)
 
     monkeypatch.setattr(calibration_module, "_process_identity", process_identity)
-    target = OwnedGtkCalibrationWindow(display=":test", xauthority="/tmp/Xauthority", command=command)
+    target = OwnedGtkCalibrationWindow(display=":test", xauthority=str(FAKE_XAUTHORITY), command=command)
     process = object()
     window = target._verify(pid, client_xid, process)  # type: ignore[arg-type]
     assert window.pid == pid
@@ -6491,7 +6494,7 @@ def test_owned_gtk_create_pins_x11_backend_only_for_child(monkeypatch: pytest.Mo
 
     def command(args: list[str], *, display: str, xauthority: str, timeout: float = 5.0) -> str:
         assert display == ":test"
-        assert xauthority == "/tmp/Xauthority"
+        assert xauthority == str(FAKE_XAUTHORITY)
         if args == ["wmctrl", "-lp"]:
             return f"{hex(client_xid)}  -1  {pid} host CROWLEY INPUT CALIBRATION ONLY\n"
         if args == ["xprop", "-id", hex(client_xid)]:
@@ -6588,7 +6591,7 @@ def test_owned_gtk_create_pins_x11_backend_only_for_child(monkeypatch: pytest.Mo
     monkeypatch.setattr(calibration_module.subprocess, "Popen", fake_popen)
     target = OwnedGtkCalibrationWindow(
         display=":test",
-        xauthority="/tmp/Xauthority",
+        xauthority=str(FAKE_XAUTHORITY),
         python_executable=sys.executable,
         command=command,
     )
@@ -6600,7 +6603,7 @@ def test_owned_gtk_create_pins_x11_backend_only_for_child(monkeypatch: pytest.Mo
         child_env = kwargs["env"]
         assert isinstance(child_env, dict)
         assert child_env["DISPLAY"] == ":test"
-        assert child_env["XAUTHORITY"] == "/tmp/Xauthority"
+        assert child_env["XAUTHORITY"] == str(FAKE_XAUTHORITY)
         assert child_env["GDK_BACKEND"] == "x11"
         assert os.environ["GDK_BACKEND"] == "wayland"
         assert kwargs["env"] is not os.environ
@@ -6628,7 +6631,7 @@ def test_owned_gtk_create_closes_admission_gate_once_on_startup_error(
     monkeypatch.setattr(AdmissionGate, "close", close_once)
     target = OwnedGtkCalibrationWindow(
         display=":test",
-        xauthority="/tmp/Xauthority",
+        xauthority=str(FAKE_XAUTHORITY),
         python_executable=sys.executable,
     )
 
@@ -6790,7 +6793,7 @@ def test_owned_gtk_rejects_root_unrelated_parent_and_sibling(
         raise AssertionError(process_pid)
 
     monkeypatch.setattr(calibration_module, "_process_identity", process_identity)
-    target = OwnedGtkCalibrationWindow(display=":test", xauthority="/tmp/Xauthority", command=command)
+    target = OwnedGtkCalibrationWindow(display=":test", xauthority=str(FAKE_XAUTHORITY), command=command)
     expected = _GtkStartupPending if startup_readiness and case == "root" else CalibrationError
     with pytest.raises(expected, match="root|parent|sibling|ancestry|children") as failure:
         target._verify(pid, client_xid, object(), startup_readiness=startup_readiness)  # type: ignore[arg-type]
@@ -6900,7 +6903,7 @@ def test_owned_input_evidence_rejects_foreign_forwarded_target() -> None:
             synthetic_motion_plan=probe.plan,
             synthetic_motion_probe=probe,
             display=":test",
-            xauthority="/tmp/Xauthority",
+            xauthority=str(FAKE_XAUTHORITY),
             game_identity_fingerprint="game-test-identity",
             game_geometry=(0, 0, 1920, 1080),
             target_executable="/usr/bin/python3",
@@ -7111,9 +7114,9 @@ def test_owned_input_workflow_revokes_on_first_human_event_and_cancels_queue(
             ready_order.append("prompt")
 
     class FakeDriver:
-        profile = SimpleNamespace(display=":test", xauthority="/tmp/Xauthority")
+        profile = SimpleNamespace(display=":test", xauthority=str(FAKE_XAUTHORITY))
         driver_version = DRIVER_VERSION
-        xauthority = "/tmp/Xauthority"
+        xauthority = str(FAKE_XAUTHORITY)
         queued_calibration_count = 0
         calibration_executions = 0
         calibration_due_count = 1
@@ -7126,8 +7129,8 @@ def test_owned_input_workflow_revokes_on_first_human_event_and_cancels_queue(
             # Keep the fake process/observer boundary while exercising the
             # canonical native transition proof and seal path.
             self.backend = object.__new__(X11Backend)
-            self.backend.profile = DriverProfile(display=":test", xauthority="/tmp/Xauthority")
-            self.backend.xauthority = "/tmp/Xauthority"
+            self.backend.profile = DriverProfile(display=":test", xauthority=str(FAKE_XAUTHORITY))
+            self.backend.xauthority = str(FAKE_XAUTHORITY)
             self.backend.pointer_position = lambda **_kwargs: (1, 1, 0x600119)  # type: ignore[method-assign]
 
         def begin_calibration_operation(self) -> int:
@@ -7261,7 +7264,7 @@ def test_owned_input_workflow_revokes_on_first_human_event_and_cancels_queue(
         managed_frame_xid=0x700100,
         target_event_xids=frozenset({0x700100, 0x700101}),
     )
-    profile = DriverProfile(display=":test", xauthority="/tmp/Xauthority")
+    profile = DriverProfile(display=":test", xauthority=str(FAKE_XAUTHORITY))
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))
     backend.resolve_identity = lambda require_foreground=True: identity  # type: ignore[method-assign]
 

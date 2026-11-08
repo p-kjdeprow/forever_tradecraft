@@ -320,8 +320,8 @@ def _resource_template(name: str, replacements: Mapping[bytes, bytes]) -> bytes:
     return rendered
 
 
-def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path) -> bytes:
-    """Render the reviewed launcher from the target identity and game root."""
+def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path, display: str) -> bytes:
+    """Render the reviewed launcher from target, host display, and game paths."""
 
     resolved_game_root = _absolute_path(game_root, "launcher game root")
     expected_argv0 = rf"C:\Program Files (x86)\World of Warcraft\{target.product_dir}\{target.executable}"
@@ -332,6 +332,7 @@ def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path) -> b
         b"{{EXECUTABLE}}": shlex.quote(target.executable).encode("utf-8"),
         b"{{WINE_PREFIX}}": shlex.quote(str(resolved_wine_prefix)).encode("utf-8"),
         b"{{EXPECTED_ARGV0}}": shlex.quote(expected_argv0).encode("utf-8"),
+        b"{{DISPLAY}}": shlex.quote(display).encode("utf-8"),
     }
     return _resource_template("launcher/crowley-world-of-warcraft.sh.in", replacements)
 
@@ -734,7 +735,7 @@ def _build_plan(
     launcher = _plan_file(
         launcher_dir / _LAUNCHER_NAME,
         f"launcher/{_LAUNCHER_NAME}",
-        render_launcher(target, game_root, host.wine_prefix_path),
+        render_launcher(target, game_root, host.wine_prefix_path, host.display),
         "launcher",
         mode=0o700,
     )

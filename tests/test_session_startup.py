@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from urllib.parse import urlparse
 
 import pytest
 
@@ -48,7 +49,7 @@ from crowley.session.startup import (
     mint_runtime_evidence,
     resolve_forwarded_echo_sources,
 )
-from tests.support.config import fixture_codex_path
+from tests.support.config import fixture_codex_path, fixture_host
 from tests.x11_startup import start_private_xvfb
 
 
@@ -130,6 +131,8 @@ def test_stormwind_target_binding_and_interaction_chord_use_guarded_native_keybo
 
     from crowley.session import driver as driver_module
 
+    window_host = urlparse(fixture_host(tmp_path).server_url).hostname
+    assert window_host is not None
     expected_driver = (Path(__file__).resolve().parents[1] / "src/crowley/session/driver.py").resolve()
     assert Path(driver_module.__file__).resolve() == expected_driver
     assert (
@@ -206,7 +209,7 @@ def test_stormwind_target_binding_and_interaction_chord_use_guarded_native_keybo
                 if not verifier_facts:
                     return ""
                 return (
-                    f"0x{verifier_facts['xid']:x} -1 {verifier_facts['pid']} localhost "
+                    f"0x{verifier_facts['xid']:x} -1 {verifier_facts['pid']} {window_host} "
                     f"{OwnedGtkCalibrationWindow.TITLE}\n"
                 )
             if argv[:2] in (["xprop", "-id"], ["xwininfo", "-id"]):

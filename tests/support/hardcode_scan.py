@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import io
 import ipaddress
 import json
 import ntpath
 import re
 import subprocess
+import tokenize
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -16,6 +18,7 @@ from typing import Final
 
 BASELINE_RELATIVE_PATH: Final = Path("tests/fixtures/hardcode_baseline.json")
 _ARCHIVE_PREFIX = ".archive/"
+_EXTERNAL_FIXTURE_PREFIX = "tests/fixtures/external/"
 _BINARY_NUL = b"\x00"
 _SYSTEMD_SPECIFIERS = frozenset({"%h", "%E", "%S", "%t", "%C"})
 _SYSTEMD_ASSIGNMENT_RE = re.compile(
@@ -31,17 +34,20 @@ _WINDOWS_USER_RE = re.compile(r"(?i)(?<![A-Za-z0-9_.-])C:[\\/]+Users[\\/]+" + _P
 _RUNTIME_DIR_RE = re.compile(r"(?<![A-Za-z0-9_.-])/run/" + r"user/[0-9]+")
 _CHECKOUT_RE = re.compile(r"(?<![A-Za-z0-9_.-])repos[/\\]" + _PATH_TOKEN)
 _MUTTER_AUTH_RE = re.compile(r"\.mutter-Xway" + r"landauth")
-_TMP_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])/(?:tmp|var/tmp)/" + _PATH_SEGMENT)
+_TMP_PATH_SEGMENT = r"""[^/\\\s\r\n"'<>`:)\],;|]+"""
+_TMP_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])/(?:tmp|var/tmp)(?:/" + _TMP_PATH_SEGMENT + r")*/?(?=$|[\s\"':<>`)\],;|])"
+)
 _DOCKER_PATH_RE = re.compile(r"(?<![A-Za-z0-9_.-])/var/lib/" + r"docker(?=$|[/\\])")
 _SYSTEMD_PREFIXES = {
     "WorkingDirectory": frozenset("-"),
     "ExecStart": frozenset("@-:+!"),
     "EnvironmentFile": frozenset("-"),
 }
+_LOCALHOST_RE = re.compile(r"local(?:host)")
 _MACHINE_HOST_RE = (
     r"(?:\[[0-9a-f:]+\]|"
-    + "local"
-    + "host"
+    + _LOCALHOST_RE.pattern
     + r"|(?:[0-9]{1,3}\.){3}[0-9]{1,3}"
     + r"|[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9-]+)*\.(?:local|ts\.net))"
 )
@@ -75,8 +81,19 @@ class Finding:
     count: int
 
 
+def _is_external_fixture(path: str) -> bool:
+    """Identify recorded third-party output, and only that fixture directory."""
+
+    return path.startswith(_EXTERNAL_FIXTURE_PREFIX)
+
+
 def _is_excluded(path: str) -> bool:
-    return path == ".archive" or path.startswith(_ARCHIVE_PREFIX) or path == str(BASELINE_RELATIVE_PATH)
+    return (
+        path == ".archive"
+        or path.startswith(_ARCHIVE_PREFIX)
+        or path == str(BASELINE_RELATIVE_PATH)
+        or _is_external_fixture(path)
+    )
 
 
 def _add_matches(occurrences: Counter[tuple[str, str]], category: str, matches: Sequence[str]) -> None:
@@ -109,7 +126,11 @@ def _is_allowed_systemd_path(path: str) -> bool:
 
 def _is_machine_host(host: str) -> bool:
     normalized = host.strip("[]").lower()
-    if normalized == "local" + "host" or normalized.endswith(".local") or normalized.endswith(".ts.net"):
+    if (
+        _LOCALHOST_RE.fullmatch(normalized) is not None
+        or normalized.endswith(".local")
+        or normalized.endswith(".ts.net")
+    ):
         return True
     try:
         address = ipaddress.ip_address(normalized)
@@ -131,12 +152,49 @@ def _is_allowed_docker_loopback(path: str, host: str) -> bool:
     if path not in _DOCKER_DEPLOY_PATHS:
         return False
     normalized = host.strip("[]").lower()
-    if normalized == "local" + "host":
+    if _LOCALHOST_RE.fullmatch(normalized) is not None:
         return True
     try:
         return ipaddress.ip_address(normalized).is_loopback
     except ValueError:
         return False
+
+
+def _python_local_attribute_spans(text: str) -> frozenset[tuple[int, int]]:
+    """Return source spans for ``NAME . NAME(local)`` outside string tokens."""
+
+    try:
+        tokens = tuple(tokenize.generate_tokens(io.StringIO(text).readline))
+    except (IndentationError, SyntaxError, tokenize.TokenError):
+        return frozenset()
+
+    line_offsets = [0]
+    for line in text.splitlines(keepends=True):
+        line_offsets.append(line_offsets[-1] + len(line))
+
+    def absolute(position: tuple[int, int]) -> int:
+        line, column = position
+        return line_offsets[line - 1] + column
+
+    spans: set[tuple[int, int]] = set()
+    for first, dot, last in zip(tokens, tokens[1:], tokens[2:], strict=False):
+        if (
+            first.type == tokenize.NAME
+            and dot.type == tokenize.OP
+            and dot.string == "."
+            and last.type == tokenize.NAME
+            and last.string == "local"
+        ):
+            spans.add((absolute(first.start), absolute(last.end)))
+    return frozenset(spans)
+
+
+def _is_python_local_attribute(path: str, text: str, match: re.Match[str]) -> bool:
+    """Exclude only a tokenized Python attribute access ending in ``.local``."""
+
+    if not path.endswith(".py"):
+        return False
+    return match.span() in _python_local_attribute_spans(text)
 
 
 def _sorted_findings(path: str, occurrences: Counter[tuple[str, str]]) -> tuple[Finding, ...]:
@@ -148,6 +206,9 @@ def _sorted_findings(path: str, occurrences: Counter[tuple[str, str]]) -> tuple[
 
 def scan_text(path: str, text: str) -> tuple[Finding, ...]:
     """Scan one decoded text file and return deterministic aggregated findings."""
+
+    if _is_external_fixture(path):
+        return ()
 
     occurrences: Counter[tuple[str, str]] = Counter()
     _add_matches(occurrences, "posix-home", _path_matches(_POSIX_HOME_RE, text))
@@ -181,6 +242,7 @@ def scan_text(path: str, text: str) -> tuple[Finding, ...]:
         match.group(0)
         for match in _MACHINE_URL_RE.finditer(text)
         if _is_machine_host(match.group("host"))
+        and not _is_python_local_attribute(path, text, match)
         and not _is_allowed_docker_loopback(path, match.group("host"))
     ]
     _add_matches(occurrences, "machine-url", url_matches)

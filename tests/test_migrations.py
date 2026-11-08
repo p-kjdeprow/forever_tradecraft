@@ -492,6 +492,7 @@ def test_server_startup_refuses_pending_migrations_without_mutation(
 
     monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
     monkeypatch.setenv("CROWLEY_API_TOKEN", "startup-test-token")
+    monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
     from fastapi.testclient import TestClient
 
@@ -589,6 +590,7 @@ def test_status_command_prints_without_applying(
 
     monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
     monkeypatch.setenv("CROWLEY_API_TOKEN", "status-test-token")
+    monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setattr(sys, "argv", ["crowley-server", "migrate", "--status"])
     get_settings.cache_clear()
     try:

@@ -19,7 +19,7 @@ uv run python tools/session_performance.py \
   --receipt /private/preserved/timing.json \
   --samples 100 \
   --warmups 5 \
-  --output /tmp/runtime-performance.json
+  --output "$XDG_RUNTIME_DIR/crowley/runtime-performance.json"
 ```
 
 Each input is read through a bounded descriptor, checked for PNG format and
@@ -62,7 +62,7 @@ uv run python tools/session_performance.py \
   --live-receipt /private/run-02.json \
   --accepted-binding /private/accepted-binding.json \
   --binding-sha256 PARENT_RECORDED_64_HEX_DIGEST \
-  --output /tmp/runtime-performance-decision.json
+  --output "$XDG_RUNTIME_DIR/crowley/runtime-performance-decision.json"
 ```
 
 The evaluator accepts at most 64 distinct receipt inputs. Each binding and

@@ -21,6 +21,7 @@ from pathlib import Path
 from crowley.config import (
     HostConfig,
     HostConfigError,
+    OpsResolvedConfig,
     OpsTunables,
     host_config_path,
     load_host_config,
@@ -638,13 +639,13 @@ def _build_plan(
     home: Path,
     *,
     host: HostConfig,
+    resolved: OpsResolvedConfig,
 ) -> InstallPlan:
-    resolved = resolve_ops(target, host, OpsTunables(), xdg=xdg)
     game_root = resolve_game_root(request.game_root, host)
     _require_directory(game_root, "game root")
     flavor_dir = resolved.flavor_dir
     _require_directory(flavor_dir, "target product directory")
-    addons_dir = flavor_dir / "Interface" / "AddOns"
+    addons_dir = resolved.addons_dir
     _require_directory(addons_dir, "addon directory")
 
     unit_dir = xdg.config_home / "systemd" / "user"
@@ -777,7 +778,37 @@ def build_plan(
         raise InstallError(f"XDG paths are invalid: {exc}") from exc
     target = packaged_game_target()
     resolved_host = _host_for_install(xdg) if host is None else host
-    plan = _build_plan(request, xdg, target, home, host=resolved_host)
+    resolved = resolve_ops(target, resolved_host, OpsTunables(), xdg=xdg)
+    plan = _build_plan(request, xdg, target, home, host=resolved_host, resolved=resolved)
+    _check_foreign(plan, load_manifest(plan.manifest_path), request.force)
+    return plan
+
+
+def build_plan_from_resolved(
+    request: InstallRequest,
+    environ: Mapping[str, str] | None,
+    *,
+    resolved: OpsResolvedConfig,
+) -> InstallPlan:
+    """Build an install plan from the caller's already-composed ops config."""
+
+    environment = os.environ if environ is None else environ
+    try:
+        xdg = XdgDirs.from_environ(environment)
+        home_value = environment.get("HOME")
+        if not isinstance(home_value, str) or not home_value:
+            raise ValueError("HOME must be set")
+        home = _absolute_path(Path(home_value), "HOME")
+    except ValueError as exc:
+        raise InstallError(f"XDG paths are invalid: {exc}") from exc
+    plan = _build_plan(
+        request,
+        xdg,
+        resolved.target,
+        home,
+        host=resolved.host,
+        resolved=resolved,
+    )
     _check_foreign(plan, load_manifest(plan.manifest_path), request.force)
     return plan
 
@@ -1028,6 +1059,7 @@ __all__ = [
     "InstallResult",
     "MAX_RESOURCE_BYTES",
     "build_plan",
+    "build_plan_from_resolved",
     "build_image",
     "compose_file_path",
     "diff_text",

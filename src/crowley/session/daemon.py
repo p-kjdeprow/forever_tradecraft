@@ -26,9 +26,9 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
 
+from pydantic import BaseModel
+
 from crowley.core import savedvars
-from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
-from crowley.core.watchlist import load_catalog
 
 from . import protocol
 from .calibration import (
@@ -142,11 +142,6 @@ from .startup import (
 )
 
 _LOGGER = logging.getLogger(__name__)
-_TARGET = packaged_game_target()
-_CANONICAL_PLAN = cast(
-    dict[str, Any],
-    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
-)
 
 
 def _canonical_semantic_value(value: Any) -> Any:
@@ -158,6 +153,8 @@ def _canonical_semantic_value(value: Any) -> Any:
         return {str(key): _canonical_semantic_value(item) for key, item in value.items()}
     if isinstance(value, (tuple, list)):
         return [_canonical_semantic_value(item) for item in value]
+    if isinstance(value, BaseModel):
+        return _canonical_semantic_value(value.model_dump(mode="json"))
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
     raise TypeError(f"unsupported session config value: {type(value).__name__}")
@@ -1440,18 +1437,21 @@ class SessionDaemon:
         path = getattr(config, "routes_file", None)
         if path is None:
             return None
+        target = config.target
+        provenance = config.route_provenance
+        if target is None or provenance is None:
+            raise DriverError("routes_file requires the resolved target and route provenance")
         descriptor: int | None = None
         try:
             descriptor = open_routes_descriptor(path)
             with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
                 descriptor = None
                 route_file = RouteFile.from_json(handle.read())
-                target = packaged_game_target()
                 if target.full_build != "1.60.1.70450" or target.route_provenance != KINEMATICS_PROVENANCE:
                     raise DriverError(
                         "routes_file is historical beta kinematics and cannot be used for the selected target"
                     )
-                if route_file.kinematics.provenance != target.route_provenance:
+                if route_file.kinematics.provenance != provenance:
                     raise DriverError(
                         "routes_file kinematics provenance is not the verified beta measurement"
                     )
@@ -1488,6 +1488,20 @@ class SessionDaemon:
                 raise DriverError(f"selected {role} motion profile has role {profile.role.value!r}")
             loaded[role] = profile
         return loaded
+
+    def _canonical_plan(self) -> dict[str, Any]:
+        plan = self.config.canonical_plan
+        if plan is not None:
+            return cast(dict[str, Any], plan)
+        if not self.config.plan_json:
+            raise DriverError("session canonical plan was not composed")
+        try:
+            value = json.loads(self.config.plan_json)
+        except json.JSONDecodeError as exc:
+            raise DriverError("session canonical plan JSON is malformed") from exc
+        if not isinstance(value, dict):
+            raise DriverError("session canonical plan JSON is not an object")
+        return cast(dict[str, Any], value)
 
     def __init__(
         self,
@@ -1683,6 +1697,8 @@ class SessionDaemon:
             reload_deadline_seconds=self.config.reload_deadline_seconds,
             upload_deadline_seconds=self.config.upload_deadline_seconds,
             ack_deadline_seconds=self.config.ack_deadline_seconds,
+            plan_count=self.config.profile.plan_count,
+            protocol_contract=self.config.protocol_contract,
         )
         # Mail-loop opt-in is deliberately process-local.  It is never loaded
         # from the journal, so a fresh owner starts disabled and cannot replay
@@ -1707,7 +1723,10 @@ class SessionDaemon:
         )
         self.camera_mapping: CameraMapping | None = None
         self.movement_basis: MovementBasis | None = None
-        self.decoder = PixelDecoder(crop=self.config.profile.canvas_crop)
+        self.decoder = PixelDecoder(
+            crop=self.config.profile.canvas_crop,
+            contract=self.config.protocol_contract,
+        )
         self.last_error = ""
         self.reopen_action_sent = False
         self.current_evidence = None
@@ -8824,7 +8843,7 @@ class SessionDaemon:
         if not isinstance(raw, bytes) or len(raw) != protocol.CAPACITY:
             raise DriverError("executor frame has no exact CRS byte evidence")
         try:
-            decoded = protocol.decode_frame(raw)
+            decoded = protocol.decode_frame(raw, contract=self.config.protocol_contract)
         except protocol.ProtocolError as exc:
             raise DriverError("executor frame CRS evidence is not re-decodable") from exc
         mapped_crc = getattr(self, "_motion_crs", {}).get(key)
@@ -12237,7 +12256,12 @@ class SessionDaemon:
             self.config.data_lua,
             expected_plan_json=self.config.plan_json,
             expected_plan_hash=self.config.plan_hash,
-            expected_client_build=_CANONICAL_PLAN["targetClientBuild"],
+            expected_client_build=self._canonical_plan()["targetClientBuild"],
+            expected_reference_item_ids=(
+                [item.item_id for item in self.config.catalog.items]
+                if self.config.catalog is not None
+                else None
+            ),
         )
         scanner = snapshot.get("scanner")
         pending = snapshot.get("pending")
@@ -12727,7 +12751,7 @@ class SessionDaemon:
         if sample.kind != "FRESH" or sample.frame is None:
             raise DriverError("mail-loop start requires a fresh authoritative executor frame")
         value = sample.frame.snapshot.value
-        validated = protocol.validate_snapshot(value)
+        validated = protocol.validate_snapshot(value, contract=self.config.protocol_contract)
         executor = validated.value.get("executor")
         context = validated.value.get("context")
         house = validated.value.get("house")
@@ -12962,7 +12986,7 @@ class SessionDaemon:
             return False
         capability = None
         try:
-            validated = protocol.validate_snapshot(snapshot)
+            validated = protocol.validate_snapshot(snapshot, contract=self.config.protocol_contract)
             boundary = self._mail_boundary(snapshot, status)
             bounds = self._mail_operation_bounds()
             decision = admit_mail_cycle(validated, binding, boundary, bounds)
@@ -13504,7 +13528,7 @@ class SessionDaemon:
         if self.config.plan_hash and plan.get("hash") != self.config.plan_hash:
             raise EvidenceError("telemetry plan hash is not externally pinned")
         cursor = snapshot.get("scanner", {}).get("cursorItemID", 0)
-        configured_ids = frozenset(_CANONICAL_PLAN["itemIDs"])
+        configured_ids = frozenset(self._canonical_plan()["itemIDs"])
         if (
             isinstance(cursor, bool)
             or not isinstance(cursor, int)
@@ -13523,6 +13547,7 @@ class SessionDaemon:
             "house": self.config.profile.house,
             "plan_hash": plan_hash,
             "expected_plan_json": self.config.plan_json or None,
+            "catalog": self.config.catalog,
             "expected_context": {
                 "character": self.config.profile.character,
                 "realm": self.config.profile.realm,
@@ -13856,7 +13881,12 @@ class SessionDaemon:
                     self.config.data_lua,
                     expected_plan_json=self.config.plan_json,
                     expected_plan_hash=self.config.plan_hash,
-                    expected_client_build=_CANONICAL_PLAN["targetClientBuild"],
+                    expected_client_build=self._canonical_plan()["targetClientBuild"],
+                    expected_reference_item_ids=(
+                        [item.item_id for item in self.config.catalog.items]
+                        if self.config.catalog is not None
+                        else None
+                    ),
                 )
                 if status.last_uid in data_ids:
                     data_uid = status.last_uid
@@ -13888,7 +13918,12 @@ class SessionDaemon:
                         self.config.data_lua,
                         expected_plan_json=self.config.plan_json,
                         expected_plan_hash=self.config.plan_hash,
-                        expected_client_build=_CANONICAL_PLAN["targetClientBuild"],
+                        expected_client_build=self._canonical_plan()["targetClientBuild"],
+                        expected_reference_item_ids=(
+                            [item.item_id for item in self.config.catalog.items]
+                            if self.config.catalog is not None
+                            else None
+                        ),
                     ):
                         return
                 companion_uid = status.last_uid

@@ -17,6 +17,12 @@ EXPECTED_CARGO: Final[str] = "cargo 1.85.1 (d73d2caf9 2024-12-31)"
 EXPECTED_RUSTFMT: Final[str] = "rustfmt 1.8.0-stable (4eb161250e 2025-03-15)"
 TARGET_TRIPLE: Final[str] = "x86_64-unknown-linux-gnu"
 
+# The checked-in release pin is deliberately explicit.  Test and deployment
+# tooling may provide a different reviewed executable only by replacing this
+# pin in the same reviewed change; doctor must never turn the digest into a
+# discovery result.
+CODEX_ARTIFACT_SHA256: Final[str] = "628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1"
+
 MATCHER_PROTOCOL: Final[str] = "CRWTM001"
 MATCHER_MAGIC: Final[bytes] = MATCHER_PROTOCOL.encode("ascii")
 MATCHER_VERSION: Final[str] = "v1"
@@ -119,6 +125,7 @@ OBSERVER_SOURCE_HASHES: Final[dict[str, str]] = {
 }
 OBSERVER_ARTIFACT_SHA256: Final[str] = "60f9c5416f54e0b4f5cf7805cfa3a7abc1135b0fd054ac3e6894b64eccf0f339"
 OBSERVER_WORKSPACE_SHA256: Final[str] = "be09da59a21a77717f12d243a5855e9b3d0c35fb240131b889a8db0efc9263b0"
+OBSERVER_PROVENANCE: Final[str] = OBSERVER_MANIFEST_SCHEMA
 
 
 @dataclass(frozen=True)
@@ -139,6 +146,7 @@ __all__ = [
     "EXPECTED_CARGO",
     "EXPECTED_RUSTC",
     "EXPECTED_RUSTFMT",
+    "CODEX_ARTIFACT_SHA256",
     "MATCHER",
     "MATCHER_ARTIFACT_NAME",
     "MATCHER_ARTIFACT_SHA256",
@@ -162,6 +170,7 @@ __all__ = [
     "OBSERVER_MANIFEST_KEYS",
     "OBSERVER_MANIFEST_SCHEMA",
     "OBSERVER_PROTOCOL_VERSION",
+    "OBSERVER_PROVENANCE",
     "OBSERVER_SOURCE_MANIFEST_FILES",
     "OBSERVER_SOURCE_FILES",
     "OBSERVER_SOURCE_HASHES",

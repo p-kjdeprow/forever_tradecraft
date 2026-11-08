@@ -21,10 +21,12 @@ from crowley.config import (
     load_session_tunables,
     resolve_session,
 )
-from crowley.core.game_target import GameTarget, canonical_plan, selected_target
+from crowley.core.game_target import GameTarget, selected_target
+from crowley.core.watchlist import Catalog
 from crowley.platform.paths import XdgDirs
 
 from .driver import DriverProfile
+from .protocol import ProtocolContract
 
 DEFAULT_RELOAD_DEADLINE_SECONDS = 45
 MAX_RELOAD_DEADLINE_SECONDS = 600
@@ -137,6 +139,12 @@ class SessionConfig:
     identity_observer_executable: Path | None = None
     identity_observer_executable_sha256: str | None = None
     routes_file: Path | None = None
+    target: GameTarget | None = None
+    catalog: Catalog | None = None
+    canonical_plan: dict[str, object] | None = None
+    route_provenance: str | None = None
+    account_dir: Path | None = None
+    protocol_contract: ProtocolContract | None = None
 
 
 def _validate_socket_path(value: object) -> Path:
@@ -204,6 +212,10 @@ def _driver_profile(resolved: SessionResolvedConfig, plan_count: int) -> DriverP
         plan_count=plan_count,
         identity_observer_executable=resolved.identity_observer_executable,
         identity_observer_executable_sha256=resolved.identity_observer_executable_sha256,
+        protocol_contract=ProtocolContract.from_plan(
+            resolved.canonical_plan,
+            sweep_cap_seconds=resolved.sweep_cap_seconds,
+        ),
     )
 
 
@@ -220,7 +232,7 @@ def load_config(
     host = load_host_config(host_config_path())
     tunables = load_session_tunables(session_path)
     resolved = resolve_session(target, host, tunables)
-    plan = canonical_plan(target)
+    plan = resolved.canonical_plan
     plan_hash = plan.get("planHash")
     plan_json = plan.get("planJSON")
     if not isinstance(plan_hash, str) or not isinstance(plan_json, str):
@@ -263,6 +275,15 @@ def load_config(
         locale=resolved.locale,
         client_version=resolved.client_version,
         routes_file=resolved.route_file,
+        target=resolved.target,
+        catalog=resolved.catalog,
+        canonical_plan=resolved.canonical_plan,
+        route_provenance=resolved.route_provenance,
+        account_dir=resolved.account_dir,
+        protocol_contract=ProtocolContract.from_plan(
+            resolved.canonical_plan,
+            sweep_cap_seconds=resolved.sweep_cap_seconds,
+        ),
     )
 
 

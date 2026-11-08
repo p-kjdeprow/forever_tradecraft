@@ -15,10 +15,10 @@ from crowley.config import (
     load_host_config,
     resolve_companion,
 )
-from crowley.core.game_target import selected_target
+from crowley.core.game_target import GameTarget, selected_target
+from crowley.core.watchlist import Catalog
 
 _ACCOUNT_COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._#-]*\Z")
-_TARGET = selected_target()
 
 
 def config_path() -> Path:
@@ -60,9 +60,19 @@ def _secret_token() -> SecretStr:
 class CompanionSettings(BaseModel):
     """Runtime settings; path fields are derived, not TOML configuration."""
 
-    model_config = ConfigDict(extra="forbid", strict=True, validate_assignment=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        strict=True,
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+    )
 
+    target: GameTarget
+    catalog: Catalog
+    canonical_plan: dict[str, object]
+    route_provenance: str
     wow_dir: Path
+    account_dir: Path
     server_url: str
     api_token: SecretStr
     poll_seconds: float = 3.0
@@ -81,6 +91,11 @@ class CompanionSettings(BaseModel):
             resolved = _load_resolved()
             values = {
                 "wow_dir": resolved.flavor_dir,
+                "target": resolved.target,
+                "catalog": resolved.catalog,
+                "canonical_plan": resolved.canonical_plan,
+                "route_provenance": resolved.route_provenance,
+                "account_dir": resolved.account_dir,
                 "server_url": resolved.server_url,
                 "api_token": _secret_token(),
                 "poll_seconds": resolved.tunables.poll_seconds,
@@ -94,25 +109,13 @@ class CompanionSettings(BaseModel):
                 "queue_lua": resolved.queue_lua,
                 "addons_dir": resolved.addons_dir,
             }
-        else:
-            wow_dir = values.get("wow_dir")
-            account = values.get("wtf_account")
-            if isinstance(wow_dir, Path) and isinstance(account, str):
-                addon = wow_dir / "Interface" / "AddOns" / "Crowley_Data"
-                values.setdefault(
-                    "saved_variables",
-                    wow_dir / "WTF" / "Account" / account / "SavedVariables" / "Crowley.lua",
-                )
-                values.setdefault("data_lua", addon / "Data.lua")
-                values.setdefault("queue_lua", addon / "Queue.lua")
-                values.setdefault("addons_dir", wow_dir / "Interface" / "AddOns")
         super().__init__(**values)
 
     @model_validator(mode="after")
     def validate_target_facts(self) -> CompanionSettings:
-        if self.wow_path.name != _TARGET.product_dir:
+        if self.wow_path.name != self.target.product_dir:
             raise ValueError("wow_dir must end in the selected target productDir")
-        if self.house_key is not None and self.house_key != _TARGET.house:
+        if self.house_key is not None and self.house_key != self.target.house:
             raise ValueError("house_key must match the selected target house when configured")
         return self
 
@@ -129,14 +132,16 @@ class CompanionSettings(BaseModel):
 
     def saved_variables_file(self) -> Path:
         saved_variables = self.saved_variables
-        account_dir = saved_variables.parent.parent
+        account_dir = self.account_dir
         if not account_dir.is_dir():
             raise FileNotFoundError(f"configured WTF account directory does not exist: {account_dir}")
         resolved_account = account_dir.resolve()
         try:
-            resolved_account.relative_to(self.wow_path.resolve() / "WTF" / "Account")
+            relative_account = resolved_account.relative_to(self.wow_path.resolve())
         except ValueError as exc:
             raise ValueError("configured WTF account directory escapes WTF/Account") from exc
+        if relative_account.parts != ("WTF", "Account", self.wtf_account):
+            raise ValueError("configured WTF account directory escapes WTF/Account")
         try:
             saved_variables.resolve().relative_to(resolved_account)
         except ValueError as exc:

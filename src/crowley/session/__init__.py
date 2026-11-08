@@ -32,7 +32,16 @@ from .evidence import (
 )
 from .journal import Journal, JournalError, stable_file
 from .model import LunaAdapter, ModelDecision, ModelError, ModelObservation
-from .protocol import Frame, ProtocolError, Snapshot, decode_frame, encode_frame, pack_cells, unpack_cells
+from .protocol import (
+    Frame,
+    ProtocolContract,
+    ProtocolError,
+    Snapshot,
+    decode_frame,
+    encode_frame,
+    pack_cells,
+    unpack_cells,
+)
 
 __all__ = [
     "Controller",
@@ -43,6 +52,7 @@ __all__ = [
     "DriverProfile",
     "EvidenceError",
     "Frame",
+    "ProtocolContract",
     "InputGuardian",
     "InputMonitor",
     "Journal",

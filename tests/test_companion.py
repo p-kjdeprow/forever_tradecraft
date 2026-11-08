@@ -6,7 +6,6 @@ import httpx
 import pytest
 from pydantic import SecretStr, ValidationError
 
-from crowley.companion import config as companion_config
 from crowley.companion.config import CompanionSettings
 from crowley.companion.sync import (
     MAX_HISTORY_ENTRIES,
@@ -33,7 +32,7 @@ from crowley.core.companion_state import (
     parse_bytes,
     upgrade_legacy_state_bytes,
 )
-from crowley.core.game_target import load_game_target
+from crowley.core.game_target import load_game_target, target_scan_plan
 from crowley.core.luawriter import render_assignment
 from crowley.core.queue import build_queue, render_queue_lua
 from crowley.core.watchlist import load_catalog
@@ -43,6 +42,39 @@ from .wow_harness import WowClient
 
 FIXTURE = Path(__file__).parent / "fixtures/native-construction-unknown-savedvars.lua"
 TARGET_FIXTURE = Path(__file__).parent / "fixtures/targets/verified-beta.json"
+
+
+def _settings_for(
+    root: Path,
+    *,
+    target=None,
+    account: str = "Test",
+    house_key: str | None = None,
+    wow_dir: Path | None = None,
+) -> CompanionSettings:
+    selected = load_game_target(TARGET_FIXTURE) if target is None else target
+    catalog = load_catalog()
+    plan = target_scan_plan(catalog, selected)
+    flavor = Path(wow_dir) if wow_dir is not None else root / selected.product_dir
+    account_dir = flavor / "WTF" / "Account" / account
+    addon = flavor / "Interface" / "AddOns" / "Crowley_Data"
+    return CompanionSettings(
+        target=selected,
+        catalog=catalog,
+        canonical_plan=plan,
+        route_provenance=selected.route_provenance,
+        wow_dir=flavor,
+        account_dir=account_dir,
+        server_url="http://test",
+        api_token="test-token",
+        wtf_account=account,
+        house_key=house_key,
+        state_file=root / "state" / "companion.json",
+        saved_variables=account_dir / "SavedVariables" / "Crowley.lua",
+        data_lua=addon / "Data.lua",
+        queue_lua=addon / "Queue.lua",
+        addons_dir=flavor / "Interface" / "AddOns",
+    )
 
 
 def write_savedvars(path, scans, probe=None, reference=None, account=None, executions=None):
@@ -62,15 +94,8 @@ def write_savedvars(path, scans, probe=None, reference=None, account=None, execu
 def companion(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     target = load_game_target(TARGET_FIXTURE)
-    monkeypatch.setattr(companion_config, "_TARGET", target)
     wow_dir = tmp_path / target.product_dir
-    settings = CompanionSettings(
-        wow_dir=wow_dir,
-        server_url="http://test",
-        api_token="test-token",
-        wtf_account="Test",
-        state_file=tmp_path / "state" / "companion.json",
-    )
+    settings = _settings_for(tmp_path, target=target, wow_dir=wow_dir)
     saved = wow_dir / "WTF/Account/Test/SavedVariables/Crowley.lua"
     saved.parent.mkdir(parents=True)
     settings.data_lua.parent.mkdir(parents=True)
@@ -86,20 +111,9 @@ def test_companion_settings_reject_stale_target_identity():
     target = load_game_target(TARGET_FIXTURE)
     expected_wow_dir = Path("fixture") / target.product_dir
     with pytest.raises(ValueError, match="wow_dir"):
-        CompanionSettings(
-            wow_dir=Path("stale-wow"),
-            server_url="http://test",
-            wtf_account="Test",
-            api_token="test-token",
-        )
+        _settings_for(Path("fixture"), target=target, wow_dir=Path("stale-wow"))
     with pytest.raises(ValueError, match="house_key"):
-        CompanionSettings(
-            wow_dir=expected_wow_dir,
-            server_url="http://test",
-            wtf_account="Test",
-            house_key="us-normal-horde",
-            api_token="test-token",
-        )
+        _settings_for(Path("fixture"), target=target, wow_dir=expected_wow_dir, house_key="us-normal-horde")
 
 
 @pytest.mark.parametrize("failure", ["s1", "s2", "probe"])
@@ -372,7 +386,7 @@ def test_account_upload_permanent_rejection_waits_for_operator_retry(companion):
 
 def test_queue_lua_is_written_only_when_content_changes(companion, monkeypatch):
     instance, _ = companion
-    instance.settings.house_key = companion_config._TARGET.house
+    instance.settings.house_key = instance.settings.target.house
     instance.settings.character = "Tester"
     queue = build_queue(
         {
@@ -874,29 +888,29 @@ def test_explicit_account_selection_missing_wrong_and_correct(companion):
     assert instance.settings.saved_variables_file() == saved
     assert instance.settings.saved_variables_files() == [saved]
 
-    missing = CompanionSettings(
+    missing = _settings_for(
+        instance.settings.wow_path.parent,
+        target=instance.settings.target,
         wow_dir=instance.settings.wow_path,
-        server_url="http://test",
-        api_token="test-token",
-        wtf_account="Missing",
+        account="Missing",
     )
     with pytest.raises(FileNotFoundError, match="account directory"):
         missing.saved_variables_file()
 
-    wrong = CompanionSettings(
+    wrong = _settings_for(
+        instance.settings.wow_path.parent,
+        target=instance.settings.target,
         wow_dir=instance.settings.wow_path,
-        server_url="http://test",
-        api_token="test-token",
-        wtf_account="Other",
+        account="Other",
     )
     assert wrong.saved_variables_file() == other
 
     with pytest.raises(ValidationError, match="literal account"):
-        CompanionSettings(
+        _settings_for(
+            instance.settings.wow_path.parent,
+            target=instance.settings.target,
             wow_dir=instance.settings.wow_path,
-            server_url="http://test",
-            api_token="test-token",
-            wtf_account="..",
+            account="..",
         )
 
 
@@ -904,16 +918,34 @@ def test_config_is_strict_and_requires_account_selection(companion):
     settings = companion[0].settings
     with pytest.raises(ValidationError, match="wtf_account"):
         CompanionSettings(
+            target=settings.target,
+            catalog=settings.catalog,
+            canonical_plan=settings.canonical_plan,
+            route_provenance=settings.route_provenance,
             wow_dir=settings.wow_path,
+            account_dir=settings.account_dir,
             server_url=settings.server_url,
             api_token="test-token",
+            saved_variables=settings.saved_variables,
+            data_lua=settings.data_lua,
+            queue_lua=settings.queue_lua,
+            addons_dir=settings.addons_dir,
         )
     with pytest.raises(ValidationError, match="unknown"):
         CompanionSettings(
+            target=settings.target,
+            catalog=settings.catalog,
+            canonical_plan=settings.canonical_plan,
+            route_provenance=settings.route_provenance,
             wow_dir=settings.wow_path,
+            account_dir=settings.account_dir,
             server_url=settings.server_url,
             api_token="test-token",
             wtf_account="Test",
+            saved_variables=settings.saved_variables,
+            data_lua=settings.data_lua,
+            queue_lua=settings.queue_lua,
+            addons_dir=settings.addons_dir,
             unknown="value",
         )
 

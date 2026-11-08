@@ -26,6 +26,7 @@ class PinnedBinaries:
     codex_path: Path
     model: str
     cli_version: str
+    sha256: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +36,8 @@ class PinnedObserver:
     path: Path
     sha256: str
     version: str
+    provenance: str = pins.OBSERVER_PROVENANCE
+    manifest_path: Path | None = None
 
 
 def resolve_pinned_observer(xdg: XdgDirs) -> PinnedObserver:
@@ -44,6 +47,11 @@ def resolve_pinned_observer(xdg: XdgDirs) -> PinnedObserver:
         path=xdg.crowley_cache / "x11-identity-observer" / f"v{pins.OBSERVER_PROTOCOL_VERSION}" / "observer",
         sha256=pins.OBSERVER_ARTIFACT_SHA256,
         version=str(pins.OBSERVER_PROTOCOL_VERSION),
+        provenance=pins.OBSERVER_PROVENANCE,
+        manifest_path=xdg.crowley_cache
+        / "x11-identity-observer"
+        / f"v{pins.OBSERVER_PROTOCOL_VERSION}"
+        / "observer.manifest.json",
     )
 
 
@@ -57,7 +65,7 @@ def load_pinned_binaries(environ: Mapping[str, str] | None = None) -> PinnedBina
     path = Path(raw_path)
     if not path.is_absolute() or path == Path("/") or ".." in path.parts:
         raise BinaryConfigError(f"{CODEX_PATH_ENV} must be an absolute path without traversal")
-    return PinnedBinaries(path, CODEX_MODEL, CODEX_CLI_VERSION)
+    return PinnedBinaries(path, CODEX_MODEL, CODEX_CLI_VERSION, pins.CODEX_ARTIFACT_SHA256)
 
 
 __all__ = [

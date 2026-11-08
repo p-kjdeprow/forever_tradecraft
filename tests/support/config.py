@@ -12,10 +12,11 @@ from crowley.config import (
     SessionTunables,
     resolve_session,
 )
-from crowley.core.game_target import GameTarget, canonical_plan, load_game_target
+from crowley.core.game_target import GameTarget, load_game_target
 from crowley.platform.paths import XdgDirs
 from crowley.session.config import SessionConfig
 from crowley.session.driver import DriverProfile
+from crowley.session.protocol import ProtocolContract
 
 FIXTURE_TARGET_PATH = Path(__file__).parents[1] / "fixtures" / "targets" / "verified-beta.json"
 
@@ -122,11 +123,12 @@ def fixture_session_config(
     machine = fixture_host(root) if host is None else host
     values = fixture_session_tunables() if tunables is None else tunables
     resolved = resolve_session(selected, machine, values, xdg=fixture_xdg(root))
-    plan = canonical_plan(selected)
+    plan = resolved.canonical_plan
     plan_hash = plan.get("planHash")
     plan_json = plan.get("planJSON")
     if not isinstance(plan_hash, str) or not isinstance(plan_json, str):
         raise AssertionError("fixture target canonical plan is incomplete")
+    protocol_contract = ProtocolContract.from_plan(plan, sweep_cap_seconds=resolved.sweep_cap_seconds)
     fixture_profile = profile or DriverProfile(
         display=machine.display,
         wine_prefix=machine.wine_prefix,
@@ -147,6 +149,7 @@ def fixture_session_config(
         realm=selected.realm,
         house=selected.house,
         plan_count=len(plan["itemIDs"]),
+        protocol_contract=protocol_contract,
     )
     return SessionConfig(
         profile=fixture_profile,
@@ -172,6 +175,12 @@ def fixture_session_config(
         locale=resolved.locale,
         client_version=resolved.client_version,
         routes_file=resolved.route_file if routes_file is None else routes_file,
+        target=resolved.target,
+        catalog=resolved.catalog,
+        canonical_plan=resolved.canonical_plan,
+        route_provenance=resolved.route_provenance,
+        account_dir=resolved.account_dir,
+        protocol_contract=protocol_contract,
     )
 
 

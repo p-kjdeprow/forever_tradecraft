@@ -13,12 +13,9 @@ import math
 import re
 import struct
 import zlib
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from typing import Any, cast
-
-from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
-from crowley.core.watchlist import load_catalog
+from typing import Any
 
 MAGIC = b"CRS1"
 VERSION = 1
@@ -34,19 +31,55 @@ HALF_U32 = 0x80000000
 POSITION_LIMIT = 1_000_000.0
 FACING_LIMIT = 2.0 * math.pi
 SPEED_LIMIT = 1_000.0
-_TARGET = packaged_game_target()
-_PLAN = cast(
-    dict[str, Any],
-    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
-)
-PLAN_COUNT = len(_PLAN["itemIDs"])
-PLAN_CADENCE = _TARGET.cadence_seconds
-PLAN_CAP = _TARGET.sweep_cap_seconds
-PLAN_LEVELS = _TARGET.initial_price_levels
 
 
 class ProtocolError(ValueError):
     """A frame or snapshot is not admissible."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProtocolContract:
+    """Resolved target plan facts required to validate one CRS publication."""
+
+    plan_count: int
+    cadence_seconds: int
+    sweep_cap_seconds: int
+    initial_price_levels: int
+    plan_item_ids: tuple[int, ...]
+
+    @classmethod
+    def from_plan(cls, plan: Mapping[str, object], *, sweep_cap_seconds: int = 600) -> ProtocolContract:
+        item_ids = plan.get("itemIDs")
+        cadence = plan.get("cadenceSeconds")
+        levels = plan.get("initialPriceLevels")
+        build = plan.get("targetClientBuild")
+        if (
+            not isinstance(item_ids, list)
+            or any(isinstance(item, bool) or not isinstance(item, int) or item <= 0 for item in item_ids)
+            or item_ids != sorted(set(item_ids))
+            or not isinstance(cadence, int)
+            or isinstance(cadence, bool)
+            or not isinstance(levels, int)
+            or isinstance(levels, bool)
+            or not isinstance(build, str)
+        ):
+            raise ProtocolError("canonical plan is malformed")
+        if not item_ids:
+            raise ProtocolError("canonical plan must contain item IDs")
+        if (
+            isinstance(sweep_cap_seconds, bool)
+            or not isinstance(sweep_cap_seconds, int)
+            or sweep_cap_seconds <= 0
+        ):
+            raise ProtocolError("canonical plan sweep cap is malformed")
+        return cls(len(item_ids), cadence, sweep_cap_seconds, levels, tuple(item_ids))
+
+
+DEFAULT_PROTOCOL_CONTRACT = ProtocolContract(428, 900, 600, 20, tuple())
+PLAN_COUNT = DEFAULT_PROTOCOL_CONTRACT.plan_count
+PLAN_CADENCE = DEFAULT_PROTOCOL_CONTRACT.cadence_seconds
+PLAN_CAP = DEFAULT_PROTOCOL_CONTRACT.sweep_cap_seconds
+PLAN_LEVELS = DEFAULT_PROTOCOL_CONTRACT.initial_price_levels
 
 
 @dataclass(frozen=True)
@@ -522,8 +555,15 @@ def _uid_array(value: Any, path: str) -> list[str]:
     return result
 
 
-def validate_snapshot(value: Any, *, plan_item_ids: Collection[int] | None = None) -> Snapshot:
+def validate_snapshot(
+    value: Any,
+    *,
+    plan_item_ids: Collection[int] | None = None,
+    contract: ProtocolContract | None = None,
+) -> Snapshot:
     """Validate the complete snapshot and its cross-field invariants."""
+
+    rules = DEFAULT_PROTOCOL_CONTRACT if contract is None else contract
 
     top = _keys(
         value,
@@ -662,21 +702,34 @@ def validate_snapshot(value: Any, *, plan_item_ids: Collection[int] | None = Non
     _string(plan["hash"], "plan.hash")
     if not re.fullmatch(r"[0-9a-f]{64}", plan["hash"]):
         raise _error("plan.hash", "must be lowercase SHA-256 hex")
-    if _integer(plan["count"], "plan.count", minimum=1) != PLAN_COUNT:
-        raise _error("plan.count", f"must be {PLAN_COUNT}")
+    if _integer(plan["count"], "plan.count", minimum=1) != rules.plan_count:
+        raise _error("plan.count", f"must be {rules.plan_count}")
     if (
-        _integer(plan["cadenceSeconds"], "plan.cadenceSeconds", minimum=PLAN_CADENCE, maximum=PLAN_CADENCE)
-        != PLAN_CADENCE
-        or _integer(plan["sweepCapSeconds"], "plan.sweepCapSeconds", minimum=PLAN_CAP, maximum=PLAN_CAP)
-        != PLAN_CAP
-        or _integer(
-            plan["initialPriceLevels"], "plan.initialPriceLevels", minimum=PLAN_LEVELS, maximum=PLAN_LEVELS
+        _integer(
+            plan["cadenceSeconds"],
+            "plan.cadenceSeconds",
+            minimum=rules.cadence_seconds,
+            maximum=rules.cadence_seconds,
         )
-        != PLAN_LEVELS
+        != rules.cadence_seconds
+        or _integer(
+            plan["sweepCapSeconds"],
+            "plan.sweepCapSeconds",
+            minimum=rules.sweep_cap_seconds,
+            maximum=rules.sweep_cap_seconds,
+        )
+        != rules.sweep_cap_seconds
+        or _integer(
+            plan["initialPriceLevels"],
+            "plan.initialPriceLevels",
+            minimum=rules.initial_price_levels,
+            maximum=rules.initial_price_levels,
+        )
+        != rules.initial_price_levels
     ):
         raise _error(
             "plan",
-            f"cadence, cap, and retained levels must be {PLAN_CADENCE}/{PLAN_CAP}/{PLAN_LEVELS}",
+            "cadence, cap, and retained levels do not match the resolved target",
         )
 
     _boolean(top["ahOpen"], "ahOpen")
@@ -788,8 +841,8 @@ def validate_snapshot(value: Any, *, plan_item_ids: Collection[int] | None = Non
             raise _error("plan.itemIDs", "configured item IDs are invalid")
         if cursor_item_id and cursor_item_id not in configured_ids:
             raise _error("scanner.cursorItemID", "cursor is outside the configured plan")
-    if planned != PLAN_COUNT:
-        raise _error("scanner.planned", f"must be {PLAN_COUNT}")
+    if planned != rules.plan_count:
+        raise _error("scanner.planned", f"must be {rules.plan_count}")
     if phase in {"ready", "scheduled", "blocked"} and (active_id or started):
         raise _error("scanner", "inactive phase cannot have active ID/start")
     if phase == "scheduled" and due == 0:
@@ -799,7 +852,7 @@ def validate_snapshot(value: Any, *, plan_item_ids: Collection[int] | None = Non
     if phase in {"item", "owned"}:
         # The existing scanner creates its UID only at Finish.  The empty string is
         # an explicit wire sentinel; Lua nil must never be used for this field.
-        if active_id or started == 0 or due != started + PLAN_CADENCE or not 1 <= ordinal <= planned:
+        if active_id or started == 0 or due != started + rules.cadence_seconds or not 1 <= ordinal <= planned:
             raise _error("scanner", "active phase timing/ordinal invariant failed")
         if not started <= wall_time <= due:
             raise _error("scanner", "active phase is outside its cadence interval")
@@ -824,7 +877,7 @@ def validate_snapshot(value: Any, *, plan_item_ids: Collection[int] | None = Non
             raise _error("lastSaved", "empty UID requires zero counters")
     elif (
         finished == 0
-        or last_planned != PLAN_COUNT
+        or last_planned != rules.plan_count
         or attempted > last_planned
         or failures < last_planned - attempted
         or failures > last_planned
@@ -871,8 +924,13 @@ def _u32(value: int) -> bytes:
     return struct.pack("<I", value & MAX_U32)
 
 
-def encode_payload(snapshot: dict[str, Any], *, plan_item_ids: Collection[int] | None = None) -> bytes:
-    validate_snapshot(snapshot, plan_item_ids=plan_item_ids)
+def encode_payload(
+    snapshot: dict[str, Any],
+    *,
+    plan_item_ids: Collection[int] | None = None,
+    contract: ProtocolContract | None = None,
+) -> bytes:
+    validate_snapshot(snapshot, plan_item_ids=plan_item_ids, contract=contract)
     raw = json.dumps(snapshot, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     compressor = zlib.compressobj(wbits=-15)
     compressed = compressor.compress(raw) + compressor.flush()
@@ -881,11 +939,16 @@ def encode_payload(snapshot: dict[str, Any], *, plan_item_ids: Collection[int] |
     return compressed
 
 
-def encode_frame(snapshot: dict[str, Any], *, plan_item_ids: Collection[int] | None = None) -> bytes:
+def encode_frame(
+    snapshot: dict[str, Any],
+    *,
+    plan_item_ids: Collection[int] | None = None,
+    contract: ProtocolContract | None = None,
+) -> bytes:
     """Encode a validated snapshot into the exact 2048-byte frame."""
 
-    validate_snapshot(snapshot, plan_item_ids=plan_item_ids)
-    payload = encode_payload(snapshot, plan_item_ids=plan_item_ids)
+    validate_snapshot(snapshot, plan_item_ids=plan_item_ids, contract=contract)
+    payload = encode_payload(snapshot, plan_item_ids=plan_item_ids, contract=contract)
     header = b"".join(
         (
             MAGIC,
@@ -925,7 +988,12 @@ def _inflate(payload: bytes) -> bytes:
     return raw
 
 
-def decode_frame(frame: bytes, *, plan_item_ids: Collection[int] | None = None) -> Frame:
+def decode_frame(
+    frame: bytes,
+    *,
+    plan_item_ids: Collection[int] | None = None,
+    contract: ProtocolContract | None = None,
+) -> Frame:
     if not isinstance(frame, (bytes, bytearray)) or len(frame) != CAPACITY:
         raise ProtocolError(f"frame must be exactly {CAPACITY} bytes")
     if frame[:4] != MAGIC:
@@ -946,7 +1014,7 @@ def decode_frame(frame: bytes, *, plan_item_ids: Collection[int] | None = None) 
         value = json.loads(_inflate(payload).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ProtocolError(f"invalid snapshot JSON: {exc}") from exc
-    snapshot = validate_snapshot(value, plan_item_ids=plan_item_ids)
+    snapshot = validate_snapshot(value, plan_item_ids=plan_item_ids, contract=contract)
     if (
         snapshot["sequence"] != sequence
         or snapshot["wallTime"] != wall_time

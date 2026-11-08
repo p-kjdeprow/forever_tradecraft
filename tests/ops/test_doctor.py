@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import subprocess
 import tomllib
@@ -8,14 +9,68 @@ from pathlib import Path
 
 import pytest
 
-from crowley.config import PinnedObserver
+from crowley.config import PinnedBinaries, PinnedObserver
 from crowley.core.game_target import load_game_target
 from crowley.core.luawriter import render_assignment
 from crowley.core.queue import render_queue_lua
+from crowley.native import pins
 from crowley.ops import doctor, install
 from crowley.server.db import MigrationStatus
 
 TARGET_FIXTURE = Path(__file__).parents[1] / "fixtures" / "targets" / "verified-beta.json"
+REVIEWED_CODEX_DIGEST = "628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1"
+
+
+def test_production_codex_pin_matches_reviewed_install_receipt() -> None:
+    assert pins.CODEX_ARTIFACT_SHA256 == REVIEWED_CODEX_DIGEST
+
+
+def test_pinned_binary_digest_accepts_a_large_sparse_fixture(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "large-codex"
+    path.write_bytes(b"fixture")
+    path.chmod(0o700)
+    with path.open("r+b") as stream:
+        stream.truncate(32 * 1024 * 1024 + 1)
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    monkeypatch.setattr(
+        doctor.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 0, stdout="codex-cli test\n", stderr=""
+        ),
+    )
+    problems: list[str] = []
+    doctor._check_binary(
+        path,
+        label="large pinned Codex executable",
+        expected_digest=digest,
+        expected_version="codex-cli test",
+        problems=problems,
+    )
+    assert problems == []
+
+
+def test_real_reviewed_codex_binary_hashes_when_installed() -> None:
+    receipt_path = Path.home() / ".cache" / "crowley" / "codex" / "0.162.1" / "INSTALL-RECEIPT.json"
+    if not receipt_path.is_file():
+        pytest.skip(f"reviewed Codex install receipt is absent: {receipt_path}")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    native_binary = receipt["native_binary"]
+    path = Path(native_binary["path"])
+    if not path.is_file():
+        pytest.skip(f"reviewed Codex executable is absent: {path}")
+    problems: list[str] = []
+    doctor._check_binary(
+        path,
+        label="reviewed pinned Codex executable",
+        expected_digest=native_binary["sha256"],
+        expected_version=receipt["verification"]["cli_version_output"],
+        problems=problems,
+    )
+    assert problems == []
 
 
 def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, str], Path]:
@@ -83,15 +138,63 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
     codex = tmp_path / "codex"
     codex.write_text("#!/bin/sh\nprintf 'codex-cli 0.162.1\\n'\n", encoding="ascii")
     codex.chmod(0o700)
+    codex_digest = hashlib.sha256(codex.read_bytes()).hexdigest()
     environment["CROWLEY_CODEX_PATH"] = str(codex)
     observer = tmp_path / "observer"
     observer.write_bytes(b"reviewed observer fixture")
     observer.chmod(0o700)
     observer_digest = hashlib.sha256(observer.read_bytes()).hexdigest()
+    observer_manifest = observer.with_suffix(".manifest.json")
+    observer_manifest.write_text(
+        json.dumps(
+            {
+                "schema": pins.OBSERVER_MANIFEST_SCHEMA,
+                "target": pins.TARGET_TRIPLE,
+                "binary": pins.OBSERVER_ARTIFACT_NAME,
+                "binary_sha256": observer_digest,
+                "source_sha256": pins.OBSERVER_SOURCE_HASHES,
+                "workspace_sha256": pins.OBSERVER_WORKSPACE_SHA256,
+                "static_library_resolution": {
+                    "mechanism": "pkg-config",
+                    "package": "x11",
+                    "mode": "static",
+                    "libraries": [f"lib{name}.a" for name in pins.OBSERVER_STATIC_LIBRARY_NAMES],
+                },
+                "static_inputs": {f"lib{name}.a": "a" * 64 for name in pins.OBSERVER_STATIC_LIBRARY_NAMES},
+                "toolchain": {
+                    "rustc": pins.EXPECTED_RUSTC,
+                    "cargo": pins.EXPECTED_CARGO,
+                    "rustfmt": pins.EXPECTED_RUSTFMT,
+                },
+                "linker": {
+                    "driver": {"name": "cc", "sha256": "b" * 64, "version": "cc test"},
+                    "ld": {"name": "ld", "sha256": "c" * 64, "version": "ld test"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    observer_manifest.chmod(0o600)
     monkeypatch.setattr(
         doctor,
         "resolve_pinned_observer",
-        lambda _xdg: PinnedObserver(observer, observer_digest, "1"),
+        lambda _xdg: PinnedObserver(
+            observer,
+            observer_digest,
+            str(pins.OBSERVER_PROTOCOL_VERSION),
+            pins.OBSERVER_PROVENANCE,
+            observer_manifest,
+        ),
+    )
+    monkeypatch.setattr(
+        doctor,
+        "load_pinned_binaries",
+        lambda _environment: PinnedBinaries(
+            codex,
+            "gpt-6-luna",
+            "codex-cli 0.162.1",
+            codex_digest,
+        ),
     )
     entrypoints = tmp_path / "home" / ".local" / "bin"
     entrypoints.mkdir(parents=True)
@@ -121,6 +224,56 @@ def test_doctor_passes_after_install(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert report.problems == ()
 
 
+def test_doctor_rejects_a_codex_digest_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    environment, _game_root = _setup(tmp_path, monkeypatch)
+    codex = Path(environment["CROWLEY_CODEX_PATH"])
+    codex.write_text(codex.read_text(encoding="ascii") + "# changed\n", encoding="ascii")
+    report = doctor.doctor(environment, database_status=_current)
+    assert "pinned Codex executable digest mismatch" in "\n".join(report.problems)
+
+
+@pytest.mark.parametrize(
+    ("version", "provenance", "message"),
+    [
+        ("2", "crowley.x11-identity-observer.v1", "version does not match"),
+        ("1", "wrong-provenance", "provenance does not match"),
+    ],
+)
+def test_doctor_rejects_observer_version_and_provenance_mismatch(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    version: str,
+    provenance: str,
+    message: str,
+) -> None:
+    environment, _game_root = _setup(tmp_path, monkeypatch)
+    observer = tmp_path / "observer"
+    observer_digest = hashlib.sha256(observer.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        doctor,
+        "resolve_pinned_observer",
+        lambda _xdg: PinnedObserver(
+            observer,
+            observer_digest,
+            version,
+            provenance,
+            observer.with_suffix(".manifest.json"),
+        ),
+    )
+    report = doctor.doctor(environment, database_status=_current)
+    assert message in "\n".join(report.problems)
+
+
+def test_doctor_rejects_malformed_observer_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    environment, _game_root = _setup(tmp_path, monkeypatch)
+    manifest = tmp_path / "observer.manifest.json"
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    del value["toolchain"]
+    manifest.write_text(json.dumps(value), encoding="utf-8")
+    report = doctor.doctor(environment, database_status=_current)
+    assert "provenance manifest keys are invalid" in "\n".join(report.problems)
+
+
 def test_doctor_reuses_validated_host_for_install_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -129,7 +282,11 @@ def test_doctor_reuses_validated_host_for_install_plan(
     def fail_duplicate_load(_path: Path) -> object:
         raise AssertionError("doctor asked the installer to reload host.toml")
 
+    def fail_duplicate_target() -> object:
+        raise AssertionError("doctor asked the installer to reload target.json")
+
     monkeypatch.setattr(install, "load_host_config", fail_duplicate_load)
+    monkeypatch.setattr(install, "packaged_game_target", fail_duplicate_target)
     report = doctor.doctor(environment, database_status=_current)
     assert report.ok, report.problems
 

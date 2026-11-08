@@ -34,26 +34,29 @@ class SessionTunables(_StrictModel):
     reload_deadline_seconds: StrictInt
     ack_deadline_seconds: StrictInt
 
-    @field_validator(
-        "quiet_margin_seconds",
-        "upload_deadline_seconds",
-        "reload_deadline_seconds",
-        "ack_deadline_seconds",
-    )
+    @field_validator("quiet_margin_seconds")
     @classmethod
-    def validate_seconds(cls, value: int) -> int:
-        if value < 0 or value > 900:
-            raise ValueError("session timing values must be between 0 and 900 seconds")
+    def validate_quiet_margin(cls, value: int) -> int:
+        if not 0 < value < 900:
+            raise ValueError("quiet_margin_seconds must be between 1 and 899 seconds")
+        return value
+
+    @field_validator("upload_deadline_seconds")
+    @classmethod
+    def validate_upload_deadline(cls, value: int) -> int:
+        if not 0 < value <= 60:
+            raise ValueError("upload_deadline_seconds must be between 1 and 60 seconds")
+        return value
+
+    @field_validator("reload_deadline_seconds", "ack_deadline_seconds")
+    @classmethod
+    def validate_reload_and_ack_deadlines(cls, value: int) -> int:
+        if not 0 < value <= 600:
+            raise ValueError("reload and acknowledgement deadlines must be between 1 and 600 seconds")
         return value
 
     @model_validator(mode="after")
     def validate_deadlines(self) -> SessionTunables:
-        if (
-            self.upload_deadline_seconds == 0
-            or self.reload_deadline_seconds == 0
-            or self.ack_deadline_seconds == 0
-        ):
-            raise ValueError("session deadlines must be greater than zero")
         if self.quiet_margin_seconds >= self.reload_deadline_seconds:
             raise ValueError("quiet_margin_seconds must be less than reload_deadline_seconds")
         return self

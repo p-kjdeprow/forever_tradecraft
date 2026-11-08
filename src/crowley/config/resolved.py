@@ -6,8 +6,11 @@ import os
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
+from typing import cast
 
-from crowley.core.game_target import GameTarget
+from crowley import data as crowley_data
+from crowley.core.game_target import CatalogLike, GameTarget, target_scan_plan
+from crowley.core.watchlist import Catalog, load_catalog
 from crowley.platform.paths import XdgDirs
 
 from .binaries import resolve_pinned_observer
@@ -39,7 +42,7 @@ def _flavor_dir(target: GameTarget, host: HostConfig) -> Path:
 def _route_file(target: GameTarget, route_name: str) -> Path:
     if not route_name or Path(route_name).name != route_name or Path(route_name).suffix != ".json":
         raise ResolutionError("route name must be one JSON file name")
-    resource = resources.files("crowley.data").joinpath("routes", target.target_id, route_name)
+    resource = resources.files(crowley_data).joinpath("routes", target.target_id, route_name)
     if not isinstance(resource, Path):
         raise ResolutionError("packaged route resources must be available as filesystem files")
     if not resource.is_file():
@@ -47,12 +50,23 @@ def _route_file(target: GameTarget, route_name: str) -> Path:
     return resource
 
 
+def _composition(target: GameTarget, catalog: Catalog | None) -> tuple[Catalog, dict[str, object]]:
+    selected_catalog = load_catalog(enforce_target=False) if catalog is None else catalog
+    target.validate_catalog(cast(CatalogLike, selected_catalog))
+    plan = target_scan_plan(cast(CatalogLike, selected_catalog), target)
+    return selected_catalog, plan
+
+
 @dataclass(frozen=True, slots=True)
 class SessionResolvedConfig:
     target: GameTarget
+    catalog: Catalog
+    canonical_plan: dict[str, object]
+    route_provenance: str
     host: HostConfig
     tunables: SessionTunables
     flavor_dir: Path
+    account_dir: Path
     journal: Path
     socket: Path
     capture_dir: Path
@@ -79,9 +93,13 @@ class SessionResolvedConfig:
 @dataclass(frozen=True, slots=True)
 class CompanionResolvedConfig:
     target: GameTarget
+    catalog: Catalog
+    canonical_plan: dict[str, object]
+    route_provenance: str
     host: HostConfig
     tunables: CompanionTunables
     flavor_dir: Path
+    account_dir: Path
     saved_variables: Path
     data_lua: Path
     queue_lua: Path
@@ -94,9 +112,20 @@ class CompanionResolvedConfig:
 @dataclass(frozen=True, slots=True)
 class OpsResolvedConfig:
     target: GameTarget
+    catalog: Catalog
+    canonical_plan: dict[str, object]
+    route_provenance: str
     host: HostConfig
     tunables: OpsTunables
     flavor_dir: Path
+    account_root: Path
+    account_dir: Path
+    addon_dir: Path
+    data_addon_dir: Path
+    saved_variables: Path
+    data_lua: Path
+    queue_lua: Path
+    addons_dir: Path
     state_dir: Path
     runtime_dir: Path
     config_dir: Path
@@ -108,6 +137,7 @@ def resolve_session(
     tunables: SessionTunables,
     *,
     xdg: XdgDirs | None = None,
+    catalog: Catalog | None = None,
 ) -> SessionResolvedConfig:
     """Derive every session path from target, host, and session tunables."""
 
@@ -117,13 +147,19 @@ def resolve_session(
     runtime = dirs.crowley_runtime
     account = host.wtf_account
     addon = flavor / "Interface" / "AddOns" / "Crowley_Data"
+    account_dir = flavor / "WTF" / "Account" / account
+    selected_catalog, plan = _composition(target, catalog)
     observer = resolve_pinned_observer(dirs)
-    saved = flavor / "WTF" / "Account" / account / "SavedVariables" / "Crowley.lua"
+    saved = account_dir / "SavedVariables" / "Crowley.lua"
     return SessionResolvedConfig(
         target=target,
+        catalog=selected_catalog,
+        canonical_plan=plan,
+        route_provenance=target.route_provenance,
         host=host,
         tunables=tunables,
         flavor_dir=flavor,
+        account_dir=account_dir,
         journal=state / "journal.json",
         socket=runtime / "session.sock",
         capture_dir=runtime / "captures",
@@ -154,6 +190,7 @@ def resolve_companion(
     tunables: CompanionTunables,
     *,
     xdg: XdgDirs | None = None,
+    catalog: Catalog | None = None,
 ) -> CompanionResolvedConfig:
     """Derive companion game, SavedVariables, addon, and state paths."""
 
@@ -161,12 +198,18 @@ def resolve_companion(
     flavor = _flavor_dir(target, host)
     state = _state_dir(target, host, dirs)
     addon = flavor / "Interface" / "AddOns" / "Crowley_Data"
+    account_dir = flavor / "WTF" / "Account" / host.wtf_account
+    selected_catalog, plan = _composition(target, catalog)
     return CompanionResolvedConfig(
         target=target,
+        catalog=selected_catalog,
+        canonical_plan=plan,
+        route_provenance=target.route_provenance,
         host=host,
         tunables=tunables,
         flavor_dir=flavor,
-        saved_variables=flavor / "WTF" / "Account" / host.wtf_account / "SavedVariables" / "Crowley.lua",
+        account_dir=account_dir,
+        saved_variables=account_dir / "SavedVariables" / "Crowley.lua",
         data_lua=addon / "Data.lua",
         queue_lua=addon / "Queue.lua",
         state_file=state / "companion.json",
@@ -182,15 +225,34 @@ def resolve_ops(
     tunables: OpsTunables,
     *,
     xdg: XdgDirs | None = None,
+    catalog: Catalog | None = None,
 ) -> OpsResolvedConfig:
     """Derive operational installation and runtime roots."""
 
     dirs = _xdg_dirs(xdg)
+    flavor = _flavor_dir(target, host)
+    account_root = flavor / "WTF" / "Account"
+    account_dir = account_root / host.wtf_account
+    addons_dir = flavor / "Interface" / "AddOns"
+    addon_dir = addons_dir / "Crowley"
+    data_addon_dir = addons_dir / "Crowley_Data"
+    selected_catalog, plan = _composition(target, catalog)
     return OpsResolvedConfig(
         target=target,
+        catalog=selected_catalog,
+        canonical_plan=plan,
+        route_provenance=target.route_provenance,
         host=host,
         tunables=tunables,
-        flavor_dir=_flavor_dir(target, host),
+        flavor_dir=flavor,
+        account_root=account_root,
+        account_dir=account_dir,
+        addon_dir=addon_dir,
+        data_addon_dir=data_addon_dir,
+        saved_variables=account_dir / "SavedVariables" / "Crowley.lua",
+        data_lua=data_addon_dir / "Data.lua",
+        queue_lua=data_addon_dir / "Queue.lua",
+        addons_dir=addons_dir,
         state_dir=_state_dir(target, host, dirs),
         runtime_dir=dirs.crowley_runtime,
         config_dir=dirs.crowley_config,

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import re
 import stat
 import subprocess
 from collections.abc import Callable, Mapping
@@ -14,21 +16,22 @@ import psycopg
 
 from crowley.config import (
     BinaryConfigError,
-    CompanionResolvedConfig,
-    CompanionTunables,
     HostConfig,
     HostConfigError,
+    OpsResolvedConfig,
+    OpsTunables,
     TunablesError,
     host_config_path,
     load_companion_tunables,
     load_host_config,
     load_pinned_binaries,
     load_session_tunables,
-    resolve_companion,
+    resolve_ops,
     resolve_pinned_observer,
 )
 from crowley.core import savedvars
-from crowley.core.game_target import GameTarget, packaged_game_target
+from crowley.core.game_target import packaged_game_target
+from crowley.native import pins
 from crowley.platform import privfs
 from crowley.platform.paths import XdgDirs
 from crowley.server.db import MigrationStatus, create_pool, migration_status
@@ -36,6 +39,9 @@ from crowley.server.db import MigrationStatus, create_pool, migration_status
 from . import install
 
 MAX_CONFIG_BYTES = 256 * 1024
+MAX_PINNED_BINARY_BYTES = 1 << 30
+PINNED_BINARY_READ_CHUNK_BYTES = 1 << 20
+_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,6 +151,71 @@ def _file_digest(path: Path) -> str:
     return hashlib.sha256(privfs.read_bounded(path, install.MAX_RESOURCE_BYTES)).hexdigest()
 
 
+def _pinned_file_digest(path: Path) -> str:
+    """Stream a pinned executable digest under the explicit 1 GiB admission bound."""
+
+    try:
+        before = path.lstat()
+    except OSError as exc:
+        raise privfs.PrivateReadError("pinned binary cannot be inspected") from exc
+    if stat.S_ISLNK(before.st_mode) or not stat.S_ISREG(before.st_mode):
+        raise privfs.PrivateReadError("pinned binary is not a regular file")
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise privfs.PrivateReadError("pinned binary cannot be opened") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if not _same_file_identity(opened, before):
+            raise privfs.PrivateReadError("pinned binary changed before read")
+        if opened.st_size > MAX_PINNED_BINARY_BYTES:
+            raise privfs.PrivateReadError("pinned binary exceeds the 1 GiB size bound")
+        digest = hashlib.sha256()
+        total = 0
+        while True:
+            chunk = os.read(descriptor, PINNED_BINARY_READ_CHUNK_BYTES)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_PINNED_BINARY_BYTES:
+                raise privfs.PrivateReadError("pinned binary exceeds the 1 GiB size bound")
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        if not _same_file_identity(after, opened) or total != opened.st_size:
+            raise privfs.PrivateReadError("pinned binary changed during read")
+        final = path.lstat()
+        if not _same_file_identity(final, after):
+            raise privfs.PrivateReadError("pinned binary changed after read")
+        return digest.hexdigest()
+    except OSError as exc:
+        raise privfs.PrivateReadError("pinned binary cannot be read") from exc
+    finally:
+        os.close(descriptor)
+
+
+def _same_file_identity(left: os.stat_result, right: os.stat_result) -> bool:
+    return (
+        left.st_dev,
+        left.st_ino,
+        left.st_mode,
+        left.st_nlink,
+        left.st_uid,
+        left.st_size,
+        left.st_mtime_ns,
+        left.st_ctime_ns,
+    ) == (
+        right.st_dev,
+        right.st_ino,
+        right.st_mode,
+        right.st_nlink,
+        right.st_uid,
+        right.st_size,
+        right.st_mtime_ns,
+        right.st_ctime_ns,
+    )
+
+
 def _check_runtime_lua(path: Path, global_name: str, problems: list[str]) -> None:
     try:
         value = savedvars.load_file(path)
@@ -207,9 +278,10 @@ def _check_manifest_files(
 
 def _check_addon(
     plan: install.InstallPlan,
-    target: GameTarget,
+    resolved: OpsResolvedConfig,
     problems: list[str],
 ) -> None:
+    target = resolved.target
     manifest = _manifest(plan.manifest_path, problems)
     if not manifest:
         problems.append(f"addon manifest missing: {plan.manifest_path}")
@@ -224,7 +296,7 @@ def _check_addon(
         problems.append("addon manifest productDir does not match packaged target")
     _check_manifest_files(plan, manifest, problems)
 
-    crowley = plan.flavor_dir / "Interface" / "AddOns" / "Crowley"
+    crowley = resolved.addon_dir
     addon_mode = manifest.get("addon_mode")
     if addon_mode not in {"packaged", "development"}:
         problems.append("addon manifest mode is invalid")
@@ -243,9 +315,8 @@ def _check_addon(
     elif crowley.is_symlink() or not crowley.is_dir():
         problems.append(f"packaged addon directory missing or is a symlink: {crowley}")
 
-    data_dir = plan.flavor_dir / "Interface" / "AddOns" / "Crowley_Data"
-    _check_runtime_lua(data_dir / "Data.lua", "CROWLEY_DATA", problems)
-    _check_runtime_lua(data_dir / "Queue.lua", "CROWLEY_QUEUE", problems)
+    _check_runtime_lua(resolved.data_lua, "CROWLEY_DATA", problems)
+    _check_runtime_lua(resolved.queue_lua, "CROWLEY_QUEUE", problems)
     toc = crowley / "Crowley.toc"
     try:
         toc_text = privfs.read_bounded(toc, 128 * 1024).decode("utf-8")
@@ -303,8 +374,40 @@ def _check_binary(
     path: Path,
     *,
     label: str,
-    expected_digest: str | None,
-    expected_version: str | None,
+    expected_digest: str,
+    expected_version: str,
+    problems: list[str],
+) -> None:
+    _check_artifact(path, label=label, expected_digest=expected_digest, problems=problems)
+    if not path.is_absolute() or path == Path("/") or ".." in path.parts:
+        return
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        return
+    try:
+        result = subprocess.run(
+            [str(path), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        problems.append(f"{label} version could not be checked: {path} ({exc})")
+        return
+    version = result.stdout.strip()
+    if result.returncode != 0 or version != expected_version:
+        problems.append(f"{label} version does not match the pin: {path}")
+
+
+def _check_artifact(
+    path: Path,
+    *,
+    label: str,
+    expected_digest: str,
     problems: list[str],
 ) -> None:
     if not path.is_absolute() or path == Path("/") or ".." in path.parts:
@@ -323,28 +426,86 @@ def _check_binary(
     if not metadata.st_mode & stat.S_IXUSR or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         problems.append(f"{label} permissions are unsafe: {path}")
     try:
-        digest = _file_digest(path)
+        digest = _pinned_file_digest(path)
     except (OSError, privfs.PrivateFileError):
         problems.append(f"{label} cannot be read: {path}")
     else:
-        if expected_digest is not None and digest != expected_digest:
+        if digest != expected_digest:
             problems.append(f"{label} digest mismatch: {path}")
-    if expected_version is None:
+
+
+def _check_observer_provenance(
+    manifest_path: Path | None,
+    expected_digest: str,
+    problems: list[str],
+) -> None:
+    if manifest_path is None:
+        problems.append("pinned identity observer provenance manifest is required")
         return
     try:
-        result = subprocess.run(
-            [str(path), "--version"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        problems.append(f"{label} version could not be checked: {path} ({exc})")
+        value = json.loads(privfs.read_bounded(manifest_path, MAX_CONFIG_BYTES).decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, privfs.PrivateFileError) as exc:
+        problems.append(f"pinned identity observer provenance is unavailable: {manifest_path} ({exc})")
         return
-    version = result.stdout.strip()
-    if result.returncode != 0 or version != expected_version:
-        problems.append(f"{label} version does not match the pin: {path}")
+    if not isinstance(value, dict):
+        problems.append("pinned identity observer provenance is not an object")
+        return
+    if set(value) != set(pins.OBSERVER_MANIFEST_KEYS):
+        problems.append("pinned identity observer provenance manifest keys are invalid")
+        return
+    expected_resolution = {
+        "mechanism": "pkg-config",
+        "package": "x11",
+        "mode": "static",
+        "libraries": [f"lib{name}.a" for name in pins.OBSERVER_STATIC_LIBRARY_NAMES],
+    }
+    if value.get("schema") != pins.OBSERVER_MANIFEST_SCHEMA:
+        problems.append("pinned identity observer provenance schema does not match the pin")
+    if value.get("target") != pins.TARGET_TRIPLE:
+        problems.append("pinned identity observer provenance target does not match the pin")
+    if value.get("binary") != pins.OBSERVER_ARTIFACT_NAME:
+        problems.append("pinned identity observer provenance artifact does not match the pin")
+    if value.get("binary_sha256") != expected_digest:
+        problems.append("pinned identity observer provenance does not match the binary pin")
+    if value.get("source_sha256") != pins.OBSERVER_SOURCE_HASHES:
+        problems.append("pinned identity observer provenance source hashes do not match the pin")
+    if value.get("workspace_sha256") != pins.OBSERVER_WORKSPACE_SHA256:
+        problems.append("pinned identity observer provenance workspace hash does not match the pin")
+    if value.get("static_library_resolution") != expected_resolution:
+        problems.append("pinned identity observer provenance static library resolution is invalid")
+    static_inputs = value.get("static_inputs")
+    expected_static_inputs = {f"lib{name}.a" for name in pins.OBSERVER_STATIC_LIBRARY_NAMES}
+    if (
+        not isinstance(static_inputs, dict)
+        or set(static_inputs) != expected_static_inputs
+        or any(
+            not isinstance(item, str) or _SHA256_RE.fullmatch(item) is None for item in static_inputs.values()
+        )
+    ):
+        problems.append("pinned identity observer provenance static inputs are invalid")
+    if value.get("toolchain") != {
+        "rustc": pins.EXPECTED_RUSTC,
+        "cargo": pins.EXPECTED_CARGO,
+        "rustfmt": pins.EXPECTED_RUSTFMT,
+    }:
+        problems.append("pinned identity observer provenance toolchain does not match the pin")
+    linker = value.get("linker")
+    if not isinstance(linker, dict) or set(linker) != {"driver", "ld"}:
+        problems.append("pinned identity observer provenance linker inputs are invalid")
+        return
+    for name in ("driver", "ld"):
+        record = linker[name]
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"name", "sha256", "version"}
+            or not isinstance(record["name"], str)
+            or not record["name"]
+            or not isinstance(record["sha256"], str)
+            or _SHA256_RE.fullmatch(record["sha256"]) is None
+            or not isinstance(record["version"], str)
+            or not record["version"]
+        ):
+            problems.append(f"pinned identity observer provenance {name} input is invalid")
 
 
 def _check_pinned_binaries(xdg: XdgDirs, environ: Mapping[str, str], problems: list[str]) -> None:
@@ -356,18 +517,22 @@ def _check_pinned_binaries(xdg: XdgDirs, environ: Mapping[str, str], problems: l
         _check_binary(
             binaries.codex_path,
             label="pinned Codex executable",
-            expected_digest=None,
+            expected_digest=binaries.sha256,
             expected_version=binaries.cli_version,
             problems=problems,
         )
     observer = resolve_pinned_observer(xdg)
-    _check_binary(
+    _check_artifact(
         observer.path,
         label="pinned identity observer",
         expected_digest=observer.sha256,
-        expected_version=None,
         problems=problems,
     )
+    if observer.version != str(pins.OBSERVER_PROTOCOL_VERSION):
+        problems.append("pinned identity observer version does not match the pin")
+    if observer.provenance != pins.OBSERVER_PROVENANCE:
+        problems.append("pinned identity observer provenance does not match the pin")
+    _check_observer_provenance(observer.manifest_path, observer.sha256, problems)
 
 
 def _secret_values(path: Path) -> dict[str, str]:
@@ -428,16 +593,16 @@ def _check_database(values: Mapping[str, str], problems: list[str], status_fn: D
         problems.append(f"database migrations are not current: {', '.join(details)}")
 
 
-def _check_account(resolved: CompanionResolvedConfig | None, problems: list[str]) -> None:
+def _check_account(resolved: OpsResolvedConfig | None, problems: list[str]) -> None:
     if resolved is None:
         return
     try:
         saved_variables = resolved.saved_variables
-        account_dir = saved_variables.parent.parent
+        account_dir = resolved.account_dir
         if not account_dir.is_dir() or account_dir.is_symlink():
             raise ValueError(f"selected WTF account does not exist: {account_dir}")
         resolved_account = account_dir.resolve(strict=True)
-        account_root = resolved.flavor_dir / "WTF" / "Account"
+        account_root = resolved.account_root
         try:
             resolved_account.relative_to(account_root.resolve(strict=False))
         except ValueError as exc:
@@ -470,30 +635,29 @@ def doctor(
     host = _check_host(xdg, problems)
     _check_tunables(xdg, problems)
     _check_pinned_binaries(xdg, environment, problems)
-    companion: CompanionResolvedConfig | None = None
     companion_path = xdg.crowley_config / "companion.toml"
-    companion_tunables: CompanionTunables | None = None
     try:
-        companion_tunables = load_companion_tunables(companion_path)
+        load_companion_tunables(companion_path)
     except (OSError, TunablesError, ValueError) as exc:
         problems.append(f"companion.toml is invalid: {exc}")
-    if host is not None and companion_tunables is not None:
-        try:
-            companion = resolve_companion(target, host, companion_tunables, xdg=xdg)
-        except ValueError as exc:
-            problems.append(f"companion configuration is invalid: {exc}")
-    _check_units(xdg, environment, problems)
+    ops: OpsResolvedConfig | None = None
     if host is not None:
         try:
-            plan = install.build_plan(install.InstallRequest(), environment, host=host)
+            ops = resolve_ops(target, host, OpsTunables(), xdg=xdg)
+        except ValueError as exc:
+            problems.append(f"ops configuration is invalid: {exc}")
+    _check_units(xdg, environment, problems)
+    if ops is not None:
+        try:
+            plan = install.build_plan_from_resolved(install.InstallRequest(), environment, resolved=ops)
         except install.InstallError as exc:
             problems.append(f"addon target unavailable: {exc}")
         else:
-            _check_addon(plan, target, problems)
+            _check_addon(plan, ops, problems)
             _check_launcher(plan, problems)
     values = _check_secrets(xdg, problems)
     _check_database(values, problems, database_status)
-    _check_account(companion, problems)
+    _check_account(ops, problems)
     return DoctorReport(tuple(dict.fromkeys(problems)))
 
 

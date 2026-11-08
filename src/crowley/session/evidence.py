@@ -6,25 +6,18 @@ import copy
 import hashlib
 import json
 import re
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from crowley.core import companion_state, savedvars
-from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
 from crowley.core.scanformat import ScanFormatError, decode_json_payload, validate_v2_envelope
-from crowley.core.watchlist import load_catalog
+from crowley.core.watchlist import Catalog
 
 from .journal import JournalError, stable_file
 
 BASELINE_MEDIAN_SECONDS = 1
-_TARGET = packaged_game_target()
-_CANONICAL_CATALOG = load_catalog()
-_CANONICAL_PLAN = cast(
-    dict[str, Any],
-    target_scan_plan(cast(CatalogLike, _CANONICAL_CATALOG), _TARGET),
-)
-_PLAN_COUNT = len(_CANONICAL_PLAN["itemIDs"])
 
 
 @dataclass(frozen=True)
@@ -83,6 +76,26 @@ class EvidenceError(RuntimeError):
     """Stable evidence did not prove the expected native sweep."""
 
 
+def _plan_body(plan_json: str) -> dict[str, Any]:
+    try:
+        value = json.loads(plan_json)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise EvidenceError("canonical plan JSON is invalid") from exc
+    if not isinstance(value, dict):
+        raise EvidenceError("canonical plan JSON is not an object")
+    item_ids = value.get("itemIDs")
+    if (
+        not isinstance(item_ids, list)
+        or not item_ids
+        or any(
+            isinstance(item_id, bool) or not isinstance(item_id, int) or item_id <= 0 for item_id in item_ids
+        )
+        or item_ids != sorted(set(item_ids))
+    ):
+        raise EvidenceError("canonical plan item IDs are invalid")
+    return value
+
+
 def _decode_saved_scan(scan: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     required = {
         "id",
@@ -113,14 +126,19 @@ def qualify_saved_scan(
     plan_hash: str,
     expected_context: dict[str, Any] | None = None,
     expected_plan_json: str | None = None,
-    planned: int = _PLAN_COUNT,
+    planned: int | None = None,
+    catalog: Catalog | None = None,
 ) -> SweepEvidence:
     """Parse one exact SavedVariables file and account for every item and row."""
 
     if expected_context is None or expected_plan_json is None:
         raise EvidenceError("format-2 qualification requires the pinned context and canonical plan")
-    if isinstance(planned, bool) or not isinstance(planned, int) or planned != _PLAN_COUNT:
-        raise EvidenceError(f"format-2 qualification plan count must be exactly {_PLAN_COUNT}")
+    plan_body = _plan_body(expected_plan_json)
+    expected_planned = len(plan_body["itemIDs"])
+    if planned is None:
+        planned = expected_planned
+    if isinstance(planned, bool) or not isinstance(planned, int) or planned != expected_planned:
+        raise EvidenceError(f"format-2 qualification plan count must be exactly {expected_planned}")
     try:
         root = savedvars.loads(data)
     except (ValueError, UnicodeError) as exc:
@@ -144,14 +162,18 @@ def qualify_saved_scan(
                 raise EvidenceError(f"saved scan context field {key} does not match configured identity")
     observations = decoded["observations"]
     if len(observations) != planned or envelope["numObservations"] != planned:
-        raise EvidenceError(f"planned observation count does not match {_PLAN_COUNT}")
+        raise EvidenceError(f"planned observation count does not match {expected_planned}")
     counts = {key: 0 for key in ("full", "bounded", "incomplete", "unqueried")}
     attempted = priced = rows = 0
     durations: list[int] = []
     query_times: dict[str, tuple[int, int]] = {}
     kinds: set[str] = set()
     row_kinds: dict[str, int] = {}
-    catalog = {str(item.item_id): item.category for item in load_catalog().items if item.status == "active"}
+    categories = (
+        {str(item.item_id): item.category for item in catalog.items if item.status == "active"}
+        if catalog is not None
+        else {}
+    )
     item_evidence: dict[str, dict[str, Any]] = {}
     owned = payload.get("owned")
     if not isinstance(owned, dict):
@@ -194,7 +216,7 @@ def qualify_saved_scan(
                 observation["query"]["startedAt"],
                 observation["query"]["finishedAt"],
             )
-        category_name = catalog.get(str(item_id))
+        category_name = categories.get(str(item_id))
         category = {
             "recipes": "recipe",
             "containers": "container",
@@ -316,6 +338,7 @@ def read_data_acknowledged_ids(
     expected_plan_json: str | None = None,
     expected_plan_hash: str | None = None,
     expected_client_build: str | None = None,
+    expected_reference_item_ids: Collection[int] | None = None,
 ) -> tuple[str, ...]:
     """Read the exact stable acknowledgement arrays from the Data.lua schema."""
 
@@ -343,9 +366,10 @@ def read_data_acknowledged_ids(
     ids.extend(entries)
     if len(ids) != len(set(ids)):
         raise EvidenceError("CROWLEY_DATA acknowledgement IDs must be unique")
-    catalog = _CANONICAL_CATALOG
     reference_item_ids = value["referenceItemIDs"]
-    expected_reference_item_ids = sorted(item.item_id for item in catalog.items)
+    configured_reference_item_ids = (
+        sorted(set(expected_reference_item_ids)) if expected_reference_item_ids is not None else None
+    )
     if (
         not isinstance(reference_item_ids, list)
         or any(
@@ -353,25 +377,20 @@ def read_data_acknowledged_ids(
             for item_id in reference_item_ids
         )
         or reference_item_ids != sorted(set(reference_item_ids))
-        or reference_item_ids != expected_reference_item_ids
+        or (configured_reference_item_ids is not None and reference_item_ids != configured_reference_item_ids)
     ):
         raise EvidenceError("CROWLEY_DATA.referenceItemIDs is invalid")
     scan_plan = value["scanPlan"]
     if not isinstance(scan_plan, dict):
         raise EvidenceError("CROWLEY_DATA.scanPlan is invalid")
-    pinned = _CANONICAL_PLAN
-    if expected_plan_json is None:
-        expected_plan_json = pinned["planJSON"]
-    if expected_plan_hash is None:
-        expected_plan_hash = pinned["planHash"]
-    if expected_client_build is None:
-        expected_client_build = pinned["targetClientBuild"]
-    if (
-        expected_plan_json != pinned["planJSON"]
-        or expected_plan_hash != pinned["planHash"]
-        or expected_client_build != pinned["targetClientBuild"]
+    configured_plan = any(
+        item is not None for item in (expected_plan_json, expected_plan_hash, expected_client_build)
+    )
+    if configured_plan and not all(
+        isinstance(item, str) and item
+        for item in (expected_plan_json, expected_plan_hash, expected_client_build)
     ):
-        raise EvidenceError("configured scan plan/build is not the pinned plan")
+        raise EvidenceError("configured scan plan/build is incomplete")
     expected_plan_keys = {
         "schemaVersion",
         "id",
@@ -391,18 +410,14 @@ def read_data_acknowledged_ids(
     if any(isinstance(scan_plan[key], bool) or not isinstance(scan_plan[key], int) for key in integer_fields):
         raise EvidenceError("CROWLEY_DATA.scanPlan integer fields are invalid")
     if (
-        scan_plan["schemaVersion"] != pinned["schemaVersion"]
-        or scan_plan["id"] != pinned["id"]
-        or scan_plan["revision"] < 1
-        or scan_plan["cadenceSeconds"] != _TARGET.cadence_seconds
-        or scan_plan["initialPriceLevels"] != _TARGET.initial_price_levels
+        scan_plan["revision"] < 1
         or not isinstance(scan_plan["catalogHash"], str)
         or not re.fullmatch(r"[0-9a-f]{64}", scan_plan["catalogHash"])
-        or scan_plan["targetClientBuild"] != expected_client_build
+        or (configured_plan and scan_plan["targetClientBuild"] != expected_client_build)
         or not isinstance(scan_plan["planHash"], str)
-        or scan_plan["planHash"] != expected_plan_hash
+        or (configured_plan and scan_plan["planHash"] != expected_plan_hash)
         or not isinstance(scan_plan["planJSON"], str)
-        or scan_plan["planJSON"] != expected_plan_json
+        or (configured_plan and scan_plan["planJSON"] != expected_plan_json)
         or hashlib.sha256(scan_plan["planJSON"].encode("utf-8")).hexdigest() != scan_plan["planHash"]
     ):
         raise EvidenceError("CROWLEY_DATA.scanPlan values are invalid")
@@ -410,7 +425,6 @@ def read_data_acknowledged_ids(
     pools = scan_plan["pools"]
     if (
         not isinstance(item_ids, list)
-        or len(item_ids) != _PLAN_COUNT
         or any(
             isinstance(item_id, bool) or not isinstance(item_id, int) or item_id <= 0 for item_id in item_ids
         )
@@ -450,13 +464,15 @@ def read_data_acknowledged_ids(
         "pools",
     }:
         raise EvidenceError("CROWLEY_DATA.scanPlan.planJSON shape is invalid")
-    if (
-        json.dumps(plan_body, sort_keys=True, separators=(",", ":")) != scan_plan["planJSON"]
-        or plan_body != {key: scan_plan[key] for key in plan_body}
-        or plan_body != {key: pinned[key] for key in plan_body}
-        or scan_plan != pinned
-    ):
+    if json.dumps(plan_body, sort_keys=True, separators=(",", ":")) != scan_plan["planJSON"] or plan_body != {
+        key: scan_plan[key] for key in plan_body
+    }:
         raise EvidenceError("CROWLEY_DATA.scanPlan.planJSON values are invalid")
+    if configured_plan:
+        if not isinstance(expected_plan_json, str):
+            raise EvidenceError("configured scan plan/build is incomplete")
+        if json.loads(expected_plan_json) != plan_body:
+            raise EvidenceError("configured scan plan does not match CROWLEY_DATA.scanPlan")
     return tuple(sorted(set(ids), key=lambda item: item.encode()))
 
 

@@ -15,10 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, cast
-
-from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
-from crowley.core.watchlist import load_catalog
+from typing import Any
 
 from . import protocol
 from .calibration import CalibrationError, NativeCalibrationEvidence, NativeMemoryMeasurement
@@ -27,13 +24,6 @@ from .evidence import BASELINE_MEDIAN_SECONDS, SweepEvidence
 from .journal import Journal, JournalError
 from .mail_loop import MailBudget, MailLoopBinding, MailLoopBoundary, MailOperationBounds, admit_mail_cycle
 from .startup import InvalidationCause, RuntimeInputEvidence, TakeoverDrillRecord
-
-_TARGET = packaged_game_target()
-_CANONICAL_PLAN = cast(
-    dict[str, Any],
-    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
-)
-_PLAN_COUNT = len(_CANONICAL_PLAN["itemIDs"])
 
 
 class _ReadOnlyDriver:
@@ -631,6 +621,7 @@ def _valid_executor_evidence(
     require_raw: bool,
     expected_crs: dict[str, Any] | None = None,
     expected_executor: dict[str, Any] | None = None,
+    contract: protocol.ProtocolContract | None = None,
 ) -> bool:
     if not isinstance(value, dict):
         return False
@@ -647,7 +638,7 @@ def _valid_executor_evidence(
             return False
         try:
             raw = bytes.fromhex(raw_hex)
-            decoded = protocol.decode_frame(raw)
+            decoded = protocol.decode_frame(raw, contract=contract)
         except (ValueError, protocol.ProtocolError):
             return False
         if (
@@ -897,8 +888,10 @@ class Controller:
         driver: DesktopDriver | None = None,
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], int] = lambda: int(time.time()),
-        cadence_seconds: int = _TARGET.cadence_seconds,
-        sweep_cap_seconds: int = _TARGET.sweep_cap_seconds,
+        cadence_seconds: int = 900,
+        sweep_cap_seconds: int = 600,
+        plan_count: int = 428,
+        protocol_contract: protocol.ProtocolContract | None = None,
         reload_deadline_seconds: int = 45,
         upload_deadline_seconds: int = 60,
         ack_deadline_seconds: int = 60,
@@ -907,9 +900,11 @@ class Controller:
         if (
             isinstance(cadence_seconds, bool)
             or not isinstance(cadence_seconds, int)
-            or cadence_seconds != _TARGET.cadence_seconds
+            or cadence_seconds != 900
         ):
-            raise ValueError(f"cadence_seconds must be {_TARGET.cadence_seconds}")
+            raise ValueError("cadence_seconds must be 900")
+        if isinstance(plan_count, bool) or not isinstance(plan_count, int) or plan_count <= 0:
+            raise ValueError("plan_count must be a positive integer")
         self.journal = journal if isinstance(journal, Journal) else Journal(journal)
         self.driver = driver or (DesktopDriver() if recover_on_restart else _ReadOnlyDriver())
         self.clock = clock
@@ -919,6 +914,8 @@ class Controller:
         self.reload_deadline_seconds = reload_deadline_seconds
         self.upload_deadline_seconds = upload_deadline_seconds
         self.ack_deadline_seconds = ack_deadline_seconds
+        self.plan_count = plan_count
+        self.protocol_contract = protocol_contract
         # A fresh owner must finish any manifest that survived a publication
         # or checkpoint failure before interpreting the live checkpoint.
         self.journal.replay_archive_bundles()
@@ -2335,6 +2332,7 @@ class Controller:
                 require_raw=True,
                 expected_crs=post_crs,
                 expected_executor=post_executor,
+                contract=self.protocol_contract,
             ):
                 raise ValueError("mail completion post evidence is malformed")
             current_seq = post_executor.get("currentSeq")
@@ -2565,6 +2563,7 @@ class Controller:
                 require_raw=True,
                 expected_crs=post_crs,
                 expected_executor=post_executor,
+                contract=self.protocol_contract,
             ):
                 raise ValueError("executor completion post evidence is malformed")
             outcome_id = hashlib.sha256(
@@ -3018,6 +3017,7 @@ class Controller:
             require_raw=True,
             expected_crs=pre_crs,
             expected_executor=pre_executor,
+            contract=self.protocol_contract,
         ):
             raise RuntimeError("mail terminal outcome pre evidence is malformed")
         if record.get("kind") == "terminal_observation":
@@ -3108,6 +3108,7 @@ class Controller:
             require_raw=True,
             expected_crs=post_crs,
             expected_executor=post_executor,
+            contract=self.protocol_contract,
         ):
             raise RuntimeError("mail terminal outcome raw evidence is malformed")
         return copy.deepcopy(record)
@@ -3449,6 +3450,7 @@ class Controller:
             require_raw=True,
             expected_crs=pre_crs,
             expected_executor=pre_executor,
+            contract=self.protocol_contract,
         ):
             raise ValueError("executor pre-frame evidence is malformed")
         if continuation_capability is not None and not isinstance(continuation_capability, str):
@@ -3570,6 +3572,7 @@ class Controller:
                 require_raw=result not in {"blocked"},
                 expected_crs=intent.get("preCrs"),
                 expected_executor=intent.get("preExecutor"),
+                contract=self.protocol_contract,
             ):
                 raise ValueError("executor outcome requires complete pre evidence")
             if result not in {
@@ -3590,6 +3593,7 @@ class Controller:
                 require_raw=True,
                 expected_crs=post_crs,
                 expected_executor=post_executor,
+                contract=self.protocol_contract,
             ):
                 raise ValueError("executor post evidence is malformed")
             if result not in {"blocked", "failed", "refused", "skipped"} and not _valid_executor_receipt(
@@ -6310,9 +6314,9 @@ class Controller:
             evidence.stable_verified
             and exact_stable
             and int(evidence.envelope.get("startedAt", -1)) == int(started_at)
-            and evidence.observations == _PLAN_COUNT
-            and evidence.attempted == _PLAN_COUNT
-            and evidence.full + evidence.bounded == _PLAN_COUNT
+            and evidence.observations == self.plan_count
+            and evidence.attempted == self.plan_count
+            and evidence.full + evidence.bounded == self.plan_count
             and evidence.incomplete == 0
             and evidence.unqueried == 0
             and evidence.priced > 0
@@ -6507,12 +6511,11 @@ class Controller:
         self._save(last_action="qualify")
         return self.status()
 
-    @staticmethod
-    def _validate_item_evidence(evidence: SweepEvidence) -> tuple[bool, set[str]]:
+    def _validate_item_evidence(self, evidence: SweepEvidence) -> tuple[bool, set[str]]:
         """Check the complete target-plan accounting proof at qualification."""
 
         entries = evidence.item_evidence
-        if not isinstance(entries, dict) or len(entries) != _PLAN_COUNT:
+        if not isinstance(entries, dict) or len(entries) != self.plan_count:
             return False, set()
         categories = {"commodity", "recipe", "container", "equipment"}
         observed: set[str] = set()

@@ -176,6 +176,10 @@ class HostConfig(BaseModel):
                 raise ValueError(f"{name} must have a positive rectangle within the client")
             if left + width > self.client_width or top + height > self.client_height:
                 raise ValueError(f"{name} exceeds client geometry")
+        if self.model_crop == self.canvas_crop:
+            raise ValueError("model_crop must be separate from canvas_crop")
+        if self.model_crop[2] < 640 or self.model_crop[3] < 480:
+            raise ValueError("model_crop must be at least 640x480")
         return self
 
     @property

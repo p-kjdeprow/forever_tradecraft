@@ -894,7 +894,10 @@ def test_actual_data_schema_matches_current_producer_and_rejects_bad_reference_i
     for invalid_ids in invalid_reference_ids:
         _write_data(data, ["uid-1"], extra={"referenceItemIDs": invalid_ids})
         with pytest.raises(EvidenceError, match="CROWLEY_DATA.referenceItemIDs is invalid"):
-            read_data_acknowledged_ids(data)
+            read_data_acknowledged_ids(
+                data,
+                expected_reference_item_ids=reference_item_ids,
+            )
 
     _write_data(data, ["uid-1"], include_reference_item_ids=False)
     with pytest.raises(EvidenceError, match="CROWLEY_DATA is malformed"):

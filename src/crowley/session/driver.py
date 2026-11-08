@@ -33,8 +33,6 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
-from crowley.core.watchlist import load_catalog
 from crowley.platform.paths import XdgDirs
 
 from .executor import (
@@ -78,6 +76,7 @@ from .pointer_execution import (
     build_pointer_motion_chain as _shared_pointer_motion_chain,
 )
 from .process_admission import ADMISSION_WRAPPER, AdmissionGate
+from .protocol import ProtocolContract
 from .startup import (
     TAKEOVER_DRILL_HOVER_COMMAND_TIMEOUT_SECONDS,
     TAKEOVER_DRILL_HOVER_OBSERVATION_TIMEOUT_SECONDS,
@@ -88,13 +87,6 @@ from .startup import (
     mint_runtime_evidence,
     resolve_forwarded_echo_sources,
 )
-
-_TARGET = packaged_game_target()
-_PLAN = cast(
-    dict[str, Any],
-    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
-)
-_PLAN_COUNT = len(_PLAN["itemIDs"])
 
 _F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
 _F_SEAL_SEAL = getattr(fcntl, "F_SEAL_SEAL", 0x0001)
@@ -1063,19 +1055,20 @@ class DriverProfile:
     canvas_origin: tuple[int, int] = (80, 48)
     canvas_crop: tuple[int, int, int, int] = (80, 48, 256, 256)
     model_crop: tuple[int, int, int, int] = (80, 48, 1760, 984)
-    window_class: str = _TARGET.window_class
-    executable: str = _TARGET.executable
+    window_class: str = "wowb.exe"
+    executable: str = "WowB.exe"
     action_anchors: dict[str, tuple[int, int]] = field(default_factory=dict)
     anchor_fingerprints: dict[str, str] = field(default_factory=dict)
     window_title: str = "World of Warcraft"
     character: str = "Arthur"
-    realm: str = _TARGET.realm
-    house: str = _TARGET.house
-    plan_count: int = _PLAN_COUNT
+    realm: str = "Classic Beta PvE 2"
+    house: str = "beta-normal-alliance"
+    plan_count: int = 428
     telemetry_region_executable: Path | None = None
     telemetry_region_executable_sha256: str | None = None
     identity_observer_executable: Path | None = None
     identity_observer_executable_sha256: str | None = None
+    protocol_contract: ProtocolContract | None = None
 
     def validate(self) -> None:
         geometry_values = (
@@ -9796,7 +9789,7 @@ class DesktopDriver:
         try:
             from .decoder import PixelDecoder
 
-            return PixelDecoder(crop=self.profile.canvas_crop)
+            return PixelDecoder(crop=self.profile.canvas_crop, contract=self.profile.protocol_contract)
         except ImportError as exc:
             raise DriverError("native decoder dependencies are unavailable") from exc
 
@@ -9812,7 +9805,10 @@ class DesktopDriver:
                 image.load()
                 if image.size != (self.profile.canvas_crop[2], self.profile.canvas_crop[3]):
                     raise DriverError("native capture is not the calibrated status crop")
-                active_decoder = decoder or PixelDecoder(crop=self.profile.canvas_crop)
+                active_decoder = decoder or PixelDecoder(
+                    crop=self.profile.canvas_crop,
+                    contract=self.profile.protocol_contract,
+                )
                 return active_decoder.decode(
                     image, monotonic=self._clock(), window_identity=identity.fingerprint
                 )

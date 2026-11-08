@@ -176,15 +176,57 @@ def test_production_x11_uses_observer_from_resolved_fixture_config(
     "values",
     [
         {
-            "quiet_margin_seconds": -1,
+            "quiet_margin_seconds": 0,
             "upload_deadline_seconds": 60,
+            "reload_deadline_seconds": 45,
+            "ack_deadline_seconds": 60,
+        },
+        {
+            "quiet_margin_seconds": 900,
+            "upload_deadline_seconds": 60,
+            "reload_deadline_seconds": 900,
+            "ack_deadline_seconds": 60,
+        },
+        {
+            "quiet_margin_seconds": 15,
+            "upload_deadline_seconds": 0,
+            "reload_deadline_seconds": 45,
+            "ack_deadline_seconds": 60,
+        },
+        {
+            "quiet_margin_seconds": 15,
+            "upload_deadline_seconds": 61,
             "reload_deadline_seconds": 45,
             "ack_deadline_seconds": 60,
         },
         {
             "quiet_margin_seconds": 15,
             "upload_deadline_seconds": 60,
-            "reload_deadline_seconds": 10,
+            "reload_deadline_seconds": 0,
+            "ack_deadline_seconds": 60,
+        },
+        {
+            "quiet_margin_seconds": 15,
+            "upload_deadline_seconds": 60,
+            "reload_deadline_seconds": 601,
+            "ack_deadline_seconds": 60,
+        },
+        {
+            "quiet_margin_seconds": 15,
+            "upload_deadline_seconds": 60,
+            "reload_deadline_seconds": 45,
+            "ack_deadline_seconds": 0,
+        },
+        {
+            "quiet_margin_seconds": 15,
+            "upload_deadline_seconds": 60,
+            "reload_deadline_seconds": 45,
+            "ack_deadline_seconds": 601,
+        },
+        {
+            "quiet_margin_seconds": 45,
+            "upload_deadline_seconds": 60,
+            "reload_deadline_seconds": 45,
             "ack_deadline_seconds": 60,
         },
     ],
@@ -211,6 +253,30 @@ def test_host_geometry_rejects_crops_outside_the_client(tmp_path: Path) -> None:
     values = fixture_host(tmp_path).model_dump()
     values["model_crop"] = (0, 0, values["client_width"], values["client_height"] + 1)
     with pytest.raises(ValueError, match="model_crop exceeds client geometry"):
+        HostConfig.model_validate(values)
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "message"),
+    [
+        (639, 480, "model_crop must be at least 640x480"),
+        (640, 479, "model_crop must be at least 640x480"),
+    ],
+)
+def test_host_geometry_rejects_model_crop_below_each_minimum(
+    tmp_path: Path, width: int, height: int, message: str
+) -> None:
+    values = fixture_host(tmp_path).model_dump()
+    values["model_crop"] = (0, 0, width, height)
+    with pytest.raises(ValueError, match=message):
+        HostConfig.model_validate(values)
+
+
+def test_host_geometry_rejects_equal_canvas_and_model_crops(tmp_path: Path) -> None:
+    values = fixture_host(tmp_path).model_dump()
+    values["canvas_crop"] = (0, 0, 640, 480)
+    values["model_crop"] = (0, 0, 640, 480)
+    with pytest.raises(ValueError, match="model_crop must be separate from canvas_crop"):
         HostConfig.model_validate(values)
 
 

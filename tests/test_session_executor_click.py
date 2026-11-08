@@ -1342,6 +1342,7 @@ def test_executor_frame_evidence_rejects_missing_crc_binding() -> None:
     frame = protocol.decode_frame(raw)
     key = (frame.boot, frame.sequence, "executor-wire")
     daemon = object.__new__(SessionDaemon)
+    daemon.config = SimpleNamespace(protocol_contract=None)
     daemon._motion_evidence = {key: raw}
     daemon._motion_crs = {}
     daemon._motion_snapshots = {key: frame.snapshot.value}

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .protocol import Frame, ProtocolError, decode_frame, unpack_cells, unsigned_delta
+from .protocol import Frame, ProtocolContract, ProtocolError, decode_frame, unpack_cells, unsigned_delta
 
 
 @dataclass(frozen=True)
@@ -19,9 +19,16 @@ class Sample:
 
 
 class PixelDecoder:
-    def __init__(self, *, crop: tuple[int, int, int, int] = (80, 48, 256, 256), threshold: int = 128):
+    def __init__(
+        self,
+        *,
+        crop: tuple[int, int, int, int] = (80, 48, 256, 256),
+        threshold: int = 128,
+        contract: ProtocolContract | None = None,
+    ):
         self.crop = crop
         self.threshold = threshold
+        self.contract = contract
         self.boot: str | None = None
         self.sequence: int | None = None
         self.uptime_ms: int | None = None
@@ -55,7 +62,7 @@ class PixelDecoder:
                         raise ProtocolError("status cell physical pixels disagree")
                     row.append(cell[0])
                 rows.append(row)
-            frame = decode_frame(unpack_cells(rows))
+            frame = decode_frame(unpack_cells(rows), contract=self.contract)
         except (AttributeError, TypeError, ValueError) as exc:
             raise ProtocolError(f"invalid pixel crop: {exc}") from exc
         if window_identity == "":

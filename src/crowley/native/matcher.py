@@ -26,11 +26,16 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from crowley.platform.paths import XdgDirs
 
 from . import pins
+from .publication import PublicationReadError, read_current_publication
+
+type PublicationJSONValue = (
+    None | bool | int | float | str | list["PublicationJSONValue"] | dict[str, "PublicationJSONValue"]
+)
 
 MAGIC = pins.MATCHER_MAGIC
 PROTOCOL = pins.MATCHER_PROTOCOL
@@ -265,7 +270,27 @@ def _require_string(value: Any, label: str) -> str:
 
 
 def _verify_manifest(manifest: dict[str, Any], artifact_digest: str) -> dict[str, str]:
-    if manifest.get("schema") != "crowley.template-matcher-release" or manifest.get("schema_version") != 1:
+    expected_fields = {
+        "schema",
+        "schema_version",
+        "artifact",
+        "artifact_sha256",
+        "source_hashes",
+        "workspace_sha256",
+        "source_sha256",
+        "source_snapshot_sha256",
+        "protocol",
+        "target",
+        "toolchain",
+        "build",
+    }
+    if set(manifest) != expected_fields:
+        raise ArtifactError("matcher manifest fields are not reviewed")
+    if (
+        manifest.get("schema") != "crowley.template-matcher-release"
+        or type(manifest.get("schema_version")) is not int
+        or manifest.get("schema_version") != 1
+    ):
         raise ArtifactError("matcher manifest schema is not reviewed")
     if manifest.get("artifact") != ARTIFACT_NAME or manifest.get("protocol") != PROTOCOL:
         raise ArtifactError("matcher manifest identity is not reviewed")
@@ -282,7 +307,46 @@ def _verify_manifest(manifest: dict[str, Any], artifact_digest: str) -> dict[str
         raise ArtifactError("matcher source snapshot pin is not reviewed")
     if manifest.get("workspace_sha256") != pins.MATCHER_WORKSPACE_SHA256:
         raise ArtifactError("matcher workspace source pin is not reviewed")
+    toolchain = manifest["toolchain"]
+    if not isinstance(toolchain, dict) or set(toolchain) != {"rustc", "rustc_verbose", "cargo", "rustfmt"}:
+        raise ArtifactError("matcher toolchain provenance is not reviewed")
+    if any(type(value) is not str or not value for value in toolchain.values()):
+        raise ArtifactError("matcher toolchain provenance is not reviewed")
+    build = manifest["build"]
+    if not isinstance(build, dict) or set(build) != {
+        "profile",
+        "locked",
+        "offline",
+        "incremental",
+        "debuginfo",
+        "strip",
+        "codegen_units",
+        "target_cpu",
+        "remap_path",
+    }:
+        raise ArtifactError("matcher build provenance is not reviewed")
+    if (
+        build["profile"] != "release"
+        or type(build["locked"]) is not bool
+        or build["locked"] is not True
+        or type(build["offline"]) is not bool
+        or build["offline"] is not True
+        or type(build["incremental"]) is not bool
+        or build["incremental"] is not False
+        or type(build["debuginfo"]) is not int
+        or build["debuginfo"] != 0
+        or build["strip"] != "symbols"
+        or type(build["codegen_units"]) is not int
+        or build["codegen_units"] != 1
+        or build["target_cpu"] is not None
+        or build["remap_path"] != "/rustsrc"
+    ):
+        raise ArtifactError("matcher build provenance is not reviewed")
     return dict(EXPECTED_SOURCE_HASHES)
+
+
+def _validate_publication_manifest(manifest: dict[str, PublicationJSONValue], digest: str) -> None:
+    _verify_manifest(cast(dict[str, Any], manifest), digest)
 
 
 def _integer(value: Any, label: str, *, minimum: int = 0) -> int:
@@ -370,17 +434,23 @@ class TemplateMatcherRuntime:
         self._closed = False
         self._binary_fd: int | None = None
         try:
-            manifest_bytes = _read_private_file(root / MANIFEST_NAME)
-            manifest = _json_object(manifest_bytes, "matcher manifest")
-            descriptor = _open_private_file(root / ARTIFACT_NAME, executable=True)
-            self._binary_fd = descriptor
-            artifact_bytes = _read_descriptor_stable(descriptor)
-            artifact_digest = _sha256(artifact_bytes)
-            source_hashes = _verify_manifest(manifest, artifact_digest)
-            self._manifest = manifest
-            self._artifact_sha256 = artifact_digest
+            publication = read_current_publication(
+                root,
+                binary_name=ARTIFACT_NAME,
+                manifest_name=MANIFEST_NAME,
+                sidecar_names=(),
+                validate_manifest=_validate_publication_manifest,
+            )
+            self._binary_fd = publication.binary_fd
+            source_hashes = _verify_manifest(
+                cast(dict[str, Any], publication.manifest), publication.binary_digest
+            )
+            self._manifest = cast(dict[str, Any], publication.manifest)
+            self._artifact_sha256 = publication.binary_digest
             self._source_hashes = source_hashes
             self._source_bindings = self._make_source_bindings()
+        except PublicationReadError as error:
+            raise ArtifactError(str(error)) from error
         except Exception:
             if self._binary_fd is not None:
                 os.close(self._binary_fd)

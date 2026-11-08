@@ -54,6 +54,65 @@ def _writable_pointer_rate_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         return state
 
     monkeypatch.setattr(pointer_execution, "_session_state_directory", state_directory)
+    from crowley.session import input_tool
+
+    legacy_tool_root = input_tool.private_tool_root()
+    legacy_matcher_root = matcher_runtime.default_artifact_root()
+    cache_home = tmp_path / "native-cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_home))
+    tool_target = cache_home / "crowley" / "xdotool"
+    matcher_target = cache_home / "crowley" / "template-matcher" / "v1"
+    if not (tool_target / "current").is_symlink():
+        source_root = (
+            legacy_tool_root / "current" if (legacy_tool_root / "current").is_symlink() else legacy_tool_root
+        )
+        artifact = source_root / input_tool.PRIVATE_TOOL_BASENAME
+        manifest = source_root / input_tool.MANIFEST_BASENAME
+        archive = source_root / input_tool.ARCHIVE_BASENAME
+        if artifact.is_file() and manifest.is_file() and archive.is_file():
+            migrated_root = tool_target
+            migrated_root.mkdir(mode=0o700, parents=True)
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            releases = migrated_root / "releases"
+            releases.mkdir(mode=0o700)
+            release = releases / digest
+            release.mkdir(mode=0o700)
+            shutil.copy2(artifact, release / input_tool.PRIVATE_TOOL_BASENAME)
+            shutil.copy2(manifest, release / input_tool.MANIFEST_BASENAME)
+            shutil.copy2(archive, release / input_tool.ARCHIVE_BASENAME)
+            (release / input_tool.PRIVATE_TOOL_BASENAME).chmod(0o700)
+            (release / input_tool.MANIFEST_BASENAME).chmod(0o600)
+            (release / input_tool.ARCHIVE_BASENAME).chmod(0o600)
+            (migrated_root / "current").symlink_to(Path("releases") / digest)
+            monkeypatch.setattr(
+                input_tool, "private_tool_root", lambda migrated_root=migrated_root: migrated_root
+            )
+    if not (matcher_target / "current").is_symlink():
+        source_root = (
+            legacy_matcher_root / "current"
+            if (legacy_matcher_root / "current").is_symlink()
+            else legacy_matcher_root
+        )
+        artifact = source_root / matcher_runtime.ARTIFACT_NAME
+        manifest = source_root / matcher_runtime.MANIFEST_NAME
+        if artifact.is_file() and manifest.is_file():
+            migrated_root = matcher_target
+            migrated_root.mkdir(mode=0o700, parents=True)
+            digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+            releases = migrated_root / "releases"
+            releases.mkdir(mode=0o700)
+            release = releases / digest
+            release.mkdir(mode=0o700)
+            shutil.copy2(artifact, release / matcher_runtime.ARTIFACT_NAME)
+            shutil.copy2(manifest, release / matcher_runtime.MANIFEST_NAME)
+            (release / matcher_runtime.ARTIFACT_NAME).chmod(0o700)
+            (release / matcher_runtime.MANIFEST_NAME).chmod(0o600)
+            (migrated_root / "current").symlink_to(Path("releases") / digest)
+            monkeypatch.setattr(
+                matcher_runtime,
+                "default_artifact_root",
+                lambda migrated_root=migrated_root: migrated_root,
+            )
 
 
 # These are small grayscale chat-only crops derived from the retained GUI
@@ -1458,29 +1517,57 @@ int main(int argc, char **argv) {
 
     artifact = tmp_path / "sealed-tool"
     artifact.mkdir(mode=0o700)
-    shutil.copyfile(executable, artifact / PRIVATE_TOOL_BASENAME)
+    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+    releases = artifact / "releases"
+    releases.mkdir(mode=0o700)
+    release = releases / digest
+    release.mkdir(mode=0o700)
+    shutil.copyfile(executable, release / PRIVATE_TOOL_BASENAME)
     shutil.copyfile(
         native_build.VENDORED_SOURCE_ARCHIVE,
-        artifact / ARCHIVE_BASENAME,
+        release / ARCHIVE_BASENAME,
     )
-    executable_sha256 = hashlib.sha256((artifact / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest()
-    (artifact / MANIFEST_BASENAME).write_text(
+    (release / MANIFEST_BASENAME).write_text(
         json.dumps(
             {
                 "commit": PINNED_COMMIT,
                 "archive_sha256": PINNED_ARCHIVE_SHA256,
                 "executable": PRIVATE_TOOL_BASENAME,
-                "executable_sha256": executable_sha256,
+                "executable_sha256": digest,
                 pins.XDOTOOL_BUILD_INPUTS_KEY: _TEST_XDOTOOL_BUILD_INPUTS,
             },
             sort_keys=True,
         ),
         encoding="utf-8",
     )
-    (artifact / PRIVATE_TOOL_BASENAME).chmod(0o700)
-    (artifact / ARCHIVE_BASENAME).chmod(0o600)
-    (artifact / MANIFEST_BASENAME).chmod(0o600)
+    (release / PRIVATE_TOOL_BASENAME).chmod(0o700)
+    (release / ARCHIVE_BASENAME).chmod(0o600)
+    (release / MANIFEST_BASENAME).chmod(0o600)
+    (artifact / "current").symlink_to(Path("releases") / digest)
     return artifact
+
+
+def _replace_fixture_binary(artifact: Path, source: Path) -> None:
+    """Create a new immutable fixture release and atomically switch current."""
+
+    from crowley.session.input_tool import ARCHIVE_BASENAME, MANIFEST_BASENAME, PRIVATE_TOOL_BASENAME
+
+    old_release = (artifact / "current").resolve()
+    manifest = json.loads((old_release / MANIFEST_BASENAME).read_text(encoding="utf-8"))
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    release = artifact / "releases" / digest
+    release.mkdir(mode=0o700)
+    shutil.copy2(source, release / PRIVATE_TOOL_BASENAME)
+    shutil.copy2(old_release / ARCHIVE_BASENAME, release / ARCHIVE_BASENAME)
+    manifest["executable_sha256"] = digest
+    (release / MANIFEST_BASENAME).write_text(json.dumps(manifest, sort_keys=True), encoding="utf-8")
+    (release / PRIVATE_TOOL_BASENAME).chmod(0o700)
+    (release / ARCHIVE_BASENAME).chmod(0o600)
+    (release / MANIFEST_BASENAME).chmod(0o600)
+    temporary = artifact / ".current-fixture"
+    temporary.unlink(missing_ok=True)
+    temporary.symlink_to(Path("releases") / digest)
+    os.replace(temporary, artifact / "current")
 
 
 def _consume_action_records(
@@ -1634,13 +1721,17 @@ int main(int argc, char **argv) {
 
     artifact = tmp_path / "sealed-gated-tool"
     artifact.mkdir(mode=0o700)
-    shutil.copyfile(executable, artifact / PRIVATE_TOOL_BASENAME)
+    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
+    releases = artifact / "releases"
+    releases.mkdir(mode=0o700)
+    release = releases / digest
+    release.mkdir(mode=0o700)
+    shutil.copyfile(executable, release / PRIVATE_TOOL_BASENAME)
     shutil.copyfile(
         native_build.VENDORED_SOURCE_ARCHIVE,
-        artifact / ARCHIVE_BASENAME,
+        release / ARCHIVE_BASENAME,
     )
-    digest = hashlib.sha256((artifact / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest()
-    (artifact / MANIFEST_BASENAME).write_text(
+    (release / MANIFEST_BASENAME).write_text(
         json.dumps(
             {
                 "commit": PINNED_COMMIT,
@@ -1653,9 +1744,10 @@ int main(int argc, char **argv) {
         ),
         encoding="utf-8",
     )
-    (artifact / PRIVATE_TOOL_BASENAME).chmod(0o700)
-    (artifact / ARCHIVE_BASENAME).chmod(0o600)
-    (artifact / MANIFEST_BASENAME).chmod(0o600)
+    (release / PRIVATE_TOOL_BASENAME).chmod(0o700)
+    (release / ARCHIVE_BASENAME).chmod(0o600)
+    (release / MANIFEST_BASENAME).chmod(0o600)
+    (artifact / "current").symlink_to(Path("releases") / digest)
     return artifact
 
 
@@ -3028,7 +3120,7 @@ def test_production_reload_boundary_uses_profile_bound_strict_absence(tmp_path, 
     )
     assert result is identity
     assert calls and calls[0][1] == (4, 4)
-    assert not list(tmp_path.iterdir())
+    assert list(tmp_path.iterdir()) == [tmp_path / "native-cache"]
 
 
 def test_chat_readback_mismatch_escapes_without_submit(tmp_path):
@@ -3951,9 +4043,6 @@ def test_spawned_watchdog_ack_loss_fails_closed_and_retains_actor():
 
 def test_unconfirmed_release_retains_actor_and_owner_close_is_bounded(tmp_path):
     artifact = make_recording_artifact(tmp_path)
-    from crowley.session.input_tool import PRIVATE_TOOL_BASENAME
-
-    executable = artifact / PRIVATE_TOOL_BASENAME
     delayed_source = tmp_path / "delayed.c"
     delayed_binary = tmp_path / "delayed"
     release_marker = tmp_path / "release-first-attempt"
@@ -3989,13 +4078,7 @@ int main(int argc, char **argv) {
         encoding="utf-8",
     )
     subprocess.run(["cc", "-O2", str(delayed_source), "-o", str(delayed_binary)], check=True)
-    executable.unlink()
-    shutil.copyfile(delayed_binary, executable)
-    executable.chmod(0o700)
-    manifest = artifact / "manifest.json"
-    record = json.loads(manifest.read_text(encoding="utf-8"))
-    record["executable_sha256"] = hashlib.sha256(executable.read_bytes()).hexdigest()
-    manifest.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+    _replace_fixture_binary(artifact, delayed_binary)
     tool = operator.PinnedInputTool.from_root(artifact)
     watchdog = operator.Watchdog(
         tool,
@@ -4028,9 +4111,6 @@ int main(int argc, char **argv) {
 
 def test_real_owner_exit_is_bounded_while_failed_release_actor_survives(tmp_path):
     artifact = make_recording_artifact(tmp_path)
-    from crowley.session.input_tool import PRIVATE_TOOL_BASENAME
-
-    executable = artifact / PRIVATE_TOOL_BASENAME
     source = tmp_path / "persistent-release.c"
     binary = tmp_path / "persistent-release"
     source.write_text(
@@ -4060,13 +4140,7 @@ int main(int argc, char **argv) {
         encoding="utf-8",
     )
     subprocess.run(["cc", "-O2", str(source), "-o", str(binary)], check=True)
-    executable.unlink()
-    shutil.copyfile(binary, executable)
-    executable.chmod(0o700)
-    manifest = artifact / "manifest.json"
-    record = json.loads(manifest.read_text(encoding="utf-8"))
-    record["executable_sha256"] = hashlib.sha256(executable.read_bytes()).hexdigest()
-    manifest.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+    _replace_fixture_binary(artifact, binary)
 
     release_marker = tmp_path / "persistent-release-actions"
     enable_marker = tmp_path / "enable-release"
@@ -4111,9 +4185,6 @@ int main(int argc, char **argv) {
 
 def test_normal_systemexit_keeps_failed_release_actor_alive_until_enabled(tmp_path):
     artifact = make_recording_artifact(tmp_path)
-    from crowley.session.input_tool import PRIVATE_TOOL_BASENAME
-
-    executable = artifact / PRIVATE_TOOL_BASENAME
     source = tmp_path / "normal-exit-release.c"
     binary = tmp_path / "normal-exit-release"
     source.write_text(
@@ -4140,13 +4211,7 @@ int main(int argc, char **argv) {
         encoding="utf-8",
     )
     subprocess.run(["cc", "-O2", str(source), "-o", str(binary)], check=True)
-    executable.unlink()
-    shutil.copyfile(binary, executable)
-    executable.chmod(0o700)
-    manifest = artifact / "manifest.json"
-    record = json.loads(manifest.read_text(encoding="utf-8"))
-    record["executable_sha256"] = hashlib.sha256(executable.read_bytes()).hexdigest()
-    manifest.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+    _replace_fixture_binary(artifact, binary)
 
     release_marker = tmp_path / "normal-exit-release-actions"
     enable_marker = tmp_path / "normal-exit-enable"
@@ -4267,13 +4332,17 @@ int main(int argc, char **argv) {
 
     artifact = tmp_path / "sealed-tool"
     artifact.mkdir(mode=0o700)
-    shutil.copyfile(executable, artifact / PRIVATE_TOOL_BASENAME)
+    executable_sha256 = hashlib.sha256(executable.read_bytes()).hexdigest()
+    releases = artifact / "releases"
+    releases.mkdir(mode=0o700)
+    release = releases / executable_sha256
+    release.mkdir(mode=0o700)
+    shutil.copyfile(executable, release / PRIVATE_TOOL_BASENAME)
     shutil.copyfile(
         native_build.VENDORED_SOURCE_ARCHIVE,
-        artifact / ARCHIVE_BASENAME,
+        release / ARCHIVE_BASENAME,
     )
-    executable_sha256 = hashlib.sha256((artifact / PRIVATE_TOOL_BASENAME).read_bytes()).hexdigest()
-    (artifact / MANIFEST_BASENAME).write_text(
+    (release / MANIFEST_BASENAME).write_text(
         json.dumps(
             {
                 "commit": PINNED_COMMIT,
@@ -4286,9 +4355,10 @@ int main(int argc, char **argv) {
         ),
         encoding="utf-8",
     )
-    (artifact / PRIVATE_TOOL_BASENAME).chmod(0o700)
-    (artifact / ARCHIVE_BASENAME).chmod(0o600)
-    (artifact / MANIFEST_BASENAME).chmod(0o600)
+    (release / PRIVATE_TOOL_BASENAME).chmod(0o700)
+    (release / ARCHIVE_BASENAME).chmod(0o600)
+    (release / MANIFEST_BASENAME).chmod(0o600)
+    (artifact / "current").symlink_to(Path("releases") / executable_sha256)
 
     marker = tmp_path / "released-actions"
     tool = operator.PinnedInputTool.from_root(artifact)
@@ -4531,9 +4601,6 @@ def test_production_main_handled_term_returns_nonzero_and_retains_release_actor(
     config_path.write_text("test-only", encoding="utf-8")
     config_path.chmod(0o600)
     artifact = make_recording_artifact(tmp_path)
-    from crowley.session.input_tool import PRIVATE_TOOL_BASENAME
-
-    executable = artifact / PRIVATE_TOOL_BASENAME
     source = tmp_path / "term-release.c"
     binary = tmp_path / "term-release"
     source.write_text(
@@ -4570,12 +4637,7 @@ int main(int argc, char **argv) {
         encoding="utf-8",
     )
     subprocess.run(["cc", "-O2", str(source), "-o", str(binary)], check=True)
-    executable.unlink()
-    shutil.copyfile(binary, executable)
-    executable.chmod(0o700)
-    record = json.loads((artifact / "manifest.json").read_text(encoding="utf-8"))
-    record["executable_sha256"] = hashlib.sha256(executable.read_bytes()).hexdigest()
-    (artifact / "manifest.json").write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+    _replace_fixture_binary(artifact, binary)
 
     release_marker = tmp_path / "main-term-release-actions"
     enable_marker = tmp_path / "main-term-enable-release"
@@ -6098,8 +6160,16 @@ def test_measure_deferred_public_admission_retains_real_failure_status(tmp_path:
 
 
 def test_observer_manifest_rejects_legacy_schema(tmp_path: Path) -> None:
-    observer = tmp_path / "observer"
-    observer.write_bytes(b"#!/bin/sh\nexit 0\n")
+    publication_root = tmp_path / "observer-root"
+    publication_root.mkdir(mode=0o700)
+    releases = publication_root / "releases"
+    releases.mkdir(mode=0o700)
+    binary_data = b"#!/bin/sh\nexit 0\n"
+    digest = hashlib.sha256(binary_data).hexdigest()
+    release = releases / digest
+    release.mkdir(mode=0o700)
+    observer = release / "observer"
+    observer.write_bytes(binary_data)
     observer.chmod(0o700)
     source_root = native_build.NATIVE_ROOT
     source_names = (
@@ -6111,7 +6181,7 @@ def test_observer_manifest_rejects_legacy_schema(tmp_path: Path) -> None:
         name: hashlib.sha256((source_root / name.removeprefix("native/")).read_bytes()).hexdigest()
         for name in source_names
     }
-    manifest_path = observer.with_suffix(".manifest.json")
+    manifest_path = release / "observer.manifest.json"
     manifest_path.write_text(
         json.dumps(
             {
@@ -6129,11 +6199,11 @@ def test_observer_manifest_rejects_legacy_schema(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     manifest_path.chmod(0o600)
+    (publication_root / "current").symlink_to(Path("releases") / digest)
+    configured_observer = publication_root / "current" / "observer"
     screen = SimpleNamespace(backend=SimpleNamespace(resolver_kind="pinned-rust-v1"))
     with pytest.raises(operator.OperatorError, match="source manifest schema is malformed"):
-        operator._verify_observer_manifest(
-            screen, observer, hashlib.sha256(observer.read_bytes()).hexdigest()
-        )
+        operator._verify_observer_manifest(screen, configured_observer, digest)
 
 
 @pytest.mark.parametrize("mutation", ["mtime", "path"])

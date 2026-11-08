@@ -13,13 +13,13 @@ import ctypes
 import errno
 import fcntl
 import hashlib
-import json
 import os
 import stat
 from dataclasses import dataclass
 from pathlib import Path
 
 from crowley.native import pins
+from crowley.native.publication import PublicationReadError, read_current_publication
 from crowley.platform.paths import XdgDirs
 
 
@@ -33,6 +33,9 @@ PRIVATE_TOOL_BASENAME = pins.XDOTOOL_ARTIFACT_NAME
 MANIFEST_BASENAME = pins.XDOTOOL_MANIFEST_NAME
 ARCHIVE_BASENAME = pins.XDOTOOL_ARCHIVE_NAME
 _ELF_MAGIC = b"\x7fELF"
+type PublicationJSONValue = (
+    None | bool | int | float | str | list["PublicationJSONValue"] | dict[str, "PublicationJSONValue"]
+)
 _MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
 _F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
 _F_GET_SEALS = getattr(fcntl, "F_GET_SEALS", 1034)
@@ -111,6 +114,12 @@ class ArtifactIdentity:
 
 
 @dataclass(frozen=True)
+class _VerifiedArtifact:
+    identity: ArtifactIdentity
+    executable_bytes: bytes
+
+
+@dataclass(frozen=True)
 class NativeReleaseSpec:
     """Typed watchdog release capability for one sealed executable image."""
 
@@ -146,36 +155,7 @@ class NativeReleaseSpec:
             raise InputToolError("native release image digest does not match its identity")
 
 
-def verify_artifact(root: str | os.PathLike[str] | None = None) -> ArtifactIdentity:
-    """Verify a complete private artifact manifest and return its identity.
-
-    ``root`` exists as an explicit test/build injection. Production callers
-    resolve the private root from the current XDG environment by omitting it.
-    """
-
-    artifact_root = Path(root) if root is not None else private_tool_root()
-    try:
-        root_stat = artifact_root.lstat()
-    except OSError as exc:
-        raise InputToolError("private xdotool artifact directory is unavailable") from exc
-    if not stat.S_ISDIR(root_stat.st_mode) or root_stat.st_uid != os.getuid():
-        raise InputToolError("private xdotool artifact directory is not user-owned")
-    if root_stat.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise InputToolError("private xdotool artifact directory is writable by group or other")
-    try:
-        children = {entry.name for entry in artifact_root.iterdir()}
-    except OSError as exc:
-        raise InputToolError("private xdotool artifact directory cannot be enumerated") from exc
-    if children != {MANIFEST_BASENAME, PRIVATE_TOOL_BASENAME, ARCHIVE_BASENAME}:
-        raise InputToolError("private xdotool artifact set is incomplete or contains extras")
-    manifest_path = artifact_root / MANIFEST_BASENAME
-    _regular_private_file(manifest_path, label="private xdotool manifest", owner=os.getuid())
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise InputToolError("private xdotool manifest is malformed") from exc
-    if not isinstance(manifest, dict):
-        raise InputToolError("private xdotool manifest is not an object")
+def _validate_xdotool_manifest(manifest: dict[str, PublicationJSONValue], executable_digest: str) -> None:
     if set(manifest) != pins.XDOTOOL_MANIFEST_KEYS:
         raise InputToolError("private xdotool manifest fields are not canonical")
     build_inputs = manifest[pins.XDOTOOL_BUILD_INPUTS_KEY]
@@ -195,45 +175,70 @@ def verify_artifact(root: str | os.PathLike[str] | None = None) -> ArtifactIdent
             or not record["version"]
         ):
             raise InputToolError("private xdotool build inputs are malformed")
-    if manifest["commit"] != PINNED_COMMIT or manifest["archive_sha256"] != PINNED_ARCHIVE_SHA256:
+    if (
+        type(manifest["commit"]) is not str
+        or type(manifest["archive_sha256"]) is not str
+        or manifest["commit"] != PINNED_COMMIT
+        or manifest["archive_sha256"] != PINNED_ARCHIVE_SHA256
+    ):
         raise InputToolError("private xdotool source provenance is not pinned")
     executable_name = manifest["executable"]
-    if executable_name != PRIVATE_TOOL_BASENAME or not isinstance(executable_name, str):
+    if type(executable_name) is not str or executable_name != PRIVATE_TOOL_BASENAME:
         raise InputToolError("private xdotool executable basename is not pinned")
-    executable = artifact_root / executable_name
-    _regular_private_file(executable, label="private xdotool executable", owner=os.getuid())
-    if not os.access(executable, os.X_OK):
-        raise InputToolError("private xdotool executable is not executable")
-    try:
-        if executable.read_bytes()[:4] != _ELF_MAGIC:
-            raise InputToolError("private xdotool executable is not an ELF image")
-    except OSError as exc:
-        raise InputToolError("private xdotool executable cannot be read") from exc
-    executable_sha256 = _sha256(executable)
-    if manifest["executable_sha256"] != executable_sha256:
+    if type(manifest["executable_sha256"]) is not str or manifest["executable_sha256"] != executable_digest:
         raise InputToolError("private xdotool executable digest does not match manifest")
-    archive = artifact_root / ARCHIVE_BASENAME
-    _regular_private_file(archive, label="private xdotool source archive", owner=os.getuid())
-    if _sha256(archive) != PINNED_ARCHIVE_SHA256:
-        raise InputToolError("private xdotool source archive digest does not match pin")
-    return ArtifactIdentity(
-        root=artifact_root,
-        executable=executable,
-        executable_sha256=executable_sha256,
-        archive_sha256=PINNED_ARCHIVE_SHA256,
-        commit=PINNED_COMMIT,
-    )
+
+
+def _verify_artifact(root: str | os.PathLike[str] | None = None) -> _VerifiedArtifact:
+    artifact_root = Path(root) if root is not None else private_tool_root()
+    try:
+        publication = read_current_publication(
+            artifact_root,
+            binary_name=PRIVATE_TOOL_BASENAME,
+            manifest_name=MANIFEST_BASENAME,
+            sidecar_names=(ARCHIVE_BASENAME,),
+            validate_manifest=_validate_xdotool_manifest,
+        )
+    except PublicationReadError as error:
+        raise InputToolError(str(error)) from error
+    try:
+        descriptor = os.fstat(publication.binary_fd)
+        if not stat.S_ISREG(descriptor.st_mode) or not descriptor.st_mode & stat.S_IXUSR:
+            raise InputToolError("private xdotool executable is not executable")
+        if publication.binary_bytes[:4] != _ELF_MAGIC:
+            raise InputToolError("private xdotool executable is not an ELF image")
+        archive_digest = hashlib.sha256(publication.sidecars[ARCHIVE_BASENAME]).hexdigest()
+        if archive_digest != PINNED_ARCHIVE_SHA256:
+            raise InputToolError("private xdotool source archive digest does not match pin")
+        return _VerifiedArtifact(
+            identity=ArtifactIdentity(
+                root=artifact_root,
+                executable=artifact_root / "current" / PRIVATE_TOOL_BASENAME,
+                executable_sha256=publication.binary_digest,
+                archive_sha256=archive_digest,
+                commit=PINNED_COMMIT,
+            ),
+            executable_bytes=publication.binary_bytes,
+        )
+    finally:
+        os.close(publication.binary_fd)
+
+
+def verify_artifact(root: str | os.PathLike[str] | None = None) -> ArtifactIdentity:
+    """Verify a complete private artifact manifest and return its identity."""
+
+    return _verify_artifact(root).identity
 
 
 class PinnedInputImage:
     """An immutable executable image backed by a sealed Linux memfd."""
 
-    def __init__(self, identity: ArtifactIdentity):
+    def __init__(self, identity: ArtifactIdentity, executable_bytes: bytes):
         self.identity = identity
         self.fd = -1
         self.digest = identity.executable_sha256
         try:
-            data = identity.executable.read_bytes()
+            data = executable_bytes
             if len(data) > _MAX_ARTIFACT_BYTES:
                 raise InputToolError("private xdotool changed beyond the artifact size bound")
             if hashlib.sha256(data).hexdigest() != identity.executable_sha256:
@@ -286,17 +291,17 @@ class PinnedInputImage:
 class PinnedInputTool:
     """Verified artifact plus one owner-held immutable executable image."""
 
-    def __init__(self, identity: ArtifactIdentity):
-        self.identity = identity
-        self.image = PinnedInputImage(identity)
+    def __init__(self, verified: _VerifiedArtifact):
+        self.identity = verified.identity
+        self.image = PinnedInputImage(verified.identity, verified.executable_bytes)
 
     @classmethod
     def load(cls) -> PinnedInputTool:
-        return cls(verify_artifact())
+        return cls(_verify_artifact())
 
     @classmethod
     def from_root(cls, root: str | os.PathLike[str]) -> PinnedInputTool:
-        return cls(verify_artifact(root))
+        return cls(_verify_artifact(root))
 
     @property
     def digest(self) -> str:

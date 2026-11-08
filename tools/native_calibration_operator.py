@@ -42,6 +42,7 @@ if not __package__:
 from crowley.native import build as native_build
 from crowley.native import pins
 from crowley.native.matcher import MatcherError, TemplateMatcherRuntime
+from crowley.native.publication import PublicationReadError, read_current_publication
 from crowley.session.cli import _socket_request
 from crowley.session.config import load_config
 from crowley.session.decoder import PixelDecoder
@@ -5088,23 +5089,25 @@ def _unique_json_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 def _verify_observer_manifest(screen: X11Screen, observer: Path, digest: str) -> dict[str, str]:
     """Verify the sealed observer against the current reviewed source bytes."""
 
+    publication_root = observer.parent
+    if publication_root.name == "current":
+        publication_root = publication_root.parent
     try:
-        binary_info = observer.lstat()
-        if (
-            not stat.S_ISREG(binary_info.st_mode)
-            or binary_info.st_uid != os.getuid()
-            or binary_info.st_mode & 0o077
-            or not binary_info.st_mode & stat.S_IXUSR
-        ):
-            raise OperatorError("configured identity observer is not a private executable")
-        if _sha256_file(observer) != digest:
+        publication = read_current_publication(
+            publication_root,
+            binary_name=observer.name,
+            manifest_name=observer.with_suffix(".manifest.json").name,
+            sidecar_names=(),
+            validate_manifest=lambda _manifest, _digest: None,
+        )
+    except PublicationReadError as exc:
+        raise OperatorError(str(exc)) from exc
+    try:
+        if publication.binary_digest != digest:
             raise OperatorError("configured identity observer digest changed")
-    except OperatorError:
-        raise
-    except OSError as exc:
-        raise OperatorError("configured identity observer is unavailable") from exc
-    manifest_path = observer.with_suffix(".manifest.json")
-    manifest = _read_private_json(manifest_path, label="configured identity observer manifest")
+        manifest = publication.manifest
+    finally:
+        os.close(publication.binary_fd)
     if set(manifest) != pins.OBSERVER_MANIFEST_KEYS:
         raise OperatorError("configured identity observer source manifest schema is malformed")
     if manifest["schema"] != pins.OBSERVER_MANIFEST_SCHEMA:

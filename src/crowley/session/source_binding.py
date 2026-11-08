@@ -95,6 +95,7 @@ SAFETY_MODULES = frozenset(
         "crowley.native",
         "crowley.native.matcher",
         "crowley.native.pins",
+        "crowley.native.publication",
         "crowley.session",
         "crowley.session.calibration",
         "crowley.session.cli",

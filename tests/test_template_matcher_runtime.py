@@ -29,8 +29,10 @@ _ARTIFACT_ROOT_ENV = "CROWLEY_TEMPLATE_MATCHER_ARTIFACT_ROOT"
 def _release_paths() -> tuple[Path, Path, Path]:
     configured = os.environ.get(_ARTIFACT_ROOT_ENV)
     root = Path(configured).expanduser() if configured else runtime.default_artifact_root()
-    artifact = root / runtime.ARTIFACT_NAME
-    manifest = root / runtime.MANIFEST_NAME
+    if not (root / "current").is_symlink():
+        pytest.skip("retained matcher fixture has not been migrated to the current-pointer layout")
+    artifact = root / "current" / runtime.ARTIFACT_NAME
+    manifest = root / "current" / runtime.MANIFEST_NAME
     if not artifact.is_file() or not manifest.is_file():
         pytest.fail(
             "retained matcher release fixture is unavailable; set "
@@ -127,7 +129,13 @@ def matcher() -> runtime.TemplateMatcherRuntime:
 
 
 def test_actual_release_provenance_and_source_bindings(matcher: runtime.TemplateMatcherRuntime) -> None:
-    _root, _artifact, manifest_path = _release_paths()
+    configured = os.environ.get(_ARTIFACT_ROOT_ENV)
+    fixture_root = Path(configured).expanduser() if configured else runtime.default_artifact_root()
+    manifest_path = (
+        fixture_root / "current" / runtime.MANIFEST_NAME
+        if (fixture_root / "current").is_symlink()
+        else fixture_root / runtime.MANIFEST_NAME
+    )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert matcher.artifact_sha256 == runtime.EXPECTED_ARTIFACT_SHA256
     assert matcher.source_hashes == runtime.EXPECTED_SOURCE_HASHES
@@ -277,15 +285,25 @@ def _fake_runtime(
 ) -> runtime.TemplateMatcherRuntime:
     root = tmp_path / "release"
     root.mkdir(mode=0o700, parents=True)
-    script = root / runtime.ARTIFACT_NAME
-    script.write_text(body, encoding="utf-8")
-    script.chmod(0o700)
-    _root, _artifact, manifest_path = _release_paths()
+    configured = os.environ.get(_ARTIFACT_ROOT_ENV)
+    fixture_root = Path(configured).expanduser() if configured else runtime.default_artifact_root()
+    manifest_path = (
+        fixture_root / "current" / runtime.MANIFEST_NAME
+        if (fixture_root / "current").is_symlink()
+        else fixture_root / runtime.MANIFEST_NAME
+    )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    digest = hashlib.sha256(script.read_bytes()).hexdigest()
+    script_data = body.encode("utf-8")
+    digest = hashlib.sha256(script_data).hexdigest()
     manifest["artifact_sha256"] = digest
-    (root / runtime.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
-    (root / runtime.MANIFEST_NAME).chmod(0o600)
+    release = root / "releases" / digest
+    release.mkdir(mode=0o700, parents=True)
+    (release / runtime.ARTIFACT_NAME).write_bytes(script_data)
+    (release / runtime.ARTIFACT_NAME).chmod(0o700)
+    (release / runtime.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+    (release / runtime.MANIFEST_NAME).chmod(0o600)
+    (root / "releases").chmod(0o700)
+    (root / "current").symlink_to(Path("releases") / digest)
     monkeypatch.setattr(runtime, "EXPECTED_ARTIFACT_SHA256", digest)
     return runtime.TemplateMatcherRuntime(root)
 
@@ -533,12 +551,17 @@ def test_verified_fd_survives_binary_path_replacement(tmp_path: Path) -> None:
     _release, artifact, manifest = _assert_release_fixture()
     root = tmp_path / "release"
     root.mkdir(mode=0o700)
-    shutil.copy2(artifact, root / runtime.ARTIFACT_NAME)
-    shutil.copy2(manifest, root / runtime.MANIFEST_NAME)
-    (root / runtime.ARTIFACT_NAME).chmod(0o700)
-    (root / runtime.MANIFEST_NAME).chmod(0o600)
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    release = root / "releases" / digest
+    release.mkdir(mode=0o700, parents=True)
+    shutil.copy2(artifact, release / runtime.ARTIFACT_NAME)
+    shutil.copy2(manifest, release / runtime.MANIFEST_NAME)
+    (release / runtime.ARTIFACT_NAME).chmod(0o700)
+    (release / runtime.MANIFEST_NAME).chmod(0o600)
+    (root / "releases").chmod(0o700)
+    (root / "current").symlink_to(Path("releases") / digest)
     instance = runtime.TemplateMatcherRuntime(root)
-    original = root / runtime.ARTIFACT_NAME
+    original = root / "current" / runtime.ARTIFACT_NAME
     moved = root / "original"
     os.replace(original, moved)
     original.write_bytes(b"replacement is not the reviewed executable")
@@ -563,20 +586,25 @@ def test_provenance_tampering_is_refused(tmp_path: Path, tamper: str) -> None:
     _release, artifact, manifest = _assert_release_fixture()
     root = tmp_path / "release"
     root.mkdir(mode=0o700)
-    shutil.copy2(artifact, root / runtime.ARTIFACT_NAME)
-    shutil.copy2(manifest, root / runtime.MANIFEST_NAME)
-    (root / runtime.ARTIFACT_NAME).chmod(0o700)
-    (root / runtime.MANIFEST_NAME).chmod(0o600)
+    digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+    release = root / "releases" / digest
+    release.mkdir(mode=0o700, parents=True)
+    shutil.copy2(artifact, release / runtime.ARTIFACT_NAME)
+    shutil.copy2(manifest, release / runtime.MANIFEST_NAME)
+    (release / runtime.ARTIFACT_NAME).chmod(0o700)
+    (release / runtime.MANIFEST_NAME).chmod(0o600)
+    (root / "releases").chmod(0o700)
+    (root / "current").symlink_to(Path("releases") / digest)
     if tamper == "manifest":
-        manifest = json.loads((root / runtime.MANIFEST_NAME).read_text(encoding="utf-8"))
+        manifest = json.loads((root / "current" / runtime.MANIFEST_NAME).read_text(encoding="utf-8"))
         manifest["source_hashes"]["Cargo.toml"] = "0" * 64
-        (root / runtime.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
-        (root / runtime.MANIFEST_NAME).chmod(0o600)
+        (root / "current" / runtime.MANIFEST_NAME).write_text(json.dumps(manifest), encoding="utf-8")
+        (root / "current" / runtime.MANIFEST_NAME).chmod(0o600)
     elif tamper == "binary":
-        (root / runtime.ARTIFACT_NAME).write_bytes(b"tampered")
-        (root / runtime.ARTIFACT_NAME).chmod(0o700)
+        (root / "current" / runtime.ARTIFACT_NAME).write_bytes(b"tampered")
+        (root / "current" / runtime.ARTIFACT_NAME).chmod(0o700)
     else:
-        (root / runtime.ARTIFACT_NAME).unlink()
-        (root / runtime.ARTIFACT_NAME).symlink_to(artifact)
+        (root / "current" / runtime.ARTIFACT_NAME).unlink()
+        (root / "current" / runtime.ARTIFACT_NAME).symlink_to(artifact)
     with pytest.raises(runtime.ArtifactError):
         runtime.TemplateMatcherRuntime(root)

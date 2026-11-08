@@ -16,10 +16,18 @@ import psycopg
 
 from crowley.core.house import House
 from crowley.core.scanformat import ScanFormatError, normalize_observation, validate_envelope
+from crowley.store.houses import ensure_house as _store_ensure_house
+from crowley.store.sweeps import (
+    SweepConflictError as _SweepConflictError,
+)
+from crowley.store.sweeps import (
+    claim_sweep,
+    insert_owned,
+    insert_sold_evidence,
+    persist_sweep,
+)
 
-
-class SweepConflictError(Exception):
-    """The UID is already claimed by a different logical sweep."""
+SweepConflictError = _SweepConflictError
 
 
 @dataclass
@@ -49,14 +57,9 @@ def _ts(epoch: int) -> datetime:
 
 
 def ensure_house(conn: psycopg.Connection, house: House) -> int:
-    row = conn.execute(
-        "INSERT INTO houses (key, region, ruleset, faction) VALUES (%s, %s, %s, %s)"
-        " ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key RETURNING id",
-        (house.key, house.region, house.ruleset, house.faction),
-    ).fetchone()
-    if row is None:
-        raise RuntimeError("house upsert did not return an id")
-    return row[0]
+    """Compatibility wrapper for callers migrating to the houses adapter."""
+
+    return _store_ensure_house(conn, house)
 
 
 def _logical_digest(envelope: dict[str, Any], decoded: dict[str, Any]) -> str:
@@ -102,23 +105,9 @@ def _validate_storable_query_times(decoded: dict[str, Any]) -> None:
 def _insert_owned(
     conn: psycopg.Connection, sweep_id: int, house_id: int, character: str, owned: dict[str, Any]
 ) -> None:
-    conn.execute(
-        """
-        INSERT INTO owned_observations
-          (sweep_id, house_id, character, status, query, reason_code, row_count, rows)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
-        """,
-        (
-            sweep_id,
-            house_id,
-            character,
-            owned["status"],
-            json.dumps(owned["query"]),
-            owned["reasonCode"],
-            owned["rowCount"],
-            json.dumps(owned["rows"]),
-        ),
-    )
+    """Compatibility seam delegating owned-observation SQL to the adapter."""
+
+    insert_owned(conn, sweep_id, house_id, character, owned)
 
 
 def _insert_sold_evidence(
@@ -131,99 +120,12 @@ def _insert_sold_evidence(
     if owned["status"] != "full" or owned["query"].get("kind") != "queried":
         return
     owned_finished = _ts(owned["query"]["finishedAt"])
-    # The query interval is the evidence window.  The sweep interval may be
-    # much wider because owned auctions are collected after market items.
-    window = {
-        "startedAt": owned["query"]["startedAt"],
-        "finishedAt": owned["query"]["finishedAt"],
-    }
-    for row in owned["rows"].values():
-        if row["status"] != "sold":
-            continue
-        buyout = row["buyout"].get("copper") if row["buyout"]["kind"] == "known" else None
-        existing = conn.execute(
-            """
-            SELECT quantity, listed_buyout, item_id, item_key, raw_item_key, item_link,
-                   first_seen_sold_at
-            FROM own_sale_evidence
-            WHERE house_id=%s AND character=%s AND auction_id=%s FOR UPDATE
-            """,
-            (house_id, character, row["auctionID"]),
-        ).fetchone()
-        inconsistent = bool(
-            existing
-            and (
-                existing[0] != row["quantity"]
-                or existing[1] != buyout
-                or existing[2] != row["itemID"]
-                or existing[3] != row["itemKey"]
-                or existing[4] != row["rawItemKey"]
-                or existing[5] != row["itemLink"]
-            )
-        )
-        if existing:
-            conn.execute(
-                """
-                UPDATE own_sale_evidence
-                SET inconsistent = inconsistent OR %s,
-                    first_seen_sweep_id = CASE
-                        WHEN first_seen_sold_at > %s THEN %s ELSE first_seen_sweep_id END,
-                    observation_window = CASE
-                        WHEN first_seen_sold_at > %s THEN %s ELSE observation_window END,
-                    first_seen_sold_at = CASE
-                        WHEN first_seen_sold_at > %s THEN %s ELSE first_seen_sold_at END
-                WHERE house_id=%s AND character=%s AND auction_id=%s
-                """,
-                (
-                    inconsistent,
-                    owned_finished,
-                    sweep_id,
-                    owned_finished,
-                    json.dumps(window),
-                    owned_finished,
-                    owned_finished,
-                    house_id,
-                    character,
-                    row["auctionID"],
-                ),
-            )
-        else:
-            conn.execute(
-                """
-                INSERT INTO own_sale_evidence
-                  (house_id, character, auction_id, first_seen_sold_at, first_seen_sweep_id,
-                   item_id, item_key, raw_item_key, quantity, listed_buyout, item_link, observation_window)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    house_id,
-                    character,
-                    row["auctionID"],
-                    owned_finished,
-                    sweep_id,
-                    row["itemID"],
-                    row["itemKey"],
-                    json.dumps(row["rawItemKey"]),
-                    row["quantity"],
-                    buyout,
-                    row["itemLink"],
-                    json.dumps(window),
-                ),
-            )
+    insert_sold_evidence(conn, sweep_id, house_id, character, owned, owned_finished)
 
 
-def ingest_market_sweep(conn: psycopg.Connection, raw: dict[str, Any], data_dir: Path) -> IngestResult:
-    """Validate and atomically persist one accepted-format sweep."""
-    try:
-        validated = validate_envelope(raw)
-    except ScanFormatError:
-        raise
-    except Exception as exc:
-        # A malformed nested JSON value must never become a 500 (and must not
-        # reach archive or database code).  The wire validator intentionally
-        # reports its own domain errors; this catches type errors from every
-        # other malformed shape.
-        raise ScanFormatError("malformed format-2-or-3 envelope") from exc
+def _persist_market_sweep(conn: psycopg.Connection, raw: dict[str, Any], data_dir: Path) -> IngestResult:
+    """Validate and persist one accepted-format sweep in the caller's transaction."""
+    validated = validate_envelope(raw)
     decoded = validated["decoded"]
     plan = validated["plan"]
     normalized_observations = {
@@ -244,117 +146,42 @@ def ingest_market_sweep(conn: psycopg.Connection, raw: dict[str, Any], data_dir:
     started_at = _ts(raw["startedAt"])
     finished_at = _ts(raw["finishedAt"])
     _validate_storable_query_times(decoded)
-    with conn.transaction():
-        # The advisory lock serializes the cross-table legacy/v2 UID claim.
-        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (envelope_id,))
-        legacy = conn.execute("SELECT 1 FROM scans WHERE scan_uid=%s", (envelope_id,)).fetchone()
-        existing = conn.execute(
-            "SELECT content_digest, house_id FROM market_sweeps WHERE sweep_uid=%s FOR UPDATE", (envelope_id,)
-        ).fetchone()
-        if legacy:
-            raise SweepConflictError("sweep UID collides with legacy scan")
-        if existing:
-            if existing[0] != digest:
-                raise SweepConflictError("sweep UID has different content")
-            # A previous transaction may have committed the DB row before a
-            # filesystem restore.  Recreate only this content-addressed path;
-            # never overwrite a different archive.
-            _archive_envelope(data_dir, raw, digest)
-            return IngestResult(
-                envelope_id, house.key, "duplicate", raw["numRows"], raw["numObservations"], raw["format"]
-            )
-        # The archive is created only after validation and UID conflict checks.
-        # It is still inside the DB transaction, so an insert failure rolls the
-        # database back; the immutable archive is then simply unreferenced.
-        path = _archive_envelope(data_dir, raw, digest)
-        house_id = ensure_house(conn, house)
-        conn.execute(
-            """
-            INSERT INTO market_plans (plan_hash, plan_json, plan_body)
-            VALUES (%s,%s,%s) ON CONFLICT (plan_hash) DO NOTHING
-            """,
-            (decoded["planHash"], decoded["planJSON"], json.dumps(plan)),
+    claim = claim_sweep(conn, envelope_id, digest)
+    if claim.duplicate:
+        # A previous transaction may have committed the DB row before a
+        # filesystem restore. Recreate only this content-addressed path.
+        _archive_envelope(data_dir, raw, digest)
+        return IngestResult(
+            envelope_id, house.key, "duplicate", raw["numRows"], raw["numObservations"], raw["format"]
         )
-        sweep_row = conn.execute(
-            """
-            INSERT INTO market_sweeps
-              (sweep_uid, house_id, plan_hash, started_at, finished_at, character,
-               client_version, client_build, interface, house_source, num_rows,
-               num_observations, context, payload, content_digest, raw_path)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            RETURNING id
-            """,
-            (
-                envelope_id,
-                house_id,
-                decoded["planHash"],
-                started_at,
-                finished_at,
-                context["character"],
-                context["clientVersion"],
-                context["clientBuild"],
-                context["interface"],
-                house_raw["source"],
-                raw["numRows"],
-                raw["numObservations"],
-                json.dumps(context),
-                json.dumps(decoded),
-                digest,
-                str(path),
-            ),
-        ).fetchone()
-        if sweep_row is None:
-            raise RuntimeError("sweep insert did not return an id")
-        sweep_id = sweep_row[0]
-        for item_key, observation in normalized_observations.items():
-            conn.execute(
-                """
-                INSERT INTO market_observations
-                  (sweep_id, house_id, item_id, item_key, ordinal, kind, query,
-                   coverage, source_complete, cutoff, higher_price_witness, reason_code,
-                   row_count, observation)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                """,
-                (
-                    sweep_id,
-                    house_id,
-                    observation["itemID"],
-                    item_key,
-                    observation["ordinal"],
-                    observation["kind"],
-                    json.dumps(observation["query"]),
-                    observation["coverage"],
-                    observation["sourceComplete"],
-                    json.dumps(observation["cutoff"]),
-                    json.dumps(observation["higherPriceWitness"]),
-                    observation["reasonCode"],
-                    observation["rowCount"],
-                    json.dumps(observation),
-                ),
-            )
-            for row_key, row in observation["rows"].items():
-                conn.execute(
-                    """
-                    INSERT INTO market_captured_rows
-                      (sweep_id,item_id,row_key,result_id,item_key,raw_item_key,quantity,
-                       unit_numerator,unit_denominator,row_data)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                    """,
-                    (
-                        sweep_id,
-                        observation["itemID"],
-                        row_key,
-                        row["resultID"],
-                        row["itemKey"],
-                        json.dumps(row["rawItemKey"]),
-                        row["quantity"],
-                        row["unitPrice"]["numerator"],
-                        row["unitPrice"]["denominator"],
-                        json.dumps(row),
-                    ),
-                )
-        _insert_owned(conn, sweep_id, house_id, context["character"], decoded["owned"])
-        _insert_sold_evidence(conn, sweep_id, house_id, context["character"], decoded["owned"])
+
+    # The archive is created only after validation and UID conflict checks.
+    # It is still inside the caller's DB transaction, so an insert failure
+    # rolls the database back; the immutable archive is then unreferenced.
+    path = _archive_envelope(data_dir, raw, digest)
+    write = persist_sweep(
+        conn,
+        envelope_id=envelope_id,
+        raw=raw,
+        decoded=decoded,
+        plan=plan,
+        normalized_observations=normalized_observations,
+        digest=digest,
+        house=house,
+        house_source=house_raw["source"],
+        started_at=started_at,
+        finished_at=finished_at,
+        context=context,
+        raw_path=str(path),
+    )
+    _insert_owned(conn, write.sweep_id, write.house_id, context["character"], decoded["owned"])
+    _insert_sold_evidence(conn, write.sweep_id, write.house_id, context["character"], decoded["owned"])
     return IngestResult(
         envelope_id, house.key, "created", raw["numRows"], raw["numObservations"], raw["format"]
     )
+
+
+def ingest_market_sweep(conn: psycopg.Connection, raw: dict[str, Any], data_dir: Path) -> IngestResult:
+    """Validate and persist a sweep in the caller-owned transaction."""
+
+    return _persist_market_sweep(conn, raw, data_dir)

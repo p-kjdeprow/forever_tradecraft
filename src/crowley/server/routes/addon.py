@@ -5,6 +5,8 @@ import time
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from crowley.store.sweeps import acknowledged_scan_ids
+
 from ..deps import Authed
 
 router = APIRouter()
@@ -37,17 +39,7 @@ def addon_data(body: AddonDataRequest, request: Request) -> AddonDataResponse:
     acked: list[str] = []
     if body.scan_ids:
         with request.app.state.pool.connection() as conn:
-            acked = [
-                row[0]
-                for row in conn.execute(
-                    """
-                    SELECT scan_uid FROM scans WHERE scan_uid = ANY(%s)
-                    UNION
-                    SELECT sweep_uid FROM market_sweeps WHERE sweep_uid = ANY(%s)
-                    """,
-                    (body.scan_ids, body.scan_ids),
-                )
-            ]
+            acked = acknowledged_scan_ids(conn, body.scan_ids)
     return AddonDataResponse(
         generatedAt=int(time.time()),
         ackedScans=sorted(acked, key=lambda item: item.encode()),

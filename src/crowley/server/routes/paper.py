@@ -4,31 +4,13 @@ from decimal import Decimal
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from psycopg.rows import dict_row
+
+from crowley.store.paper import list_paper_runs as store_list_paper_runs
+from crowley.store.paper import paper_run_detail
 
 from ..deps import Authed
 
 router = APIRouter()
-
-
-def _paper_run_query() -> str:
-    return """
-        SELECT pr.id, pr.name, h.key AS house, pr.client_build, pr.start_t,
-               pr.capital_copper, pr.strategies, pr.weights, pr.demand_share,
-               pr.created_at, latest.step_t AS latest_step_t,
-               latest.equity AS latest_equity, latest.realized AS latest_realized,
-               pending.step_t AS pending_step_t
-        FROM paper_runs AS pr
-        JOIN houses AS h ON h.id = pr.house_id
-        LEFT JOIN LATERAL (
-            SELECT step_t, equity, realized
-            FROM paper_steps
-            WHERE run_id = pr.id
-            ORDER BY step_t DESC
-            LIMIT 1
-        ) AS latest ON TRUE
-        LEFT JOIN paper_pending AS pending ON pending.run_id = pr.id
-    """
 
 
 _PAPER_COPPER_MAPS = frozenset(("equity", "realized", "cash"))
@@ -87,8 +69,8 @@ def _paper_run_payload(row: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/v1/paper/runs", dependencies=[Authed])
 def list_paper_runs(request: Request) -> list[dict[str, Any]]:
-    with request.app.state.pool.connection() as conn, conn.cursor(row_factory=dict_row) as cur:
-        rows = cur.execute(_paper_run_query() + " ORDER BY pr.name").fetchall()
+    with request.app.state.pool.connection() as conn:
+        rows = store_list_paper_runs(conn)
     return [_paper_run_payload(row) for row in rows]
 
 
@@ -96,40 +78,9 @@ def list_paper_runs(request: Request) -> list[dict[str, Any]]:
 def paper_run(name: str, request: Request) -> dict[str, Any]:
     with request.app.state.pool.connection() as conn:
         with conn.transaction():
-            conn.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            conn.execute("SET TRANSACTION READ ONLY")
-            with conn.cursor(row_factory=dict_row) as cur:
-                run = cur.execute(_paper_run_query() + " WHERE pr.name = %s", (name,)).fetchone()
-                if run is None:
-                    raise HTTPException(status_code=404, detail="unknown paper run")
-
-                curve_rows = cur.execute(
-                    """
-                    SELECT step_t, equity, realized, cash
-                    FROM paper_steps
-                    WHERE run_id = %s
-                    ORDER BY step_t
-                    """,
-                    (run["id"],),
-                ).fetchall()
-                intent_rows = cur.execute(
-                    """
-                    SELECT step_t AS t, strategy, ordinal, intent, outcome, detail
-                    FROM paper_intents
-                    WHERE run_id = %s
-                    ORDER BY step_t DESC, strategy, ordinal DESC
-                    LIMIT 200
-                    """,
-                    (run["id"],),
-                ).fetchall()
-                pending = cur.execute(
-                    """
-                    SELECT step_t AS t, sweep_key, intents
-                    FROM paper_pending
-                    WHERE run_id = %s
-                    """,
-                    (run["id"],),
-                ).fetchone()
+            run, curve_rows, intent_rows, pending = paper_run_detail(conn, name)
+            if run is None:
+                raise HTTPException(status_code=404, detail="unknown paper run")
 
     payload = _paper_run_payload(run)
     payload.update(

@@ -16,6 +16,7 @@ from pathlib import Path
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
 from crowley.core.queue import build_queue
@@ -454,6 +455,219 @@ def _migration_untouched_snapshot(sweep_id: int) -> dict[str, list[tuple]]:
         }
 
 
+def _canonical_json(value):
+    if isinstance(value, dict):
+        return {key: _canonical_json(value[key]) for key in sorted(value)}
+    if isinstance(value, list):
+        return [_canonical_json(child) for child in value]
+    if isinstance(value, datetime):
+        return int(value.timestamp())
+    return value
+
+
+def _canonical_persistence_dump(sweep_uid: str, plan_hash: str) -> dict[str, list[dict]]:
+    """Dump all rows for one accepted envelope with generated values symbolic."""
+
+    with psycopg.connect(DB_URL) as conn, conn.cursor(row_factory=dict_row) as cur:
+        sweep = cur.execute(
+            "SELECT * FROM market_sweeps WHERE sweep_uid=%s",
+            (sweep_uid,),
+        ).fetchone()
+        assert sweep is not None
+        sweep_id = sweep["id"]
+        plan = cur.execute("SELECT * FROM market_plans WHERE plan_hash=%s", (plan_hash,)).fetchone()
+        assert plan is not None
+        observations = cur.execute(
+            "SELECT * FROM market_observations WHERE sweep_id=%s ORDER BY ordinal",
+            (sweep_id,),
+        ).fetchall()
+        captured = cur.execute(
+            "SELECT * FROM market_captured_rows WHERE sweep_id=%s ORDER BY item_id, row_key",
+            (sweep_id,),
+        ).fetchall()
+        owned = cur.execute(
+            "SELECT * FROM owned_observations WHERE sweep_id=%s",
+            (sweep_id,),
+        ).fetchall()
+        sales = cur.execute(
+            "SELECT * FROM own_sale_evidence WHERE first_seen_sweep_id=%s ORDER BY character, auction_id",
+            (sweep_id,),
+        ).fetchall()
+
+    canonical_sweep = _canonical_json(dict(sweep))
+    canonical_sweep["id"] = "SWEEP_ID"
+    canonical_sweep["house_id"] = "HOUSE_ID"
+    canonical_sweep["received_at"] = "<generated>"
+    canonical_sweep["raw_path"] = "<archive>"
+
+    canonical_plan = _canonical_json(dict(plan))
+    canonical_plan["created_at"] = "<generated>"
+
+    canonical_observations = []
+    for row in observations:
+        value = _canonical_json(dict(row))
+        value["sweep_id"] = "SWEEP_ID"
+        value["house_id"] = "HOUSE_ID"
+        canonical_observations.append(value)
+
+    canonical_captured = []
+    for row in captured:
+        value = _canonical_json(dict(row))
+        value["sweep_id"] = "SWEEP_ID"
+        canonical_captured.append(value)
+
+    canonical_owned = []
+    for row in owned:
+        value = _canonical_json(dict(row))
+        value["sweep_id"] = "SWEEP_ID"
+        value["house_id"] = "HOUSE_ID"
+        canonical_owned.append(value)
+
+    canonical_sales = []
+    for row in sales:
+        value = _canonical_json(dict(row))
+        value["house_id"] = "HOUSE_ID"
+        value["first_seen_sweep_id"] = "SWEEP_ID"
+        canonical_sales.append(value)
+
+    return {
+        "market_plans": [canonical_plan],
+        "market_sweeps": [canonical_sweep],
+        "market_observations": canonical_observations,
+        "market_captured_rows": canonical_captured,
+        "owned_observations": canonical_owned,
+        "own_sale_evidence": canonical_sales,
+    }
+
+
+def _expected_persistence_dump(raw: dict) -> dict[str, list[dict]]:
+    """Compute the normalized persistence contract from the envelope alone."""
+
+    validated = validate_envelope(raw)
+    decoded = validated["decoded"]
+    plan = validated["plan"]
+    observations = decoded["observations"]
+    logical = {key: value for key, value in raw.items() if key != "payload"}
+    logical["payload"] = decoded
+    digest = hashlib.sha256(
+        json.dumps(logical, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+    expected_observations = []
+    expected_captured = []
+    for item_key, observation in sorted(observations.items(), key=lambda entry: int(entry[0])):
+        expected_observations.append(
+            {
+                "sweep_id": "SWEEP_ID",
+                "house_id": "HOUSE_ID",
+                "item_id": observation["itemID"],
+                "item_key": item_key,
+                "ordinal": observation["ordinal"],
+                "kind": observation["kind"],
+                "query": observation["query"],
+                "coverage": observation["coverage"],
+                "source_complete": observation["sourceComplete"],
+                "cutoff": observation["cutoff"],
+                "higher_price_witness": observation["higherPriceWitness"],
+                "reason_code": observation["reasonCode"],
+                "row_count": observation["rowCount"],
+                "observation": observation,
+            }
+        )
+        for row_key, row in sorted(observation["rows"].items()):
+            expected_captured.append(
+                {
+                    "sweep_id": "SWEEP_ID",
+                    "item_id": observation["itemID"],
+                    "row_key": row_key,
+                    "result_id": row["resultID"],
+                    "item_key": row["itemKey"],
+                    "raw_item_key": row["rawItemKey"],
+                    "quantity": row["quantity"],
+                    "unit_numerator": row["unitPrice"]["numerator"],
+                    "unit_denominator": row["unitPrice"]["denominator"],
+                    "row_data": row,
+                }
+            )
+
+    owned = decoded["owned"]
+    expected_sales = []
+    if owned["status"] == "full" and owned["query"].get("kind") == "queried":
+        for row in owned["rows"].values():
+            if row["status"] != "sold":
+                continue
+            buyout = row["buyout"]["copper"] if row["buyout"]["kind"] == "known" else None
+            expected_sales.append(
+                {
+                    "house_id": "HOUSE_ID",
+                    "character": raw["context"]["character"],
+                    "auction_id": row["auctionID"],
+                    "first_seen_sold_at": owned["query"]["finishedAt"],
+                    "first_seen_sweep_id": "SWEEP_ID",
+                    "item_id": row["itemID"],
+                    "item_key": row["itemKey"],
+                    "raw_item_key": row["rawItemKey"],
+                    "quantity": row["quantity"],
+                    "listed_buyout": buyout,
+                    "item_link": row["itemLink"],
+                    "observation_window": {
+                        "startedAt": owned["query"]["startedAt"],
+                        "finishedAt": owned["query"]["finishedAt"],
+                    },
+                    "inconsistent": False,
+                }
+            )
+    expected_sales.sort(key=lambda row: (row["character"], row["auction_id"]))
+
+    return {
+        "market_plans": [
+            {
+                "plan_hash": decoded["planHash"],
+                "plan_json": decoded["planJSON"],
+                "plan_body": plan,
+                "created_at": "<generated>",
+            }
+        ],
+        "market_sweeps": [
+            {
+                "id": "SWEEP_ID",
+                "sweep_uid": raw["id"],
+                "house_id": "HOUSE_ID",
+                "plan_hash": decoded["planHash"],
+                "started_at": raw["startedAt"],
+                "finished_at": raw["finishedAt"],
+                "received_at": "<generated>",
+                "character": raw["context"]["character"],
+                "client_version": raw["context"]["clientVersion"],
+                "client_build": raw["context"]["clientBuild"],
+                "interface": raw["context"]["interface"],
+                "house_source": raw["house"]["source"],
+                "num_rows": raw["numRows"],
+                "num_observations": raw["numObservations"],
+                "context": raw["context"],
+                "payload": decoded,
+                "content_digest": digest,
+                "raw_path": "<archive>",
+            }
+        ],
+        "market_observations": expected_observations,
+        "market_captured_rows": expected_captured,
+        "owned_observations": [
+            {
+                "sweep_id": "SWEEP_ID",
+                "house_id": "HOUSE_ID",
+                "character": raw["context"]["character"],
+                "status": owned["status"],
+                "query": owned["query"],
+                "reason_code": owned["reasonCode"],
+                "row_count": owned["rowCount"],
+                "rows": owned["rows"],
+            }
+        ],
+        "own_sale_evidence": expected_sales,
+    }
+
+
 def test_houses_are_kept_separate(client):
     now = int(time.time())
     assert (
@@ -752,6 +966,13 @@ def test_v1_and_malformed_v2_are_rejected(client):
     assert client.get("/v1/houses/us-normal-orcs/latest").status_code == 400
 
 
+def test_probe_body_is_strictly_validated(client):
+    assert client.post("/v1/probes", json={}).status_code == 422
+    assert client.post("/v1/probes", json={"at": True}).status_code == 422
+    assert client.post("/v1/probes", json={"at": 10**12}).status_code == 422
+    assert client.post("/v1/probes", json={"at": int(time.time()), "surface": {}}).status_code == 200
+
+
 def test_volume_route_uses_market_rows_only(client):
     now = int(time.time())
     assert client.post("/v1/scans", json=scan("v1", "horde", at=now - 30)).status_code == 200
@@ -771,8 +992,22 @@ def test_real_addon_envelope_reaches_archive_history_and_volume(client):
     # into the API's 168-hour volume window before producing SavedVariables.
     addon.advance(365 * 24 * 60 * 60)
     raw = run_sweep(addon)
-    response = client.post("/v1/scans", json=envelope(raw))
+    received = envelope(raw)
+    response = client.post("/v1/scans", json=received)
     assert response.status_code == 200, response.text
+
+    decoded = validate_envelope(received)["decoded"]
+    persistence_actual = _canonical_persistence_dump(received["id"], decoded["planHash"])
+    persistence_expected = _expected_persistence_dump(received)
+    assert {table: len(rows) for table, rows in persistence_actual.items()} == {
+        "market_plans": 1,
+        "market_sweeps": 1,
+        "market_observations": raw["numObservations"],
+        "market_captured_rows": raw["numRows"],
+        "owned_observations": 1,
+        "own_sale_evidence": len(persistence_expected["own_sale_evidence"]),
+    }
+    assert persistence_actual == persistence_expected
 
     history_response = client.get("/v1/houses/us-normal-horde/items/2589/history?days=365")
     assert history_response.status_code == 200, history_response.text
@@ -784,6 +1019,43 @@ def test_real_addon_envelope_reaches_archive_history_and_volume(client):
     volume = volume_response.json()
     assert volume["latestObservation"]["itemID"] == 2589
     assert volume["marketActualSalesEstimate"] is None
+
+
+def test_volume_latest_uses_observation_effective_end_for_stale_overlaps(client):
+    base = int(time.time()) - 30 * 24 * 60 * 60
+
+    outerly_latest = scan("stale-outerly-latest", "horde", at=base + 200)
+    outerly_latest_payload = decode_json_payload(outerly_latest["payload"])
+    outerly_latest_payload["observations"]["2589"]["query"] = {
+        "kind": "queried",
+        "startedAt": base + 100,
+        "finishedAt": base + 110,
+    }
+    outerly_latest["startedAt"] = base + 100
+    outerly_latest["finishedAt"] = base + 200
+    outerly_latest["payload"] = encode_json_payload(outerly_latest_payload)
+
+    query_latest = scan("stale-query-latest", "horde", at=base + 150)
+    query_latest_payload = decode_json_payload(query_latest["payload"])
+    query_latest_payload["observations"]["2589"]["query"] = {
+        "kind": "queried",
+        "startedAt": base,
+        "finishedAt": base + 140,
+    }
+    query_latest["startedAt"] = base
+    query_latest["finishedAt"] = base + 150
+    query_latest["payload"] = encode_json_payload(query_latest_payload)
+
+    assert client.post("/v1/scans", json=outerly_latest).status_code == 200
+    assert client.post("/v1/scans", json=query_latest).status_code == 200
+
+    before = int(time.time())
+    response = client.get("/v1/houses/us-normal-horde/items/2589/volume?hours=168")
+    after = int(time.time())
+    assert response.status_code == 200, response.text
+    volume = response.json()
+    assert volume["latestObservation"]["query"]["finishedAt"] == base + 140
+    assert before - (base + 140) <= volume["freshness"] <= after - (base + 140)
 
 
 def test_ingest_normalizes_format2_but_keeps_received_payload_and_accepts_format3(client):
@@ -1092,7 +1364,7 @@ def test_database_rollback_leaves_no_sweep_reference(monkeypatch, client):
 
     monkeypatch.setattr(ingest_module, "_insert_owned", fail)
     with psycopg.connect(DB_URL) as conn:
-        with pytest.raises(RuntimeError, match="forced test rollback"):
+        with pytest.raises(RuntimeError, match="forced test rollback"), conn.transaction():
             ingest_module.ingest_market_sweep(conn, raw, data_dir)
         assert conn.execute("SELECT count(*) FROM market_sweeps").fetchone()[0] == 0
     # The immutable archive may be left unreferenced after a DB rollback; it is

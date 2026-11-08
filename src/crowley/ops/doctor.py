@@ -4,15 +4,29 @@ from __future__ import annotations
 
 import hashlib
 import os
-import re
 import stat
-import tomllib
+import subprocess
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 import psycopg
 
+from crowley.config import (
+    BinaryConfigError,
+    CompanionResolvedConfig,
+    CompanionTunables,
+    HostConfig,
+    HostConfigError,
+    TunablesError,
+    host_config_path,
+    load_companion_tunables,
+    load_host_config,
+    load_pinned_binaries,
+    load_session_tunables,
+    resolve_companion,
+    resolve_pinned_observer,
+)
 from crowley.core import savedvars
 from crowley.core.game_target import GameTarget, packaged_game_target
 from crowley.platform import privfs
@@ -21,7 +35,6 @@ from crowley.server.db import MigrationStatus, create_pool, migration_status
 
 from . import install
 
-ACCOUNT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._#-]*\Z")
 MAX_CONFIG_BYTES = 256 * 1024
 
 
@@ -37,24 +50,6 @@ class DoctorReport:
 
 
 DatabaseCheck = Callable[[str], MigrationStatus]
-
-
-def _load_toml(path: Path) -> dict[str, object]:
-    raw = tomllib.loads(privfs.read_bounded(path, MAX_CONFIG_BYTES).decode("utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"configuration is not a TOML table: {path}")
-    return raw
-
-
-def _nested_values(value: object) -> tuple[tuple[str, object], ...]:
-    if not isinstance(value, dict):
-        return ()
-    result: list[tuple[str, object]] = []
-    for key, child in value.items():
-        if isinstance(key, str):
-            result.append((key, child))
-            result.extend(_nested_values(child))
-    return tuple(result)
 
 
 def _home(environ: Mapping[str, str]) -> Path:
@@ -282,73 +277,97 @@ def _check_launcher(plan: install.InstallPlan, problems: list[str]) -> None:
         problems.append(f"launcher must have mode 0700: {path}")
 
 
-def _check_pinned_binary(
-    path_value: object,
-    expected_digest: object,
-    name: str,
-    problems: list[str],
-) -> None:
-    if not isinstance(path_value, str) or not path_value:
-        problems.append(f"pinned binary path is missing: {name}")
-        return
-    if not isinstance(expected_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_digest):
-        problems.append(f"pinned binary sha256 is missing or invalid: {name}")
-        return
+def _check_host(xdg: XdgDirs, problems: list[str]) -> HostConfig | None:
+    path = host_config_path(
+        {
+            "XDG_CONFIG_HOME": str(xdg.config_home),
+            "HOME": str(xdg.config_home.parent),
+        }
+    )
     try:
-        binary = Path(path_value).expanduser()
-        if not binary.is_absolute():
-            problems.append(f"pinned binary path is not absolute: {binary}")
-            return
-        info = binary.lstat()
-    except (OSError, ValueError):
-        problems.append(f"pinned binary unavailable: {name}")
-        return
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        problems.append(f"pinned binary is not a regular file: {binary}")
-        return
-    if not info.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
-        problems.append(f"pinned binary is not executable: {binary}")
-        return
-    try:
-        actual = _file_digest(binary)
-    except (OSError, privfs.PrivateFileError):
-        problems.append(f"pinned binary unavailable: {binary}")
-        return
-    if actual != expected_digest:
-        problems.append(f"pinned binary digest mismatch: {binary}")
+        return load_host_config(path)
+    except HostConfigError as exc:
+        problems.append(str(exc))
+        return None
 
 
-def _check_pins(xdg: XdgDirs, problems: list[str]) -> None:
+def _check_tunables(xdg: XdgDirs, problems: list[str]) -> None:
     path = xdg.crowley_config / "session.toml"
     try:
-        raw = _load_toml(path)
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError, privfs.PrivateFileError) as exc:
-        problems.append(f"session config unavailable for pinned binaries: {path} ({exc})")
-        return
-    values = dict(_nested_values(raw))
-    for name in ("identity_observer_executable", "telemetry_region_executable"):
-        _check_pinned_binary(values.get(name), values.get(f"{name}_sha256"), name, problems)
+        load_session_tunables(path)
+    except (OSError, TunablesError, ValueError) as exc:
+        problems.append(f"session.toml is invalid: {exc}")
 
-    codex_path = values.get("codex_path")
-    if not isinstance(codex_path, str) or not codex_path:
-        problems.append("codex_path is required")
+
+def _check_binary(
+    path: Path,
+    *,
+    label: str,
+    expected_digest: str | None,
+    expected_version: str | None,
+    problems: list[str],
+) -> None:
+    if not path.is_absolute() or path == Path("/") or ".." in path.parts:
+        problems.append(f"{label} path is not absolute: {path}")
+        return
+    try:
+        metadata = path.lstat()
+    except OSError:
+        problems.append(f"{label} is unavailable: {path}")
+        return
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        problems.append(f"{label} is not a regular file: {path}")
+        return
+    if metadata.st_uid != os.getuid():
+        problems.append(f"{label} is not owned by the current user: {path}")
+    if not metadata.st_mode & stat.S_IXUSR or metadata.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        problems.append(f"{label} permissions are unsafe: {path}")
+    try:
+        digest = _file_digest(path)
+    except (OSError, privfs.PrivateFileError):
+        problems.append(f"{label} cannot be read: {path}")
     else:
-        binary = Path(codex_path).expanduser()
-        if not binary.is_absolute():
-            problems.append(f"codex executable path is not absolute: {binary}")
-        else:
-            try:
-                info = binary.lstat()
-            except OSError:
-                problems.append(f"codex executable is unavailable: {binary}")
-            else:
-                if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-                    problems.append(f"codex executable is not a regular file: {binary}")
-                elif not info.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
-                    problems.append(f"codex executable is not executable: {binary}")
-    cli_version = values.get("cli_version")
-    if cli_version != "codex-cli 0.162.1":
-        problems.append("codex CLI version does not match the pinned version")
+        if expected_digest is not None and digest != expected_digest:
+            problems.append(f"{label} digest mismatch: {path}")
+    if expected_version is None:
+        return
+    try:
+        result = subprocess.run(
+            [str(path), "--version"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        problems.append(f"{label} version could not be checked: {path} ({exc})")
+        return
+    version = result.stdout.strip()
+    if result.returncode != 0 or version != expected_version:
+        problems.append(f"{label} version does not match the pin: {path}")
+
+
+def _check_pinned_binaries(xdg: XdgDirs, environ: Mapping[str, str], problems: list[str]) -> None:
+    try:
+        binaries = load_pinned_binaries(environ)
+    except BinaryConfigError as exc:
+        problems.append(str(exc))
+    else:
+        _check_binary(
+            binaries.codex_path,
+            label="pinned Codex executable",
+            expected_digest=None,
+            expected_version=binaries.cli_version,
+            problems=problems,
+        )
+    observer = resolve_pinned_observer(xdg)
+    _check_binary(
+        observer.path,
+        label="pinned identity observer",
+        expected_digest=observer.sha256,
+        expected_version=None,
+        problems=problems,
+    )
 
 
 def _secret_values(path: Path) -> dict[str, str]:
@@ -409,39 +428,28 @@ def _check_database(values: Mapping[str, str], problems: list[str], status_fn: D
         problems.append(f"database migrations are not current: {', '.join(details)}")
 
 
-def _check_account(xdg: XdgDirs, target: GameTarget, problems: list[str]) -> None:
-    path = xdg.crowley_config / "companion.toml"
+def _check_account(resolved: CompanionResolvedConfig | None, problems: list[str]) -> None:
+    if resolved is None:
+        return
     try:
-        raw = _load_toml(path)
-        account = raw.get("wtf_account")
-        wow_dir = raw.get("wow_dir")
-        if not isinstance(account, str) or ACCOUNT_RE.fullmatch(account) is None:
-            raise ValueError("wtf_account must select exactly one literal account directory")
-        if not isinstance(wow_dir, str):
-            raise ValueError("wow_dir must be an absolute target flavor directory")
-        wow_path = Path(wow_dir).expanduser()
-        expected_wow_path = Path(target.game_root) / target.product_dir
-        if wow_path != expected_wow_path:
-            raise ValueError("wow_dir must match the packaged launch target flavor root")
-        account_root = wow_path / "WTF" / "Account"
-        account_dir = account_root / account
+        saved_variables = resolved.saved_variables
+        account_dir = saved_variables.parent.parent
         if not account_dir.is_dir() or account_dir.is_symlink():
             raise ValueError(f"selected WTF account does not exist: {account_dir}")
-        resolved_root = account_root.resolve(strict=False)
         resolved_account = account_dir.resolve(strict=True)
+        account_root = resolved.flavor_dir / "WTF" / "Account"
         try:
-            resolved_account.relative_to(resolved_root)
+            resolved_account.relative_to(account_root.resolve(strict=False))
         except ValueError as exc:
             raise ValueError("configured WTF account directory escapes WTF/Account") from exc
-        saved_variables = account_dir / "SavedVariables" / "Crowley.lua"
         if not saved_variables.is_file() or saved_variables.is_symlink():
             raise ValueError(f"selected account SavedVariables/Crowley.lua does not exist: {saved_variables}")
         try:
             saved_variables.resolve(strict=True).relative_to(resolved_account)
         except ValueError as exc:
             raise ValueError("selected SavedVariables/Crowley.lua escapes the account") from exc
-    except (OSError, UnicodeError, tomllib.TOMLDecodeError, ValueError, privfs.PrivateFileError) as exc:
-        problems.append(f"companion account selection invalid: {exc}")
+    except (OSError, UnicodeError, ValueError, privfs.PrivateFileError) as exc:
+        problems.append(f"host account selection invalid: {exc}")
 
 
 def doctor(
@@ -459,18 +467,33 @@ def doctor(
     except ValueError as exc:
         return DoctorReport((f"XDG paths invalid: {exc}",))
     target = packaged_game_target()
-    _check_units(xdg, environment, problems)
+    host = _check_host(xdg, problems)
+    _check_tunables(xdg, problems)
+    _check_pinned_binaries(xdg, environment, problems)
+    companion: CompanionResolvedConfig | None = None
+    companion_path = xdg.crowley_config / "companion.toml"
+    companion_tunables: CompanionTunables | None = None
     try:
-        plan = install.build_plan(install.InstallRequest(), environment)
-    except install.InstallError as exc:
-        problems.append(f"addon target unavailable: {exc}")
-    else:
-        _check_addon(plan, target, problems)
-        _check_launcher(plan, problems)
-    _check_pins(xdg, problems)
+        companion_tunables = load_companion_tunables(companion_path)
+    except (OSError, TunablesError, ValueError) as exc:
+        problems.append(f"companion.toml is invalid: {exc}")
+    if host is not None and companion_tunables is not None:
+        try:
+            companion = resolve_companion(target, host, companion_tunables, xdg=xdg)
+        except ValueError as exc:
+            problems.append(f"companion configuration is invalid: {exc}")
+    _check_units(xdg, environment, problems)
+    if host is not None:
+        try:
+            plan = install.build_plan(install.InstallRequest(), environment, host=host)
+        except install.InstallError as exc:
+            problems.append(f"addon target unavailable: {exc}")
+        else:
+            _check_addon(plan, target, problems)
+            _check_launcher(plan, problems)
     values = _check_secrets(xdg, problems)
     _check_database(values, problems, database_status)
-    _check_account(xdg, target, problems)
+    _check_account(companion, problems)
     return DoctorReport(tuple(dict.fromkeys(problems)))
 
 

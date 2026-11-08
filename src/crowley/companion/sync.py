@@ -32,7 +32,7 @@ from crowley.core.companion_state import (
 from crowley.core.luawriter import render_assignment
 from crowley.core.queue import render_queue_lua
 
-from .config import CompanionSettings, state_path
+from .config import CompanionSettings
 
 log = logging.getLogger(__name__)
 
@@ -320,7 +320,9 @@ class Companion:
             headers={"Authorization": f"Bearer {settings.api_token.get_secret_value()}"},
             timeout=120,
         )
-        self.state_file = state_path()
+        if settings.state_file is None:
+            raise ValueError("resolved companion state_file is required")
+        self.state_file = settings.state_file
         with state_file_lock(self.state_file):
             self.state = State.load(self.state_file)
         self._signatures: dict[Path, tuple[float, int]] = {}
@@ -442,7 +444,7 @@ class Companion:
     def changed_files(self) -> list[Path]:
         """Return the selected file after it holds still for one poll interval."""
 
-        path = self.settings.saved_variables_file()
+        path = self.settings.saved_variables
         stat = path.stat()
         signature = (stat.st_mtime, stat.st_size)
         if self._signatures.get(path) == signature:
@@ -530,7 +532,7 @@ class Companion:
         )
 
     def upload_scan(self, scan_id: str, scan: dict[str, object]) -> bool:
-        return self._upload_scan(self.settings.saved_variables_file(), scan_id, scan)
+        return self._upload_scan(self.settings.saved_variables, scan_id, scan)
 
     def _upload_reference(self, path: Path, reference: dict[str, object]) -> bool:
         capture_id = _required_string(reference, "id", "item reference")
@@ -552,7 +554,7 @@ class Companion:
         )
 
     def upload_reference(self, reference: dict[str, object]) -> bool:
-        return self._upload_reference(self.settings.saved_variables_file(), reference)
+        return self._upload_reference(self.settings.saved_variables, reference)
 
     def _upload_account(self, path: Path, account: dict[str, object]) -> bool:
         capture_id = _required_string(account, "id", "account state")
@@ -574,7 +576,7 @@ class Companion:
         )
 
     def upload_account(self, account: dict[str, object]) -> bool:
-        return self._upload_account(self.settings.saved_variables_file(), account)
+        return self._upload_account(self.settings.saved_variables, account)
 
     def _upload_execution(self, path: Path, queue_id: str, execution: dict[str, object]) -> bool:
         def accepted(_: httpx.Response) -> None:
@@ -593,14 +595,14 @@ class Companion:
         )
 
     def upload_execution(self, queue_id: str, execution: dict[str, object]) -> bool:
-        return self._upload_execution(self.settings.saved_variables_file(), queue_id, execution)
+        return self._upload_execution(self.settings.saved_variables, queue_id, execution)
 
     def _write_addon_data(self) -> None:
         configured = bool(self.settings.house_key and self.settings.character)
         if not configured:
             self.write_queue()
         scan_ids = sorted({sid for ids in self._present_ids.values() for sid in ids})
-        path = self.settings.saved_variables_file()
+        path = self.settings.saved_variables
         payload = {"scan_ids": scan_ids}
         key = self._source_key(path, "addon-data", "addon-data", _json_digest(payload))
         if self._is_rejected(key):
@@ -687,7 +689,7 @@ class Companion:
             self.state.save(self.state_file)
 
     def run(self) -> None:
-        log.info("watching %s", self.settings.saved_variables_file())
+        log.info("watching %s", self.settings.saved_variables)
         log.info("server %s", self.settings.server_url)
         while True:
             try:
@@ -708,7 +710,7 @@ class Companion:
 
         with state_file_lock(self.state_file):
             self.state = State.load(self.state_file)
-            path = self.settings.saved_variables_file()
+            path = self.settings.saved_variables
             try:
                 self._process_file(path)
                 self._write_addon_data()
@@ -724,7 +726,7 @@ class Companion:
         with state_file_lock(self.state_file):
             self.state = State.load(self.state_file)
             count = self.state.retry_rejected(record_id)
-            path = self.settings.saved_variables_file()
+            path = self.settings.saved_variables
             try:
                 self._process_file(path)
                 self._write_addon_data()

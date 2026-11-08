@@ -2,14 +2,18 @@
 
 The closure starts at the session safety roots, follows every statically
 declared import whose module belongs to the installed ``crowley`` package,
-and includes each package initializer on those import paths.  This boundary
+and includes each package initializer on those import paths. This boundary
 deliberately includes non-session Crowley modules such as ``crowley.core``,
-``crowley.platform``, and the native helper modules because their source
-executes as part of the safety runtime; in particular, ``session.input_tool``
-imports the native pins that govern its helper artifacts.  The explicitly
-listed ``crowley.data`` package is a resource loader boundary:
+``crowley.config``, and ``crowley.platform`` because their source executes as
+part of the safety runtime. The native helper modules are also safety
+relevant: ``session.input_tool`` imports the native pins that govern its
+helper artifacts. In particular, ``crowley.config`` resolves the target,
+host contract, tunables, the pinned model binary, game files, runtime paths, and packaged routes that
+the session daemon is permitted to touch; omitting it would leave that safety
+decision outside the bound source manifest. The explicitly listed
+``crowley.data`` package is a resource loader boundary:
 ``importlib.resources.files`` imports it by package name without a Python
-import edge in the caller.  Third-party dependencies and non-source resource
+import edge in the caller. Third-party dependencies and non-source resource
 files are outside the boundary.
 """
 
@@ -20,15 +24,19 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from types import MappingProxyType
 
 from crowley.platform import privfs
 
 _MAX_SOURCE_BYTES = 4 * 1024 * 1024
+_MAX_RESOURCE_BYTES = 4 * 1024 * 1024
 _SHA256_LENGTH = 64
+_TARGET_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 SAFETY_ROOT_MODULES = frozenset(
     {
@@ -54,6 +62,12 @@ SAFETY_ROOT_MODULES = frozenset(
 # Some packaged resources are imported by name at runtime rather than through
 # a Python import statement.  Bind those package initializers explicitly.
 RESOURCE_BOUNDARY_MODULES = frozenset({"crowley.data"})
+RESOURCE_BOUNDARY_FILES = frozenset(
+    {
+        "targets/selected",
+        "first_run.json",
+    }
+)
 
 # This is the reviewed Crowley-package safety closure.  It must be updated
 # together with code that changes the closure; _assert_declared_closure makes
@@ -69,6 +83,11 @@ SAFETY_MODULES = frozenset(
         "crowley.core.savedvars",
         "crowley.core.scanformat",
         "crowley.core.watchlist",
+        "crowley.config",
+        "crowley.config.binaries",
+        "crowley.config.host",
+        "crowley.config.resolved",
+        "crowley.config.tunables",
         "crowley.data",
         "crowley.platform",
         "crowley.platform.paths",
@@ -133,9 +152,18 @@ def _validate_manifest(manifest: Mapping[str, str]) -> None:
     if not manifest:
         raise SourceBindingError("source binding manifest is empty")
     for module_name, digest in manifest.items():
-        if not isinstance(module_name, str) or (
-            module_name != "crowley" and not module_name.startswith("crowley.")
-        ):
+        if not isinstance(module_name, str):
+            raise SourceBindingError("source binding manifest contains an invalid module name")
+        if module_name.startswith("resource:"):
+            resource_name = module_name.removeprefix("resource:")
+            if (
+                not resource_name
+                or resource_name.startswith("/")
+                or ".." in Path(resource_name).parts
+                or "\\" in resource_name
+            ):
+                raise SourceBindingError("source binding manifest contains an invalid resource name")
+        elif module_name != "crowley" and not module_name.startswith("crowley."):
             raise SourceBindingError("source binding manifest contains an invalid module name")
         if not isinstance(digest, str) or len(digest) != _SHA256_LENGTH:
             raise SourceBindingError(f"source binding digest for {module_name} is malformed")
@@ -185,6 +213,35 @@ def _read_module(module_name: str) -> tuple[Path, bytes]:
     except privfs.PrivateFileError as exc:
         raise SourceBindingError(f"bound module {module_name} source cannot be read") from exc
     return path, source
+
+
+def _read_resource(resource_name: str) -> bytes:
+    if not resource_name or resource_name.startswith("/") or ".." in Path(resource_name).parts:
+        raise SourceBindingError(f"bound resource name is invalid: {resource_name}")
+    resource = resources.files("crowley.data").joinpath(*resource_name.split("/"))
+    if not isinstance(resource, Path) or not resource.is_file():
+        raise SourceBindingError(f"bound resource does not exist: {resource_name}")
+    try:
+        return privfs.read_bounded(resource, _MAX_RESOURCE_BYTES)
+    except privfs.PrivateFileError as exc:
+        raise SourceBindingError(f"bound resource cannot be read: {resource_name}") from exc
+
+
+def _resource_names() -> frozenset[str]:
+    selected = _read_resource("targets/selected")
+    try:
+        selected_text = selected.decode("ascii")
+    except UnicodeDecodeError as exc:
+        raise SourceBindingError("bound target selection is not ASCII") from exc
+    if not selected_text.endswith("\n") or selected_text.count("\n") != 1:
+        raise SourceBindingError("bound target selection must contain exactly one targetId line")
+    target_id = selected_text[:-1]
+    if _TARGET_ID_RE.fullmatch(target_id) is None:
+        raise SourceBindingError("bound target selection contains an invalid targetId")
+    return RESOURCE_BOUNDARY_FILES | {
+        f"targets/{target_id}.json",
+        f"routes/{target_id}/stormwind.json",
+    }
 
 
 def _relative_import_base(module_name: str, level: int, *, is_package: bool) -> str:
@@ -277,6 +334,9 @@ def build_source_binding() -> SourceBinding:
     for module_name in sorted(modules):
         _path, source = _read_module(module_name)
         manifest[module_name] = hashlib.sha256(source).hexdigest()
+    for resource_name in sorted(_resource_names()):
+        resource = _read_resource(resource_name)
+        manifest[f"resource:{resource_name}"] = hashlib.sha256(resource).hexdigest()
     canonical = canonical_manifest(manifest)
     return SourceBinding(manifest=canonical, digest=manifest_digest(canonical))
 
@@ -285,6 +345,7 @@ __all__ = [
     "SAFETY_MODULES",
     "SAFETY_ROOT_MODULES",
     "RESOURCE_BOUNDARY_MODULES",
+    "RESOURCE_BOUNDARY_FILES",
     "SourceBinding",
     "SourceBindingError",
     "build_source_binding",

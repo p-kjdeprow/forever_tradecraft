@@ -24,7 +24,6 @@ from crowley.session.calibration import (
     xtest_sources,
 )
 from crowley.session.cli import SessionIPC
-from crowley.session.config import SessionConfig
 from crowley.session.controller import Controller, ControllerState
 from crowley.session.daemon import SessionDaemon
 from crowley.session.decoder import Sample
@@ -49,6 +48,7 @@ from crowley.session.startup import (
     mint_runtime_evidence,
     resolve_forwarded_echo_sources,
 )
+from tests.support.config import fixture_codex_path
 from tests.x11_startup import start_private_xvfb
 
 
@@ -426,11 +426,11 @@ def test_xi2_modifier_tuple_keeps_locked_latched_base_order() -> None:
     assert event.modifiers == (5, 2, 1)
 
 
-def test_default_codex_executable_matches_the_pinned_runtime_version() -> None:
-    adapter = LunaAdapter()
-    configured_default = SessionConfig.__dataclass_fields__["codex_path"].default
+def test_explicit_codex_executable_matches_the_pinned_runtime_version(tmp_path: Path) -> None:
+    configured_path = fixture_codex_path(tmp_path)
+    adapter = LunaAdapter(neutral_dir=tmp_path / "neutral", codex_path=configured_path)
     assert adapter.cli_version == CLI_VERSION == "codex-cli 0.162.1"
-    assert Path(adapter.codex_path) == Path(configured_default)
+    assert Path(adapter.codex_path) == configured_path
 
 
 def test_runtime_evidence_is_process_sealed_and_environment_bound() -> None:

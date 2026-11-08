@@ -12,7 +12,46 @@ from pathlib import Path
 import pytest
 from packaging.utils import parse_wheel_filename
 
+from crowley.core.game_target import load_game_target
 from crowley.ops import install
+
+TARGET_FIXTURE = Path(__file__).parents[1] / "fixtures" / "targets" / "verified-beta.json"
+
+
+@pytest.fixture(autouse=True)
+def _fixture_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = load_game_target(TARGET_FIXTURE)
+    monkeypatch.setattr(install, "packaged_game_target", lambda: target)
+
+
+def _write_host(config_home: Path, game_root: Path, wine_prefix: Path) -> None:
+    host = Path(config_home) / "crowley" / "host.toml"
+    host.parent.mkdir(parents=True, exist_ok=True)
+    host.write_text(
+        "\n".join(
+            (
+                f"wine_prefix = {json.dumps(str(wine_prefix))}",
+                f"game_root = {json.dumps(str(game_root))}",
+                'wtf_account = "850981908#1"',
+                'character = "Arthur"',
+                'display = ":0"',
+                'server_url = "http://server.invalid:8080"',
+                'window_title = "World of Warcraft"',
+                "client_x = 0",
+                "client_y = 0",
+                "client_width = 1920",
+                "client_height = 1080",
+                "outer_width = 1928",
+                "outer_height = 1092",
+                "window_client_offset = [0, 0]",
+                "canvas_origin = [80, 48]",
+                "canvas_crop = [80, 48, 256, 256]",
+                "model_crop = [80, 48, 1760, 984]",
+                "",
+            )
+        ),
+        encoding="utf-8",
+    )
 
 
 def _environment(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
@@ -27,6 +66,7 @@ def _environment(tmp_path: Path) -> tuple[dict[str, str], Path, Path]:
         XDG_STATE_HOME=str(tmp_path / "state"),
         XDG_RUNTIME_DIR=str(runtime),
     )
+    _write_host(environment["XDG_CONFIG_HOME"], game_root, tmp_path / "wine")
     return environment, game_root, runtime
 
 
@@ -73,14 +113,23 @@ def test_dry_run_writes_nothing_and_does_not_reload_systemd(
     assert result.dry_run
     assert result.changed
     assert not called
-    assert not (tmp_path / "config").exists()
+    assert (tmp_path / "config/crowley/host.toml").is_file()
+    assert not (tmp_path / "config/crowley/session.toml").exists()
     assert not (game_root / "_classic_beta_" / "Interface" / "AddOns" / "Crowley").exists()
+
+
+def test_install_requires_host_contract_and_prints_example_path(tmp_path: Path) -> None:
+    environment, game_root, _runtime = _environment(tmp_path)
+    (tmp_path / "config/crowley/host.toml").unlink()
+    with pytest.raises(install.InstallError, match="host.example.toml"):
+        install.install(install.InstallRequest(game_root=game_root, dry_run=True), environment)
 
 
 def test_refuses_symlinked_game_root(tmp_path: Path) -> None:
     environment, game_root, _runtime = _environment(tmp_path)
     linked_root = tmp_path / "linked-game"
     linked_root.symlink_to(game_root, target_is_directory=True)
+    _write_host(environment["XDG_CONFIG_HOME"], linked_root, tmp_path / "wine")
     with pytest.raises(install.InstallError, match="symlinked path component"):
         install.install(install.InstallRequest(game_root=linked_root, dry_run=True), environment)
 
@@ -88,19 +137,20 @@ def test_refuses_symlinked_game_root(tmp_path: Path) -> None:
 def test_refuses_symlinked_xdg_config_root(tmp_path: Path) -> None:
     environment, game_root, _runtime = _environment(tmp_path)
     real_config = tmp_path / "real-config"
-    real_config.mkdir()
     linked_config = tmp_path / "config"
+    linked_config.rename(real_config)
     linked_config.symlink_to(real_config, target_is_directory=True)
     environment["XDG_CONFIG_HOME"] = str(linked_config)
     with pytest.raises(install.InstallError, match="symlinked path component"):
         install.install(install.InstallRequest(game_root=game_root, dry_run=True), environment)
 
 
-def test_hostile_paths_are_escaped_in_launcher_and_toml(tmp_path: Path) -> None:
+def test_hostile_paths_are_escaped_in_launcher_and_tunables(tmp_path: Path) -> None:
     environment, _game_root, _runtime = _environment(tmp_path)
     marker = tmp_path / "executed"
     hostile_root = tmp_path / ("game;$(touch " + str(marker) + ')"\\é')
     (hostile_root / "_classic_beta_" / "Interface" / "AddOns").mkdir(parents=True)
+    _write_host(environment["XDG_CONFIG_HOME"], hostile_root, tmp_path / "wine")
     plan = install.build_plan(install.InstallRequest(game_root=hostile_root), environment)
     configs = {
         item.relative_name: item.content
@@ -110,14 +160,10 @@ def test_hostile_paths_are_escaped_in_launcher_and_toml(tmp_path: Path) -> None:
     assert all(content is not None for content in configs.values())
     companion = tomllib.loads(configs["config/companion.toml"].decode("utf-8"))
     session = tomllib.loads(configs["config/session.toml"].decode("utf-8"))
-    assert companion["wow_dir"] == str(hostile_root / "_classic_beta_")
-    assert session["profile"]["wine_prefix"]
-    assert session["session"]["saved_variables"] == str(
-        hostile_root / "_classic_beta_" / "WTF" / "Account" / "850981908#1" / "SavedVariables" / "Crowley.lua"
-    )
-    assert session["session"]["data_lua"] == str(
-        hostile_root / "_classic_beta_" / "Interface" / "AddOns" / "Crowley_Data" / "Data.lua"
-    )
+    assert set(companion) == {"companion"}
+    assert set(session) == {"session"}
+    assert str(hostile_root) not in configs["config/companion.toml"].decode("utf-8")
+    assert str(hostile_root) not in configs["config/session.toml"].decode("utf-8")
     launcher = next(
         item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
     )
@@ -376,6 +422,7 @@ def test_clean_wheel_contains_package_resources_without_checkout_trees(tmp_path:
         assert "crowley/ops/package_data/docker/Dockerfile" in names
         assert "crowley/ops/package_data/systemd/crowley-health.service.in" in names
         assert "crowley/ops/resources/docker-compose.yml" in names
+        assert "crowley/ops/package_data/config/host.example.toml" in names
         assert not any(name.startswith("addon/") or name.startswith("deploy/") for name in names)
 
 

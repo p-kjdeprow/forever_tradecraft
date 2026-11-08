@@ -59,6 +59,7 @@ from crowley.session.startup import (
     mint_runtime_evidence,
 )
 from tests.support.companion_state import write_companion_state
+from tests.support.config import fixture_session_config
 from tests.support.private_lease import private_lease_path
 from tests.test_session_input_tool import fixture_input_tool
 
@@ -1692,13 +1693,11 @@ def _runtime_daemon(
         monotonic=virtual_clock.monotonic,
         lease_path=effective_lease_path,
     )
-    plan = load_catalog().scan_plan()
-    config = SessionConfig(
+    config = fixture_session_config(
+        root,
         profile=driver.profile,
         journal=root / "session.json",
         socket=root / "session.sock",
-        plan_hash=plan["planHash"],
-        plan_json=plan["planJSON"],
         capture_dir=root / "captures",
         saved_variables=root / "Crowley.lua",
         companion_state=root / "companion.json",
@@ -2408,13 +2407,11 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
         lease_path=tmp_path / "desktop.lock",
     )
     journal = tmp_path / "session.json"
-    plan = load_catalog().scan_plan()
-    config = SessionConfig(
+    config = fixture_session_config(
+        tmp_path,
         profile=driver.profile,
         journal=journal,
         socket=tmp_path / "session.sock",
-        plan_hash=plan["planHash"],
-        plan_json=plan["planJSON"],
         capture_dir=tmp_path / "captures",
         saved_variables=tmp_path / "Crowley.lua",
         companion_state=tmp_path / "companion.json",
@@ -2861,19 +2858,17 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
 
 
 def test_live_daemon_binds_owned_visual_and_render_providers(tmp_path: Path) -> None:
-    plan = load_catalog().scan_plan()
     profile = DriverProfile(
         xauthority="/tmp/test-Xauthority",
         wine_prefix="/measured/wine-prefix",
     )
     backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))
     driver = DesktopDriver(profile=profile, backend=backend, lease_path=tmp_path / "desktop.lock")
-    config = SessionConfig(
+    config = fixture_session_config(
+        tmp_path,
         profile=profile,
         journal=tmp_path / "session.json",
         socket=tmp_path / "session.sock",
-        plan_hash=plan["planHash"],
-        plan_json=plan["planJSON"],
     )
     with patch("crowley.session.daemon.LunaAdapter", _RuntimeFixtureModel):
         daemon = SessionDaemon(config, driver=driver)
@@ -2917,14 +2912,11 @@ def test_default_native_meter_binds_real_child_and_closes_on_retry(
     )
     backend.resolve_identity = lambda require_foreground=True: identity  # type: ignore[attr-defined]
     driver = DesktopDriver(profile=profile, backend=backend, lease_path=tmp_path / "default-meter.lock")
-    plan = load_catalog().scan_plan()
-    config = SessionConfig(
+    config = fixture_session_config(
+        tmp_path,
         profile=profile,
         journal=tmp_path / "session.json",
         socket=tmp_path / "session.sock",
-        plan_hash=plan["planHash"],
-        plan_json=plan["planJSON"],
-        codex_path="/home/dev/.cache/crowley/codex/0.162.1/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
     )
     journal = Journal(config.journal)
     journal.write(

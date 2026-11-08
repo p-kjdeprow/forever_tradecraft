@@ -18,6 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from crowley.config import CODEX_CLI_VERSION, CODEX_MODEL
+
 
 class ModelError(RuntimeError):
     """The bounded CLI turn was unavailable or returned an unsafe result."""
@@ -45,7 +47,7 @@ OBSERVED_CONTROLS = {
     "mailbox_object",
     "crowley_executor_button",
 }
-CLI_VERSION = "codex-cli 0.162.1"
+CLI_VERSION = CODEX_CLI_VERSION
 MAX_USAGE_TOKENS = 2**63 - 1
 KNOWN_DIAGNOSTIC = (
     "Code Mode is unavailable because code-mode host is disabled. Code mode will fail closed; "
@@ -93,26 +95,29 @@ class LunaAdapter:
     def __init__(
         self,
         *,
-        neutral_dir: str | os.PathLike[str] = "/tmp/crowley-model-neutral",
+        neutral_dir: str | os.PathLike[str],
         timeout: float = 45.0,
-        model: str = "gpt-6-luna",
+        model: str = CODEX_MODEL,
         cli_version: str = CLI_VERSION,
-        codex_path: str | os.PathLike[str] = (
-            "/home/dev/.cache/crowley/codex/0.162.1/node_modules/@openai/codex-linux-x64/"
-            "vendor/x86_64-unknown-linux-musl/bin/codex"
-        ),
+        codex_path: str | os.PathLike[str],
     ):
-        self.neutral_dir = Path(neutral_dir)
+        neutral_value = os.fspath(neutral_dir)
+        if not neutral_value:
+            raise ModelError("model neutral directory is required")
+        self.neutral_dir = Path(neutral_value)
         self.timeout = timeout
         self.model = model
         self.cli_version = cli_version
-        self.codex_path = os.path.realpath(os.fspath(codex_path))
+        codex_value = os.fspath(codex_path)
+        if not codex_value:
+            raise ModelError("configured Codex executable path is required")
+        self.codex_path = os.path.realpath(codex_value)
         self._cancelled = threading.Event()
         self._process_lock = threading.RLock()
         self._model_call_lock = threading.RLock()
         self._process: subprocess.Popen[str] | None = None
         self._cancel_epoch = 0
-        if self.model != "gpt-6-luna" or self.cli_version != CLI_VERSION:
+        if self.model != CODEX_MODEL or self.cli_version != CLI_VERSION:
             raise ModelError("configured model or Codex CLI version is outside the pinned boundary")
         if not os.path.isabs(self.codex_path):
             raise ModelError("configured Codex executable must be an absolute path")
@@ -264,7 +269,7 @@ class LunaAdapter:
             raise ModelError("model image lacks a verified client-area crop")
         self.neutral_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.neutral_dir, 0o700)
-        with tempfile.TemporaryDirectory(prefix="crowley-model-", dir="/tmp") as temporary:
+        with tempfile.TemporaryDirectory(prefix="crowley-model-", dir=self.neutral_dir) as temporary:
             directory = Path(temporary)
             image_path = directory / "screen.png"
             schema_path = directory / "decision.json"
@@ -324,7 +329,7 @@ class LunaAdapter:
             raise ModelError("model image lacks a verified client-area crop")
         self.neutral_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.neutral_dir, 0o700)
-        with tempfile.TemporaryDirectory(prefix="crowley-model-", dir="/tmp") as temporary:
+        with tempfile.TemporaryDirectory(prefix="crowley-model-", dir=self.neutral_dir) as temporary:
             directory = Path(temporary)
             image_path = directory / "screen.png"
             schema_path = directory / "observation.json"
@@ -442,7 +447,7 @@ class LunaAdapter:
         )
         self.neutral_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.neutral_dir, 0o700)
-        with tempfile.TemporaryDirectory(prefix="crowley-model-route-", dir="/tmp") as temporary:
+        with tempfile.TemporaryDirectory(prefix="crowley-model-route-", dir=self.neutral_dir) as temporary:
             directory = Path(temporary)
             image_path = directory / "screen.png"
             schema_path = directory / "route.json"
@@ -477,7 +482,7 @@ class LunaAdapter:
             raise ModelError("viewport observation lacks a verified client-area crop")
         self.neutral_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         os.chmod(self.neutral_dir, 0o700)
-        with tempfile.TemporaryDirectory(prefix="crowley-model-viewport-", dir="/tmp") as temporary:
+        with tempfile.TemporaryDirectory(prefix="crowley-model-viewport-", dir=self.neutral_dir) as temporary:
             directory = Path(temporary)
             image_path = directory / "screen.png"
             schema_path = directory / "viewport.json"

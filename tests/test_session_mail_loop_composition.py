@@ -19,14 +19,12 @@ from unittest.mock import patch
 
 from crowley.core.queue import validate_queue
 from crowley.core.watchlist import load_catalog
-from crowley.session import SessionConfig
 from crowley.session.cli import SessionIPC
 from crowley.session.controller import Controller, ControllerState
 from crowley.session.daemon import SessionDaemon
 from crowley.session.decoder import PixelDecoder
 from crowley.session.driver import (
     DesktopDriver,
-    DriverProfile,
     PointerButton,
     X11Backend,
 )
@@ -38,6 +36,7 @@ from crowley.session.model import ModelObservation
 from crowley.session.route_walk import KeyEvent, Pose, Route, RouteFile, simulate
 from crowley.session.startup import StartupEnvironment, mint_runtime_evidence
 from tests.support.companion_state import write_companion_state
+from tests.support.config import fixture_route_path, fixture_session_config
 from tests.support.private_lease import private_lease_path
 
 from .test_session_runtime import (
@@ -52,7 +51,7 @@ from .wow_harness import WowClient
 UID = "mail-composition-ack-1"
 WALL_TIME = 1_760_000_000
 QUEUE_ID = f"beta-normal-alliance-Arthur-{WALL_TIME}-a1b2"
-ROUTES = Path("deploy/config/routes/stormwind.json").resolve()
+ROUTES = fixture_route_path()
 
 
 class _MailFixtureRatePermit:
@@ -967,7 +966,7 @@ def _make_case(tmp_path: Path, *, armed: bool, max_messages: int):
     clock = _VirtualMonotonic()
     backend.virtual_clock = clock
     driver = DesktopDriver(
-        profile=DriverProfile(xauthority="/tmp/test-Xauthority", wine_prefix="/tmp/test-wine-prefix"),
+        profile=backend.profile,
         backend=backend,
         monotonic=clock.monotonic,
         lease_path=private_lease_path(tmp_path),
@@ -980,13 +979,11 @@ def _make_case(tmp_path: Path, *, armed: bool, max_messages: int):
         ),
     )
     backend.input_broker = driver.input_broker
-    plan = load_catalog().scan_plan()
-    config = SessionConfig(
+    config = fixture_session_config(
+        tmp_path,
         profile=driver.profile,
         journal=tmp_path / "session.json",
         socket=tmp_path / "session.sock",
-        plan_hash=plan["planHash"],
-        plan_json=plan["planJSON"],
         capture_dir=tmp_path / "captures",
         saved_variables=tmp_path / "Crowley.lua",
         companion_state=tmp_path / "companion.json",

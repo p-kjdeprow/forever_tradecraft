@@ -53,7 +53,6 @@ from crowley.session.calibration import (
     xtest_sources,
 )
 from crowley.session.cli import SessionIPC
-from crowley.session.config import SessionConfig
 from crowley.session.controller import Controller, ControllerState
 from crowley.session.daemon import SessionDaemon
 from crowley.session.decoder import PixelDecoder
@@ -73,6 +72,7 @@ from crowley.session.guardian import GuardianError, InputGuardian
 from crowley.session.input_events import EventClass, XI2Event, parse_xi2_records
 from crowley.session.journal import DEFAULT_STATE, Journal, JournalError
 from crowley.session.protocol import HEADER_SIZE, ProtocolError, encode_frame, pack_cells
+from tests.support.config import fixture_codex_path, fixture_session_config
 from tests.support.ewmh_window_manager import (
     start_ewmh_window_manager,
     stop_ewmh_window_manager,
@@ -85,7 +85,6 @@ TARGET = 0x600119
 FOREIGN = 0x1A00011
 TARGET_DESCENDANT = 0x60011A
 TARGET_FRAME = 0x60011B
-AUTHENTIC_CODEX_PATH = "/home/dev/.cache/crowley/codex/0.162.1/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex"
 NATIVE_ABSENCE_EVIDENCE = Path(__file__).parent / "fixtures" / "evidence" / "native_absence"
 
 
@@ -5241,13 +5240,16 @@ def _construction_daemon(
     )
     journal = Journal(journal_path)
     journal.write(value)
-    config = SessionConfig(
-        profile=driver.profile,
-        journal=journal_path,
-        socket=tmp_path / "construction.sock",
+    config = replace(
+        fixture_session_config(
+            tmp_path,
+            profile=driver.profile,
+            journal=journal_path,
+            socket=tmp_path / "construction.sock",
+            codex_path=fixture_codex_path(tmp_path),
+        ),
         plan_hash="plan",
         plan_json="{}",
-        codex_path=AUTHENTIC_CODEX_PATH,
     )
     controller = Controller(journal, driver=driver, recover_on_restart=False)
     return SessionDaemon(config, controller=controller, driver=driver), driver, identity, child

@@ -23,7 +23,6 @@ from types import SimpleNamespace
 import pytest
 from PIL import Image
 
-from crowley.core.game_target import packaged_game_target, target_scan_plan
 from crowley.core.luawriter import render_assignment
 from crowley.core.scanformat import (
     ScanFormatError,
@@ -43,6 +42,15 @@ from crowley.session.journal import DEFAULT_STATE, Journal
 from crowley.session.model import LunaAdapter, ModelError
 from crowley.session.protocol import decode_frame, encode_frame, pack_cells
 from tests.support.companion_state import write_companion_state
+from tests.support.config import (
+    fixture_codex_path,
+    fixture_host,
+    fixture_session_config,
+    fixture_target,
+    fixture_xdg,
+    write_host_toml,
+    write_session_toml,
+)
 
 
 def _executor_none() -> dict:
@@ -345,84 +353,37 @@ def _config(
     companion: Path | None = None,
     saved_variables: Path | None = None,
 ) -> SessionConfig:
-    return SessionConfig(
-        profile=DriverProfile(
-            house="beta-normal-alliance",
-            character="Arthur",
-            realm="Classic Beta PvE 2",
-            plan_count=428,
-            canvas_crop=(80, 48, 256, 256),
-            model_crop=(80, 48, 1760, 984),
-        ),
+    return fixture_session_config(
+        tmp_path,
         journal=tmp_path / "session.json",
         socket=tmp_path / "session.sock",
         capture_dir=tmp_path / "captures",
         saved_variables=saved_variables or tmp_path / "Crowley.lua",
         companion_state=companion,
         data_lua=data,
-        plan_hash=load_catalog().scan_plan()["planHash"],
-        plan_json=load_catalog().scan_plan()["planJSON"],
-        client_build="70450",
     )
 
 
-def test_session_config_accepts_canonical_short_build_and_rejects_previous_build(tmp_path: Path) -> None:
-    plan = load_catalog().scan_plan()
-    fixture_target = replace(
-        packaged_game_target(),
-        game_root=str(tmp_path / "game"),
-        wine_prefix=str(tmp_path / "wine"),
-    )
-    wow_root = Path(fixture_target.game_root) / fixture_target.product_dir
-    saved = wow_root / "WTF/Account/Test/SavedVariables/Crowley.lua"
-    companion = tmp_path / "companion-state.json"
-    data = wow_root / "Interface/AddOns/Crowley_Data/Data.lua"
-    saved.parent.mkdir(parents=True)
-    data.parent.mkdir(parents=True)
-    for path in (saved, companion, data):
-        path.write_text("", encoding="utf-8")
-    socket_dir = tmp_path / "session-runtime"
-    socket_dir.mkdir(mode=0o700)
-    socket_dir.chmod(0o700)
-    socket = socket_dir / "session.sock"
+def test_session_config_uses_canonical_target_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = fixture_target()
+    config_dir = tmp_path / "config"
+    (config_dir / "crowley").mkdir(parents=True)
+    write_host_toml(config_dir / "crowley" / "host.toml", fixture_host(tmp_path))
+    session_path = config_dir / "crowley" / "session.toml"
+    write_session_toml(session_path)
+    xdg = fixture_xdg(tmp_path)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg.runtime_dir))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CROWLEY_CODEX_PATH", str(tmp_path / "codex"))
 
-    def write_config(path: Path, client_build: str) -> None:
-        path.write_text(
-            "\n".join(
-                (
-                    "[profile]",
-                    f'wine_prefix = "{fixture_target.wine_prefix}"',
-                    f'window_class = "{fixture_target.window_class}"',
-                    f'executable = "{fixture_target.executable}"',
-                    f'realm = "{fixture_target.realm}"',
-                    f'house = "{fixture_target.house}"',
-                    "canvas_crop = [80, 48, 256, 256]",
-                    "model_crop = [80, 48, 1760, 984]",
-                    f'client_build = "{client_build}"',
-                    f'plan_hash = "{plan["planHash"]}"',
-                    f"plan_json = {json.dumps(plan['planJSON'])}",
-                    "",
-                    "[session]",
-                    f'socket = "{socket}"',
-                    f'saved_variables = "{saved}"',
-                    f'companion_state = "{companion}"',
-                    f'data_lua = "{data}"',
-                )
-            ),
-            encoding="utf-8",
-        )
+    loaded = load_config(session_path, expected_target=target)
 
-    accepted_path = tmp_path / "accepted.toml"
-    write_config(accepted_path, "70450")
-    accepted = load_config(accepted_path, expected_target=fixture_target)
-    assert accepted.client_build == "70450"
-    assert accepted.client_version == "1.60.1"
-
-    for rejected_build in ("70425", "70374", "99999"):
-        rejected_path = tmp_path / f"rejected-{rejected_build}.toml"
-        write_config(rejected_path, rejected_build)
-        with pytest.raises(ValueError, match="70450/interface 16001"):
-            load_config(rejected_path, expected_target=fixture_target)
+    assert loaded.client_build == target.native_build
+    assert loaded.client_version == target.client_version
+    assert loaded.interface == target.interface
 
 
 @pytest.mark.parametrize(
@@ -435,55 +396,27 @@ def test_session_config_accepts_canonical_short_build_and_rejects_previous_build
         ("house", "us-normal-horde"),
     ],
 )
-def test_session_config_rejects_stale_packaged_identity(tmp_path: Path, field: str, replacement: str) -> None:
-    target = replace(
-        packaged_game_target(),
-        game_root=str(tmp_path / "game"),
-        wine_prefix=str(tmp_path / "wine"),
-    )
-    wow_root = Path(target.game_root) / target.product_dir
-    saved = wow_root / "WTF/Account/Test/SavedVariables/Crowley.lua"
-    data = wow_root / "Interface/AddOns/Crowley_Data/Data.lua"
-    companion = tmp_path / "companion-state.json"
-    saved.parent.mkdir(parents=True)
-    data.parent.mkdir(parents=True)
-    for path in (saved, data, companion):
-        path.write_text("", encoding="utf-8")
-    socket_dir = tmp_path / "session-runtime"
-    socket_dir.mkdir(mode=0o700)
-    socket_dir.chmod(0o700)
-    socket = socket_dir / "session.sock"
-    plan = target_scan_plan(load_catalog(), target)
-    values = {
-        "wine_prefix": target.wine_prefix,
-        "window_class": target.window_class,
-        "executable": target.executable,
-        "realm": target.realm,
-        "house": target.house,
-    }
-    values[field] = replacement
-    config = tmp_path / f"stale-{field}.toml"
-    config.write_text(
-        "\n".join(
-            (
-                "[profile]",
-                *(f'{name} = "{value}"' for name, value in values.items()),
-                'client_build = "70450"',
-                f"plan_count = {len(plan['itemIDs'])}",
-                f'plan_hash = "{plan["planHash"]}"',
-                f"plan_json = {json.dumps(plan['planJSON'])}",
-                "",
-                "[session]",
-                f'socket = "{socket}"',
-                f'saved_variables = "{saved}"',
-                f'companion_state = "{companion}"',
-                f'data_lua = "{data}"',
-            )
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="packaged launch target"):
-        load_config(config, expected_target=target)
+def test_session_tunables_reject_removed_identity_keys(
+    tmp_path: Path,
+    field: str,
+    replacement: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_dir = tmp_path / "config"
+    (config_dir / "crowley").mkdir(parents=True)
+    write_host_toml(config_dir / "crowley" / "host.toml", fixture_host(tmp_path))
+    session_path = config_dir / "crowley" / "session.toml"
+    write_session_toml(session_path)
+    with session_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"{field} = {json.dumps(replacement)}\n")
+    xdg = fixture_xdg(tmp_path)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(xdg.runtime_dir))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config_dir))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("CROWLEY_CODEX_PATH", str(tmp_path / "codex"))
+
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        load_config(session_path, expected_target=fixture_target())
 
 
 def _retained_input_evidence(tmp_path: Path) -> InputCalibrationEvidence:
@@ -1683,7 +1616,9 @@ def test_pause_revocation_cancels_model_process_group(tmp_path: Path, monkeypatc
                 self.returncode = -signal.SIGTERM
             return self.returncode
 
-    adapter = LunaAdapter(neutral_dir=tmp_path / "neutral", timeout=30)
+    adapter = LunaAdapter(
+        neutral_dir=tmp_path / "neutral", timeout=30, codex_path=fixture_codex_path(tmp_path)
+    )
     process = BlockingProcess()
     killed: list[tuple[int, int]] = []
 

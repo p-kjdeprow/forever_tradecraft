@@ -33,7 +33,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from crowley.core.game_target import packaged_game_target, target_scan_plan
+from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
 from crowley.platform.paths import XdgDirs
 
@@ -90,7 +90,11 @@ from .startup import (
 )
 
 _TARGET = packaged_game_target()
-_PLAN_COUNT = len(target_scan_plan(load_catalog(), _TARGET)["itemIDs"])
+_PLAN = cast(
+    dict[str, Any],
+    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
+)
+_PLAN_COUNT = len(_PLAN["itemIDs"])
 
 _F_ADD_SEALS = getattr(fcntl, "F_ADD_SEALS", 1033)
 _F_SEAL_SEAL = getattr(fcntl, "F_SEAL_SEAL", 0x0001)

@@ -35,9 +35,13 @@ loading this change does not authorize automation to resume.
 
 ## Installation and profile
 
-Use the rendered `session.toml` for the measured client profile. Fill in
-its canonical plan hash/JSON and the existing SavedVariables, companion state and
-Data.lua paths. Keep the journal under `~/.local/state/crowley/`; it holds durable
+Create and review `$XDG_CONFIG_HOME/crowley/host.toml` from
+`deploy/templates/host.example.toml`. It contains the measured client window
+geometry, account, character, display, game root, Wine prefix, and server URL.
+The tracked `session.toml` and `companion.toml` files contain tunables only.
+The resolver derives SavedVariables, companion state, Data.lua, Queue.lua,
+the journal, runtime socket/captures, and packaged routes. Keep the journal under
+the target/account/character state namespace; it holds durable
 scan intents, acknowledgment evidence and the takeover record. Do not replace it
 with an empty journal to clear a blocker.
 
@@ -62,8 +66,8 @@ configuration directory:
 crowley-native build xdotool
 uv tool install .
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-crowley-ops install --game-root "/path/to/World of Warcraft"
-# Fill and review the rendered session.toml, companion.toml and secrets.env.
+crowley-ops install
+# Review host.toml, the tunable session.toml/companion.toml and secrets.env.
 # Keep CROWLEY_API_TOKEN, CROWLEY_DB_PASSWORD and CROWLEY_DATABASE_URL only in secrets.env.
 crowley-ops doctor
 ```
@@ -73,15 +77,15 @@ The input-tool builder needs `cc`, `make`, `readelf`, `objdump`, `libx11-dev`,
 published executable. The input owner and independent release watchdog share its
 sealed executable image.
 
-The model adapter pins Codex CLI0.162.1 and `gpt-6-luna`. Configure the provisioned
-private CLI executable shown in the example, and verify it with `--version`.
-A mutable global installation can update beyond that pin. The configured version
-must match; the controller does not select another model or executable on failure.
+The model adapter pins Codex CLI `0.162.1` and `gpt-6-luna`. The session loader
+requires the provisioned executable through the absolute `CROWLEY_CODEX_PATH`
+runtime environment value; it is not a target or TOML identity fact. A mutable
+global installation can update beyond that pin. The configured version must
+match; the controller does not select another model or executable on failure.
 
-Leave profile `xauthority` empty to inherit the current graphical session's
-XAUTHORITY. The service uses the measured Wine process, window and display profile.
-The native identity/region executable paths and their hashes must match the
-installed artifacts specified by the profile.
+The host contract owns the display, window title, Wine prefix, and measured
+client geometry. `XAUTHORITY` remains an environment fact supplied by the
+graphical session rather than a tracked configuration value.
 
 ## Startup and one-time takeover drill
 

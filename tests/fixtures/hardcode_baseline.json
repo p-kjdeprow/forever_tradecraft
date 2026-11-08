@@ -18,18 +18,6 @@
     "path": "deploy/.env.example"
   },
   {
-    "category": "machine-url",
-    "count": 1,
-    "match": "http://127.0.0.1:8080",
-    "path": "deploy/config/companion.toml"
-  },
-  {
-    "category": "posix-home",
-    "count": 4,
-    "match": "/home/dev",
-    "path": "deploy/config/routes/stormwind.json"
-  },
-  {
     "category": "checkout-path",
     "count": 1,
     "match": "repos/pegasus",
@@ -72,12 +60,6 @@
     "path": "docs/TESTING.md"
   },
   {
-    "category": "posix-home",
-    "count": 2,
-    "match": "/home/dev",
-    "path": "src/crowley/data/game_target.json"
-  },
-  {
     "category": "machine-url",
     "count": 1,
     "match": "127.0.0.1",
@@ -90,34 +72,10 @@
     "path": "src/crowley/server/config.py"
   },
   {
-    "category": "posix-home",
-    "count": 2,
-    "match": "/home/dev",
-    "path": "src/crowley/session/config.py"
-  },
-  {
-    "category": "runtime-dir",
-    "count": 2,
-    "match": "/run/user/1000",
-    "path": "src/crowley/session/config.py"
-  },
-  {
     "category": "machine-url",
     "count": 4,
     "match": "threading.local",
     "path": "src/crowley/session/daemon.py"
-  },
-  {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "src/crowley/session/model.py"
-  },
-  {
-    "category": "temporary-path",
-    "count": 1,
-    "match": "/tmp/crowley-model-neutral",
-    "path": "src/crowley/session/model.py"
   },
   {
     "category": "machine-url",
@@ -164,24 +122,6 @@
   {
     "category": "temporary-path",
     "count": 1,
-    "match": "/tmp/stale-wow",
-    "path": "tests/test_companion.py"
-  },
-  {
-    "category": "machine-url",
-    "count": 1,
-    "match": "http://127.0.0.1:8080",
-    "path": "tests/test_launch_target.py"
-  },
-  {
-    "category": "posix-home",
-    "count": 11,
-    "match": "/home/dev",
-    "path": "tests/test_launch_target.py"
-  },
-  {
-    "category": "temporary-path",
-    "count": 1,
     "match": "/tmp/native-calibration-unused.sock",
     "path": "tests/test_native_calibration_operator.py"
   },
@@ -202,12 +142,6 @@
     "count": 2,
     "match": "/tmp/test-wine-prefix",
     "path": "tests/test_session.py"
-  },
-  {
-    "category": "temporary-path",
-    "count": 1,
-    "match": "/tmp/crowley-model-test",
-    "path": "tests/test_session_cli_motion.py"
   },
   {
     "category": "temporary-path",
@@ -232,18 +166,6 @@
     "count": 2,
     "match": "threading.local",
     "path": "tests/test_session_executor_click.py"
-  },
-  {
-    "category": "temporary-path",
-    "count": 1,
-    "match": "/tmp/test-Xauthority",
-    "path": "tests/test_session_mail_loop_composition.py"
-  },
-  {
-    "category": "temporary-path",
-    "count": 1,
-    "match": "/tmp/test-wine-prefix",
-    "path": "tests/test_session_mail_loop_composition.py"
   },
   {
     "category": "machine-url",
@@ -276,12 +198,6 @@
     "path": "tests/test_session_native.py"
   },
   {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "tests/test_session_native_regressions.py"
-  },
-  {
     "category": "temporary-path",
     "count": 1,
     "match": "/tmp/input87-observer.Xauthority",
@@ -292,12 +208,6 @@
     "count": 1,
     "match": "/tmp/stale-wine-prefix",
     "path": "tests/test_session_regressions.py"
-  },
-  {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "tests/test_session_runtime.py"
   },
   {
     "category": "temporary-path",
@@ -316,12 +226,6 @@
     "count": 1,
     "match": "localhost",
     "path": "tests/test_session_startup.py"
-  },
-  {
-    "category": "posix-home",
-    "count": 1,
-    "match": "/home/dev",
-    "path": "tests/test_session_transitions.py"
   },
   {
     "category": "temporary-path",

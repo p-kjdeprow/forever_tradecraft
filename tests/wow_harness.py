@@ -13,12 +13,12 @@ from pathlib import Path
 from lupa import lua51
 from PIL import Image
 
-from crowley.core.game_target import GameTarget, packaged_game_target, target_scan_plan
+from crowley.core.game_target import GameTarget, load_game_target, target_scan_plan
 from crowley.core.watchlist import Catalog, load_catalog
 from tools.generate_launch_target import render_generated_lua
 
 ADDONS = Path(__file__).resolve().parents[1] / "addon"
-TARGET = packaged_game_target()
+TARGET = load_game_target(Path(__file__).parent / "fixtures" / "targets" / "verified-beta.json")
 _NEXT_AUCTION_ID = 1
 _BYTE_ATLAS_PATH = ADDONS / "Crowley" / "Textures" / "ByteAtlas.tga"
 _BYTE_ATLAS: Image.Image | None = None

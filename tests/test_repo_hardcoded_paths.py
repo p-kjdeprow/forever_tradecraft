@@ -53,7 +53,7 @@ def test_repository_matches_hardcode_baseline() -> None:
         details.append("new findings:\n" + _describe(added))
     if stale:
         details.append("stale baseline findings:\n" + _describe(stale))
-    assert not details, (
+    assert not added and not stale, (
         "hardcode baseline mismatch:\n"
         + "\n".join(details)
         + "\nRegenerate with: uv run python -m tests.support.hardcode_scan --write-baseline"

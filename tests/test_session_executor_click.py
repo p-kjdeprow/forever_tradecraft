@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from crowley.core.game_target import packaged_game_target
 from crowley.session import cli as session_cli
 from crowley.session import pointer_execution, protocol
 from crowley.session.cli import SessionIPC
@@ -23,6 +22,8 @@ from crowley.session.driver import DriverError, MeasuredAnchor
 from crowley.session.executor import BindingMetadata, Point, PointerButton, PointerTarget, Rect
 from crowley.session.input_events import EventClass
 from crowley.session.journal import Journal, JournalError
+from crowley.session.model import CLI_VERSION
+from tests.support.config import fixture_target
 
 from .test_session_driver_actions import (
     _driver as native_driver,
@@ -35,7 +36,7 @@ from .test_session_driver_actions import (
 )
 from .wow_harness import WowClient
 
-TARGET = packaged_game_target()
+TARGET = fixture_target()
 
 
 def _queue() -> dict:
@@ -633,6 +634,9 @@ def test_unarmed_lua_button_click_composes_through_daemon_and_records_dry_run(
     controller._state = ControllerState.READY
     controller._generation = generation
     controller._lease_generation = generation
+    codex = tmp_path / "codex"
+    codex.write_text(f"#!/bin/sh\nprintf '%s\\n' {CLI_VERSION!r}\n", encoding="utf-8")
+    codex.chmod(0o700)
     config = SessionConfig(
         profile=profile,
         journal=journal.path,
@@ -640,6 +644,8 @@ def test_unarmed_lua_button_click_composes_through_daemon_and_records_dry_run(
         capture_dir=tmp_path / "captures",
         plan_hash="synthetic-plan-hash",
         plan_json="{}",
+        codex_path=str(codex),
+        model_neutral_dir=tmp_path / "model-neutral",
     )
     daemon = SessionDaemon(config, controller=controller, driver=driver)
 

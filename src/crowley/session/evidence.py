@@ -8,10 +8,10 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from crowley.core import companion_state, savedvars
-from crowley.core.game_target import packaged_game_target, target_scan_plan
+from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
 from crowley.core.scanformat import ScanFormatError, decode_json_payload, validate_v2_envelope
 from crowley.core.watchlist import load_catalog
 
@@ -20,7 +20,10 @@ from .journal import JournalError, stable_file
 BASELINE_MEDIAN_SECONDS = 1
 _TARGET = packaged_game_target()
 _CANONICAL_CATALOG = load_catalog()
-_CANONICAL_PLAN = target_scan_plan(_CANONICAL_CATALOG, _TARGET)
+_CANONICAL_PLAN = cast(
+    dict[str, Any],
+    target_scan_plan(cast(CatalogLike, _CANONICAL_CATALOG), _TARGET),
+)
 _PLAN_COUNT = len(_CANONICAL_PLAN["itemIDs"])
 
 

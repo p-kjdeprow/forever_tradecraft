@@ -14,10 +14,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+from crowley.session import source_binding as _source_binding
 from crowley.session.cli import _socket_request as _bounded_socket_request
 from crowley.session.config import load_config
 from crowley.session.daemon import session_config_semantic_sha256
-from crowley.session.source_binding import SAFETY_MODULES, build_source_binding
+from crowley.session.source_binding import (
+    SourceBindingError,
+    build_source_binding,
+    canonical_manifest,
+)
 
 # Keep the private reader bound aligned with the existing 512 KiB IPC record
 # bound.  The 256-event diagnostic cap must round-trip without silently
@@ -56,6 +61,12 @@ _OUTCOMES = frozenset({"ok", "failed", "cancelled", "deadline", "not_reached"})
 
 class IdentityLatencyError(RuntimeError):
     """A private profile or manifest is malformed or cannot be trusted as provenance."""
+
+
+# Kept as a compatibility export for the offline diagnostic fixtures.  The
+# expected-binding validator uses canonical_manifest so resource entries are
+# accepted and validated by the source-binding module itself.
+SAFETY_MODULES = _source_binding.SAFETY_MODULES
 
 
 def _is_sha(value: Any) -> bool:
@@ -164,17 +175,22 @@ def load_expected_binding(path: Path, supplied_sha256: str) -> tuple[dict[str, A
     }
     if set(value) != expected or value["schema"] != "identity-latency-binding-v1":
         raise IdentityLatencyError("expected-binding manifest shape is not exact")
-    source_binding = value["source_binding"]
+    source_binding_value = value["source_binding"]
+    if not isinstance(source_binding_value, dict):
+        raise IdentityLatencyError("expected-binding manifest values are malformed")
+    try:
+        source_binding = canonical_manifest(source_binding_value)
+    except (SourceBindingError, TypeError, ValueError) as exc:
+        raise IdentityLatencyError("expected-binding manifest values are malformed") from exc
     if (
-        not isinstance(source_binding, dict)
-        or set(source_binding) != SAFETY_MODULES
-        or not all(_is_sha(item) for item in source_binding.values())
-        or not _is_sha(value["config_file_sha256"])
+        not _is_sha(value["config_file_sha256"])
         or not _is_sha(value["config_semantic_sha256"])
         or not _is_sha(value["producer_sha256"])
     ):
         raise IdentityLatencyError("expected-binding manifest values are malformed")
-    return value, digest
+    normalized = dict(value)
+    normalized["source_binding"] = source_binding
+    return normalized, digest
 
 
 def _hash_local_descriptor(path: Path, label: str) -> str:

@@ -15,7 +15,16 @@ from crowley.platform import privfs
 def test_declared_safety_closure_is_exact() -> None:
     assert source_binding.compute_safety_closure() == source_binding.SAFETY_MODULES
     binding = source_binding.build_source_binding()
-    assert set(binding.manifest) == source_binding.SAFETY_MODULES
+    resource_names = {
+        name.removeprefix("resource:") for name in binding.manifest if name.startswith("resource:")
+    }
+    assert set(binding.manifest) == source_binding.SAFETY_MODULES | {
+        f"resource:{name}" for name in resource_names
+    }
+    assert source_binding.RESOURCE_BOUNDARY_FILES <= resource_names
+    selected = (source_binding._read_resource("targets/selected")).decode("ascii").strip()
+    assert f"resource:targets/{selected}.json" in binding.manifest
+    assert f"resource:routes/{selected}/stormwind.json" in binding.manifest
     assert binding.digest == source_binding.manifest_digest(binding.manifest)
 
 
@@ -61,6 +70,29 @@ def test_mutating_session_package_initializer_changes_manifest_digest(
     assert mutated.digest != baseline.digest
 
 
+def test_mutating_each_bound_resource_changes_manifest_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = source_binding.build_source_binding()
+    resource_names = sorted(
+        name.removeprefix("resource:") for name in baseline.manifest if name.startswith("resource:")
+    )
+    original_read = source_binding._read_resource
+    monkeypatch.setattr(source_binding, "_resource_names", lambda: frozenset(resource_names))
+    for resource_name in resource_names:
+
+        def mutated_read(name: str, *, target: str = resource_name) -> bytes:
+            data = original_read(name)
+            return data + b"\n# resource binding mutation\n" if name == target else data
+
+        monkeypatch.setattr(source_binding, "_read_resource", mutated_read)
+        mutated = source_binding.build_source_binding()
+        key = f"resource:{resource_name}"
+        assert mutated.manifest[key] != baseline.manifest[key]
+        assert mutated.digest != baseline.digest
+        monkeypatch.setattr(source_binding, "_read_resource", original_read)
+
+
 def test_missing_bound_module_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> None:
     missing = "crowley.session.driver"
     original_path = source_binding._module_path
@@ -94,7 +126,7 @@ def test_non_editable_style_package_location_builds_binding(tmp_path: Path) -> N
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == str(len(source_binding.SAFETY_MODULES))
+    assert result.stdout.strip() == str(len(source_binding.SAFETY_MODULES) + 4)
 
 
 def test_fresh_cli_process_has_no_unbound_crowley_source_modules(tmp_path: Path) -> None:

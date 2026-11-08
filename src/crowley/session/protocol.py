@@ -15,9 +15,9 @@ import struct
 import zlib
 from collections.abc import Collection
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
-from crowley.core.game_target import packaged_game_target, target_scan_plan
+from crowley.core.game_target import CatalogLike, packaged_game_target, target_scan_plan
 from crowley.core.watchlist import load_catalog
 
 MAGIC = b"CRS1"
@@ -35,7 +35,10 @@ POSITION_LIMIT = 1_000_000.0
 FACING_LIMIT = 2.0 * math.pi
 SPEED_LIMIT = 1_000.0
 _TARGET = packaged_game_target()
-_PLAN = target_scan_plan(load_catalog(), _TARGET)
+_PLAN = cast(
+    dict[str, Any],
+    target_scan_plan(cast(CatalogLike, load_catalog()), _TARGET),
+)
 PLAN_COUNT = len(_PLAN["itemIDs"])
 PLAN_CADENCE = _TARGET.cadence_seconds
 PLAN_CAP = _TARGET.sweep_cap_seconds

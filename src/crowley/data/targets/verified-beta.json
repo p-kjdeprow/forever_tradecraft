@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "targetId": "verified-beta",
+  "client": {
+    "fullBuild": "1.60.1.70450",
+    "interface": 16001,
+    "executable": "WowB.exe",
+    "windowClass": "wowb.exe",
+    "product": "wow_classic_beta",
+    "productDir": "_classic_beta_",
+    "locale": "enUS"
+  },
+  "context": {
+    "region": "beta",
+    "ruleset": "normal",
+    "realm": "Classic Beta PvE 2",
+    "faction": "Alliance",
+    "house": "beta-normal-alliance",
+    "nativeRegionId": 110
+  },
+  "scan": {
+    "catalogId": "first-run",
+    "catalogRevision": 2,
+    "cadenceSeconds": 900,
+    "sweepCapSeconds": 600,
+    "initialPriceLevels": 20
+  },
+  "routeProvenance": "measured live on client build 70450"
+}

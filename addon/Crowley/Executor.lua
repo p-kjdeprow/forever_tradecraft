@@ -6,87 +6,23 @@ local _, ns = ...
 local Executor = {}
 ns.Executor = Executor
 
-local MAX_ACTIONS = 50
 local MAX_SELECTION_STATES = 10000
 local MAX_SAFE = 9007199254740991
 local MAX_U32 = 4294967295
 local DURATION = { [12] = 1, [24] = 2, [48] = 3 }
-
-local ACTION_FIELDS = {
-  buy_commodity = { seq = true, kind = true, itemID = true, quantity = true, maxUnitPrice = true },
-  post_commodity = { seq = true, kind = true, itemID = true, quantity = true, unitPrice = true, durationHours = true },
-  cancel_auction = { seq = true, kind = true, auctionID = true },
-  vendor_sell = { seq = true, kind = true, itemID = true, quantity = true },
-  vendor_buy = { seq = true, kind = true, itemID = true, quantity = true },
-  craft = { seq = true, kind = true, recipeID = true, times = true },
-  mail_collect = { seq = true, kind = true, maxMessages = true },
-}
 
 local state
 local sessionArmed = false
 local button
 local frameOpen = { ah = false, merchant = false, mailbox = false, profession = false }
 
-local function validAction(action, index)
-  if type(action) ~= "table" or type(action.kind) ~= "string" then return false, "action " .. index .. " has an unknown kind" end
-  local fields = ACTION_FIELDS[action.kind]
-  if not fields then return false, "action " .. index .. " has an unknown kind " .. tostring(action.kind) end
-  if not ns.Util.ExactKeys(action, fields) then return false, "action " .. index .. " has unknown or missing fields" end
-  if action.seq ~= index or not ns.Util.IsInteger(action.seq, 1, MAX_SAFE) then return false, "action " .. index .. " has a non-contiguous seq" end
-  if action.kind == "buy_commodity" then
-    if not ns.Util.IsInteger(action.itemID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.quantity, 1, MAX_SAFE) or not ns.Util.IsInteger(action.maxUnitPrice, 1, MAX_SAFE) then
-      return false, "action " .. index .. " has an invalid positive integer"
-    end
-  elseif action.kind == "post_commodity" then
-    if not ns.Util.IsInteger(action.itemID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.quantity, 1, MAX_SAFE) or not ns.Util.IsInteger(action.unitPrice, 1, MAX_SAFE) or
-        not DURATION[action.durationHours] then return false, "action " .. index .. " has an invalid post field" end
-  elseif action.kind == "cancel_auction" then
-    if not ns.Util.IsInteger(action.auctionID, 1, MAX_SAFE) then return false, "action " .. index .. " has an invalid auctionID" end
-  elseif action.kind == "vendor_sell" or action.kind == "vendor_buy" then
-    if not ns.Util.IsInteger(action.itemID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.quantity, 1, MAX_SAFE) then
-      return false, "action " .. index .. " has an invalid positive integer"
-    end
-  elseif action.kind == "craft" then
-    if not ns.Util.IsInteger(action.recipeID, 1, MAX_SAFE) or not ns.Util.IsInteger(action.times, 1, MAX_SAFE) then
-      return false, "action " .. index .. " has an invalid positive integer"
-    end
-  elseif action.kind == "mail_collect" then
-    if not ns.Util.IsInteger(action.maxMessages, 1, MAX_U32) then
-      return false, "action " .. index .. " has an invalid maxMessages"
-    end
-  end
-  return true
-end
-
 local function validateQueue(queue)
-  if type(queue) ~= "table" then return false, "queue is not a table" end
-  if not ns.Util.ExactKeys(queue, { format = true, queueId = true, generatedAt = true, expiresAt = true, house = true, character = true, armed = true, actions = true }) then
-    return false, "queue has unknown or missing fields"
-  end
-  if queue.format ~= 1 then return false, "queue format is invalid" end
-  if type(queue.queueId) ~= "string" or queue.queueId == "" or #queue.queueId > 192 then return false, "queueId is invalid" end
-  if not ns.Util.IsInteger(queue.generatedAt, 1, MAX_SAFE) or not ns.Util.IsInteger(queue.expiresAt, 1, MAX_SAFE) or queue.expiresAt <= queue.generatedAt then
-    return false, "queue expiry is invalid"
-  end
-  if type(queue.house) ~= "string" or queue.house == "" or #queue.house > 256 then return false, "queue house is invalid" end
-  if type(queue.character) ~= "string" or queue.character == "" or #queue.character > 256 then return false, "queue character is invalid" end
-  if type(queue.armed) ~= "boolean" then return false, "queue armed is invalid" end
-  if type(queue.actions) ~= "table" then return false, "queue actions is not an array" end
-  local count = #queue.actions
-  if count > MAX_ACTIONS then return false, "queue has more than 50 actions" end
-  for key in pairs(queue.actions) do
-    if type(key) ~= "number" or key < 1 or key > count or key ~= math.floor(key) then
-      return false, "queue actions is not contiguous"
-    end
-  end
-  for index = 1, count do
-    local ok, reason = validAction(queue.actions[index], index)
-    if not ok then return false, reason end
-  end
-  return true
+  if not ns.ExecutorState then return false, "executor state module is unavailable" end
+  if not ns.GeneratedWireSchemas then return false, "generated wire schemas are unavailable" end
+  return ns.ExecutorState.ValidateQueue(queue, ns.GeneratedWireSchemas)
 end
 
-local function now() return time() end
+local function now() return ns.ExecutorNative.Time() end
 local function currentAction() return state and state.queue.actions[state.index] or nil end
 
 local function currentSummary(action)
@@ -111,16 +47,12 @@ end
 local function isFrameOpen(kind)
   local required = actionFrame(kind)
   if required == "ah" then return frameOpen.ah or ns.ahOpen == true end
-  if required == "profession" and C_TradeSkillUI and type(C_TradeSkillUI.IsTradeSkillReady) == "function" then
-    return C_TradeSkillUI.IsTradeSkillReady() == true
-  end
+  if required == "profession" then return ns.ExecutorNative.TradeSkillReady() end
   if required == "mailbox" then
     -- MAIL_CLOSED is not reliable on the installed client.  The native frame
     -- visibility is the admission fact; the event flag is retained only as
     -- diagnostic state and is deliberately not consulted here.
-    if not MailFrame or type(MailFrame.IsShown) ~= "function" then return false end
-    local ok, shown = pcall(function() return MailFrame:IsShown() end)
-    return ok and shown == true
+    return ns.ExecutorNative.MailFrameShown()
   end
   return frameOpen[required] == true
 end
@@ -128,9 +60,9 @@ end
 local function updateButton()
   if not button or not state or not state.valid then return end
   local action = currentAction()
-  if not action then button:Hide() return end
-  button:SetText("Crowley: " .. currentSummary(action))
-  if isFrameOpen(action.kind) then button:Show() else button:Hide() end
+  if not action then ns.ExecutorNative.SetButtonShown(button, false) return end
+  ns.ExecutorNative.SetButtonText(button, "Crowley: " .. currentSummary(action))
+  ns.ExecutorNative.SetButtonShown(button, isFrameOpen(action.kind))
 end
 
 local function ensureExecution()
@@ -157,21 +89,27 @@ local function appendResult(seq, kind, status, detail)
   return result
 end
 
-local function finishResult(status, detail)
-  if not state.result then return end
-  state.result.status = status
-  state.result.at = now()
-  state.result.detail = detail or state.result.detail or {}
-end
-
 local function printDryRun(action) ns.Print("dry run: would " .. currentSummary(action)) end
 
 local function advance()
-  state.index = state.index + 1
-  state.phase, state.inFlight, state.result, state.blocked, state.latched, state.cancelReason, state.cancelAttempted =
-    nil, false, nil, false, false, nil, false
-  state.mailIndex, state.mailCount, state.mailProcessed, state.beforeMailCount = nil, nil, nil, nil
+  state = ns.ExecutorState.Reduce(state, { type = "advance" })
   updateButton()
+end
+
+local function reduce(event)
+  state = ns.ExecutorState.Reduce(state, event)
+end
+
+local function persistFinishedResult(status, detail)
+  local results = state.execution and state.execution.results
+  if not results or not state.result then return end
+  for index = #results, 1, -1 do
+    local result = results[index]
+    if result.status == "started" and result.seq == state.result.seq and result.kind == state.result.kind then
+      result.status, result.at, result.detail = status, now(), detail or result.detail or {}
+      return
+    end
+  end
 end
 
 local function refuse(reason, detail, stop)
@@ -180,10 +118,11 @@ local function refuse(reason, detail, stop)
     local blockedDetail = type(detail) == "table" and detail or { reason = reason }
     blockedDetail.reason = blockedDetail.reason or reason
     appendResult(action.seq, action.kind, "blocked", blockedDetail)
-    state.latched = true
-    if action.kind == "buy_commodity" then
-      state.phase, state.cancelReason = "must_cancel", reason
-    end
+    reduce({
+      type = "blocked", latched = true, blocked = state.blocked,
+      cancelReason = action.kind == "buy_commodity" and reason or nil,
+      phase = action.kind == "buy_commodity" and "must_cancel" or nil,
+    })
     updateButton()
     ns.Print("executor blocked: " .. tostring(reason))
     return nil
@@ -192,12 +131,13 @@ local function refuse(reason, detail, stop)
     -- An ambiguous persisted history must stay ambiguous across reloads, so a click on it is
     -- a nonterminal event, never a terminal refusal that reconciliation could treat as resolution.
     appendResult(action.seq, action.kind, "blocked", { reason = reason })
+    reduce({ type = "blocked", latched = state.latched, blocked = state.blocked })
     updateButton()
     ns.Print("executor blocked: " .. tostring(reason))
     return nil
   end
   local result = appendResult(action and action.seq or 0, action and action.kind or "queue", "refused", detail or reason)
-  if action and stop ~= false then state.blocked = true end
+  reduce({ type = "blocked", latched = state.latched, blocked = action ~= nil and stop ~= false or state.blocked })
   updateButton()
   ns.Print("executor refused: " .. tostring(reason))
   return result
@@ -215,10 +155,10 @@ end
 local function validAndCurrent()
   if not state or not state.valid then return false, "queue_invalid" end
   if not currentAction() then return false, "complete" end
-  if time() >= state.queue.expiresAt then return false, "expired" end
+  if ns.ExecutorNative.Time() >= state.queue.expiresAt then return false, "expired" end
   local ok, house = pcall(ns.Context.House)
   if not ok or type(house) ~= "table" or house.key ~= state.queue.house then return false, "house_mismatch" end
-  if UnitName("player") ~= state.queue.character then return false, "character_mismatch" end
+  if ns.ExecutorNative.UnitName("player") ~= state.queue.character then return false, "character_mismatch" end
   local scannerOK, scannerReason = scannerAdmission(currentAction())
   if not scannerOK then return false, scannerReason end
   if state.latched and not (state.inFlight and state.phase == "must_cancel" and not state.cancelAttempted) then
@@ -239,7 +179,7 @@ local function protected(name, fn, ...)
   local scannerOK, scannerReason = scannerAdmission(action)
   if not scannerOK then return false, scannerReason end
   if state.latched and not (state.inFlight and action and action.kind == "buy_commodity" and
-      name == "C_AuctionHouse.CancelCommoditiesPurchase" and state.phase == "must_cancel" and not state.cancelAttempted) then
+      name == ns.ExecutorNative.AuctionAction("CancelCommoditiesPurchase") and state.phase == "must_cancel" and not state.cancelAttempted) then
     return false, "blocked"
   end
   if type(fn) ~= "function" then return false, name .. " unavailable" end
@@ -248,23 +188,26 @@ local function protected(name, fn, ...)
 end
 
 local function finishStarted(status, detail)
-  finishResult(status, detail)
-  state.inFlight, state.phase, state.latched = false, nil, false
-  if status == "succeeded" then advance() else state.blocked = true updateButton() end
+  local result = ns.Util.Copy(state.result)
+  result.status, result.at, result.detail = status, now(), detail or result.detail or {}
+  persistFinishedResult(status, result.detail)
+  reduce({ type = "finished", result = result, blocked = status ~= "succeeded" })
+  if status == "succeeded" then advance() else updateButton() end
 end
 
 local function beginStarted(detail)
-  state.result = appendResult(currentAction().seq, currentAction().kind, "started", detail)
-  state.inFlight = true
+  local result = appendResult(currentAction().seq, currentAction().kind, "started", detail)
+  reduce({ type = "started", result = result })
 end
 
 local function bagSlots(itemID)
   local slots = {}
-  if not C_Container or type(C_Container.GetContainerNumSlots) ~= "function" or type(C_Container.GetContainerItemInfo) ~= "function" then return slots end
+  local countSlots, itemInfo = ns.ExecutorNative.ContainerFunction("GetContainerNumSlots"), ns.ExecutorNative.ContainerFunction("GetContainerItemInfo")
+  if not countSlots or not itemInfo then return slots end
   for bag = 0, 4 do
-    local count = C_Container.GetContainerNumSlots(bag) or 0
+    local count = countSlots(bag) or 0
     for slot = 1, count do
-      local info = C_Container.GetContainerItemInfo(bag, slot)
+      local info = itemInfo(bag, slot)
       local id = info and info.itemID
       local quantity = info and (info.stackCount or info.quantity or info.count)
       if id == itemID and ns.Util.IsInteger(quantity, 1, MAX_SAFE) then
@@ -303,15 +246,17 @@ local function exactBagSelection(itemID, wanted)
 end
 
 local function slotMatches(planned)
-  if not C_Container or type(C_Container.GetContainerItemInfo) ~= "function" then return false end
-  local info = C_Container.GetContainerItemInfo(planned.bag, planned.slot)
+  local itemInfo = ns.ExecutorNative.ContainerFunction("GetContainerItemInfo")
+  if not itemInfo then return false end
+  local info = itemInfo(planned.bag, planned.slot)
   local quantity = info and (info.stackCount or info.quantity or info.count)
   return info and info.itemID == planned.itemID and quantity == planned.quantity
 end
 
 local function slotSold(planned)
-  if not C_Container or type(C_Container.GetContainerItemInfo) ~= "function" then return false end
-  local info = C_Container.GetContainerItemInfo(planned.bag, planned.slot)
+  local itemInfo = ns.ExecutorNative.ContainerFunction("GetContainerItemInfo")
+  if not itemInfo then return false end
+  local info = itemInfo(planned.bag, planned.slot)
   return not info or info.itemID ~= planned.itemID
 end
 
@@ -322,18 +267,18 @@ local function observeVendorSell()
   if state.stackIndex >= #state.stacks then
     finishStarted("succeeded", state.result.detail)
   else
-    state.stackIndex = state.stackIndex + 1
-    state.phase = "sell_stacks"
+    reduce({ type = "sell_progress", stackIndex = state.stackIndex + 1 })
     updateButton()
   end
 end
 
 local function bagCount()
-  if not C_Container or type(C_Container.GetContainerNumSlots) ~= "function" or type(C_Container.GetContainerItemInfo) ~= "function" then return nil end
+  local countSlots, itemInfo = ns.ExecutorNative.ContainerFunction("GetContainerNumSlots"), ns.ExecutorNative.ContainerFunction("GetContainerItemInfo")
+  if not countSlots or not itemInfo then return nil end
   local total = 0
   for bag = 0, 4 do
-    for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-      local info = C_Container.GetContainerItemInfo(bag, slot)
+    for slot = 1, (countSlots(bag) or 0) do
+      local info = itemInfo(bag, slot)
       local quantity = info and (info.stackCount or info.quantity or info.count)
       if ns.Util.IsInteger(quantity, 0, MAX_SAFE) then total = total + quantity end
     end
@@ -342,11 +287,12 @@ local function bagCount()
 end
 
 local function bagItemCount(itemID)
-  if not C_Container or type(C_Container.GetContainerNumSlots) ~= "function" or type(C_Container.GetContainerItemInfo) ~= "function" then return nil end
+  local countSlots, itemInfo = ns.ExecutorNative.ContainerFunction("GetContainerNumSlots"), ns.ExecutorNative.ContainerFunction("GetContainerItemInfo")
+  if not countSlots or not itemInfo then return nil end
   local total = 0
   for bag = 0, 4 do
-    for slot = 1, (C_Container.GetContainerNumSlots(bag) or 0) do
-      local info = C_Container.GetContainerItemInfo(bag, slot)
+    for slot = 1, (countSlots(bag) or 0) do
+      local info = itemInfo(bag, slot)
       local quantity = info and (info.stackCount or info.quantity or info.count)
       if info and info.itemID == itemID and ns.Util.IsInteger(quantity, 0, MAX_SAFE) then total = total + quantity end
     end
@@ -355,8 +301,9 @@ local function bagItemCount(itemID)
 end
 
 local function mailMessageEmpty(index)
-  if type(GetInboxHeaderInfo) ~= "function" then return false end
-  local ok, _, _, _, _, money, _, _, hasItem = pcall(GetInboxHeaderInfo, index)
+  local header = ns.ExecutorNative.GlobalFunction("GetInboxHeaderInfo")
+  if not header then return false end
+  local ok, _, _, _, _, money, _, _, hasItem = pcall(header, index)
   if not ok then return false end
   if money == nil and hasItem == nil then return false end
   return ns.Util.IsInteger(money or 0, 0, MAX_SAFE) and (money or 0) == 0 and hasItem ~= true
@@ -369,19 +316,22 @@ local function observePostcondition()
     local after = state.expectedItemID and bagItemCount(state.expectedItemID) or bagCount()
     if after and after >= state.beforeBagCount + state.expectedBagCount then finishStarted("succeeded", state.result.detail) end
   elseif phase == "mail_wait" then
-    if type(GetInboxNumItems) == "function" then
-      local after = GetInboxNumItems()
+    local inboxCount = ns.ExecutorNative.GlobalFunction("GetInboxNumItems")
+    if inboxCount then
+      local after = inboxCount()
       local removed = ns.Util.IsInteger(after, 0, MAX_SAFE) and after < state.beforeMailCount
       local emptied = mailMessageEmpty(state.mailIndex)
       if removed or emptied then
-        state.mailProcessed = state.mailProcessed + 1
-        if state.mailProcessed >= state.mailCount then
+        local processed = state.mailProcessed + 1
+        if processed >= state.mailCount then
           finishStarted("succeeded", state.result.detail)
         else
           -- A removed message shifts the next message into this same index.
           -- The action remains in flight across the next hardware click.
-          if not removed then state.mailIndex = state.mailIndex + 1 end
-          state.phase = "mail_items"
+          reduce({
+            type = "mail_progress", mailProcessed = processed,
+            mailIndex = removed and state.mailIndex or state.mailIndex + 1,
+          })
           updateButton()
         end
       end
@@ -390,25 +340,28 @@ local function observePostcondition()
 end
 
 local function merchantIndex(itemID)
-  if type(GetMerchantNumItems) ~= "function" or type(GetMerchantItemID) ~= "function" then return nil end
-  for index = 1, GetMerchantNumItems() do if GetMerchantItemID(index) == itemID then return index end end
+  local countItems, itemIDAt = ns.ExecutorNative.GlobalFunction("GetMerchantNumItems"), ns.ExecutorNative.GlobalFunction("GetMerchantItemID")
+  if not countItems or not itemIDAt then return nil end
+  for index = 1, countItems() do if itemIDAt(index) == itemID then return index end end
 end
 
 local function recipeReady(action)
-  if not C_TradeSkillUI or type(C_TradeSkillUI.IsTradeSkillReady) ~= "function" or C_TradeSkillUI.IsTradeSkillReady() ~= true then return false, "wrong_frame" end
-  if type(C_TradeSkillUI.GetRecipeInfo) ~= "function" or type(C_TradeSkillUI.GetCraftableCount) ~= "function" or type(C_TradeSkillUI.CraftRecipe) ~= "function" then
+  if not ns.ExecutorNative.TradeSkillReady() then return false, "wrong_frame" end
+  local recipeInfo, craftableCount, craftRecipe = ns.ExecutorNative.TradeSkillFunction("GetRecipeInfo"), ns.ExecutorNative.TradeSkillFunction("GetCraftableCount"), ns.ExecutorNative.TradeSkillFunction("CraftRecipe")
+  if not recipeInfo or not craftableCount or not craftRecipe then
     return false, "profession_api_unavailable"
   end
-  local info = C_TradeSkillUI.GetRecipeInfo(action.recipeID)
+  local info = recipeInfo(action.recipeID)
   if type(info) ~= "table" or info.learned ~= true then return false, "recipe_not_learned" end
-  local count = C_TradeSkillUI.GetCraftableCount(action.recipeID)
+  local count = craftableCount(action.recipeID)
   if not ns.Util.IsInteger(count, 0, MAX_SAFE) or count < action.times then return false, "craftable_count_short" end
   return true
 end
 
 local function buyAPIsAvailable()
-  return C_AuctionHouse and type(C_AuctionHouse.StartCommoditiesPurchase) == "function" and
-    type(C_AuctionHouse.ConfirmCommoditiesPurchase) == "function" and type(C_AuctionHouse.CancelCommoditiesPurchase) == "function"
+  return ns.ExecutorNative.AuctionFunction("StartCommoditiesPurchase") ~= nil and
+    ns.ExecutorNative.AuctionFunction("ConfirmCommoditiesPurchase") ~= nil and
+    ns.ExecutorNative.AuctionFunction("CancelCommoditiesPurchase") ~= nil
 end
 
 local function resolve(action)
@@ -416,38 +369,41 @@ local function resolve(action)
   if kind == "buy_commodity" then
     if not buyAPIsAvailable() then return false, "buy_api_unavailable" end
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", { itemID = action.itemID, quantity = action.quantity }) advance() return true end
-    local ok, reason = protected("C_AuctionHouse.StartCommoditiesPurchase", C_AuctionHouse.StartCommoditiesPurchase, action.itemID, action.quantity)
+    local ok, reason = protected(ns.ExecutorNative.AuctionAction("StartCommoditiesPurchase"), ns.ExecutorNative.AuctionFunction("StartCommoditiesPurchase"), action.itemID, action.quantity)
     if not ok then return false, reason end
-    state.phase = "await_price"
     beginStarted({ itemID = action.itemID, quantity = action.quantity })
+    reduce({ type = "phase", phase = "await_price" })
     return true
   elseif kind == "post_commodity" then
     local slots = bagSlots(action.itemID)
     local chosen
     for _, slot in ipairs(slots) do if slot.quantity >= action.quantity then chosen = slot break end end
     if not chosen then return false, "missing_bag_stack" end
-    if not ItemLocation or type(ItemLocation.CreateFromBagAndSlot) ~= "function" then return false, "item_location_unavailable" end
-    if not C_AuctionHouse or type(C_AuctionHouse.IsSellItemValid) ~= "function" or type(C_AuctionHouse.CalculateCommodityDeposit) ~= "function" or type(C_AuctionHouse.PostCommodity) ~= "function" then
+    if not ns.ExecutorNative.CreateItemLocation then return false, "item_location_unavailable" end
+    local sellValid, calculateDeposit, postCommodity = ns.ExecutorNative.AuctionFunction("IsSellItemValid"), ns.ExecutorNative.AuctionFunction("CalculateCommodityDeposit"), ns.ExecutorNative.AuctionFunction("PostCommodity")
+    if not sellValid or not calculateDeposit or not postCommodity then
       return false, "auction_api_unavailable"
     end
-    local location = ItemLocation:CreateFromBagAndSlot(chosen.bag, chosen.slot)
-    if C_AuctionHouse.IsSellItemValid(location) ~= true then return false, "sell_item_invalid" end
-    local ok, deposit = pcall(C_AuctionHouse.CalculateCommodityDeposit, action.itemID, DURATION[action.durationHours], action.quantity)
+    local location = ns.ExecutorNative.CreateItemLocation(chosen.bag, chosen.slot)
+    if not location then return false, "item_location_unavailable" end
+    if sellValid(location) ~= true then return false, "sell_item_invalid" end
+    local ok, deposit = pcall(calculateDeposit, action.itemID, DURATION[action.durationHours], action.quantity)
     if not ok or type(deposit) ~= "number" or deposit < 0 or deposit ~= math.floor(deposit) then return false, "deposit_invalid" end
     local detail = { bag = chosen.bag, slot = chosen.slot, deposit = deposit }
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
-    local called, reason = protected("C_AuctionHouse.PostCommodity", C_AuctionHouse.PostCommodity, location, DURATION[action.durationHours], action.quantity, action.unitPrice)
+    local called, reason = protected(ns.ExecutorNative.AuctionAction("PostCommodity"), postCommodity, location, DURATION[action.durationHours], action.quantity, action.unitPrice)
     if not called then return false, reason end
     beginStarted(detail)
     return true
   elseif kind == "cancel_auction" then
-    if not C_AuctionHouse or type(C_AuctionHouse.CanCancelAuction) ~= "function" or C_AuctionHouse.CanCancelAuction(action.auctionID) ~= true then return false, "cannot_cancel" end
-    if type(C_AuctionHouse.GetCancelCost) ~= "function" then return false, "cancel_cost_unavailable" end
-    local costOK, cost = pcall(C_AuctionHouse.GetCancelCost, action.auctionID)
+    local canCancel, cancelCost, cancelAuction = ns.ExecutorNative.AuctionFunction("CanCancelAuction"), ns.ExecutorNative.AuctionFunction("GetCancelCost"), ns.ExecutorNative.AuctionFunction("CancelAuction")
+    if not canCancel or canCancel(action.auctionID) ~= true then return false, "cannot_cancel" end
+    if not cancelCost then return false, "cancel_cost_unavailable" end
+    local costOK, cost = pcall(cancelCost, action.auctionID)
     if not costOK or not ns.Util.IsInteger(cost, 0, MAX_SAFE) then return false, "cancel_cost_invalid" end
     local detail = { auctionID = action.auctionID, cost = cost }
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
-    local called, reason = protected("C_AuctionHouse.CancelAuction", C_AuctionHouse.CancelAuction, action.auctionID)
+    local called, reason = protected(ns.ExecutorNative.AuctionAction("CancelAuction"), cancelAuction, action.auctionID)
     if not called then return false, reason end
     beginStarted(detail)
     return true
@@ -455,59 +411,62 @@ local function resolve(action)
     local selected, reason = exactBagSelection(action.itemID, action.quantity)
     if not selected then return false, reason end
     local detail = { stacks = selected }
-    if not C_Container or type(C_Container.UseContainerItem) ~= "function" then return false, "container_api_unavailable" end
+    local useContainerItem = ns.ExecutorNative.ContainerFunction("UseContainerItem")
+    if not useContainerItem then return false, "container_api_unavailable" end
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
-    state.stacks, state.stackIndex, state.phase = selected, 1, "sell_stacks"
+    reduce({ type = "prepare_sell", stacks = selected, stackIndex = 1 })
     local slot = state.stacks[1]
-    if not slotMatches(slot) then state.stacks = nil return false, "slot_changed" end
-    local called, callReason = protected("C_Container.UseContainerItem", C_Container.UseContainerItem, slot.bag, slot.slot)
+    if not slotMatches(slot) then reduce({ type = "clear_stacks" }) return false, "slot_changed" end
+    local called, callReason = protected(ns.ExecutorNative.ContainerAction("UseContainerItem"), useContainerItem, slot.bag, slot.slot)
     if not called then return false, callReason end
     beginStarted(detail)
-    state.phase = "sell_wait"
+    reduce({ type = "phase", phase = "sell_wait" })
     observeVendorSell()
     return true
   elseif kind == "vendor_buy" then
     local index = merchantIndex(action.itemID)
     if not index then return false, "merchant_item_missing" end
-    if type(BuyMerchantItem) ~= "function" then return false, "BuyMerchantItem unavailable" end
+    local buyMerchantItem = ns.ExecutorNative.GlobalFunction("BuyMerchantItem")
+    if not buyMerchantItem then return false, "BuyMerchantItem unavailable" end
     local detail = { merchantIndex = index }
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
     local before = bagItemCount(action.itemID)
     if not before then return false, "bag_api_unavailable" end
-    local called, reason = protected("BuyMerchantItem", BuyMerchantItem, index, action.quantity)
+    local called, reason = protected(ns.ExecutorNative.GlobalAction("BuyMerchantItem"), buyMerchantItem, index, action.quantity)
     if not called then return false, reason end
     beginStarted(detail)
-    state.phase, state.beforeBagCount, state.expectedBagCount, state.expectedItemID = "await_vendor_buy", before, action.quantity, action.itemID
+    reduce({ type = "prepare_vendor_buy", beforeBagCount = before, expectedBagCount = action.quantity, expectedItemID = action.itemID })
     observePostcondition()
     return true
   elseif kind == "craft" then
     local ready, reason = recipeReady(action)
     if not ready then return false, reason end
-    local info = C_TradeSkillUI.GetRecipeInfo(action.recipeID)
+    local info = ns.ExecutorNative.TradeSkillFunction("GetRecipeInfo")(action.recipeID)
     local detail = { recipeID = action.recipeID, times = action.times }
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
     local expectedItemID = info and (info.itemID or info.resultItemID) or nil
     local before = expectedItemID and bagItemCount(expectedItemID) or bagCount()
     if not before then return false, "bag_api_unavailable" end
-    local called, callReason = protected("C_TradeSkillUI.CraftRecipe", C_TradeSkillUI.CraftRecipe, action.recipeID, action.times)
+    local called, callReason = protected(ns.ExecutorNative.TradeSkillAction("CraftRecipe"), ns.ExecutorNative.TradeSkillFunction("CraftRecipe"), action.recipeID, action.times)
     if not called then return false, callReason end
     beginStarted(detail)
-    state.phase, state.beforeBagCount, state.expectedBagCount, state.expectedItemID = "await_craft", before, action.times, expectedItemID
+    reduce({ type = "prepare_craft", beforeBagCount = before, expectedBagCount = action.times, expectedItemID = expectedItemID })
     observePostcondition()
     return true
   elseif kind == "mail_collect" then
-    if type(GetInboxNumItems) ~= "function" or type(AutoLootMailItem) ~= "function" then return false, "mail_api_unavailable" end
-    local available = GetInboxNumItems()
+    local inboxCount, autoLoot = ns.ExecutorNative.GlobalFunction("GetInboxNumItems"), ns.ExecutorNative.GlobalFunction("AutoLootMailItem")
+    if not inboxCount or not autoLoot then return false, "mail_api_unavailable" end
+    local available = inboxCount()
     if not ns.Util.IsInteger(available, 0, MAX_SAFE) or available < 1 then return false, "mailbox_empty" end
     local count = math.min(action.maxMessages, available)
     local detail = { messages = count }
     if not isArmed() then printDryRun(action) appendResult(action.seq, kind, "dry_run", detail) advance() return true end
-    state.mailIndex, state.mailCount, state.mailProcessed, state.phase = 1, count, 0, "mail_items"
-    local before = GetInboxNumItems()
-    local called, callReason = protected("AutoLootMailItem", AutoLootMailItem, 1)
+    reduce({ type = "prepare_mail", mailIndex = 1, mailCount = count, mailProcessed = 0 })
+    local before = inboxCount()
+    local called, callReason = protected(ns.ExecutorNative.GlobalAction("AutoLootMailItem"), autoLoot, 1)
     if not called then return false, callReason end
     beginStarted(detail)
-    state.phase, state.beforeMailCount = "mail_wait", before
+    reduce({ type = "mail_wait", beforeMailCount = before })
     observePostcondition()
     return true
   end
@@ -549,53 +508,47 @@ end
 
 local function click(source)
   if state then
-    if source == "button" then
-      if (state.clickOrdinal or 0) >= MAX_U32 then error("executor click ordinal exhausted") end
-      state.clickOrdinal = (state.clickOrdinal or 0) + 1
-      state.lastClickSource = "button"
-    elseif source == "directAPI" then
-      state.lastClickSource = "directAPI"
-    end
+    reduce({ type = "click", source = source, at = ns.ExecutorNative.Uptime() })
   end
   if not state or not state.valid then return end
   local action = currentAction()
   if not action then return end
-  local at = GetTime()
+  local at = ns.ExecutorNative.Uptime()
   local accepted, branch = clickAdmission(action, at)
   if not accepted then
-    state.lastClickAt = at
+    reduce({ type = "click_at", at = at })
     refuse(branch, branch)
     return
   end
-  state.lastClickAt = at
+  reduce({ type = "click_at", at = at })
   if branch == "ready_to_confirm" then
-    local called, callReason = protected("C_AuctionHouse.ConfirmCommoditiesPurchase", C_AuctionHouse and C_AuctionHouse.ConfirmCommoditiesPurchase, action.itemID, action.quantity)
+    local called, callReason = protected(ns.ExecutorNative.AuctionAction("ConfirmCommoditiesPurchase"), ns.ExecutorNative.AuctionFunction("ConfirmCommoditiesPurchase"), action.itemID, action.quantity)
     if not called then refuse(callReason, callReason) return end
-    state.phase = "await_purchase"
+    reduce({ type = "phase", phase = "await_purchase" })
     return
   end
   if branch == "must_cancel" then
-    local called, callReason = protected("C_AuctionHouse.CancelCommoditiesPurchase", C_AuctionHouse and C_AuctionHouse.CancelCommoditiesPurchase, action.itemID)
+    local called, callReason = protected(ns.ExecutorNative.AuctionAction("CancelCommoditiesPurchase"), ns.ExecutorNative.AuctionFunction("CancelCommoditiesPurchase"), action.itemID)
     if not called then refuse(callReason, callReason) return end
-    state.cancelAttempted = true
+    reduce({ type = "cancel_attempted" })
     finishStarted("refused", { unitPrice = state.result.detail.unitPrice, totalPrice = state.result.detail.totalPrice, reason = state.cancelReason or "price_above_max" })
     return
   end
   if branch == "sell_stacks" then
     local slot = state.stacks[state.stackIndex]
     if not slot or not slotMatches(slot) then refuse("slot_changed", "slot_changed") return end
-    local called, callReason = protected("C_Container.UseContainerItem", C_Container and C_Container.UseContainerItem, slot.bag, slot.slot)
+    local called, callReason = protected(ns.ExecutorNative.ContainerAction("UseContainerItem"), ns.ExecutorNative.ContainerFunction("UseContainerItem"), slot.bag, slot.slot)
     if not called then refuse(callReason, callReason) return end
-    state.phase = "sell_wait"
-    state.inFlight = true
+    reduce({ type = "phase", phase = "sell_wait" })
     observeVendorSell()
     return
   end
   if branch == "mail_items" then
-    local before = GetInboxNumItems()
-    local called, callReason = protected("AutoLootMailItem", AutoLootMailItem, state.mailIndex)
+    local inboxCount, autoLoot = ns.ExecutorNative.GlobalFunction("GetInboxNumItems"), ns.ExecutorNative.GlobalFunction("AutoLootMailItem")
+    local before = inboxCount()
+    local called, callReason = protected(ns.ExecutorNative.GlobalAction("AutoLootMailItem"), autoLoot, state.mailIndex)
     if not called then refuse(callReason, callReason) return end
-    state.phase, state.beforeMailCount, state.inFlight = "mail_wait", before, true
+    reduce({ type = "mail_wait", beforeMailCount = before })
     observePostcondition()
     return
   end
@@ -617,16 +570,17 @@ local function commodityPrice(_, first, second, third)
   end
   local valid = ns.Util.IsInteger(unitPrice, 0, MAX_SAFE) and ns.Util.IsInteger(totalPrice, 0, MAX_SAFE)
   if valid then valid = totalPrice >= unitPrice * action.quantity end
+  local detail = ns.Util.Copy(state.result.detail)
+  detail.unitPrice, detail.totalPrice = unitPrice, totalPrice
+  reduce({ type = "result_detail", detail = detail })
   if not valid then
-    state.result.detail.unitPrice, state.result.detail.totalPrice = unitPrice, totalPrice
     refuse("price_invalid", { unitPrice = unitPrice, totalPrice = totalPrice })
     return
   end
-  state.result.detail.unitPrice, state.result.detail.totalPrice = unitPrice, totalPrice
   if unitPrice > action.maxUnitPrice then
     refuse("price_above_max", { unitPrice = unitPrice, totalPrice = totalPrice })
   else
-    state.phase = "ready_to_confirm"
+    reduce({ type = "phase", phase = "ready_to_confirm" })
   end
   updateButton()
 end
@@ -668,18 +622,9 @@ local function eventFrame(event)
 end
 
 local function makeButton()
-  button = CreateFrame("Button", "CrowleyTradeExecutorButton", UIParent, "UIPanelButtonTemplate")
-  button:SetSize(260, 34)
-  button:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-  if button.SetMovable then button:SetMovable(true) end
-  if button.EnableMouse then button:EnableMouse(true) end
-  if button.RegisterForDrag then button:RegisterForDrag("LeftButton") end
-  if button.SetScript then
-    button:SetScript("OnDragStart", function(self) if self.StartMoving then self:StartMoving() end end)
-    button:SetScript("OnDragStop", function(self) if self.StopMovingOrSizing then self:StopMovingOrSizing() end end)
-    button:SetScript("OnClick", function() click("button") end)
-  end
-  button:Hide()
+  local parent = ns.ExecutorNative.UIParent()
+  button = ns.ExecutorNative.CreateButton("CrowleyTradeExecutorButton", parent, "UIPanelButtonTemplate")
+  ns.ExecutorNative.ConfigureButton(button, parent, function() click("button") end)
 end
 
 local function reconcile()
@@ -703,22 +648,23 @@ local function reconcile()
       -- protected operation that preceded it.
     end
   end
-  state.index = 1
+  local index, blocked, ambiguous = 1, false, false
   for seq = 1, #state.queue.actions do
     if unresolved[seq] then
-      state.index, state.blocked, state.ambiguous = seq, true, true
+      index, blocked, ambiguous = seq, true, true
       ns.Print("queue blocked: ambiguous_history")
-      return
+      return reduce({ type = "reconcile", index = index, blocked = blocked, ambiguous = ambiguous })
     end
   end
   for seq = 1, #state.queue.actions do
     if not terminal[seq] or (terminal[seq] ~= "succeeded" and terminal[seq] ~= "skipped") then
-      state.index = seq
-      if terminal[seq] == "refused" or terminal[seq] == "failed" then state.blocked = true end
-      return
+      index = seq
+      blocked = terminal[seq] == "refused" or terminal[seq] == "failed"
+      return reduce({ type = "reconcile", index = index, blocked = blocked, ambiguous = false })
     end
-    state.index = seq + 1
+    index = seq + 1
   end
+  reduce({ type = "reconcile", index = index, blocked = false, ambiguous = false })
 end
 
 local function rejectQueue(reason)
@@ -760,14 +706,12 @@ local function wirePhase(action)
 end
 
 local function buttonIsShown()
-  if not button or type(button.IsShown) ~= "function" then return false end
-  local ok, shown = pcall(function() return button:IsShown() end)
-  return ok and shown == true
+  return button ~= nil and ns.ExecutorNative.ButtonIsShown(button)
 end
 
 local function clickReady()
   if not state or not state.valid or not currentAction() or not buttonIsShown() then return false end
-  local accepted = clickAdmission(currentAction(), GetTime())
+  local accepted = clickAdmission(currentAction(), ns.ExecutorNative.Uptime())
   return accepted == true
 end
 
@@ -837,7 +781,7 @@ end
 function Executor.Arm(queueId)
   if not state or not state.valid then ns.Print("arm refused: queue_invalid") return false end
   if queueId ~= state.queue.queueId then ns.Print("arm refused: queue_id_mismatch") return false end
-  if time() >= state.queue.expiresAt then ns.Print("arm refused: expired") return false end
+  if ns.ExecutorNative.Time() >= state.queue.expiresAt then ns.Print("arm refused: expired") return false end
   if state.queue.armed ~= true then ns.Print("arm refused: published armed=false") return false end
   sessionArmed = true
   ns.Print(("armed: queueId=%s, published=true, session=true"):format(queueId))
@@ -861,7 +805,7 @@ function Executor.Skip()
 end
 
 ns.RegisterModule("Executor", {
-  requires = { "Core" },
+  requires = { "Core", "ExecutorState", "GeneratedWireSchemas", "ExecutorNative" },
   onLoad = function()
     if CROWLEY_QUEUE ~= nil and CROWLEY_QUEUE ~= false then loadQueue() end
   end,
@@ -897,5 +841,5 @@ end
 -- With Queue.lua's false placeholder, the executor creates no frame and
 -- registers no events, leaving the scanner's live surface untouched.
 if CROWLEY_QUEUE ~= nil and CROWLEY_QUEUE ~= false then
-  for _, registration in ipairs(REGISTERED_EVENTS) do ns.On(registration.name, registration.handler) end
+  for _, registration in ipairs(REGISTERED_EVENTS) do ns.ExecutorNative.On(registration.name, registration.handler) end
 end

@@ -50,6 +50,21 @@ def test_packaged_target_and_catalog_are_coherent_and_generated_bytes_are_curren
     assert result.returncode == 0, result.stderr
 
 
+def test_generated_wire_schema_artifact_is_current():
+    result = subprocess.run(
+        [sys.executable, str(GENERATOR), "--check"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    schemas = (ROOT / "addon" / "Crowley" / "GeneratedSchemas.lua").read_text(encoding="utf-8")
+    assert '["ackedScans"] = true' in schemas
+    assert '["actions"] = true' in schemas
+    assert "buy_commodity" in schemas
+
+
 def test_default_watchlist_cli_exports_the_packaged_target_plan():
     result = subprocess.run(
         [sys.executable, "-m", "crowley.core.watchlist", "export"],

@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from lupa import lua51
 
 from crowley.core import savedvars
 from crowley.core.game_target import packaged_game_target
@@ -112,6 +113,426 @@ def schedule_trace(client: WowClient) -> dict:
     return json.loads(
         client.lua.globals().C_EncodingUtil.SerializeJSON(client.lua.globals().CrowleyDB.scheduleTrace)
     )
+
+
+def load_pure_lua_modules(*names: str) -> tuple[lua51.LuaRuntime, object]:
+    """Load pure addon modules into a Lua runtime with no WoW globals."""
+
+    lua = lua51.LuaRuntime(unpack_returned_tuples=True, encoding="latin-1")
+    namespace = lua.table()
+    namespace.RegisterModule = lambda _name, _spec: None
+    for name in names:
+        source = (Path(__file__).parents[1] / "addon" / "Crowley" / f"{name}.lua").read_text()
+        lua.execute(f"return function(...) {source}\nend")("Crowley", namespace)
+    return lua, namespace
+
+
+def test_pure_addon_state_and_encoders_have_no_native_dependency():
+    lua, namespace = load_pure_lua_modules(
+        "GeneratedSchemas", "ScannerState", "AgentState", "ExecutorState", "ScanEncoder", "AgentEncoder"
+    )
+    order = namespace.ScannerState.PlanOrder(lua.table_from([10, 20, 30]), 20)
+    assert list(order.values()) == [30, 10, 20]
+    with pytest.raises(Exception, match="must not be empty"):
+        namespace.ScannerState.PlanOrder(lua.table(), None)
+
+    sweep = namespace.ScannerState.NewSweep(
+        lua.table_from({"itemIDs": lua.table_from([10])}),
+        lua.table_from({"key": "beta-normal-horde"}),
+        lua.table_from({"character": "Tester"}),
+        1,
+        1,
+    )
+    reduced = namespace.ScannerState.Reduce(
+        sweep,
+        lua.table_from(
+            {
+                "type": "item_completed",
+                "itemID": 10,
+                "observation": lua.table_from({}),
+                "cursor": 10,
+                "nextOrdinal": 2,
+            }
+        ),
+    )
+    assert reduced.observations["10"] is not None
+    rows = lua.table_from(
+        [
+            lua.table_from({"unitPrice": lua.table_from({"numerator": 100, "denominator": 1})}),
+            lua.table_from({"unitPrice": lua.table_from({"numerator": 200, "denominator": 1})}),
+            lua.table_from({"unitPrice": lua.table_from({"numerator": 300, "denominator": 1})}),
+        ]
+    )
+    full = namespace.ScannerState.Coverage(rows, 3, True, None)
+    assert full.coverage == "full" and full.sourceComplete is True and full.reasonCode == "ok"
+    bounded = namespace.ScannerState.Coverage(rows, 2, True, None)
+    assert bounded.coverage == "bounded"
+    assert bounded.cutoff.numerator == 200 and bounded.higherPriceWitness.numerator == 300
+    incomplete = namespace.ScannerState.Coverage(rows, 3, False, "metadata_unavailable")
+    assert incomplete.coverage == "incomplete" and incomplete.sourceComplete is False
+    assert incomplete.reasonCode == "metadata_unavailable"
+    with pytest.raises(Exception, match="positive integer"):
+        namespace.ScannerState.Coverage(rows, 0, True, None)
+    with pytest.raises(Exception, match="no rational unit price"):
+        namespace.ScannerState.Coverage(lua.table_from([lua.table_from({})]), 1, True, None)
+
+    lifecycle = namespace.AgentState.New("ordinary")
+    deferred = namespace.AgentState.Transition(lifecycle, "defer")
+    assert deferred.lifecycle == "deferred"
+    invalid, reason = namespace.AgentState.Transition(deferred, "resume")
+    assert invalid is None and reason == "invalid_transition"
+    with pytest.raises(Exception, match="lifecycle is invalid"):
+        namespace.AgentState.New("held")
+    held = namespace.AgentState.Measurement(lifecycle, 0)
+    assert held.lifecycle == "ordinary" and held.nativePhase == "held" and held.nativeOrdinal == 0
+    updating = namespace.AgentState.Measurement(held, 1)
+    assert updating.nativePhase == "updates" and updating.nativeOrdinal == 1
+    completed = namespace.AgentState.Measurement(updating, 100)
+    assert completed.nativePhase == "held" and completed.measurementCompleted is True
+    resumed = namespace.AgentState.Transition(completed, "resume")
+    assert resumed.lifecycle == "ordinary" and resumed.nativePhase == "normal" and resumed.nativeOrdinal == 0
+    with pytest.raises(Exception, match="measurement input is malformed"):
+        namespace.AgentState.Measurement(deferred, 1)
+
+    schemas = namespace.GeneratedWireSchemas
+    queue = lua.table_from(
+        {
+            "format": 1,
+            "queueId": "q",
+            "generatedAt": 1,
+            "expiresAt": 2,
+            "house": "beta-normal-horde",
+            "character": "Tester",
+            "armed": False,
+            "actions": lua.table_from(
+                [lua.table_from({"seq": 1, "kind": "vendor_sell", "itemID": 10, "quantity": 1})]
+            ),
+        }
+    )
+    valid = namespace.ExecutorState.ValidateQueue(queue, schemas)
+    assert valid is True
+    queue.extra = True
+    valid, reason = namespace.ExecutorState.ValidateQueue(queue, schemas)
+    assert not valid and reason == "queue has unknown or missing fields"
+
+    execution_state = lua.table_from(
+        {
+            "index": 1,
+            "phase": "mail_wait",
+            "inFlight": True,
+            "result": lua.table_from({"status": "started"}),
+            "blocked": True,
+            "latched": True,
+            "cancelReason": "blocked",
+            "cancelAttempted": True,
+            "mailIndex": 3,
+            "mailCount": 4,
+            "mailProcessed": 2,
+            "beforeMailCount": 5,
+            "stacks": lua.table_from([lua.table_from({"bag": 0, "slot": 1})]),
+            "stackIndex": 1,
+            "beforeBagCount": 2,
+            "expectedBagCount": 1,
+            "expectedItemID": 10,
+        }
+    )
+    advanced = namespace.ExecutorState.Reduce(execution_state, lua.table_from({"type": "advance"}))
+    assert advanced.index == 2 and advanced.inFlight is False and advanced.blocked is False
+    for field in (
+        "phase",
+        "result",
+        "cancelReason",
+        "mailIndex",
+        "mailCount",
+        "mailProcessed",
+        "beforeMailCount",
+        "stacks",
+        "stackIndex",
+        "beforeBagCount",
+        "expectedBagCount",
+        "expectedItemID",
+    ):
+        assert advanced[field] is None
+    assert advanced.latched is False and advanced.cancelAttempted is False
+    with pytest.raises(Exception, match="unknown event"):
+        namespace.ExecutorState.Reduce(execution_state, lua.table_from({"type": "unknown"}))
+
+    sweep_for_encoding = lua.table_from(
+        {
+            "planHash": "plan",
+            "planJSON": "{}",
+            "observations": lua.table_from({}),
+            "owned": lua.table_from({}),
+            "house": lua.table_from({"key": "beta-normal-horde", "source": "override"}),
+            "context": lua.table_from({"character": "Tester"}),
+            "startedAt": 1,
+        }
+    )
+    encoded_payload = namespace.ScanEncoder.Payload(sweep_for_encoding)
+    assert encoded_payload.planHash == "plan" and encoded_payload.owned is not None
+    encoded_envelope = namespace.ScanEncoder.Envelope(sweep_for_encoding, "scan", 2, 0, 0, "wire")
+    assert encoded_envelope.format == 3 and encoded_envelope.payload == "wire"
+    serialize = lua.eval("function(_) return 'json' end")
+    compress = lua.eval("function(value, method) return value .. tostring(method) end")
+    base64 = lua.eval("function(value) return '[' .. value .. ']' end")
+    assert namespace.ScanEncoder.Encode(encoded_payload, serialize, compress, base64, 7) == "[json7]"
+    ok, decoded = namespace.ScanEncoder.Decode(
+        "wire", lua.eval("function(value) return value .. '-decoded' end")
+    )
+    assert ok is True and decoded == "wire-decoded"
+    bad_sweep = lua.table_from({"planHash": "plan"})
+    with pytest.raises(Exception, match="payload does not match"):
+        namespace.ScanEncoder.Payload(bad_sweep)
+
+    frame = namespace.AgentEncoder.Frame("{}", "payload", 1, 2, 3)
+    assert len(frame) == 2048
+
+
+def test_live_modules_dispatch_their_production_transitions_through_reducers():
+    agent = WowClient()
+    agent.login()
+    agent.lua.globals().testNs = agent.ns
+    agent.lua.execute(
+        "_agent_measurement_calls = 0; "
+        "local measurement = testNs.AgentState.Measurement; "
+        "testNs.AgentState.Measurement = function(current, ordinal) "
+        "_agent_measurement_calls = _agent_measurement_calls + 1; "
+        "return measurement(current, ordinal) end"
+    )
+    agent.slash("agent hold")
+    assert agent.lua.globals()._agent_measurement_calls == 1
+
+    scanner = WowClient()
+    scanner.login()
+    scanner.set_canonical_plan()
+    scanner.lua.globals().testNs = scanner.ns
+    scanner.lua.execute(
+        "_scanner_reducer_events = {}; local reduce = testNs.ScannerState.Reduce; "
+        "testNs.ScannerState.Reduce = function(current, event) "
+        "table.insert(_scanner_reducer_events, event.type); return reduce(current, event) end"
+    )
+    scanner.set_auctions([Auction(itemID=2589, name="Linen Cloth", count=2, buyout=200)])
+    scanner.fire("AUCTION_HOUSE_SHOW")
+    scanner.slash("scan")
+    scanner.run_timers()
+    scanner_events = list(scanner.lua.globals()._scanner_reducer_events.values())
+    assert scanner_events[:4] == ["item_started", "item_completed", "item_started", "item_completed"]
+    assert scanner_events[-3:] == ["owned_started", "owned_completed", "finished"]
+
+    timeout = WowClient(suppress_owned_timeout=True)
+    timeout.login()
+    timeout.set_canonical_plan()
+    timeout.lua.globals().testNs = timeout.ns
+    timeout.lua.execute(
+        "_scanner_reducer_events = {}; local reduce = testNs.ScannerState.Reduce; "
+        "testNs.ScannerState.Reduce = function(current, event) "
+        "table.insert(_scanner_reducer_events, event.type); return reduce(current, event) end"
+    )
+    ids = load_catalog().scan_plan()["itemIDs"]
+    timeout.set_auctions([Auction(2589, "Linen Cloth", count=1, buyout=100)])
+    timeout.set_metadata_pending(ids)
+    timeout.set_owned_behavior(emit=False, delay=601)
+    timeout.fire("AUCTION_HOUSE_SHOW")
+    timeout.slash("scan")
+    advance_to_owned_query(timeout)
+    sweep_deadline = int(timeout.lua.globals().CrowleyDB.lastSweepStart) + 600
+    assert int(timeout.lua.globals()._now) < sweep_deadline
+    timeout.advance_with_timers(sweep_deadline - int(timeout.lua.globals()._now))
+    timeout_events = list(timeout.lua.globals()._scanner_reducer_events.values())
+    assert timeout_events[-3:] == ["owned_started", "owned_completed", "finished"]
+    assert timeout_events.count("item_completed") > 0
+    assert decoded_payload(timeout)["owned"]["reasonCode"] == "sweep_timeout"
+
+    def new_executor(queue_id: str) -> WowClient:
+        client = WowClient(
+            faction="Alliance",
+            realm="Classic Beta PvE 2",
+            current_region=110,
+            queue={
+                "format": 1,
+                "queueId": queue_id,
+                "generatedAt": 1759990000,
+                "expiresAt": 1760000100,
+                "house": "beta-normal-alliance",
+                "character": "Tester",
+                "armed": True,
+                "actions": [
+                    {
+                        "seq": 1,
+                        "kind": "buy_commodity",
+                        "itemID": 2589,
+                        "quantity": 1,
+                        "maxUnitPrice": 100,
+                    }
+                ],
+            },
+        )
+        client.login()
+        client.fire("AUCTION_HOUSE_SHOW")
+        client.slash(f"arm {queue_id}")
+        client.lua.globals().testNs = client.ns
+        client.lua.execute(
+            "_executor_reducer_events = {}; local reduce = testNs.ExecutorState.Reduce; "
+            "testNs.ExecutorState.Reduce = function(current, event) "
+            "table.insert(_executor_reducer_events, event.type); return reduce(current, event) end"
+        )
+        return client
+
+    executor = new_executor("beta-normal-alliance-1760000000-success")
+    executor.click_executor()
+    assert list(executor.lua.globals()._executor_reducer_events.values()) == [
+        "click",
+        "click_at",
+        "started",
+        "phase",
+    ]
+    started = executor._json_table(executor.ns.Executor.State())
+    assert started["inFlight"] is True
+    assert started["phase"] == "await_price"
+    assert started["latched"] is False
+
+    executor.fire("COMMODITY_PRICE_UPDATED", 2589, 50, 50)
+    assert list(executor.lua.globals()._executor_reducer_events.values()) == [
+        "click",
+        "click_at",
+        "started",
+        "phase",
+        "result_detail",
+        "phase",
+    ]
+    priced = executor._json_table(executor.ns.Executor.State())
+    assert priced["inFlight"] is True and priced["phase"] == "ready_to_confirm"
+
+    executor.advance(1)
+    executor.click_executor()
+    assert list(executor.lua.globals()._executor_reducer_events.values()) == [
+        "click",
+        "click_at",
+        "started",
+        "phase",
+        "result_detail",
+        "phase",
+        "click",
+        "click_at",
+        "phase",
+    ]
+    confirming = executor._json_table(executor.ns.Executor.State())
+    assert confirming["inFlight"] is True and confirming["phase"] == "await_purchase"
+
+    executor.fire("COMMODITY_PURCHASE_SUCCEEDED")
+    assert list(executor.lua.globals()._executor_reducer_events.values()) == [
+        "click",
+        "click_at",
+        "started",
+        "phase",
+        "result_detail",
+        "phase",
+        "click",
+        "click_at",
+        "phase",
+        "finished",
+        "advance",
+    ]
+    succeeded = executor._json_table(executor.ns.Executor.State())
+    assert succeeded["index"] == 2
+    assert succeeded["inFlight"] is False
+    assert succeeded["blocked"] is False
+    assert succeeded["latched"] is False
+    assert "phase" not in succeeded
+    assert (
+        executor.execution("beta-normal-alliance-1760000000-success")["results"][0]["status"] == "succeeded"
+    )
+
+    failed = new_executor("beta-normal-alliance-1760000000-failed")
+    failed.click_executor()
+    failed.fire("COMMODITY_PRICE_UPDATED", 2589, 50, 50)
+    failed.advance(1)
+    failed.click_executor()
+    failed.fire("COMMODITY_PURCHASE_FAILED", 1, "purchase_failed")
+    assert list(failed.lua.globals()._executor_reducer_events.values()) == [
+        "click",
+        "click_at",
+        "started",
+        "phase",
+        "result_detail",
+        "phase",
+        "click",
+        "click_at",
+        "phase",
+        "finished",
+    ]
+    failure_state = failed._json_table(failed.ns.Executor.State())
+    assert failure_state["index"] == 1
+    assert failure_state["inFlight"] is False
+    assert failure_state["blocked"] is True
+    assert failure_state["latched"] is False
+    assert "phase" not in failure_state
+    assert failed.execution("beta-normal-alliance-1760000000-failed")["results"][0]["status"] == "failed"
+
+    blocked = new_executor("beta-normal-alliance-1760000000-blocked")
+    blocked.click_executor()
+    blocked.fire("COMMODITY_PRICE_UPDATED", 2589, 200, 200)
+    assert list(blocked.lua.globals()._executor_reducer_events.values()) == [
+        "click",
+        "click_at",
+        "started",
+        "phase",
+        "result_detail",
+        "blocked",
+    ]
+    blocking_state = blocked._json_table(blocked.ns.Executor.State())
+    assert blocking_state["inFlight"] is True
+    assert blocking_state["latched"] is True
+    assert blocking_state["blocked"] is False
+    assert blocking_state["phase"] == "must_cancel"
+
+    blocked.advance(1)
+    blocked.click_executor()
+    assert list(blocked.lua.globals()._executor_reducer_events.values()) == [
+        "click",
+        "click_at",
+        "started",
+        "phase",
+        "result_detail",
+        "blocked",
+        "click",
+        "click_at",
+        "cancel_attempted",
+        "finished",
+    ]
+    blocked_state = blocked._json_table(blocked.ns.Executor.State())
+    assert blocked_state["inFlight"] is False
+    assert blocked_state["latched"] is False
+    assert blocked_state["blocked"] is True
+    assert blocked_state["cancelAttempted"] is True
+    assert blocked_state["result"]["status"] == "refused"
+    assert "phase" not in blocked_state
+    blocked_results = blocked.execution("beta-normal-alliance-1760000000-blocked")["results"]
+    assert [result["status"] for result in blocked_results] == ["refused", "blocked"]
+
+    reconciled = WowClient(
+        faction="Alliance",
+        realm="Classic Beta PvE 2",
+        current_region=110,
+        queue={
+            "format": 1,
+            "queueId": "beta-normal-alliance-1760000000-reconcile",
+            "generatedAt": 1759990000,
+            "expiresAt": 1760000100,
+            "house": "beta-normal-alliance",
+            "character": "Tester",
+            "armed": False,
+            "actions": [{"seq": 1, "kind": "mail_collect", "maxMessages": 1}],
+        },
+    )
+    reconciled.lua.globals().testNs = reconciled.ns
+    reconciled.lua.execute(
+        "_executor_reducer_events = {}; local reduce = testNs.ExecutorState.Reduce; "
+        "testNs.ExecutorState.Reduce = function(current, event) "
+        "table.insert(_executor_reducer_events, event.type); return reduce(current, event) end"
+    )
+    reconciled.login()
+    assert list(reconciled.lua.globals()._executor_reducer_events.values()) == ["reconcile"]
 
 
 def finish_canonical(client: WowClient) -> None:

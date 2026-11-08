@@ -9,6 +9,16 @@
 GeneratedTarget.lua
 Util.lua
 Core.lua
+GeneratedSchemas.lua
+ScannerState.lua
+AgentState.lua
+ExecutorState.lua
+ScanEncoder.lua
+AgentEncoder.lua
+AgentRendering.lua
+AgentNative.lua
+ScannerNative.lua
+ExecutorNative.lua
 Context.lua
 Account.lua
 Probe.lua

@@ -159,10 +159,6 @@ class RuntimeInputEvidence:
         return frozenset(self.environment.forwarded_echo_sources)
 
     @property
-    def keyboard_keymap_sha256(self) -> str:
-        return hashlib.sha256(_canonical(self.keyboard_keymap)).hexdigest()
-
-    @property
     def environment_fingerprint(self) -> str:
         return self.environment.fingerprint
 

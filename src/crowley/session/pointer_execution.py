@@ -66,10 +66,6 @@ class HumanPointerPlan:
         return 0.0 if self.click is None else self.click.dwell
 
 
-def _pixel(value: float) -> int:
-    return int(math.floor(value + 0.5))
-
-
 def _random_waypoints(
     start: Point,
     endpoint: Point,

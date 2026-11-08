@@ -1711,8 +1711,8 @@ class Controller:
         self._evidence_meta["outcomeArchived"] = True
         self._qualification_pending = None
 
-    def _set_format2_evidence(self, evidence: SweepEvidence) -> None:
-        """Install the complete stable format-2 record for one UID."""
+    def _set_stable_scan_evidence(self, evidence: SweepEvidence) -> None:
+        """Install the complete stable scan record for one UID."""
 
         envelope_id = evidence.envelope.get("id", evidence.uid)
         envelope_house = evidence.envelope.get("house", {})
@@ -1721,7 +1721,7 @@ class Controller:
             and envelope_house.get("key")
             and envelope_house.get("key") != evidence.house
         ):
-            raise DriverError("stable format-2 proof identity mismatch")
+            raise DriverError("stable scan proof identity mismatch")
         self._evidence_meta = {
             "uid": evidence.uid,
             "startedAt": int(evidence.envelope["startedAt"]),
@@ -3917,23 +3917,6 @@ class Controller:
             self._save(last_action="native_construction_recovery_required")
             return self.status()
 
-    def clear_native_construction_checkpoint(
-        self,
-        *,
-        expected_generation: int | None = None,
-        expected_state: ControllerState | str | set[ControllerState | str] | None = None,
-    ) -> ControllerStatus:
-        with self._mutex:
-            if not self._native_construction_valid:
-                raise RuntimeError("malformed native construction checkpoint requires recovery")
-            if not self._admitted(expected_generation=expected_generation, expected_state=expected_state):
-                return self.status()
-            self._native_construction = None
-            self._native_construction_valid = True
-            self._native_construction_raw = None
-            self._save(last_action="native_construction_cleared")
-            return self.status()
-
     def rebind_native_construction_frame(
         self,
         *,
@@ -5234,12 +5217,11 @@ class Controller:
         stable_scan_ids: set[str] | frozenset[str] | None = None,
         stable_sweep_ids: set[str] | frozenset[str] | None = None,
         loaded_uid: str = "",
-        stable_format2_uid: str = "",
-        stable_format2_evidence: SweepEvidence | None = None,
-        stable_format2_verified: bool = False,
+        stable_scan_uid: str = "",
+        stable_scan_evidence: SweepEvidence | None = None,
+        stable_scan_verified: bool = False,
         stable_files_complete: bool = False,
         observed_scene: str = "",
-        stable_saved_uid: str = "",
         stable_upload_timestamp: int = 0,
         stable_data_ack_uid: str = "",
         stable_companion_uploaded_uid: str = "",
@@ -5261,7 +5243,7 @@ class Controller:
         This method is read-only with respect to the game.  Every action has a
         named postcondition; absence of an unrelated UID never resolves a
         save/upload/acknowledgement effect.  A recovered acknowledgement is
-        qualified in this method from the complete stable format-2 object so a
+        qualified in this method from the complete stable scan object so a
         daemon cannot accidentally move it through ``REOPEN`` without a run
         outcome.
         """
@@ -5292,8 +5274,7 @@ class Controller:
                 observed_boot,
                 observed_uid,
                 loaded_uid,
-                stable_format2_uid,
-                stable_saved_uid,
+                stable_scan_uid,
                 stable_data_ack_uid,
                 stable_companion_uploaded_uid,
                 loaded_boot,
@@ -5353,9 +5334,9 @@ class Controller:
                 and scanner_idle is True
                 and stable_files_complete is True
             )
-            complete_facts = ready_stable_facts and stable_format2_verified is True and bool(observed_boot)
+            complete_facts = ready_stable_facts and stable_scan_verified is True and bool(observed_boot)
             scan_completed_uid = (
-                stable_format2_evidence.uid if isinstance(stable_format2_evidence, SweepEvidence) else ""
+                stable_scan_evidence.uid if isinstance(stable_scan_evidence, SweepEvidence) else ""
             )
             scan_completed = bool(
                 intent == "scan"
@@ -5363,18 +5344,16 @@ class Controller:
                 and scan_completed_uid
                 and scan_completed_uid != uid
                 and observed_uid == scan_completed_uid
-                and stable_format2_uid == scan_completed_uid
-                and stable_saved_uid == scan_completed_uid
+                and stable_scan_uid == scan_completed_uid
                 and scan_completed_uid in stable_scan_ids
-                and int(stable_format2_evidence.envelope.get("startedAt", -1)) == self._started_at
+                and int(stable_scan_evidence.envelope.get("startedAt", -1)) == self._started_at
             )
-            stable_saved_matches = bool(
+            stable_scan_matches = bool(
                 uid
                 and uid in stable_scan_ids
-                and stable_format2_uid == uid
-                and stable_saved_uid == uid
-                and isinstance(stable_format2_evidence, SweepEvidence)
-                and stable_format2_evidence.uid == uid
+                and stable_scan_uid == uid
+                and isinstance(stable_scan_evidence, SweepEvidence)
+                and stable_scan_evidence.uid == uid
             )
             finish_at = int(self._evidence_meta.get("finishedAt", 0) or 0)
             upload_time_valid = bool(
@@ -5386,7 +5365,7 @@ class Controller:
             companion_uid = stable_companion_uploaded_uid
             proven_upload = bool(
                 complete_facts
-                and stable_saved_matches
+                and stable_scan_matches
                 and uid in uploaded_ids
                 and uid in data_ack_ids
                 and upload_time_valid
@@ -5414,7 +5393,7 @@ class Controller:
                 and uid
                 and observed_uid == uid
                 and boot_changed
-                and stable_saved_matches
+                and stable_scan_matches
             )
             outcome = "restart_observation_unresolved"
 
@@ -5439,7 +5418,7 @@ class Controller:
                 # A scan completed and was durably saved before the owner
                 # stopped.  Continue at the save boundary; no scan is replayed.
                 self._last_uid = scan_completed_uid
-                self._set_format2_evidence(stable_format2_evidence)
+                self._set_stable_scan_evidence(stable_scan_evidence)
                 self._restart_uncertain = False
                 self._reconciliation_required = True
                 self._resume_state = ControllerState.QUIET_SAVE
@@ -5448,8 +5427,8 @@ class Controller:
                 self._begin_intent("save_reload", deadline_seconds=self.reload_deadline_seconds)
                 outcome = "scan_completed_saved"
             elif intent == "save_reload" and proven_saved:
-                if isinstance(stable_format2_evidence, SweepEvidence):
-                    self._set_format2_evidence(stable_format2_evidence)
+                if isinstance(stable_scan_evidence, SweepEvidence):
+                    self._set_stable_scan_evidence(stable_scan_evidence)
                 self._restart_uncertain = False
                 self._reconciliation_required = True
                 self._resume_state = ControllerState.UPLOAD_WAIT
@@ -5458,8 +5437,8 @@ class Controller:
                 self._begin_intent("upload_wait", deadline_seconds=self.upload_deadline_seconds)
                 outcome = "saved_uid_stable"
             elif intent == "upload_wait" and proven_upload:
-                if isinstance(stable_format2_evidence, SweepEvidence):
-                    self._set_format2_evidence(stable_format2_evidence)
+                if isinstance(stable_scan_evidence, SweepEvidence):
+                    self._set_stable_scan_evidence(stable_scan_evidence)
                 self._evidence_meta["atomicCompanionUploadedUid"] = companion_uid
                 self._evidence_meta["companionUploadedUID"] = companion_uid
                 self._evidence_meta["dataAckUid"] = stable_data_ack_uid
@@ -5472,12 +5451,12 @@ class Controller:
                 self._state = self._calibration_gate_state()
                 self._begin_intent("ack_reload", deadline_seconds=self.ack_deadline_seconds)
                 outcome = "upload_observed"
-            elif intent == "ack_reload" and proven_loaded and stable_saved_matches and proven_upload:
+            elif intent == "ack_reload" and proven_loaded and stable_scan_matches and proven_upload:
                 # Rebuild the complete proof and qualify it now.  Keeping a
                 # temporary QUALIFY_PENDING state makes the public boundary
                 # explicit while _qualify_unlocked commits exactly one result.
                 prior_witnesses = copy.deepcopy(self._evidence_meta)
-                self._set_format2_evidence(stable_format2_evidence)
+                self._set_stable_scan_evidence(stable_scan_evidence)
                 for key in (
                     "ackPublicationAt",
                     "ackPublicationBoot",
@@ -5511,9 +5490,9 @@ class Controller:
                 self._reconciliation_required = False
                 self._clear_intent("reconciled_ack_loaded")
                 self._state = ControllerState.QUALIFY_PENDING
-                started_at = self._started_at or int(stable_format2_evidence.envelope["startedAt"])
+                started_at = self._started_at or int(stable_scan_evidence.envelope["startedAt"])
                 self._started_at = int(started_at)
-                result = self._qualify_unlocked(stable_format2_evidence, started_at=started_at)
+                result = self._qualify_unlocked(stable_scan_evidence, started_at=started_at)
                 result = self._park_recovered_terminal(result)
                 self._archive(
                     "interventions",
@@ -5594,12 +5573,12 @@ class Controller:
             elif (
                 intent in {"save_reload", "upload_wait", "ack_reload"}
                 and stable_files_complete is True
-                and not stable_format2_uid
+                and not stable_scan_uid
                 and not stable_scan_ids
                 and not stable_sweep_ids
             ):
                 return self._reject_unrecoverable_cycle(
-                    f"unrecoverable {intent} cycle: exact UID is absent from stable format-2 files"
+                    f"unrecoverable {intent} cycle: exact UID is absent from stable scan files"
                 )
             elif (
                 intent == "scan"
@@ -5638,11 +5617,11 @@ class Controller:
                     "scannerPhase": phase,
                     "scannerIdle": scanner_idle,
                     "scene": scene,
-                    "stableSavedUid": stable_saved_uid,
+                    "stableSavedUid": stable_scan_uid,
                     "stableUploadTimestamp": stable_upload_timestamp,
                     "stableDataAckUid": stable_data_ack_uid,
                     "stableCompanionUploadedUid": companion_uid,
-                    "stableFormat2Verified": stable_format2_verified,
+                    "stableFormat2Verified": stable_scan_verified,
                     "stableFilesComplete": stable_files_complete,
                     "stableScanIds": sorted(stable_scan_ids),
                     "stableSweepIds": sorted(stable_sweep_ids),
@@ -5943,7 +5922,7 @@ class Controller:
             if not evidence.stable_verified:
                 return self.block("SavedVariables evidence was not stably verified")
             try:
-                self._set_format2_evidence(evidence)
+                self._set_stable_scan_evidence(evidence)
             except (DriverError, KeyError, TypeError, ValueError) as exc:
                 return self.block(str(exc))
             if self._stop_requested:

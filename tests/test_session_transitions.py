@@ -146,11 +146,6 @@ def test_native_construction_checkpoint_is_strict_and_rebinds_frame(tmp_path: Pa
     assert controller.native_construction_checkpoint() is None
     controller.tick(expected_generation=7, expected_state=ControllerState.PAUSED)
     assert journal.read()["nativeConstruction"] == malformed
-    with pytest.raises(RuntimeError, match="requires recovery"):
-        controller.clear_native_construction_checkpoint(
-            expected_generation=7, expected_state=ControllerState.PAUSED
-        )
-    assert journal.read()["nativeConstruction"] == malformed
 
     valid = {
         "schema": 1,
@@ -578,7 +573,7 @@ def test_restart_uncertain_intent_resolves_without_replay_or_deadlock(tmp_path: 
         observed_scene="world",
         stable_scan_ids=set(),
         stable_sweep_ids=set(),
-        stable_format2_verified=True,
+        stable_scan_verified=True,
         stable_files_complete=True,
         scanner_idle=True,
         expected_generation=fence.generation,
@@ -615,12 +610,11 @@ def test_restart_observe_frame_preserves_pre_effect_boot_for_save_resolution(tmp
         scanner_idle=True,
         stable_scan_ids={evidence.uid},
         stable_sweep_ids=set(),
-        stable_format2_uid=evidence.uid,
-        stable_format2_evidence=evidence,
-        stable_format2_verified=True,
+        stable_scan_uid=evidence.uid,
+        stable_scan_evidence=evidence,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
-        stable_saved_uid=evidence.uid,
         expected_generation=fence.generation,
         expected_state=ControllerState.RECONCILE,
         fence=fence,
@@ -646,12 +640,11 @@ def test_restart_observe_frame_preserves_pre_effect_boot_for_save_resolution(tmp
         scanner_idle=True,
         stable_scan_ids={evidence.uid},
         stable_sweep_ids=set(),
-        stable_format2_uid=evidence.uid,
-        stable_format2_evidence=evidence,
-        stable_format2_verified=True,
+        stable_scan_uid=evidence.uid,
+        stable_scan_evidence=evidence,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
-        stable_saved_uid=evidence.uid,
         expected_generation=fence.generation,
         expected_state=ControllerState.RECONCILE,
         fence=fence,
@@ -839,7 +832,7 @@ def test_dispatched_scan_start_preserves_attempt_for_fresh_empty_reconcile(tmp_p
         scanner_idle=True,
         stable_scan_ids=set(),
         stable_sweep_ids=set(),
-        stable_format2_verified=True,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
         expected_generation=fence.generation,
@@ -1293,7 +1286,7 @@ def test_ready_empty_dispatched_scan_is_a_truthful_rejected_attempt(tmp_path: Pa
         scanner_idle=True,
         stable_scan_ids=set(),
         stable_sweep_ids=set(),
-        stable_format2_verified=True,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
         expected_generation=fence.generation,
@@ -1311,7 +1304,7 @@ def test_ready_empty_dispatched_scan_is_a_truthful_rejected_attempt(tmp_path: Pa
     assert run["evidence"]["attemptObservation"] == "ready_empty_stable_queues"
 
 
-def test_runtime_durable_empty_scan_facts_reject_without_format2_proof(
+def test_runtime_durable_empty_scan_facts_reject_without_stable_scan_proof(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import tests.test_session_runtime as runtime_fixtures
@@ -1375,8 +1368,8 @@ def test_runtime_durable_empty_scan_facts_reject_without_format2_proof(
     try:
         facts = daemon._reconcile_durable_files(snapshot)
         assert facts["stable_files_complete"] is True
-        assert facts["stable_format2_evidence"] is None
-        assert facts["stable_format2_verified"] is False
+        assert facts["stable_scan_evidence"] is None
+        assert facts["stable_scan_verified"] is False
         fence = controller.observation_fence()
         resolved = controller.reconcile_restart(
             observed_boot=snapshot["boot"],
@@ -1384,9 +1377,9 @@ def test_runtime_durable_empty_scan_facts_reject_without_format2_proof(
             scanner_idle=facts["scanner_idle"],
             stable_scan_ids=facts["stable_scan_ids"],
             stable_sweep_ids=facts["stable_sweep_ids"],
-            stable_format2_uid=facts["stable_format2_uid"],
-            stable_format2_evidence=facts["stable_format2_evidence"],
-            stable_format2_verified=facts["stable_format2_verified"],
+            stable_scan_uid=facts["stable_scan_uid"],
+            stable_scan_evidence=facts["stable_scan_evidence"],
+            stable_scan_verified=facts["stable_scan_verified"],
             stable_files_complete=facts["stable_files_complete"],
             observed_scene="auction_house",
             expected_generation=fence.generation,
@@ -1415,12 +1408,11 @@ def _complete_scan_reconciliation(
         scanner_idle=True,
         stable_scan_ids={evidence.uid},
         stable_sweep_ids=set(),
-        stable_format2_uid=evidence.uid,
-        stable_format2_evidence=evidence,
-        stable_format2_verified=True,
+        stable_scan_uid=evidence.uid,
+        stable_scan_evidence=evidence,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
-        stable_saved_uid=evidence.uid,
         expected_generation=fence.generation,
         expected_state=ControllerState.RECONCILE,
         fence=fence,
@@ -1627,12 +1619,11 @@ def test_recovered_ack_reconstructs_full_evidence_and_qualifies_once(tmp_path: P
         scanner_idle=True,
         stable_scan_ids={evidence.uid},
         stable_sweep_ids=set(),
-        stable_format2_uid=evidence.uid,
-        stable_format2_evidence=evidence,
-        stable_format2_verified=True,
+        stable_scan_uid=evidence.uid,
+        stable_scan_evidence=evidence,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
-        stable_saved_uid=evidence.uid,
         stable_upload_timestamp=103,
         stable_data_ack_uid=evidence.uid,
         stable_companion_uploaded_uid=evidence.uid,
@@ -1712,12 +1703,11 @@ def test_recovered_ack_first_pending_failure_retries_from_durable_full_evidence(
             scanner_idle=True,
             stable_scan_ids={evidence.uid},
             stable_sweep_ids=set(),
-            stable_format2_uid=evidence.uid,
-            stable_format2_evidence=evidence,
-            stable_format2_verified=True,
+            stable_scan_uid=evidence.uid,
+            stable_scan_evidence=evidence,
+            stable_scan_verified=True,
             stable_files_complete=True,
             observed_scene="world",
-            stable_saved_uid=evidence.uid,
             stable_upload_timestamp=103,
             stable_data_ack_uid=evidence.uid,
             stable_companion_uploaded_uid=evidence.uid,
@@ -1994,12 +1984,11 @@ def test_recovered_ack_uid_mismatch_stays_unresolved(tmp_path: Path, bad_field: 
         scanner_idle=True,
         stable_scan_ids={wrong if bad_field == "evidence" else evidence.uid},
         stable_sweep_ids=set(),
-        stable_format2_uid=wrong if bad_field == "evidence" else evidence.uid,
-        stable_format2_evidence=evidence,
-        stable_format2_verified=True,
+        stable_scan_uid=wrong if bad_field == "evidence" else evidence.uid,
+        stable_scan_evidence=evidence,
+        stable_scan_verified=True,
         stable_files_complete=True,
         observed_scene="world",
-        stable_saved_uid=wrong if bad_field == "evidence" else evidence.uid,
         stable_upload_timestamp=103,
         stable_data_ack_uid=wrong if bad_field == "data" else evidence.uid,
         stable_companion_uploaded_uid=wrong if bad_field == "companion" else evidence.uid,

@@ -1,5 +1,5 @@
 import math
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -21,7 +21,6 @@ from crowley.session.executor import (
     WaitPolicy,
     accepts_observation,
     aggregate_motion_profile,
-    binding_matches,
     observations_settled,
     plan_camera_drag,
     plan_context_wait,
@@ -274,8 +273,6 @@ def test_wait_requires_fresh_matching_generation_and_sequence(binding: BindingMe
         ),
         now=10.3,
     )
-    assert binding_matches(binding, binding)
-    assert not binding_matches(binding, replace(binding, generation=4))
 
 
 def test_settling_does_not_reage_an_admitted_observation_after_model_latency(

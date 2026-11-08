@@ -1454,8 +1454,8 @@ def test_restart_reconciliation_keeps_unresolved_intent_until_complete_facts(tmp
         scanner_idle=True,
         stable_scan_ids={uid},
         stable_sweep_ids=set(),
-        stable_format2_uid=uid,
-        stable_format2_verified=True,
+        stable_scan_uid=uid,
+        stable_scan_verified=True,
         stable_files_complete=False,
     )
     assert unresolved.state is ControllerState.RECONCILE
@@ -1474,11 +1474,10 @@ def test_restart_reconciliation_keeps_unresolved_intent_until_complete_facts(tmp
         scanner_idle=True,
         stable_scan_ids={uid},
         stable_sweep_ids=set(),
-        stable_format2_uid=uid,
-        stable_format2_evidence=stable_evidence,
-        stable_format2_verified=True,
+        stable_scan_uid=uid,
+        stable_scan_evidence=stable_evidence,
+        stable_scan_verified=True,
         stable_files_complete=True,
-        stable_saved_uid=uid,
     )
     assert resolved.state is ControllerState.NATIVE_CALIBRATION
     assert resolved.action_intent == "upload_wait"

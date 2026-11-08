@@ -333,21 +333,6 @@ class InputGuardian:
             self._calibration_bootstrap_process_groups.discard(pgid)
             self._watchdog_state()
 
-    def register_observer_process(self, pgid: int) -> None:
-        """Track the read-only XI2 observer for owner-death cleanup."""
-
-        if not isinstance(pgid, int) or isinstance(pgid, bool) or pgid <= 0:
-            raise GuardianError("observer process group identity is malformed")
-        with self._lock:
-            if self._release_failed or self._held or self._active_process_groups:
-                raise GuardianError("observer cannot start while physical ownership is unresolved")
-            if self._watchdog_failed:
-                raise GuardianError("input watchdog is unhealthy")
-            self._observer_process_groups.add(pgid)
-            if not self._watchdog_state():
-                self._observer_process_groups.discard(pgid)
-                raise GuardianError("input watchdog state was not acknowledged")
-
     def observer_dispatch_admission(self, start: Callable[[], Any], *, calibration: bool = False) -> Any:
         """Start and register an observer in one owner-death fence."""
 

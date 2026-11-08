@@ -22,8 +22,6 @@ from .driver import (
 )
 from .evidence import (
     BASELINE_MEDIAN_SECONDS,
-    BASELINE_RANGE_SECONDS,
-    BASELINE_UID,
     EvidenceError,
     SweepEvidence,
     qualify_saved_scan,
@@ -40,8 +38,6 @@ __all__ = [
     "Controller",
     "ControllerState",
     "BASELINE_MEDIAN_SECONDS",
-    "BASELINE_RANGE_SECONDS",
-    "BASELINE_UID",
     "DesktopDriver",
     "DriverError",
     "DriverProfile",

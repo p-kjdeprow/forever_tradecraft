@@ -722,13 +722,6 @@ def plan_context_wait(
     return ContextWaitPlan(expected_context, policy, binding, started_at, allow_source_boot_change)
 
 
-def binding_matches(expected: BindingMetadata, current: BindingMetadata) -> bool:
-    """Require exact identity, capture and generation equality before admission."""
-    if not isinstance(expected, BindingMetadata) or not isinstance(current, BindingMetadata):
-        raise ExecutorError("expected and current bindings have invalid types")
-    return expected == current
-
-
 def accepts_observation(plan: ContextWaitPlan, observation: FreshObservation, *, now: float) -> bool:
     """Return true only for a fresh observation from the exact bound generation."""
     if not isinstance(plan, ContextWaitPlan) or not isinstance(observation, FreshObservation):
@@ -938,7 +931,6 @@ __all__ = [
     "WaitPolicy",
     "accepts_observation",
     "aggregate_motion_profile",
-    "binding_matches",
     "observations_settled",
     "plan_camera_drag",
     "plan_context_wait",

@@ -228,8 +228,24 @@ class _CommodityRow(NamedTuple):
     row_data: object
 
 
-def load_commodity_books(conn: Any, house_key: str) -> dict[int, list[Book]]:
-    """Load one house's corrected commodity observations in one read-only transaction."""
+def load_commodity_books(
+    conn: Any,
+    house_key: str,
+    *,
+    start_t: int | None = None,
+    end_t: int | None = None,
+    client_build: str | None = None,
+) -> dict[int, list[Book]]:
+    """Load corrected commodity observations for one house and optional replay window."""
+
+    if start_t is not None and start_t < 0:
+        raise ValueError("commodity book start_t must be non-negative")
+    if end_t is not None and end_t < 0:
+        raise ValueError("commodity book end_t must be non-negative")
+    if start_t is not None and end_t is not None and start_t > end_t:
+        raise ValueError("commodity book start_t cannot exceed end_t")
+    if client_build is not None and (not client_build or "." not in client_build):
+        raise ValueError("commodity book client_build must be a full client build")
 
     books: dict[int, list[Book]] = defaultdict(list)
     with conn.transaction():
@@ -241,8 +257,23 @@ def load_commodity_books(conn: Any, house_key: str) -> dict[int, list[Book]]:
         if migration is None:
             raise RuntimeError("required migration 003_item_unit_price_and_time_left.sql is not applied")
 
+        conditions = [
+            "h.key = %s",
+            "mo.kind = 'commodity'",
+            "mo.coverage IN ('full', 'bounded')",
+        ]
+        parameters: list[object] = [house_key]
+        if start_t is not None:
+            conditions.append("(mo.query ->> 'startedAt')::bigint >= %s")
+            parameters.append(start_t)
+        if end_t is not None:
+            conditions.append("(mo.query ->> 'startedAt')::bigint <= %s")
+            parameters.append(end_t)
+        if client_build is not None:
+            conditions.append("ms.client_version || '.' || ms.client_build = %s")
+            parameters.append(client_build)
         rows = conn.execute(
-            """
+            f"""
             SELECT ms.id, ms.started_at, mo.item_id, mo.kind, mo.coverage,
                    mo.cutoff, mo.query, mcr.result_id, mcr.quantity,
                    mcr.unit_numerator, mcr.unit_denominator, mcr.row_data
@@ -252,12 +283,10 @@ def load_commodity_books(conn: Any, house_key: str) -> dict[int, list[Book]]:
                 AND mo.house_id = ms.house_id
             LEFT JOIN market_captured_rows mcr ON mcr.sweep_id = mo.sweep_id
                 AND mcr.item_id = mo.item_id
-            WHERE h.key = %s
-              AND mo.kind = 'commodity'
-              AND mo.coverage IN ('full', 'bounded')
+            WHERE {" AND ".join(conditions)}
             ORDER BY mo.item_id, ms.started_at, ms.id, mcr.result_id
             """,
-            (house_key,),
+            tuple(parameters),
         ).fetchall()
 
     typed_rows = tuple(_CommodityRow(*row) for row in rows)

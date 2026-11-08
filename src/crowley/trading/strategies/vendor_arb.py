@@ -11,13 +11,20 @@ class VendorArbStrategy:
     name = "vendor_arb"
 
     def __init__(self, params: Mapping[str, object] | None = None) -> None:
-        params = params or {}
-        supplied = params.get("professions", ())
+        self.params: Mapping[str, object] = dict(params or {})
+        supplied = self.params.get("professions", ())
         self.professions = (
             frozenset(str(value) for value in supplied)
             if isinstance(supplied, Sequence) and not isinstance(supplied, str)
             else frozenset()
         )
+
+    def checkpoint(self) -> Mapping[str, object]:
+        return {}
+
+    def restore(self, state: Mapping[str, object]) -> None:
+        if state:
+            raise ValueError("vendor-arb strategy state must be empty")
 
     def decide(self, market: MarketView, account) -> Sequence[Intent]:
         intents: list[Intent] = []

@@ -61,9 +61,10 @@ class SnipeFlipStrategy:
     professions = frozenset()
 
     def __init__(self, params: Mapping[str, object] | None = None) -> None:
-        self.params = dict(DEFAULT_PARAMS)
+        configured = dict(DEFAULT_PARAMS)
         if params:
-            self.params.update(params)
+            configured.update(params)
+        self.params: Mapping[str, object] = configured
 
     def _plans(self, market: MarketView) -> dict[int, _Plan]:
         plans: dict[int, _Plan] = {}
@@ -73,7 +74,7 @@ class SnipeFlipStrategy:
             facts = market.facts(item_id)
             if facts is None or not trustworthy_fair(
                 snapshot,
-                min_fair_n=int(self.params["min_fair_n"]),
+                min_fair_n=int(fraction_parameter(self.params, "min_fair_n")),
                 max_band_width=fraction_parameter(self.params, "max_band_width"),
             ):
                 continue
@@ -91,6 +92,13 @@ class SnipeFlipStrategy:
                 ),
             )
         return plans
+
+    def checkpoint(self) -> Mapping[str, object]:
+        return {}
+
+    def restore(self, state: Mapping[str, object]) -> None:
+        if state:
+            raise ValueError("snipe-flip strategy state must be empty")
 
     def _buy_limit(self, plan: _Plan, market: MarketView) -> tuple[int, Fraction] | None:
         if not clears_vendor_floor(market.rules, plan.target, plan.facts):

@@ -40,14 +40,18 @@ class ExecutionContext:
     sweep_index: int
     rules: AuctionHouseRules = field(kw_only=True)
     purchased: dict[tuple[int, Any], int] = field(default_factory=dict)
+    purchase_deltas: dict[tuple[int, Any], int] = field(default_factory=dict)
     next_listing_id: int = 1
     time_used: int = 0
     wind_down: bool = False
     demand_share: Fraction = Fraction(1)
+    replay_ordinal: int | None = None
 
     def __post_init__(self) -> None:
         if self.rules != self.market.rules:
             raise ValueError("execution rules do not match market rules")
+        if self.replay_ordinal is None:
+            self.replay_ordinal = self.sweep_index
 
     def account_index(self, account: Account) -> int:
         for index, candidate in enumerate(self.accounts):
@@ -84,7 +88,7 @@ def obtainable_units(context: ExecutionContext, item_id: int) -> list[tuple[Grou
     if next_index is None:
         return []
     result: list[tuple[Group, int]] = []
-    for group in sorted(item_books[index].groups, key=lambda x: (x.unit, str(x.result_id))):
+    for group in context.market.sorted_groups(item_id, index):
         if interval.ceiling is not None and group.unit > interval.ceiling:
             continue
         after = next(
@@ -194,7 +198,7 @@ def settle_fills(context: ExecutionContext) -> None:
                 for listing in account.listings_by_id.values()
                 if listing.item_id == item_id
                 and listing.quantity > 0
-                and listing.posted_step < interval_start
+                and listing.posted_step < context.market.replay_ordinal_for_step(interval_start)
             )
         listings.sort(key=lambda pair: (pair[1].unit_price, pair[1].posted_step, pair[1].listing_id))
         filled_before = 0
@@ -217,7 +221,7 @@ def settle_fills(context: ExecutionContext) -> None:
             account.add_fee("ah_cut", ah_fee)
             account.add_fee("deposits_refunded", refund)
             account.add_count("units_sold", fill)
-            account.mail.append(Mail(context.t + MAIL_DELAY_SECONDS, cash=proceeds + refund))
+            account.mail.append(Mail(float(context.t + MAIL_DELAY_SECONDS), cash=proceeds + refund))
             _consume_lots(account, item_id, fill, proceeds, context.t, "auction")
             account.ledger.append(
                 LedgerEvent(
@@ -244,7 +248,7 @@ def settle_expiry(context: ExecutionContext) -> None:
         ]
         for listing in expired:
             account.mail.append(
-                Mail(context.t + MAIL_DELAY_SECONDS, items={listing.item_id: listing.quantity})
+                Mail(float(context.t + MAIL_DELAY_SECONDS), items={listing.item_id: listing.quantity})
             )
             lost = listing.deposit_paid - listing.deposit_refunded
             account.add_fee("deposits_lost", max(0, lost))
@@ -306,6 +310,9 @@ def _execute_buy(context: ExecutionContext, account: Account, intent: Buy) -> bo
         context.purchased[(intent.item_id, group.result_id)] = (
             context.purchased.get((intent.item_id, group.result_id), 0) + take
         )
+        context.purchase_deltas[(intent.item_id, group.result_id)] = (
+            context.purchase_deltas.get((intent.item_id, group.result_id), 0) + take
+        )
         account.cash_balance -= cost
         account.add_inventory(intent.item_id, take, unit_cost=Fraction(cost, take), t=context.t)
         account.add_count("units_bought", take)
@@ -347,6 +354,9 @@ def _execute_post(context: ExecutionContext, account: Account, intent: Post) -> 
         return False
     account.remove_inventory(intent.item_id, intent.quantity)
     account.cash_balance -= required
+    replay_ordinal = context.replay_ordinal
+    if replay_ordinal is None:
+        raise RuntimeError("execution context has no replay ordinal")
     listing = Listing(
         listing_id=context.next_listing_id,
         item_id=intent.item_id,
@@ -354,7 +364,7 @@ def _execute_post(context: ExecutionContext, account: Account, intent: Post) -> 
         quantity=intent.quantity,
         original_quantity=intent.quantity,
         posted_t=context.t,
-        posted_step=context.sweep_index,
+        posted_step=replay_ordinal,
         expires_t=context.t + intent.duration_hours * 3600,
         deposit_paid=required,
     )

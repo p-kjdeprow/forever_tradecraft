@@ -128,9 +128,10 @@ def _post_horizon_limit(
 
 class CraftingStrategy:
     def __init__(self, params: Mapping[str, object] | None = None) -> None:
-        self.params = dict(DEFAULT_PARAMS)
+        configured = dict(DEFAULT_PARAMS)
         if params:
-            self.params.update(params)
+            configured.update(params)
+        self.params: Mapping[str, object] = configured
         duration = self.params["listing_duration_hours"]
         if isinstance(duration, bool) or not isinstance(duration, int):
             raise TypeError("listing_duration_hours must be an integer")
@@ -196,7 +197,7 @@ class CraftingStrategy:
                 or facts is None
                 or not trustworthy_fair(
                     snapshot,
-                    min_fair_n=int(self.params["min_fair_n"]),
+                    min_fair_n=int(fraction_parameter(self.params, "min_fair_n")),
                     max_band_width=fraction_parameter(self.params, "max_band_width"),
                 )
             ):
@@ -236,6 +237,31 @@ class CraftingStrategy:
             projected_cash -= replacement_deposit
         return intents, projected_cash
 
+    def checkpoint(self) -> Mapping[str, object]:
+        planned = None if self._planned is None else [self._planned[0], self._planned[1]]
+        return {"planned": planned}
+
+    def restore(self, state: Mapping[str, object]) -> None:
+        if set(state) != {"planned"}:
+            raise ValueError("crafting strategy state must contain exactly 'planned'")
+        raw = state["planned"]
+        if raw is None:
+            self._planned = None
+            return
+        if not isinstance(raw, list) or len(raw) != 2:
+            raise ValueError("crafting strategy planned state must be null or [spell_id, times]")
+        spell_id, times = raw
+        if (
+            isinstance(spell_id, bool)
+            or not isinstance(spell_id, int)
+            or spell_id <= 0
+            or isinstance(times, bool)
+            or not isinstance(times, int)
+            or times <= 0
+        ):
+            raise ValueError("crafting strategy planned state contains invalid integers")
+        self._planned = (spell_id, times)
+
     def _trusted_outputs(
         self, recipe: Recipe, market: MarketView
     ) -> dict[int, tuple[ItemSnapshot, ItemFacts, int]] | None:
@@ -249,7 +275,7 @@ class CraftingStrategy:
                 or facts is None
                 or not trustworthy_fair(
                     snapshot,
-                    min_fair_n=int(self.params["min_fair_n"]),
+                    min_fair_n=int(fraction_parameter(self.params, "min_fair_n")),
                     max_band_width=fraction_parameter(self.params, "max_band_width"),
                 )
             ):
@@ -485,7 +511,7 @@ class CraftingStrategy:
                 or quantity <= 0
                 or not trustworthy_fair(
                     snapshot,
-                    min_fair_n=int(self.params["min_fair_n"]),
+                    min_fair_n=int(fraction_parameter(self.params, "min_fair_n")),
                     max_band_width=fraction_parameter(self.params, "max_band_width"),
                 )
             ):

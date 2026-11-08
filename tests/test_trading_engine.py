@@ -98,6 +98,8 @@ def facts(
 
 
 class Script:
+    params = {}
+
     def __init__(
         self,
         name: str,
@@ -110,8 +112,15 @@ class Script:
         self.views: list[tuple[int, int, dict[int, object]]] = []
 
     def decide(self, market, account):
-        self.views.append((market.t, market.sweep_index, dict(market.items())))
-        return self.actions.get(market.sweep_index, ())
+        self.views.append((market.t, market.replay_ordinal, dict(market.items())))
+        return self.actions.get(market.replay_ordinal, ())
+
+    def checkpoint(self):
+        return {}
+
+    def restore(self, state):
+        if state:
+            raise ValueError("script state must be empty")
 
 
 def run(
@@ -475,8 +484,8 @@ def test_click_budget_rotation_and_one_step_per_recorded_sweep():
             super().__init__(name)
 
         def decide(self, market, account):
-            invocation_order.append((market.sweep_index, self.name))
-            self.views.append((market.t, market.sweep_index, dict(market.items())))
+            invocation_order.append((market.replay_ordinal, self.name))
+            self.views.append((market.t, market.replay_ordinal, dict(market.items())))
             return ()
 
     a, b = Ordering("a"), Ordering("b")

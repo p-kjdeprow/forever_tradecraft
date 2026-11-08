@@ -21,6 +21,7 @@ from psycopg.types.json import Jsonb
 
 from crowley.core.queue import build_queue
 from crowley.core.scanformat import decode_json_payload, encode_json_payload, validate_envelope
+from crowley.trading import paper
 from crowley.trading.api import CraftingCapabilities
 from crowley.trading.requirements import capabilities_hash
 
@@ -1403,8 +1404,10 @@ def test_paper_run_api_and_dashboard(client):
                 """
                 INSERT INTO paper_runs
                     (name, house_id, client_build, start_t, capital_copper, strategies,
-                     weights, demand_share, engine_digest, capabilities, capabilities_hash)
-                VALUES (%s, %s, '1.60.1.70450', 100, 9007199254740993, %s, %s, '1/2', %s, %s, %s)
+                     weights, demand_share, engine_digest, capabilities, capabilities_hash,
+                     engine_contract)
+                VALUES (%s, %s, '1.60.1.70450', 100, 9007199254740993, %s, %s, '1/2', %s, %s, %s,
+                        'replay-v1')
                 RETURNING id
                 """,
                 (
@@ -1421,21 +1424,39 @@ def test_paper_run_api_and_dashboard(client):
                 (100, {"alpha": 40000, "beta": 60000, "total": 100000}),
                 (200, {"alpha": 50000, "beta": 70000, "total": 120000}),
             ]
-            for step_t, equity in steps:
+            previous_digest = "0" * 64
+            for replay_ordinal, (step_t, equity) in enumerate(steps):
+                realized = {"alpha": step_t, "beta": step_t * 2, "total": step_t * 3}
+                cash = {"alpha": 39000, "beta": 59000, "total": 98000}
+                chain_record = {
+                    "replay_ordinal": replay_ordinal,
+                    "t": step_t,
+                    "sweep_key": f"sweep-{step_t}",
+                    "equity": equity,
+                    "realized": realized,
+                    "cash": cash,
+                }
+                step_digest = paper._step_chain_digest(previous_digest, chain_record)
                 conn.execute(
                     """
-                    INSERT INTO paper_steps (run_id, step_t, sweep_key, equity, realized, cash)
-                    VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO paper_steps
+                        (run_id, replay_ordinal, step_t, sweep_key, equity, realized, cash,
+                         previous_digest, step_digest)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         run_id,
+                        replay_ordinal,
                         step_t,
                         f"sweep-{step_t}",
                         Jsonb(equity),
-                        Jsonb({"alpha": step_t, "beta": step_t * 2, "total": step_t * 3}),
-                        Jsonb({"alpha": 39000, "beta": 59000, "total": 98000}),
+                        Jsonb(realized),
+                        Jsonb(cash),
+                        previous_digest,
+                        step_digest,
                     ),
                 )
+                previous_digest = step_digest
             for ordinal in range(205):
                 conn.execute(
                     """
@@ -1452,11 +1473,12 @@ def test_paper_run_api_and_dashboard(client):
                 )
             conn.execute(
                 """
-                INSERT INTO paper_pending (run_id, step_t, sweep_key, intents)
-                VALUES (%s, 300, 'pending-sweep', %s)
+                INSERT INTO paper_pending (run_id, replay_ordinal, step_t, sweep_key, intents)
+                VALUES (%s, %s, 300, 'pending-sweep', %s)
                 """,
                 (
                     run_id,
+                    len(steps),
                     Jsonb(
                         {"beta": [{"type": "Buy", "item_id": 2319, "max_unit_price": 27000, "quantity": 3}]}
                     ),

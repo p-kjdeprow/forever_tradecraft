@@ -52,6 +52,7 @@ DEFAULT_PARAMS = {
 
 # Mail return delay plus one recorded sweep (900 s cadence).
 RETURN_GRACE_SECONDS = SECONDS_PER_HOUR + 900
+MAX_STRATEGY_TIMESTAMP = 10**12
 
 
 @dataclass(frozen=True)
@@ -77,9 +78,10 @@ class DipReversionStrategy:
     professions = frozenset()
 
     def __init__(self, params: Mapping[str, object] | None = None) -> None:
-        self.params = dict(DEFAULT_PARAMS)
+        configured = dict(DEFAULT_PARAMS)
         if params:
-            self.params.update(params)
+            configured.update(params)
+        self.params: Mapping[str, object] = configured
         self._entry_t: dict[int, int] = {}
         # Last step time at which this strategy saw one of its own listings for an item. A listing
         # that ends leaves the item unheld until mailed units return, so new entries wait out that
@@ -93,11 +95,47 @@ class DipReversionStrategy:
             facts = market.facts(item_id)
             if facts is not None and trustworthy_fair(
                 snapshot,
-                min_fair_n=int(self.params["min_fair_n"]),
+                min_fair_n=int(fraction_parameter(self.params, "min_fair_n")),
                 max_band_width=fraction_parameter(self.params, "max_band_width"),
             ):
                 plans[item_id] = _Plan(item_id, snapshot, facts)
         return plans
+
+    def checkpoint(self) -> Mapping[str, object]:
+        return {
+            "entry_t": [[item_id, value] for item_id, value in sorted(self._entry_t.items())],
+            "last_listing_t": [[item_id, value] for item_id, value in sorted(self._last_listing_t.items())],
+        }
+
+    def restore(self, state: Mapping[str, object]) -> None:
+        if set(state) != {"entry_t", "last_listing_t"}:
+            raise ValueError("dip-reversion strategy state has an unexpected schema")
+
+        def decode(field: str) -> dict[int, int]:
+            raw = state[field]
+            if not isinstance(raw, list):
+                raise ValueError(f"dip-reversion strategy {field} state must be a list")
+            result: dict[int, int] = {}
+            for entry in raw:
+                if (
+                    not isinstance(entry, list)
+                    or len(entry) != 2
+                    or isinstance(entry[0], bool)
+                    or not isinstance(entry[0], int)
+                    or entry[0] <= 0
+                    or isinstance(entry[1], bool)
+                    or not isinstance(entry[1], int)
+                    or entry[1] < 0
+                    or entry[1] > MAX_STRATEGY_TIMESTAMP
+                ):
+                    raise ValueError(f"dip-reversion strategy {field} state contains an invalid entry")
+                if entry[0] in result:
+                    raise ValueError(f"dip-reversion strategy {field} state contains duplicate item")
+                result[entry[0]] = entry[1]
+            return result
+
+        self._entry_t = decode("entry_t")
+        self._last_listing_t = decode("last_listing_t")
 
     def _snipe_target(self, snapshot: ItemSnapshot) -> int:
         buy_limit = floor_fraction(fraction_parameter(self.params, "snipe_buy_ratio") * fair_value(snapshot))
@@ -109,6 +147,17 @@ class DipReversionStrategy:
         )
 
     def decide(self, market: MarketView, account: AccountView) -> Sequence[Intent]:
+        entry_horizon = 48 * SECONDS_PER_HOUR + RETURN_GRACE_SECONDS + 900
+        self._entry_t = {
+            item_id: entry_t
+            for item_id, entry_t in self._entry_t.items()
+            if market.t - entry_t <= entry_horizon
+        }
+        self._last_listing_t = {
+            item_id: listing_t
+            for item_id, listing_t in self._last_listing_t.items()
+            if market.t - listing_t <= RETURN_GRACE_SECONDS
+        }
         plans = self._plans(market)
         if not plans:
             return []
@@ -176,9 +225,9 @@ class DipReversionStrategy:
             snapshot = plan.snapshot
             if (
                 snapshot.half_life_hours is None
-                or snapshot.half_life_hours > float(self.params["max_half_life"])
+                or snapshot.half_life_hours > float(fraction_parameter(self.params, "max_half_life"))
                 or snapshot.trend_per_day is None
-                or snapshot.trend_per_day <= float(self.params["min_trend"])
+                or snapshot.trend_per_day <= float(fraction_parameter(self.params, "min_trend"))
             ):
                 continue
             ref20 = _twentieth_price(snapshot.levels)

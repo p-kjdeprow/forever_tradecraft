@@ -371,7 +371,15 @@ if tradeNamespaces.C_Timer == false then
 elseif tradeNamespaces.C_Timer ~= nil then
   installTradeNamespace("C_Timer", tradeNamespaces.C_Timer)
 else
-  C_Timer = { After = function(delay, fn) table.insert(_timers, { at = _now + delay, fn = fn }) end }
+  C_Timer = {
+    After = function(delay, fn)
+      local timer = { at = _now + delay, fn = fn }
+      table.insert(_timers, timer)
+      if delay == 30 and harness.suppressOwnedTimeout == true then
+        harness.ownedTimeoutCandidate = timer
+      end
+    end,
+  }
 end
 if harness.accountFakes and tradeNamespaces.C_Spell == nil then
   C_Spell = {
@@ -713,6 +721,16 @@ C_AuctionHouse = {
       type(sorts[1].sortOrder) == "number" and type(sorts[1].reverseSort) == "boolean",
       "documented QueryOwnedAuctions signature")
     harness.ownedQueries = harness.ownedQueries + 1
+    if harness.suppressOwnedTimeout == true and harness.ownedTimeoutCandidate then
+      for index, timer in ipairs(_timers) do
+        if timer == harness.ownedTimeoutCandidate then
+          table.remove(_timers, index)
+          harness.ownedTimeoutSkipped = true
+          break
+        end
+      end
+      harness.ownedTimeoutCandidate = nil
+    end
     appendSend("owned", 0)
     _fire("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT")
     _fire("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED")
@@ -1045,6 +1063,7 @@ class WowClient:
     trade_globals: dict[str, bool] = field(default_factory=dict)
     trade_frames: dict[str, bool] = field(default_factory=dict)
     queue: dict | bool | None = None
+    suppress_owned_timeout: bool = False
     bags: dict[int, dict] = field(default_factory=dict)
     merchant_items: list[dict] = field(default_factory=list)
     sell_item_valid: bool = True
@@ -1235,6 +1254,8 @@ class WowClient:
                 "queryMethods": self.lua.table(),
                 "ignoredCommoditySellQueries": 0,
                 "ownedQueries": 0,
+                "suppressOwnedTimeout": self.suppress_owned_timeout,
+                "ownedTimeoutSkipped": False,
                 "auctions": self.lua.table(),
                 "owned": self.lua.table(),
                 "ownedFull": True,

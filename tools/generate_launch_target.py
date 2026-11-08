@@ -9,14 +9,18 @@ it never edits live deployment files, game files, routes, or evidence.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from crowley.core import companion_state, queue, scanformat
 from crowley.core.game_target import GameTarget, GameTargetError, load_game_target, target_catalog
 from crowley.core.watchlist import Catalog
+from crowley.server.routes.addon import AddonDataResponse
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = ROOT / "src" / "crowley" / "data" / "game_target.json"
@@ -25,6 +29,159 @@ DEFAULT_CATALOG = ROOT / "src" / "crowley" / "data" / "first_run.json"
 
 class GenerationError(ValueError):
     """Raised when target-derived artifacts cannot be rendered safely."""
+
+
+def _literal_string_set(node: ast.AST, context: str) -> set[str]:
+    if not isinstance(node, ast.Set):
+        raise GenerationError(f"{context} must be a literal string set")
+    values: set[str] = set()
+    for element in node.elts:
+        if not isinstance(element, ast.Constant) or not isinstance(element.value, str):
+            raise GenerationError(f"{context} must contain only string literals")
+        values.add(element.value)
+    return values
+
+
+def _validator_named_literal_sets(module_path: Path, function_name: str) -> dict[str, set[str]]:
+    try:
+        tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    except (OSError, SyntaxError) as exc:
+        raise GenerationError(f"cannot read wire contract source {module_path}: {exc}") from exc
+    function = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name
+        ),
+        None,
+    )
+    if function is None:
+        raise GenerationError(f"wire contract source is missing {function_name}")
+    result: dict[str, set[str]] = {}
+    for node in ast.walk(function):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.func.id != "_keys":
+            continue
+        if len(node.args) < 2:
+            raise GenerationError(f"{function_name} has an incomplete _keys call")
+        source = node.args[0]
+        if not isinstance(source, ast.Name):
+            raise GenerationError(f"{function_name}._keys source must be a named value")
+        if source.id in result:
+            raise GenerationError(f"{function_name} has duplicate _keys validation for {source.id}")
+        result[source.id] = _literal_string_set(node.args[1], f"{function_name}._keys[{source.id}]")
+    if not result:
+        raise GenerationError(f"{function_name} has no literal _keys calls")
+    return result
+
+
+def _action_literal_sets(module_path: Path) -> dict[str, set[str]]:
+    try:
+        tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
+    except (OSError, SyntaxError) as exc:
+        raise GenerationError(f"cannot read wire contract source {module_path}: {exc}") from exc
+    function = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef) and node.name == "_validate_action"
+        ),
+        None,
+    )
+    if function is None:
+        raise GenerationError("queue wire contract source is missing _validate_action")
+    assignment = next(
+        (
+            node
+            for node in ast.walk(function)
+            if (
+                isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == "fields" for target in node.targets)
+            )
+            or (
+                isinstance(node, ast.AnnAssign)
+                and isinstance(node.target, ast.Name)
+                and node.target.id == "fields"
+            )
+        ),
+        None,
+    )
+    if assignment is None or not isinstance(assignment.value, ast.Dict):
+        raise GenerationError("queue _validate_action fields must be a literal mapping")
+    result: dict[str, set[str]] = {}
+    for key, value in zip(assignment.value.keys, assignment.value.values, strict=True):
+        if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
+            raise GenerationError("queue action field names must be string literals")
+        result[key.value] = _literal_string_set(value, f"queue action {key.value}")
+    return result
+
+
+def _wire_schema_sets() -> dict[str, object]:
+    """Return wire keys from the Python validators and addon-data writer contract."""
+
+    scan_sets = _validator_named_literal_sets(Path(scanformat.__file__), "validate_envelope")
+    if not {"raw", "decoded"}.issubset(scan_sets):
+        raise GenerationError("scan validate_envelope must validate raw and decoded envelope keys")
+    action_kinds = sorted(queue.ACTION_KINDS)
+    action_fields = _action_literal_sets(Path(queue.__file__))
+    if set(action_fields) != set(action_kinds):
+        raise GenerationError(
+            "queue action validator fields do not match ACTION_KINDS; update the contract parser"
+        )
+    data_fields = set(AddonDataResponse.model_fields)
+    if not data_fields:
+        raise GenerationError("addon-data response has no fields")
+    companion_fields = set(companion_state.CompanionState.__dataclass_fields__)
+    return {
+        "savedScanEnvelope": scan_sets["raw"],
+        "scanPayload": scan_sets["decoded"],
+        "crowleyData": data_fields,
+        "crowleyQueue": set(queue.QUEUE_FIELDS),
+        "execution": set(queue.EXECUTION_FIELDS),
+        "result": set(queue.RESULT_FIELDS),
+        "companionState": companion_fields,
+        "actionFields": action_fields,
+    }
+
+
+def _render_lua_key_set(value: set[str]) -> str:
+    return "{" + ", ".join(f"[{_lua_string(key)}] = true" for key in sorted(value)) + "}"
+
+
+def render_generated_schemas() -> str:
+    schemas = _wire_schema_sets()
+    action_fields = schemas.pop("actionFields")
+    lines = [
+        "local _, ns = ...",
+        "",
+        "-- Generated by tools/generate_launch_target.py. Do not edit by hand.",
+        "ns.GeneratedWireSchemas = {",
+    ]
+    for name in sorted(schemas):
+        value = schemas[name]
+        if not isinstance(value, set):
+            raise GenerationError(f"wire schema {name} is not a string set")
+        lines.append(f"  {name} = {_render_lua_key_set(value)},")
+    lines.append("  actionFields = {")
+    if not isinstance(action_fields, Mapping):
+        raise GenerationError("wire action fields are not a mapping")
+    for action in sorted(action_fields):
+        fields = action_fields[action]
+        if not isinstance(fields, set):
+            raise GenerationError(f"wire action schema {action} is not a string set")
+        lines.append(f"    {action} = {_render_lua_key_set(fields)},")
+    lines.extend(
+        [
+            "  },",
+            "}",
+            "",
+            'ns.RegisterModule("GeneratedWireSchemas", {',
+            '  requires = { "Core" },',
+            "  onLoad = function() end,",
+            "})",
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def _compact_entries(plan: dict[str, Any]) -> str:
@@ -286,6 +443,7 @@ def _source_artifacts(root: Path) -> dict[str, Path]:
         "target": root / "src" / "crowley" / "data" / "game_target.json",
         "catalog": root / "src" / "crowley" / "data" / "first_run.json",
         "generated_lua": root / "addon" / "Crowley" / "GeneratedTarget.lua",
+        "generated_schemas": root / "addon" / "Crowley" / "GeneratedSchemas.lua",
         "crowley_toc": root / "addon" / "Crowley" / "Crowley.toc",
         "data_toc": root / "addon" / "Crowley_Data" / "Crowley_Data.toc",
     }
@@ -318,6 +476,7 @@ def _render(root: Path, target_path: Path, catalog_path: Path) -> dict[Path, str
         artifacts["target"]: render_target_json(target),
         artifacts["catalog"]: catalog_json,
         artifacts["generated_lua"]: render_generated_lua(target, plan),
+        artifacts["generated_schemas"]: render_generated_schemas(),
         artifacts["crowley_toc"]: _replace_toc_interface(toc, target.interface),
         artifacts["data_toc"]: _replace_toc_interface(data_toc, target.interface),
     }

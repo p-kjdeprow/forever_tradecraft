@@ -186,12 +186,10 @@ local function rejectLegacyStorage()
   if CROWLEY_DATA.ackedSweeps ~= nil then
     error("CROWLEY_DATA contains legacy key ackedSweeps; refresh Data.lua before loading Crowley")
   end
-  if not ns.Util.ExactKeys(CROWLEY_DATA, {
-    generatedAt = true,
-    ackedScans = true,
-    scanPlan = true,
-    referenceItemIDs = true,
-  }) then
+  if type(ns.GeneratedWireSchemas) ~= "table" or type(ns.GeneratedWireSchemas.crowleyData) ~= "table" then
+    error("generated CROWLEY_DATA wire schema is unavailable")
+  end
+  if not ns.Util.ExactKeys(CROWLEY_DATA, ns.GeneratedWireSchemas.crowleyData) then
     error("CROWLEY_DATA has unknown or missing keys; refresh Data.lua before loading Crowley")
   end
   if not ns.Util.IsDenseUniqueByteSortedStrings(CROWLEY_DATA.ackedScans) then

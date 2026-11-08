@@ -4,6 +4,9 @@ local _, ns = ...
 -- AuctionHouse ItemKey/result structures and never falls back to the old replication API.
 local Scanner = {}
 ns.Scanner = Scanner
+local Native = ns.ScannerNative
+local time = Native.Now
+local GetTime = Native.Uptime
 
 local TARGET = ns.GeneratedTarget
 if type(TARGET) ~= "table" then error("generated launch target is not loaded") end
@@ -197,16 +200,17 @@ local function traceReadiness(s, phase)
   if not s then return end
   local key = s.itemKey
   local readiness = {
-    hasSearchResults = traceNativeCall("HasSearchResults", C_AuctionHouse.HasSearchResults, key),
+    hasSearchResults = Native.HasSearchResultsAvailable() and
+      traceNativeCall("HasSearchResults", Native.HasSearchResults, key) or { status = "unsupported" },
   }
   if s.kind == "commodity" then
-    readiness.hasFull = traceNativeCall("HasFullCommoditySearchResults", C_AuctionHouse.HasFullCommoditySearchResults, s.itemID)
-    readiness.quantity = traceNativeCall("GetCommoditySearchResultsQuantity", C_AuctionHouse.GetCommoditySearchResultsQuantity, s.itemID)
-    readiness.count = traceNativeCall("GetNumCommoditySearchResults", C_AuctionHouse.GetNumCommoditySearchResults, s.itemID)
+    readiness.hasFull = traceNativeCall("HasFullCommoditySearchResults", Native.HasFullCommodity, s.itemID)
+    readiness.quantity = traceNativeCall("GetCommoditySearchResultsQuantity", Native.GetCommodityQuantity, s.itemID)
+    readiness.count = traceNativeCall("GetNumCommoditySearchResults", Native.GetCommodityCount, s.itemID)
   elseif s.kind == "item" then
-    readiness.hasFull = traceNativeCall("HasFullItemSearchResults", C_AuctionHouse.HasFullItemSearchResults, key)
-    readiness.quantity = traceNativeCall("GetItemSearchResultsQuantity", C_AuctionHouse.GetItemSearchResultsQuantity, key)
-    readiness.count = traceNativeCall("GetNumItemSearchResults", C_AuctionHouse.GetNumItemSearchResults, key)
+    readiness.hasFull = traceNativeCall("HasFullItemSearchResults", Native.HasFullItem, key)
+    readiness.quantity = traceNativeCall("GetItemSearchResultsQuantity", Native.GetItemQuantity, key)
+    readiness.count = traceNativeCall("GetNumItemSearchResults", Native.GetItemCount, key)
   end
   traceEvent("readiness", s, { phase = phase, readiness = readiness })
 end
@@ -223,23 +227,18 @@ local function markForeignOwned()
   state.ownedExternal = true
 end
 
-if not hooksecurefunc then error("Crowley requires hooksecurefunc for Auction House query attribution") end
-hooksecurefunc(C_AuctionHouse, "SendSellSearchQuery", markForeignSearch)
-hooksecurefunc(C_AuctionHouse, "SendSearchQuery", markForeignSearch)
-hooksecurefunc(C_AuctionHouse, "RequestMoreCommoditySearchResults", markForeignSearch)
-hooksecurefunc(C_AuctionHouse, "RequestMoreItemSearchResults", markForeignSearch)
-hooksecurefunc(C_AuctionHouse, "QueryOwnedAuctions", markForeignOwned)
+Native.InstallHooks(markForeignSearch, markForeignOwned)
 
 ns.ahOpen = false
-ns.On("AUCTION_HOUSE_SHOW", function() ns.ahOpen = true Scanner.Schedule("ah_show") end)
-ns.On("AUCTION_HOUSE_CLOSED", function()
+Native.On("AUCTION_HOUSE_SHOW", function() ns.ahOpen = true Scanner.Schedule("ah_show") end)
+Native.On("AUCTION_HOUSE_CLOSED", function()
   ns.ahOpen = false
   local previousToken = scheduleToken
   scheduleToken = scheduleToken + 1
   scheduleEvent("cancel", { reason = "ah_closed", source = "event", token = previousToken, currentToken = scheduleToken })
   if state then Scanner.Abort("ah_closed") end
 end)
-ns.On("PLAYER_LOGOUT", function()
+Native.On("PLAYER_LOGOUT", function()
   -- PLAYER_LOGOUT is the final client-owned scheduling fence.  In-flight
   -- queries are marked as logout-tailed, and a cooldown timer that was
   -- created by the completed sweep cannot start a new sweep while the client
@@ -251,7 +250,7 @@ ns.On("PLAYER_LOGOUT", function()
   if state then Scanner.Abort("logout") end
 end)
 ns.RegisterModule("Scanner", {
-  requires = { "Core" },
+  requires = { "Core", "ScannerState", "ScanEncoder", "ScannerNative", "GeneratedWireSchemas" },
   onLoad = function()
     beginScheduleLoad()
     local decision = nativeDecision()
@@ -347,8 +346,7 @@ local function planMatchesCanonical(source, loaded)
 end
 
 local function runtimeMatchesCanonical()
-  if type(GetBuildInfo) ~= "function" then return false end
-  local version, build, _, interface = GetBuildInfo()
+  local version, build, _, interface = Native.BuildInfo()
   return type(version) == "string" and type(build) == "string" and type(interface) == "number" and
     version == CANONICAL_CLIENT_VERSION and build == CANONICAL_BUILD and interface == CANONICAL_INTERFACE
 end
@@ -358,11 +356,8 @@ local function loadPlan()
   if type(source) ~= "table" or type(source.planJSON) ~= "string" or source.planJSON == "" then
     return nil, "no scan plan loaded"
   end
-  if not C_EncodingUtil or not C_EncodingUtil.DeserializeJSON then
-    return nil, "plan_invalid"
-  end
   if source.planJSON ~= canonicalPlanJSON() then return nil, "plan_invalid" end
-  local ok, loaded = pcall(C_EncodingUtil.DeserializeJSON, source.planJSON)
+  local ok, loaded = ns.ScanEncoder.Decode(source.planJSON, Native.DeserializeJSON)
   if not ok or type(loaded) ~= "table" then return nil, "plan_invalid" end
   if not planMatchesCanonical(source, loaded) then return nil, "plan_invalid" end
   if not runtimeMatchesCanonical() then return loaded, "client_invalid" end
@@ -399,12 +394,13 @@ keyFields = function(key)
 end
 
 local function classifyItem(itemID)
-  if type(C_Item) ~= "table" or type(C_Item.GetItemInfoInstant) ~= "function" then return nil end
-  local ok, _, _, _, _, _, classID = pcall(C_Item.GetItemInfoInstant, itemID)
+  local ok, _, _, _, _, _, classID = pcall(Native.ItemClassInfo, itemID)
   if not ok then return nil end
   if type(classID) ~= "number" or classID < 0 or classID > MAX_SAFE or classID ~= math.floor(classID) then return nil end
-  if type(Enum) ~= "table" or type(Enum.ItemClass) ~= "table" then return nil end
-  local classes = Enum.ItemClass
+  local container, weapon, armor, recipe, profession, tradegoods = Native.ItemClass("Container"), Native.ItemClass("Weapon"),
+    Native.ItemClass("Armor"), Native.ItemClass("Recipe"), Native.ItemClass("Profession"), Native.ItemClass("Tradegoods")
+  if not container or not weapon or not armor or not recipe or not profession or not tradegoods then return nil end
+  local classes = { Container = container, Weapon = weapon, Armor = armor, Recipe = recipe, Profession = profession, Tradegoods = tradegoods }
   if type(classes.Weapon) ~= "number" or type(classes.Armor) ~= "number" or type(classes.Profession) ~= "number" then return nil end
   return classID, classID == classes.Weapon or classID == classes.Armor or classID == classes.Profession
 end
@@ -442,8 +438,8 @@ local function timeLeft(info)
     elseif seconds > 172800 then return nil end
     return { kind = "exact", seconds = seconds }
   end
-  if info.timeLeft ~= nil and C_AuctionHouse.GetTimeLeftBandInfo then
-    local minimum, maximum = C_AuctionHouse.GetTimeLeftBandInfo(info.timeLeft)
+  if info.timeLeft ~= nil then
+    local minimum, maximum = Native.TimeLeftBandInfo(info.timeLeft)
     if type(info.timeLeft) == "number" and info.timeLeft >= 0 and info.timeLeft <= 3 and minimum and maximum and
         minimum >= 0 and maximum >= minimum and minimum <= MAX_SAFE and maximum <= MAX_SAFE and
         minimum == math.floor(minimum) and maximum == math.floor(maximum) then
@@ -521,7 +517,7 @@ end
 
 local function disconnectQueryEvents(s)
   if not s or not s.handlers then return end
-  for event, handler in pairs(s.handlers) do ns.Off(event, handler) end
+  for event, handler in pairs(s.handlers) do Native.Off(event, handler) end
   s.handlers = {}
 end
 
@@ -531,16 +527,22 @@ local function sessionAlive(token, owner)
   return state.item == owner
 end
 
+local function reduceState(previous, event)
+  local nextState = ns.ScannerState.Reduce(previous, event)
+  if ns.db and nextState.queryTrace then ns.db.activeQueryTrace = nextState.queryTrace end
+  return nextState
+end
+
 local function sendMessage(owner, fn)
-  if not C_AuctionHouse.IsThrottledMessageSystemReady then error("Crowley requires IsThrottledMessageSystemReady") end
+  if type(Native.IsThrottledReady) ~= "function" then error("Crowley requires IsThrottledMessageSystemReady") end
   ns.db.querySendTimes = ns.db.querySendTimes or {}
   local now = time()
   local kept = {}
   for _, sent in ipairs(ns.db.querySendTimes) do if now - sent < 60 then kept[#kept + 1] = sent end end
   ns.db.querySendTimes = kept
   local token = state and state.generation
-  if #kept >= 100 or not C_AuctionHouse.IsThrottledMessageSystemReady() then
-    C_Timer.After(1, function() if sessionAlive(token, owner) then sendMessage(owner, fn) end end)
+  if #kept >= 100 or not Native.IsThrottledReady() then
+    Native.After(1, function() if sessionAlive(token, owner) then sendMessage(owner, fn) end end)
     return false
   end
   ns.db.querySendTimes[#ns.db.querySendTimes + 1] = now
@@ -584,20 +586,23 @@ local function failCurrent(reason)
   disconnectQueryEvents(s)
   reason = normalizeRows(s, reason)
   local finished = time()
-  state.observations[tostring(s.itemID)] = {
+  local observation = {
     itemID = s.itemID, ordinal = s.ordinal, kind = s.kind or "unknown",
     query = { kind = "queried", startedAt = s.queryStarted, finishedAt = finished }, coverage = "incomplete",
     sourceComplete = false, cutoff = { kind = "unknown" }, higherPriceWitness = { kind = "unknown" },
     reasonCode = reason, rowCount = #s.rows, rows = rowMap(s.rows),
   }
-  state.cursor, state.nextOrdinal, state.item = s.itemID, s.ordinal + 1, nil
+  state = reduceState(state, {
+    type = "item_completed", itemID = s.itemID, observation = observation,
+    cursor = s.itemID, nextOrdinal = s.ordinal + 1,
+  })
   ns.db.failureCount = (ns.db.failureCount or 0) + 1
   traceEvent("query_outcome", s, { outcome = "incomplete", reason = reason, rowCount = #s.rows })
 end
 
 local function sourceComplete(s)
-  if s.kind == "commodity" then return C_AuctionHouse.HasFullCommoditySearchResults(s.itemID) == true end
-  return C_AuctionHouse.HasFullItemSearchResults(s.itemKey) == true
+  if s.kind == "commodity" then return Native.HasFullCommodity(s.itemID) end
+  return Native.HasFullItem(s.itemKey)
 end
 
 local function finishItem(s)
@@ -606,51 +611,36 @@ local function finishItem(s)
   local reason = normalizeRows(s, s.reasonCode)
   local complete = false
   if not reason then complete = sourceComplete(s) end
-  local depth = s.planLevels
-  local levels, previous, cutoff, witness = 0, nil, nil, nil
-  if not reason then
-    for _, row in ipairs(s.rows) do
-      local marker = row.unitPrice.numerator .. ":" .. row.unitPrice.denominator
-      if marker ~= previous then levels, previous = levels + 1, marker end
-      if levels == depth and not cutoff then cutoff = row.unitPrice end
-      if cutoff and compare(row.unitPrice, cutoff) > 0 then witness = row.unitPrice break end
-    end
-  end
-  local coverage, source = "full", complete
-  if reason then coverage, source, cutoff, witness = "incomplete", false, { kind = "unknown" }, { kind = "unknown" }
-  elseif cutoff and witness then
+  local coverageState = ns.ScannerState.Coverage(s.rows, s.planLevels, complete, reason)
+  local coverage, source = coverageState.coverage, coverageState.sourceComplete
+  local cutoff, witness = coverageState.cutoff, coverageState.higherPriceWitness
+  if coverage == "bounded" then
     local retained = {}
     for _, row in ipairs(s.rows) do if compare(row.unitPrice, cutoff) <= 0 then retained[#retained + 1] = row end end
     s.rows = retained
-    coverage = "bounded"
-  elseif complete then
-    -- A complete source with no higher witness reached at most the advertised
-    -- depth. It is fully covered, so its cutoff is unbounded.
-    cutoff, witness = nil, nil
-  elseif not complete then
-    -- An incomplete commodity cannot claim full coverage without a proven depth boundary;
-    -- item results always wait for HasFullItemSearchResults before reaching this branch.
-    coverage, source = "incomplete", false
   end
   if s.kind == "item" and coverage == "bounded" and not complete then coverage, source, cutoff, witness = "incomplete", false, { kind = "unknown" }, { kind = "unknown" } end
   local cutoffWire = cutoff and cutoff.numerator and { kind = "price", numerator = cutoff.numerator, denominator = cutoff.denominator } or
     (coverage == "incomplete" and { kind = "unknown" } or { kind = "unbounded" })
   local witnessWire = witness and witness.numerator and { kind = "known", numerator = witness.numerator, denominator = witness.denominator } or { kind = "unknown" }
-  state.observations[tostring(s.itemID)] = {
+  local observation = {
     itemID = s.itemID, ordinal = s.ordinal, kind = s.kind,
     query = { kind = "queried", startedAt = s.queryStarted, finishedAt = time() }, coverage = coverage,
     sourceComplete = source, cutoff = cutoffWire, higherPriceWitness = witnessWire, reasonCode = reason or "ok",
     rowCount = #s.rows, rows = rowMap(s.rows),
   }
+  state = reduceState(state, {
+    type = "item_completed", itemID = s.itemID, observation = observation,
+    cursor = s.itemID, nextOrdinal = s.ordinal + 1,
+  })
   traceEvent("query_outcome", s, { outcome = coverage, reason = reason or "ok", rowCount = #s.rows })
-  state.cursor, state.nextOrdinal, state.item = s.itemID, s.ordinal + 1, nil
   Scanner.Next()
 end
 
 local function resultInfo(s, index)
   local info
-  if s.kind == "commodity" then info = C_AuctionHouse.GetCommoditySearchResultInfo(s.itemID, index)
-  else info = C_AuctionHouse.GetItemSearchResultInfo(s.itemKey, index) end
+  if s.kind == "commodity" then info = Native.GetCommodityResult(s.itemID, index)
+  else info = Native.GetItemResult(s.itemKey, index) end
   if not info then return nil, "missing_result" end
   local link = info.itemLink
   local rowItemID, key, raw
@@ -726,7 +716,7 @@ local function collectResults(s)
   s.awaiting, s.sentBarrier, s.responseBarrier, s.sentRequested = false, false, false, false
   if s.reasonCode then return finishItem(s) end
   if ns.Context.House().key ~= state.house.key then return Scanner.Abort("house_changed") end
-  local count = s.kind == "commodity" and C_AuctionHouse.GetNumCommoditySearchResults(s.itemID) or C_AuctionHouse.GetNumItemSearchResults(s.itemKey)
+  local count = s.kind == "commodity" and Native.GetCommodityCount(s.itemID) or Native.GetItemCount(s.itemKey)
   local seenThisCall = {}
   for i = 1, count do
     local row, reason = resultInfo(s, i)
@@ -766,8 +756,8 @@ local function collectResults(s)
       s.sentRequested, s.awaiting, s.sentBarrier, s.responseBarrier = true, false, false, false
       traceEvent("query_send", s, { operation = "page" })
       internalSendDepth = internalSendDepth + 1
-      if s.kind == "commodity" then C_AuctionHouse.RequestMoreCommoditySearchResults(s.itemID)
-      else C_AuctionHouse.RequestMoreItemSearchResults(s.itemKey) end
+      if s.kind == "commodity" then Native.RequestMoreCommodity(s.itemID)
+      else Native.RequestMoreItem(s.itemKey) end
       internalSendDepth = internalSendDepth - 1
     end
   end)
@@ -800,16 +790,16 @@ local function bindSearchEvents(s)
   s.handlers.AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED = responseEvent
   s.handlers.COMMODITY_SEARCH_RESULTS_ADDED, s.handlers.COMMODITY_SEARCH_RESULTS_UPDATED = commodityEvent, commodityEvent
   s.handlers.ITEM_SEARCH_RESULTS_ADDED, s.handlers.ITEM_SEARCH_RESULTS_UPDATED = itemEvent, itemEvent
-  ns.On("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", sentEvent)
-  ns.On("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", responseEvent)
-  ns.On("COMMODITY_SEARCH_RESULTS_ADDED", commodityEvent) ns.On("COMMODITY_SEARCH_RESULTS_UPDATED", commodityEvent)
-  ns.On("ITEM_SEARCH_RESULTS_ADDED", itemEvent) ns.On("ITEM_SEARCH_RESULTS_UPDATED", itemEvent)
+  Native.On("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", sentEvent)
+  Native.On("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", responseEvent)
+  Native.On("COMMODITY_SEARCH_RESULTS_ADDED", commodityEvent) Native.On("COMMODITY_SEARCH_RESULTS_UPDATED", commodityEvent)
+  Native.On("ITEM_SEARCH_RESULTS_ADDED", itemEvent) Native.On("ITEM_SEARCH_RESULTS_UPDATED", itemEvent)
 end
 
 local function failItemStart(s, reason)
   if state ~= nil and state.item == s then
     if s.metadataHandler then
-      ns.Off("ITEM_KEY_ITEM_INFO_RECEIVED", s.metadataHandler)
+      Native.Off("ITEM_KEY_ITEM_INFO_RECEIVED", s.metadataHandler)
       s.handlers.ITEM_KEY_ITEM_INFO_RECEIVED, s.metadataHandler = nil, nil
     end
     failCurrent(reason)
@@ -819,9 +809,9 @@ end
 
 local function startSearch(s)
   if not state or state.item ~= s then return end
-  local nativeKey = C_AuctionHouse.MakeItemKey(s.itemID)
+  local nativeKey = Native.MakeItemKey(s.itemID)
   if not nativeKey then return failItemStart(s, "metadata_unavailable") end
-  local metadata = C_AuctionHouse.GetItemKeyInfo(nativeKey, false)
+  local metadata = Native.ItemKeyInfo(nativeKey)
   if not metadata then return end
   if type(metadata.isCommodity) ~= "boolean" then return failItemStart(s, "metadata_unavailable") end
   local classID, equipment = classifyItem(s.itemID)
@@ -830,7 +820,7 @@ local function startSearch(s)
   s.classID, s.isEquipment = classID, equipment
   s.itemKey = equipment and { itemID = s.itemID, itemLevel = 0, itemSuffix = 0, battlePetSpeciesID = 0 } or nativeKey
   s.kind = metadata.isCommodity and "commodity" or "item"
-  local sort = s.kind == "commodity" and Enum.AuctionHouseSortOrder.Price or Enum.AuctionHouseSortOrder.Buyout
+  local sort = s.kind == "commodity" and Native.SortOrder("Price") or Native.SortOrder("Buyout")
   s.sorts = { { sortOrder = sort, reverseSort = false } }
   bindSearchEvents(s)
   local sent = sendMessage(s, function()
@@ -843,9 +833,9 @@ local function startSearch(s)
       })
       internalSendDepth = internalSendDepth + 1
       if s.kind == "commodity" or not s.isEquipment then
-        C_AuctionHouse.SendSearchQuery(s.itemKey, s.sorts, false)
+        Native.SendSearchQuery(s.itemKey, s.sorts)
       else
-        C_AuctionHouse.SendSellSearchQuery(s.itemKey, s.sorts, false)
+        Native.SendSellSearchQuery(s.itemKey, s.sorts)
       end
       internalSendDepth = internalSendDepth - 1
     end
@@ -854,19 +844,21 @@ end
 
 local function disconnectOwned(sweep)
   if not sweep then return end
-  if sweep.ownedHandler then ns.Off("OWNED_AUCTIONS_UPDATED", sweep.ownedHandler) end
-  if sweep.ownedSentHandler then ns.Off("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", sweep.ownedSentHandler) end
-  if sweep.ownedResponseHandler then ns.Off("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", sweep.ownedResponseHandler) end
+  if sweep.ownedHandler then Native.Off("OWNED_AUCTIONS_UPDATED", sweep.ownedHandler) end
+  if sweep.ownedSentHandler then Native.Off("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", sweep.ownedSentHandler) end
+  if sweep.ownedResponseHandler then Native.Off("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", sweep.ownedResponseHandler) end
 end
 
 local function failOwned(sweep, reason)
   if state ~= sweep or sweep.owned then return end
   sweep.ownedAwaiting = false
   disconnectOwned(sweep)
-  sweep.owned = {
+  local owned = {
     status = "incomplete", query = { kind = "queried", startedAt = sweep.ownedStarted, finishedAt = time() },
     reasonCode = reason, rowCount = 0, rows = {},
   }
+  sweep = reduceState(sweep, { type = "owned_completed", owned = owned })
+  state = sweep
   traceEvent("owned_outcome", sweep, { outcome = "incomplete", reason = reason, rowCount = 0 })
   Scanner.Finish()
 end
@@ -879,15 +871,15 @@ local function beginOwned(sweep)
     traceEvent("dispatch", sweep, { event = "owned_result", matching = sweep.ownedAwaiting == true })
     if ns.Context.House().key ~= sweep.house.key then return failOwned(sweep, "house_changed") end
     if not sweep.ownedAwaiting or not sweep.ownedSentBarrier or not sweep.ownedResponseBarrier or sweep.ownedExternal then return end
-    if not C_AuctionHouse.HasFullOwnedAuctionResults() then return end
+    if not Native.FullOwned() then return end
     sweep.ownedAwaiting, sweep.ownedSentBarrier, sweep.ownedResponseBarrier, sweep.ownedSentRequested = false, false, false, false
     local rows, invalid = {}, false
-      for i = 1, C_AuctionHouse.GetNumOwnedAuctions() do
-        local info = C_AuctionHouse.GetOwnedAuctionInfo(i)
+      for i = 1, Native.OwnedCount() do
+        local info = Native.OwnedInfo(i)
         local itemID, keyFieldsValue = info and info.itemKey and keyFields(info.itemKey)
         if not info or type(info.auctionID) ~= "number" or info.auctionID <= 0 or info.auctionID > MAX_SAFE or info.auctionID ~= math.floor(info.auctionID) or
             not itemID or type(info.quantity) ~= "number" or info.quantity <= 0 or info.quantity > MAX_SAFE or info.quantity ~= math.floor(info.quantity) or
-            (info.status ~= Enum.AuctionStatus.Active and info.status ~= Enum.AuctionStatus.Sold) or not info.itemLink then
+            (info.status ~= Native.AuctionStatus("Active") and info.status ~= Native.AuctionStatus("Sold")) or not info.itemLink then
           invalid = true
         else
           local raw = rawKey(info.itemKey, itemID, info.itemLink)
@@ -897,16 +889,20 @@ local function beginOwned(sweep)
           else rows[#rows + 1] = { auctionID = info.auctionID, itemID = itemID, itemKey = key, rawItemKey = raw,
             itemLink = info.itemLink, quantity = info.quantity,
             buyout = buyout and buyout > 0 and { kind = "known", copper = buyout } or { kind = "unknown" },
-            status = info.status == Enum.AuctionStatus.Sold and "sold" or "active" }
+            status = info.status == Native.AuctionStatus("Sold") and "sold" or "active" }
           end
         end
       end
-      sweep.owned = { status = invalid and "incomplete" or "full", query = { kind = "queried", startedAt = sweep.ownedStarted, finishedAt = time() },
+      local owned = { status = invalid and "incomplete" or "full", query = { kind = "queried", startedAt = sweep.ownedStarted, finishedAt = time() },
         reasonCode = invalid and "query_timeout" or "ok", rowCount = #rows, rows = (function() local out = {} for _, row in ipairs(rows) do out[tostring(row.auctionID)] = row end return out end)() }
+      sweep = reduceState(sweep, { type = "owned_completed", owned = owned })
+      state = sweep
       traceEvent("owned_outcome", sweep, { outcome = sweep.owned.status, reason = sweep.owned.reasonCode, rowCount = sweep.owned.rowCount })
       disconnectOwned(sweep)
       Scanner.Finish()
   end
+  sweep = reduceState(sweep, { type = "owned_started", handler = sweep.ownedHandler })
+  state = sweep
   sweep.ownedSentHandler = function()
     traceEvent("throttle_sent", sweep, { matching = state == sweep and sweep.ownedSentRequested == true, operation = "owned" })
     if state == sweep and sweep.ownedSentRequested then sweep.ownedSentBarrier, sweep.ownedAwaiting = true, true end
@@ -915,10 +911,10 @@ local function beginOwned(sweep)
     traceEvent("throttle_response", sweep, { matching = state == sweep and sweep.ownedSentRequested == true and sweep.ownedSentBarrier == true, operation = "owned" })
     if state == sweep and sweep.ownedSentRequested and sweep.ownedSentBarrier then sweep.ownedResponseBarrier = true end
   end
-  ns.On("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", sweep.ownedSentHandler)
-  ns.On("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", sweep.ownedResponseHandler)
-  ns.On("OWNED_AUCTIONS_UPDATED", sweep.ownedHandler)
-  C_Timer.After(OWNED_TIMEOUT, function()
+  Native.On("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT", sweep.ownedSentHandler)
+  Native.On("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", sweep.ownedResponseHandler)
+  Native.On("OWNED_AUCTIONS_UPDATED", sweep.ownedHandler)
+  Native.After(OWNED_TIMEOUT, function()
     if state == sweep and not sweep.owned then
       failOwned(sweep, "query_timeout")
     end
@@ -928,34 +924,34 @@ local function beginOwned(sweep)
       sweep.ownedSentRequested, sweep.ownedAwaiting, sweep.ownedSentBarrier, sweep.ownedResponseBarrier = true, false, false, false
       traceEvent("query_send", sweep, { operation = "owned" })
       internalSendDepth = internalSendDepth + 1
-      sweep.ownedSorts = { { sortOrder = Enum.AuctionHouseSortOrder.Buyout, reverseSort = false } }
-      C_AuctionHouse.QueryOwnedAuctions(sweep.ownedSorts)
+      sweep.ownedSorts = { { sortOrder = Native.SortOrder("Buyout"), reverseSort = false } }
+      Native.QueryOwned(sweep.ownedSorts)
       internalSendDepth = internalSendDepth - 1
     end
   end)
 end
 
 local function beginItem(itemID, ordinal)
-  local itemKey = C_AuctionHouse.MakeItemKey(itemID)
+  local itemKey = Native.MakeItemKey(itemID)
   local s = { itemID = itemID, ordinal = ordinal, itemKey = itemKey, rows = {}, seen = {}, pages = 1,
     handlers = {}, queryStarted = time(), planLevels = state.plan.initialPriceLevels }
-  state.item, state.cursor = s, itemID
-  local metadata = C_AuctionHouse.GetItemKeyInfo(itemKey, false)
+  state = reduceState(state, { type = "item_started", item = s, cursor = itemID })
+  local metadata = Native.ItemKeyInfo(itemKey)
   if not metadata then
     s.metadataWaiting = true
     s.metadataHandler = function(_, readyID)
       if state and state.item == s and readyID == itemID then
         s.metadataWaiting = false
-        ns.Off("ITEM_KEY_ITEM_INFO_RECEIVED", s.metadataHandler)
+        Native.Off("ITEM_KEY_ITEM_INFO_RECEIVED", s.metadataHandler)
         s.handlers.ITEM_KEY_ITEM_INFO_RECEIVED, s.metadataHandler = nil, nil
         startSearch(s)
       end
     end
     s.handlers.ITEM_KEY_ITEM_INFO_RECEIVED = s.metadataHandler
-    ns.On("ITEM_KEY_ITEM_INFO_RECEIVED", s.metadataHandler)
-    C_Item.RequestLoadItemDataByID(itemID)
+    Native.On("ITEM_KEY_ITEM_INFO_RECEIVED", s.metadataHandler)
+    Native.RequestItemData(itemID)
   else startSearch(s) end
-  C_Timer.After(ITEM_TIMEOUT, function()
+  Native.After(ITEM_TIMEOUT, function()
     if state and state.item == s then failCurrent(s.metadataWaiting and "metadata_unavailable" or "query_timeout") Scanner.Next() end
   end)
 end
@@ -970,7 +966,10 @@ function Scanner.Next()
     if state.item then failCurrent("sweep_timeout") end
     if state.ownedHandler then
       disconnectOwned(state)
-      state.owned = { status = "incomplete", query = { kind = "queried", startedAt = state.ownedStarted or time(), finishedAt = time() }, reasonCode = "sweep_timeout", rowCount = 0, rows = {} }
+      state = reduceState(state, {
+        type = "owned_completed",
+        owned = { status = "incomplete", query = { kind = "queried", startedAt = state.ownedStarted or time(), finishedAt = time() }, reasonCode = "sweep_timeout", rowCount = 0, rows = {} },
+      })
     end
     markTail("sweep_timeout") return Scanner.Finish()
   end
@@ -1013,7 +1012,7 @@ function Scanner.Schedule(source)
     end
     Scanner.Start(false, "timer_callback")
   end
-  C_Timer.After(delay, timerCallback)
+  Native.After(delay, timerCallback)
   scheduleEvent("timer_create", {
     source = source, token = token, currentToken = scheduleToken, delay = delay, due = time() + delay,
   })
@@ -1050,13 +1049,11 @@ function Scanner.Start(force, source)
   local sweepGeneration = generation
   local sweepPlanHash = CROWLEY_DATA.scanPlan.planHash
   local sweepPlanJSON = CROWLEY_DATA.scanPlan.planJSON
-  state = { generation = sweepGeneration, plan = plan, planHash = sweepPlanHash, planJSON = sweepPlanJSON, cursor = cursor, order = (function()
-    local ids, start = {}, 1
-    for i, itemID in ipairs(plan.itemIDs) do ids[i] = itemID if itemID == cursor then start = i + 1 end end
-    if start > #ids then start = 1 end
-    local ordered = {} for n = 0, #ids - 1 do ordered[#ordered + 1] = ids[((start + n - 1) % #ids) + 1] end return ordered
-  end)(), nextOrdinal = 1, observations = {}, startedAt = time(), house = ns.Context.House(), context = ns.Context.Snapshot(),
-    queryTrace = { version = QUERY_TRACE_VERSION, cap = QUERY_TRACE_CAP, sequence = 0, dropped = 0, events = {} } }
+  local sweepState = ns.ScannerState.NewSweep(plan, ns.Context.House(), ns.Context.Snapshot(), time(), sweepGeneration)
+  sweepState.planHash, sweepState.planJSON, sweepState.cursor = sweepPlanHash, sweepPlanJSON, cursor
+  sweepState.order = ns.ScannerState.PlanOrder(plan.itemIDs, cursor)
+  sweepState.queryTrace = { version = QUERY_TRACE_VERSION, cap = QUERY_TRACE_CAP, sequence = 0, dropped = 0, events = {} }
+  state = sweepState
   ns.db.activeQueryTrace = state.queryTrace
   traceEvent("sweep_start", nil, { planned = #state.order, house = state.house.key })
   ns.db.lastSweepStart = state.startedAt
@@ -1065,12 +1062,17 @@ function Scanner.Start(force, source)
   })
   ns.Print(("sweep started for %s (%d planned items)"):format(state.house.key, #state.order))
   local sweep = state
-  C_Timer.After(SWEEP_TIMEOUT, function()
-    if state == sweep and state.generation == sweepGeneration then
+  Native.After(SWEEP_TIMEOUT, function()
+    if state and state.generation == sweepGeneration then
       if state.item then failCurrent("sweep_timeout") end
       if state.ownedHandler then
         disconnectOwned(state)
-        if not state.owned then state.owned = { status = "incomplete", query = { kind = "queried", startedAt = state.ownedStarted or time(), finishedAt = time() }, reasonCode = "sweep_timeout", rowCount = 0, rows = {} } end
+        if not state.owned then
+          state = reduceState(state, {
+            type = "owned_completed",
+            owned = { status = "incomplete", query = { kind = "queried", startedAt = state.ownedStarted or time(), finishedAt = time() }, reasonCode = "sweep_timeout", rowCount = 0, rows = {} },
+          })
+        end
       end
       markTail("sweep_timeout") Scanner.Finish()
     end
@@ -1114,7 +1116,10 @@ function Scanner.Abort(reason)
   if state.item then failCurrent(reason) end
   if state.ownedHandler then
     disconnectOwned(state)
-    state.owned = { status = "incomplete", query = { kind = "queried", startedAt = state.ownedStarted or time(), finishedAt = time() }, reasonCode = reason, rowCount = 0, rows = {} }
+    state = reduceState(state, {
+      type = "owned_completed",
+      owned = { status = "incomplete", query = { kind = "queried", startedAt = state.ownedStarted or time(), finishedAt = time() }, reasonCode = reason, rowCount = 0, rows = {} },
+    })
   end
   markTail(reason)
   Scanner.Finish()
@@ -1123,14 +1128,18 @@ end
 function Scanner.Finish()
   if not state then return end
   traceEvent("sweep_finish", nil, { planned = #state.order })
-  local s = state state = nil
+  local s = state
+  state = reduceState(state, { type = "finished" })
+  s = state
+  state = nil
   ns.db.lastQueryTrace, ns.db.activeQueryTrace = s.queryTrace, nil
   local owned = s.owned or { status = "unqueried", query = { kind = "unqueried" }, reasonCode = "not_started", rowCount = 0, rows = {} }
-  local payload = { planHash = s.planHash, planJSON = s.planJSON, observations = s.observations, owned = owned }
-  local compressed = C_EncodingUtil.CompressString(C_EncodingUtil.SerializeJSON(payload), Enum.CompressionMethod.Deflate)
+  local payload = ns.ScanEncoder.Payload({ planHash = s.planHash, planJSON = s.planJSON, observations = s.observations, owned = owned })
+  local encodedPayload = ns.ScanEncoder.Encode(
+    payload, Native.SerializeJSON, Native.CompressString, Native.EncodeBase64, true
+  )
   local id = ns.Util.NewID({ s.house.key, s.startedAt, s.context.character }, 0, 9999)
-  ns.db.scans[id] = { id = id, format = 3, house = s.house, context = s.context, startedAt = s.startedAt, finishedAt = time(), numRows = 0,
-    numObservations = #s.order, payload = C_EncodingUtil.EncodeBase64(compressed) }
+  ns.db.scans[id] = ns.ScanEncoder.Envelope(s, id, time(), 0, #s.order, encodedPayload)
   for _, observation in pairs(s.observations) do ns.db.scans[id].numRows = ns.db.scans[id].numRows + observation.rowCount end
   local stored = 0 for _ in pairs(ns.db.scans) do stored = stored + 1 end
   local attempted, failures = 0, 0

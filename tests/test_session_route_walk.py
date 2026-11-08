@@ -17,6 +17,7 @@ from crowley.session import driver as driver_module
 from crowley.session.config import open_routes_descriptor
 from crowley.session.daemon import SessionDaemon
 from crowley.session.driver import DesktopDriver, DriverError, DriverProfile, X11Backend
+from crowley.session.driver_runner import GuardedActionRunner
 from crowley.session.executor import BindingMetadata, Point, PointerTarget, Rect
 from crowley.session.guardian import GuardianError, InputGuardian
 from crowley.session.input_broker import InputBroker, RateReservation
@@ -398,6 +399,7 @@ def test_interleaved_timeline_seals_guardian_trace_and_revokes_on_failure() -> N
         {"w": 25, "q": 24, "e": 26, "space": 65},
     )
     driver.revoke = lambda reason: revoked.append(reason)
+    driver._guarded_actions = GuardedActionRunner(driver.guardian, driver.revoke)
     frame = SimpleNamespace(
         identity_fingerprint="client",
         binding=lambda name: {
@@ -468,6 +470,7 @@ def test_real_guardian_releases_on_an_injected_key_repeat(tmp_path: Path) -> Non
     generation = guardian.arm(Evidence())
     driver = object.__new__(DesktopDriver)
     driver.guardian = guardian
+    driver._guarded_actions = GuardedActionRunner(guardian, driver.revoke)
     driver._held_input = False
     identity = SimpleNamespace(child_xid=41, fingerprint="client")
     driver._is_owned_client_target = lambda xid, _identity: xid == 41
@@ -537,6 +540,7 @@ def test_real_guardian_accepts_interleaved_trace_and_releases_on_reordering(tmp_
     identity = SimpleNamespace(child_xid=41, fingerprint="client")
     driver = object.__new__(DesktopDriver)
     driver.guardian = guardian
+    driver._guarded_actions = GuardedActionRunner(guardian, driver.revoke)
     driver._held_input = False
     driver._is_owned_client_target = lambda xid, _identity: xid == 41
     driver._motion_input_context = lambda *_args, **_kwargs: (
@@ -803,6 +807,9 @@ def _virtual_route_daemon(
 
         production_driver = object.__new__(DesktopDriver)
         production_driver.guardian = Guardian()
+        production_driver._guarded_actions = GuardedActionRunner(
+            production_driver.guardian, production_driver.revoke
+        )
         production_driver.backend = Backend()
         production_driver._monitor = SimpleNamespace(
             wait_for_event=lambda predicate, **_kwargs: predicate([])

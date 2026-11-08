@@ -1286,6 +1286,7 @@ def _public_status_for_controller(controller: Controller, driver) -> dict:
     daemon._calibration_operation_snapshot = lambda: {}
     daemon._native_bootstrap_ready = SimpleNamespace(is_set=lambda: False)
     daemon._native_baseline_ready = SimpleNamespace(is_set=lambda: False)
+    daemon._native_bootstrap_lock = threading.RLock()
     daemon._native_baseline_observation = {}
     daemon._native_bootstrap_observation = {}
     daemon._native_handshake = {}

@@ -23,7 +23,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from functools import wraps
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, MethodType
 from typing import Any, cast
 
 from pydantic import BaseModel
@@ -1558,6 +1558,7 @@ class SessionDaemon:
         self._native_baseline_ready = threading.Event()
         self._native_bootstrap_lock = threading.RLock()
         self._native_bootstrap_observation: dict[str, Any] | None = None
+        self._native_bootstrap_release_monotonic: float | None = None
         self._native_baseline_observation: dict[str, Any] | None = None
         self._native_bootstrap_proof: dict[str, Any] | None = None
         self._native_handshake: dict[str, Any] = {
@@ -4519,6 +4520,7 @@ class SessionDaemon:
                 "provenance": "owned-live",
             }
             self._native_bootstrap_proof = None
+            self._native_bootstrap_release_monotonic = None
             self._native_baseline_ready.clear()
             self._native_baseline_observation = None
         self._native_bootstrap_ready.set()
@@ -4537,6 +4539,8 @@ class SessionDaemon:
         with self.controller.lock:
             if self.controller.status().state != ControllerState.NATIVE_CALIBRATION:
                 raise DriverError("native calibration generation was revoked")
+            if self._native_bootstrap_release_monotonic is None:
+                raise DriverError("native baseline-ready callback arrived before bootstrap release")
         with self._native_bootstrap_lock:
             observation = self._native_bootstrap_observation
             if not observation or observation.get("identity") != identity.fingerprint:
@@ -4929,7 +4933,21 @@ class SessionDaemon:
     def _ensure_native_memory_meter(self) -> LinuxProcStatusVmHwmReset5 | None:
         """Open the default reset5 meter only for a fresh verified client."""
 
-        if self.driver.native_memory_meter is not None:
+        existing_meter = self.driver.native_memory_meter
+        if existing_meter is not None:
+            if not isinstance(existing_meter, LinuxProcStatusVmHwmReset5):
+                raise DriverError("pre-bound native reset5 memory meter has an invalid type")
+            try:
+                meter_clock = existing_meter._monotonic
+            except AttributeError as exc:
+                raise DriverError("pre-bound native reset5 memory meter has no monotonic clock") from exc
+            if not callable(meter_clock):
+                raise DriverError("pre-bound native reset5 memory meter has an invalid monotonic clock")
+            if not self._native_clock_matches(
+                cast(Callable[[], float], self._native_clock),
+                cast(Callable[[], float], meter_clock),
+            ):
+                raise DriverError("pre-bound native reset5 memory meter uses a different monotonic clock")
             return None
         if not isinstance(self.driver.backend, X11Backend):
             raise DriverError("native reset5 memory meter requires the configured X11 backend")
@@ -4969,6 +4987,19 @@ class SessionDaemon:
         )
         self.driver.native_memory_meter = meter
         return meter
+
+    @staticmethod
+    def _native_clock_matches(expected: Callable[[], float], candidate: Callable[[], float]) -> bool:
+        """Match the same clock capability, including separately fetched bound methods."""
+
+        if expected is candidate:
+            return True
+        return (
+            isinstance(expected, MethodType)
+            and isinstance(candidate, MethodType)
+            and expected.__self__ is candidate.__self__
+            and expected.__func__ is candidate.__func__
+        )
 
     def _archive_native_memory_assessment(
         self,
@@ -5100,13 +5131,22 @@ class SessionDaemon:
             ):
                 raise DriverError("post-reset absence capture changed")
             self._native_bootstrap_observation = observation
-            baseline_ready(identity.pid, baseline_hwm)
-            observation["baselineHwm"] = baseline_hwm
-            if observation.get("baselineHwm") != baseline_hwm:
+        # The release clock seam is deliberately before the callback.  The
+        # legacy callback publishes the public ready handshake/event, so the
+        # release boundary must be committed by the state owner first; a
+        # status consumer must never observe actionable readiness without it.
+        bootstrap_release = cast(Callable[[], float], self._native_clock)()
+        with self.controller.lock:
+            if self.controller.status().state != ControllerState.NATIVE_CALIBRATION:
+                raise DriverError("native calibration generation was revoked")
+            if self._native_bootstrap_release_monotonic is not None:
+                raise DriverError("native bootstrap release boundary was already committed")
+            self._native_bootstrap_release_monotonic = bootstrap_release
+        baseline_ready(identity.pid, baseline_hwm)
+        with self._native_bootstrap_lock:
+            observation = self._native_bootstrap_observation
+            if observation is None or observation.get("baselineHwm") != baseline_hwm:
                 raise DriverError("native baseline-ready callback did not publish the measured HWM")
-            # Construction timing begins only after baseline-ready crosses the
-            # reset receipt boundary.
-            bootstrap_release = self._native_clock()
             evidence = NativePreconstructionEvidence._issue(
                 identity_fingerprint=identity.fingerprint,
                 process_start=identity.process_start,
@@ -12064,6 +12104,7 @@ class SessionDaemon:
             # the daemon-side object would let a later gate accidentally
             # reuse an observation from the previous client construction.
             self._native_bootstrap_proof = None
+            self._native_bootstrap_release_monotonic = None
             self._native_baseline_ready.clear()
             self._native_baseline_observation = None
             succeeded = True
@@ -12078,6 +12119,7 @@ class SessionDaemon:
             # provider was running.  Require a new external bootstrap token.
             self._native_bootstrap_proof = None
             self._native_measurement_state = None
+            self._native_bootstrap_release_monotonic = None
             self._native_baseline_ready.clear()
             self._native_baseline_observation = None
             with self._native_bootstrap_lock:
@@ -14159,6 +14201,11 @@ class SessionDaemon:
         route_walk = dict(getattr(self, "_route_walk_status", self._NO_ROUTE_WALK_STATUS))
         if isinstance(route_walk.get("segments"), tuple):
             route_walk["segments"] = list(route_walk["segments"])
+        with self._native_bootstrap_lock:
+            native_bootstrap_pending = self._native_bootstrap_ready.is_set()
+            native_bootstrap_ready = self._native_baseline_ready.is_set()
+            native_bootstrap = self._native_baseline_observation or self._native_bootstrap_observation
+            native_handshake = dict(self._native_handshake)
         return {
             "state": value.state.value,
             "mode": value.mode.value,
@@ -14207,13 +14254,13 @@ class SessionDaemon:
             },
             "nextAction": next_action,
             "nativeResourceAssessment": self.controller.native_resource_assessment(),
-            "nativeBootstrapPending": self._native_bootstrap_ready.is_set(),
-            "nativeBootstrapReady": self._native_baseline_ready.is_set(),
-            "nativeBootstrap": self._native_baseline_observation or self._native_bootstrap_observation,
+            "nativeBootstrapPending": native_bootstrap_pending,
+            "nativeBootstrapReady": native_bootstrap_ready,
+            "nativeBootstrap": native_bootstrap,
             # These fields are the operator-visible native8 handshake.  They
             # are facts emitted by callbacks from the live runner, not claims
             # inferred from a calibration boolean.
-            "nativeHandshake": dict(self._native_handshake),
+            "nativeHandshake": native_handshake,
             "routeWalk": copy.deepcopy(route_walk),
         }
 

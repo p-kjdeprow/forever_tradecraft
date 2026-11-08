@@ -5229,6 +5229,10 @@ def _construction_daemon(
     tmp_path: Path, *, state: ControllerState = ControllerState.NATIVE_CALIBRATION
 ) -> tuple[SessionDaemon, DesktopDriver, WindowIdentity, subprocess.Popen[str]]:
     driver, identity, child = _native_driver(tmp_path)
+    meter = driver.native_memory_meter
+    if meter is None:
+        raise AssertionError("construction daemon fixture has no pre-bound native memory meter")
+    meter._monotonic = driver._clock
     journal_path = tmp_path / "construction-journal.json"
     value = copy.deepcopy(DEFAULT_STATE)
     value.update(
@@ -8557,6 +8561,10 @@ def test_native_construction_composes_real_png_runner_and_finalize(
     driver._clock = now  # type: ignore[method-assign]
     driver.new_native_decoder = lambda: PixelDecoder(crop=driver.profile.canvas_crop)  # type: ignore[method-assign]
     daemon._native_clock = now  # type: ignore[method-assign]
+    meter = driver.native_memory_meter
+    if meter is None:
+        raise AssertionError("native construction fixture has no pre-bound native memory meter")
+    meter._monotonic = now
 
     def write_native_frame(*args: object, **kwargs: object) -> tuple[object, str, Path, None]:
         sample, digest, path = write_strict_capture(*args, **kwargs)
@@ -9116,6 +9124,10 @@ def _configure_deadline_png_runner(
 
     driver._clock = now  # type: ignore[method-assign]
     daemon._native_clock = now  # type: ignore[method-assign]
+    meter = driver.native_memory_meter
+    if meter is None:
+        raise AssertionError("deadline runner fixture has no pre-bound native memory meter")
+    meter._monotonic = now
     driver.new_native_decoder = lambda: PixelDecoder(crop=driver.profile.canvas_crop)  # type: ignore[method-assign]
 
     def write_native_frame(*args: object, **kwargs: object) -> tuple[object, str, Path, None]:

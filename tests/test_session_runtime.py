@@ -32,6 +32,7 @@ from crowley.session.calibration import (
     NativeCalibrationRunner,
     NativeMemoryMeasurement,
     NativeMemoryResetRecord,
+    NativePreconstructionEvidence,
     OwnedWindow,
     XTestInputProfile,
 )
@@ -2422,7 +2423,13 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
     )
     with patch("crowley.session.daemon.LunaAdapter", _RuntimeFixtureModel):
         daemon = SessionDaemon(config, controller=controller, driver=driver)
-    driver.native_memory_meter = _FixtureNativeMemoryMeter(backend.identity)
+    # The daemon and its production reset5 meter share one monotonic domain.
+    # Keeping that binding in the fixture prevents wall-clock test scheduling
+    # from making reset completion appear later than the release barrier.
+    driver.native_memory_meter = _FixtureNativeMemoryMeter(
+        backend.identity,
+        monotonic=virtual_clock.monotonic,
+    )
     try:
         daemon.model = _FixtureLunaAdapter(backend)
         hierarchy = (
@@ -2857,6 +2864,123 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
         driver.close()
 
 
+def test_native_preconstruction_release_waits_for_reset_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Public readiness cannot escape before the release boundary is committed."""
+
+    daemon, backend, driver, controller, _config, virtual_clock = _runtime_daemon(tmp_path)
+    try:
+        status = controller.start("validation")
+        capture_path = tmp_path / "absence.png"
+        capture_path.write_bytes(b"absence")
+        capture_digest = hashlib.sha256(capture_path.read_bytes()).hexdigest()
+        observation = {
+            "identity": backend.identity.fingerprint,
+            "capturePath": str(capture_path),
+            "captureDigest": capture_digest,
+            "capture": virtual_clock.value,
+        }
+        daemon._native_bootstrap_observation = observation
+        daemon._native_bootstrap_ready.set()
+        with daemon._native_construction_lock:
+            daemon._native_construction_handshake["state"] = "running"
+            daemon._native_construction_reset_history_locked()
+            daemon._native_construction_start_context_locked(
+                generation=status.generation,
+                deferred=False,
+            )
+        monkeypatch.setattr(
+            daemon,
+            "_retain_native_absence_capture",
+            lambda _identity: dict(observation),
+        )
+        reset_started = threading.Event()
+        release_clock_armed = threading.Event()
+        release_clock_entered = threading.Event()
+        allow_release_clock = threading.Event()
+        release_clock_returned = threading.Event()
+        reset_completed: list[float] = []
+        evidence: list[NativePreconstructionEvidence] = []
+        failures: list[BaseException] = []
+        status_results: list[dict[str, Any]] = []
+        status_failures: list[BaseException] = []
+
+        def release_clock() -> float:
+            if release_clock_armed.is_set() and not release_clock_returned.is_set():
+                release_clock_entered.set()
+                if not allow_release_clock.wait(timeout=5):
+                    raise AssertionError("release clock was not released")
+                release_clock_returned.set()
+            return virtual_clock.monotonic()
+
+        daemon._native_clock = release_clock
+
+        def baseline_reader(pid: int) -> int:
+            assert pid == backend.identity.pid
+            reset_started.set()
+            reset_completed.append(virtual_clock.monotonic())
+            release_clock_armed.set()
+            return 0
+
+        def read_public_status() -> None:
+            try:
+                status_results.append(
+                    SessionIPC(controller, daemon).dispatch({"command": "calibration_status"})
+                )
+            except BaseException as exc:
+                status_failures.append(exc)
+
+        def baseline_ready(pid: int, value: int) -> None:
+            assert pid == backend.identity.pid
+            daemon.notify_native_baseline_ready(backend.identity, value)
+
+        def run_provider() -> None:
+            try:
+                result = daemon._native_preconstruction_provider(
+                    backend.identity,
+                    baseline_reader=baseline_reader,
+                    baseline_ready=baseline_ready,
+                )
+                evidence.append(result)
+            except BaseException as exc:
+                failures.append(exc)
+
+        worker = threading.Thread(target=run_provider, name="native-release-barrier-test")
+        worker.start()
+        if not reset_started.wait(timeout=5):
+            worker.join(timeout=5)
+            pytest.fail(f"preconstruction provider did not reach reset boundary: {failures}")
+        if not release_clock_entered.wait(timeout=5):
+            worker.join(timeout=5)
+            pytest.fail(f"preconstruction provider did not reach release clock: {failures}")
+
+        status_worker = threading.Thread(target=read_public_status, name="native-public-status-test")
+        status_worker.start()
+        status_worker.join(timeout=5)
+        if status_worker.is_alive():
+            allow_release_clock.set()
+            status_worker.join(timeout=5)
+            pytest.fail("public calibration status was blocked before release publication")
+        assert status_failures == []
+        assert len(status_results) == 1
+        assert status_results[0]["status"]["nativeBootstrapReady"] is False
+        assert status_results[0]["status"]["nativeHandshake"]["state"] != "bootstrap_ready"
+
+        allow_release_clock.set()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert failures == []
+        assert len(evidence) == 1
+        assert evidence[0].bootstrap_release_monotonic >= reset_completed[0]
+        published = daemon.status_dict()
+        assert published["nativeBootstrapReady"] is True
+        assert published["nativeHandshake"]["state"] == "bootstrap_ready"
+    finally:
+        daemon.request_shutdown()
+        driver.close()
+
+
 def test_live_daemon_binds_owned_visual_and_render_providers(tmp_path: Path) -> None:
     profile = DriverProfile(
         xauthority="/tmp/test-Xauthority",
@@ -2877,6 +3001,18 @@ def test_live_daemon_binds_owned_visual_and_render_providers(tmp_path: Path) -> 
         assert getattr(driver.native_measurement_provider, "__self__", None) is daemon
         assert getattr(driver.measured_anchor_provider, "__self__", None) is daemon
     finally:
+        daemon.request_shutdown()
+        driver.close()
+
+
+def test_prebound_native_meter_rejects_a_different_clock_domain(tmp_path: Path) -> None:
+    daemon, backend, driver, _controller, _config, _clock = _runtime_daemon(tmp_path)
+    driver.native_memory_meter = _FixtureNativeMemoryMeter(backend.identity)
+    try:
+        with pytest.raises(DriverError, match="different monotonic clock"):
+            daemon._ensure_native_memory_meter()
+    finally:
+        driver.native_memory_meter = None
         daemon.request_shutdown()
         driver.close()
 

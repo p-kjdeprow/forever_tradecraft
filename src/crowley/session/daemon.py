@@ -142,6 +142,11 @@ from .startup import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+# Each status capture costs a desktop screenshot plus an identity check
+# (about 1.2 s on the live host, more under load), and the HUD publishes the
+# EditBox text on a one-Hz tick; allow several fresh frames, matching the
+# other bounded per-step waits of the auction-house route.
+_COMMAND_READBACK_SECONDS = 8.0
 
 
 def _canonical_semantic_value(value: Any) -> Any:
@@ -6757,9 +6762,9 @@ class SessionDaemon:
                 or not math.isfinite(float(deadline_monotonic))
             ):
                 raise DriverError("command readback deadline is malformed")
-            deadline = min(now + 3.0, float(deadline_monotonic))
+            deadline = min(now + _COMMAND_READBACK_SECONDS, float(deadline_monotonic))
         else:
-            deadline = now + 3.0
+            deadline = now + _COMMAND_READBACK_SECONDS
         if deadline <= now:
             raise DriverError("command readback deadline expired")
         while time.monotonic() < deadline:
@@ -12661,6 +12666,11 @@ class SessionDaemon:
                     "enter_world",
                 }
             )
+            if status.state in {ControllerState.SAVE_RELOAD_SENT, ControllerState.ACK_RELOAD_SENT}:
+                # The loading screen can also present a partly drawn canvas
+                # (a corrupt frame, not just an absent one).  Both are the same
+                # bounded absence owned by the reload's durable deadline.
+                return self.status_dict()
             if isinstance(exc, ProtocolError) and not menu_or_logout_reconcile:
                 self.last_error = str(exc)
                 self._block_if_current(
@@ -12668,8 +12678,6 @@ class SessionDaemon:
                     generation,
                     invalidation_cause=InvalidationCause.TELEMETRY_INVALID,
                 )
-                return self.status_dict()
-            if status.state in {ControllerState.SAVE_RELOAD_SENT, ControllerState.ACK_RELOAD_SENT}:
                 return self.status_dict()
             if status.state == ControllerState.DISK_CLEANUP_WAIT:
                 try:

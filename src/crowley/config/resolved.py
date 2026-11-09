@@ -39,12 +39,22 @@ def _flavor_dir(target: GameTarget, host: HostConfig) -> Path:
     return host.game_root_path / target.product_dir
 
 
-def _route_file(target: GameTarget, route_name: str) -> Path:
+def _route_file(target: GameTarget, route_name: str) -> Path | None:
+    """Return the target's packaged route, or None when no route was measured.
+
+    A target owns a route only through ``routes/<targetId>/``.  A target without
+    that directory has no mailbox route, and route consumers stay unavailable;
+    a route directory missing the named route is a packaging error.
+    """
+
     if not route_name or Path(route_name).name != route_name or Path(route_name).suffix != ".json":
         raise ResolutionError("route name must be one JSON file name")
-    resource = resources.files(crowley_data).joinpath("routes", target.target_id, route_name)
-    if not isinstance(resource, Path):
+    directory = resources.files(crowley_data).joinpath("routes", target.target_id)
+    if not isinstance(directory, Path):
         raise ResolutionError("packaged route resources must be available as filesystem files")
+    if not directory.exists():
+        return None
+    resource = directory / route_name
     if not resource.is_file():
         raise ResolutionError(f"packaged route does not exist: {target.target_id}/{route_name}")
     return resource
@@ -74,7 +84,7 @@ class SessionResolvedConfig:
     companion_state: Path
     data_lua: Path
     queue_lua: Path
-    route_file: Path
+    route_file: Path | None
     state_dir: Path
     runtime_dir: Path
     model_neutral_dir: Path

@@ -283,3 +283,19 @@ def test_host_geometry_rejects_equal_canvas_and_model_crops(tmp_path: Path) -> N
 def test_pinned_binary_loader_does_not_expand_tilde() -> None:
     with pytest.raises(BinaryConfigError, match="absolute path"):
         load_pinned_binaries({"CROWLEY_CODEX_PATH": "~/codex"})
+
+
+def test_target_without_packaged_route_directory_has_no_route(tmp_path: Path) -> None:
+    from crowley.core.game_target import load_target
+
+    target = load_target("forever-us-camwow7")
+    assert resolved_module._route_file(target, "stormwind.json") is None
+
+
+def test_route_directory_missing_the_named_route_is_a_packaging_error() -> None:
+    from crowley.core.game_target import load_target
+
+    target = load_target("verified-beta")
+    assert resolved_module._route_file(target, "stormwind.json") is not None
+    with pytest.raises(resolved_module.ResolutionError, match="packaged route does not exist"):
+        resolved_module._route_file(target, "missing.json")

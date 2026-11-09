@@ -2594,7 +2594,7 @@ def test_three_cycle_daemon_and_socket_lifecycle(tmp_path: Path, monkeypatch) ->
             input_tool_sha256=backend.input_tool.digest,
         )
         startup_evidence = mint_runtime_evidence(
-            readiness_boot="boot-runtime-fixture",
+            readiness_boot="boot-1",
             readiness_sequence=44,
             environment=startup_environment,
             identity=backend.identity,

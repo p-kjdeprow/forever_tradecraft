@@ -203,6 +203,35 @@ def test_public_decoder_exercises_sequence_and_boot_guards() -> None:
         other_image.close()
 
 
+def test_public_decoder_resets_boot_epoch_only_for_passive_startup() -> None:
+    client = WowClient()
+    client.set_canonical_plan()
+    client.login()
+    client.publish_agent()
+    first_image = client.render_agent_capture()
+    other = WowClient()
+    other.set_canonical_plan()
+    other.login()
+    other.publish_agent()
+    other_image = other.render_agent_capture()
+    try:
+        decoder = PixelDecoder()
+        decoder.decode(first_image, monotonic=1.0, window_identity="lua-fixture")
+        with pytest.raises(ProtocolError, match="unexpected status boot change"):
+            decoder.decode(other_image, monotonic=2.0, window_identity="lua-fixture")
+
+        decoder.reset_for_passive_startup()
+        fresh = decoder.decode(other_image, monotonic=3.0, window_identity="lua-fixture")
+        assert fresh.kind == "FRESH"
+        assert fresh.frame is not None
+
+        with pytest.raises(ProtocolError, match="unexpected status boot change"):
+            decoder.decode(first_image, monotonic=4.0, window_identity="lua-fixture")
+    finally:
+        first_image.close()
+        other_image.close()
+
+
 def test_crc_valid_schema_refusal_reaches_public_decoder_guard(tmp_path: Path) -> None:
     frame = _lua_frame()
     payload_length = struct.unpack_from("<H", frame, 8)[0]

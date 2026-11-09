@@ -27,7 +27,7 @@ from crowley.session.calibration import (
     xtest_sources,
 )
 from crowley.session.cli import SessionIPC
-from crowley.session.controller import Controller, ControllerState
+from crowley.session.controller import ActionKind, Controller, ControllerState
 from crowley.session.daemon import SessionDaemon
 from crowley.session.decoder import Sample
 from crowley.session.driver import (
@@ -40,6 +40,7 @@ from crowley.session.driver import (
 )
 from crowley.session.guardian import InputGuardian
 from crowley.session.input_events import EventClass, XI2Event, parse_xi2_records
+from crowley.session.journal import Journal
 from crowley.session.mail_loop import MailLoopBinding
 from crowley.session.model import CLI_VERSION, LunaAdapter
 from crowley.session.protocol import Frame, Snapshot
@@ -729,6 +730,51 @@ def _runtime_evidence():
         keyboard_profile=(),
     )
     return Identity(), environment, evidence
+
+
+def _runtime_evidence_with_boot(boot: str, sequence: int = 3):
+    identity, environment, evidence = _runtime_evidence()
+    return mint_runtime_evidence(
+        readiness_boot=boot,
+        readiness_sequence=sequence,
+        environment=environment,
+        identity=identity,
+        keyboard_keymap=evidence.keyboard_keymap,
+        native_modifiers=evidence.native_modifiers,
+        native_held_keycodes=(),
+        native_held_buttons=(),
+        keyboard_profile=evidence.keyboard_profile,
+    )
+
+
+def _journal_with_inherited_open_ah(path: Path, environment: StartupEnvironment) -> Journal:
+    journal = Journal(path)
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 11,
+            "resumeState": ControllerState.RECONCILE.value,
+            "restartUncertain": True,
+            "reconciliationRequired": True,
+            "blocker": "operator paused before Auction House dispatch",
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 12, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "action": "open_ah",
+            "actionAttempt": 4,
+            "actionResult": "preparing",
+            "frameBoot": "boot-before-idle-logout",
+            "frameSequence": 97,
+            "frameCrc32": 1234,
+        }
+    )
+    journal.write(value)
+    return journal
 
 
 def test_forwarded_seat_attachment_is_not_durable_environment_identity() -> None:
@@ -1470,6 +1516,425 @@ def test_takeover_drill_is_durable_and_runtime_resume_skips_old_calibration(tmp_
     assert restarted_driver.input_calibration_calls == 0
 
 
+def test_resume_adopts_passive_boot_for_inherited_observation_intent(tmp_path: Path) -> None:
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-after-idle-logout")
+    journal = Journal(tmp_path / "inherited-open-ah.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 11,
+            "resumeState": ControllerState.RECONCILE.value,
+            "restartUncertain": True,
+            "reconciliationRequired": True,
+            "blocker": "operator paused before Auction House dispatch",
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 12, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "action": "open_ah",
+            "actionAttempt": 4,
+            "actionResult": "preparing",
+            "frameBoot": "boot-before-idle-logout",
+            "frameSequence": 97,
+            "frameCrc32": 1234,
+        }
+    )
+    journal.write(value)
+
+    controller = Controller(journal, driver=_RuntimeDriver())
+    resumed = controller.resume_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+
+    assert resumed.state is ControllerState.RECONCILE
+    current = journal.read()["current"]
+    assert current["frameBoot"] == "boot-after-idle-logout"
+    assert current["frameSequence"] == 0
+    assert current["frameCrc32"] == 0
+    adopted = [
+        record
+        for record in journal.archives("interventions")
+        if record.get("kind") == "external_boot_change_adopted"
+    ]
+    assert len(adopted) == 1
+    assert {
+        key: adopted[0][key] for key in ("kind", "oldBoot", "newBoot", "generation", "state", "intent")
+    } == {
+        "kind": "external_boot_change_adopted",
+        "oldBoot": "boot-before-idle-logout",
+        "newBoot": "boot-after-idle-logout",
+        "generation": 12,
+        "state": ControllerState.RECONCILE.value,
+        "intent": "open_ah",
+    }
+
+    fence = controller.observation_fence()
+    reconciled = controller.reconcile_restart(
+        observed_boot="boot-after-idle-logout",
+        observed_scene="auction_house",
+        observed_ah_open=True,
+        action_postcondition=True,
+        expected_generation=fence.generation,
+        expected_state=ControllerState.RECONCILE,
+        fence=fence,
+    )
+    assert reconciled.action_intent == ""
+    assert journal.archives("interventions")[-1]["outcome"] == "open_ah_postcondition_observed"
+
+
+def test_start_binds_passive_boot_as_the_new_frame_epoch(tmp_path: Path) -> None:
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-at-start")
+    journal = Journal(tmp_path / "start-boot.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 3,
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 13, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update({"frameBoot": "boot-before-start", "frameSequence": 19, "frameCrc32": 44})
+    journal.write(value)
+
+    controller = Controller(journal.path, driver=_RuntimeDriver())
+    started = controller.start_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+
+    assert started.state is ControllerState.RECONCILE
+    current = journal.read()["current"]
+    assert current["frameBoot"] == "boot-at-start"
+    assert current["frameSequence"] == 0
+    assert current["frameCrc32"] == 0
+    assert any(
+        record.get("kind") == "external_boot_change_adopted"
+        and record.get("oldBoot") == "boot-before-start"
+        and record.get("newBoot") == "boot-at-start"
+        for record in journal.archives("interventions")
+    )
+
+
+@pytest.mark.parametrize("failure", ["archive_artifact", "checkpoint_write"])
+def test_passive_boot_adoption_failure_rolls_back_and_retries_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-after-fault")
+    journal = _journal_with_inherited_open_ah(tmp_path / f"{failure}.json", environment)
+    controller = Controller(journal, driver=_RuntimeDriver())
+    prior_history = controller._history.copy()
+    failed = False
+
+    if failure == "archive_artifact":
+        write_archive_artifact = journal._write_archive_artifact
+
+        def fail_archive_artifact(kind: str, ordinal: int, record: dict[str, object]) -> None:
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError("injected archive-artifact failure")
+            write_archive_artifact(kind, ordinal, record)
+
+        monkeypatch.setattr(journal, "_write_archive_artifact", fail_archive_artifact)
+    else:
+        write_checkpoint = journal.write
+
+        def fail_checkpoint(value: dict[str, object]) -> None:
+            nonlocal failed
+            if not failed:
+                failed = True
+                raise RuntimeError("injected checkpoint-write failure")
+            write_checkpoint(value)
+
+        monkeypatch.setattr(journal, "write", fail_checkpoint)
+
+    with pytest.raises(RuntimeError, match=f"injected {failure.replace('_', '-')} failure"):
+        controller.resume_with_runtime_evidence(evidence, expected_generation=controller.status().generation)
+
+    assert failed
+    assert controller._runtime_startup_evidence is None
+    assert controller._frame_boot == "boot-before-idle-logout"
+    assert controller._frame_sequence == 97
+    assert controller._frame_crc32 == 1234
+    assert controller._history == prior_history
+    assert journal.read()["current"]["frameBoot"] == "boot-before-idle-logout"
+
+    resumed = controller.resume_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+    assert resumed.state is ControllerState.RECONCILE
+    current = journal.read()["current"]
+    assert current["frameBoot"] == "boot-after-fault"
+    assert current["frameSequence"] == 0
+    assert current["frameCrc32"] == 0
+    adopted = [
+        record
+        for record in journal.archives("interventions")
+        if record.get("kind") == "external_boot_change_adopted"
+    ]
+    assert len(adopted) == 1
+    assert adopted[0]["oldBoot"] == "boot-before-idle-logout"
+    assert adopted[0]["newBoot"] == "boot-after-fault"
+
+    restarted = Controller(journal, driver=_RuntimeDriver())
+    assert restarted._frame_boot == "boot-after-fault"
+    assert (
+        len(
+            [
+                record
+                for record in journal.archives("interventions")
+                if record.get("kind") == "external_boot_change_adopted"
+            ]
+        )
+        == 1
+    )
+
+
+@pytest.mark.parametrize(
+    ("resume_state", "intent", "action_result"),
+    [
+        (ControllerState.SCANNING, "scan", "dispatched"),
+        (ControllerState.SAVE_RELOAD_WAIT, "save_reload", "dispatched"),
+    ],
+)
+def test_passive_boot_adoption_does_not_cross_active_boot_fences(
+    tmp_path: Path,
+    resume_state: ControllerState,
+    intent: str,
+    action_result: str,
+) -> None:
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-fenced")
+    journal = Journal(tmp_path / f"{resume_state.value}.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 21,
+            "resumeState": resume_state.value,
+            "reconciliationRequired": True,
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 14, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "action": intent,
+            "actionAttempt": 2,
+            "actionResult": action_result,
+            "frameBoot": "boot-fenced-old",
+            "frameSequence": 31,
+            "frameCrc32": 55,
+        }
+    )
+    journal.write(value)
+
+    controller = Controller(journal.path, driver=_RuntimeDriver())
+    resumed = controller.resume_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+
+    assert resumed.state is ControllerState.RECONCILE
+    current = journal.read()["current"]
+    assert current["frameBoot"] == "boot-fenced-old"
+    assert not any(
+        record.get("kind") == "external_boot_change_adopted" for record in journal.archives("interventions")
+    )
+    blocked = controller.observe_frame(boot="boot-fenced", sequence=32, crc32=56)
+    assert blocked.state is ControllerState.BLOCKED
+    assert "boot" in blocked.blocker
+
+    resumed_again = controller.resume_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+    assert resumed_again.state is ControllerState.RECONCILE
+    assert journal.read()["current"]["frameBoot"] == "boot-fenced-old"
+    assert not any(
+        record.get("kind") == "external_boot_change_adopted" for record in journal.archives("interventions")
+    )
+    blocked_again = controller.observe_frame(boot="boot-fenced", sequence=33, crc32=57)
+    assert blocked_again.state is ControllerState.BLOCKED
+    assert "boot" in blocked_again.blocker
+
+
+def test_passive_boot_adoption_does_not_cross_unresolved_logout(
+    tmp_path: Path,
+) -> None:
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-after-logout")
+    journal = Journal(tmp_path / "logout.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 23,
+            "resumeState": ControllerState.RECONCILE.value,
+            "restartUncertain": True,
+            "reconciliationRequired": True,
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 15, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "action": ActionKind.LOGOUT.value,
+            "actionAttempt": 3,
+            "actionResult": "dispatched",
+            "frameBoot": "boot-before-logout",
+            "frameSequence": 41,
+            "frameCrc32": 66,
+        }
+    )
+    journal.write(value)
+
+    controller = Controller(journal.path, driver=_RuntimeDriver())
+    resumed = controller.resume_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+
+    assert resumed.state is ControllerState.RECONCILE
+    current = journal.read()["current"]
+    assert current["frameBoot"] == "boot-before-logout"
+    assert current["frameSequence"] == 41
+    assert current["frameCrc32"] == 66
+    assert not any(
+        record.get("kind") == "external_boot_change_adopted" for record in journal.archives("interventions")
+    )
+    blocked = controller.observe_frame(boot="boot-after-logout", sequence=42, crc32=67)
+    assert blocked.state is ControllerState.BLOCKED
+    assert "boot" in blocked.blocker
+
+
+def test_passive_boot_adoption_does_not_cross_native_calibration(
+    tmp_path: Path,
+) -> None:
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-after-native-calibration")
+    journal = Journal(tmp_path / "native-calibration.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 27,
+            "resumeState": ControllerState.NATIVE_CALIBRATION.value,
+            "reconciliationRequired": True,
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 16, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "frameBoot": "boot-before-native-calibration",
+            "frameSequence": 51,
+            "frameCrc32": 76,
+        }
+    )
+    journal.write(value)
+
+    controller = Controller(journal.path, driver=_RuntimeDriver())
+    resumed = controller.resume_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+
+    assert resumed.state is ControllerState.RECONCILE
+    current = journal.read()["current"]
+    assert current["frameBoot"] == "boot-before-native-calibration"
+    assert current["frameSequence"] == 51
+    assert current["frameCrc32"] == 76
+    assert not any(
+        record.get("kind") == "external_boot_change_adopted" for record in journal.archives("interventions")
+    )
+    blocked = controller.observe_frame(boot="boot-after-native-calibration", sequence=52, crc32=77)
+    assert blocked.state is ControllerState.BLOCKED
+    assert "boot" in blocked.blocker
+
+
+@pytest.mark.parametrize("checkpoint_kind", ["valid", "malformed"])
+def test_passive_boot_adoption_does_not_cross_native_construction_checkpoint(
+    tmp_path: Path, checkpoint_kind: str
+) -> None:
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-after-construction")
+    valid_checkpoint = {
+        "schema": 1,
+        "B0": "boot-before-construction",
+        "expectedConstructorBoot": "native-construction:boot-before-construction",
+        "ownerGeneration": 28,
+        "kind": "preflight",
+        "phase": "recovery_required",
+    }
+    malformed_checkpoint = {**valid_checkpoint, "unexpected": True}
+    checkpoint = valid_checkpoint if checkpoint_kind == "valid" else malformed_checkpoint
+    journal = Journal(tmp_path / f"native-construction-{checkpoint_kind}.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 28,
+            "resumeState": ControllerState.RECONCILE.value,
+            "reconciliationRequired": True,
+            "nativeConstruction": checkpoint,
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 17, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "frameBoot": "boot-before-construction",
+            "frameSequence": 61,
+            "frameCrc32": 86,
+        }
+    )
+    journal.write(value)
+
+    controller = Controller(journal.path, driver=_RuntimeDriver())
+    resumed = controller.resume_with_runtime_evidence(
+        evidence, expected_generation=controller.status().generation
+    )
+
+    assert resumed.state is ControllerState.RECONCILE
+    current = journal.read()["current"]
+    assert current["frameBoot"] == "boot-before-construction"
+    assert current["frameSequence"] == 61
+    assert current["frameCrc32"] == 86
+    assert journal.read()["nativeConstruction"] == checkpoint
+    assert not any(
+        record.get("kind") == "external_boot_change_adopted" for record in journal.archives("interventions")
+    )
+
+    if checkpoint_kind == "valid":
+        controller.pause("prepare explicit native construction recovery")
+        recovered = controller.commit_native_construction_recovery(
+            boot="boot-after-construction",
+            sequence=3,
+            crc32=99,
+            expected_generation=controller.status().generation,
+        )
+        assert recovered.state is ControllerState.PAUSED
+        assert journal.read()["current"]["frameBoot"] == "boot-after-construction"
+        assert "nativeConstruction" not in journal.read()
+        resumed_after_recovery = controller.resume_with_runtime_evidence(
+            evidence, expected_generation=controller.status().generation
+        )
+        assert resumed_after_recovery.state is ControllerState.RECONCILE
+        assert not any(
+            record.get("kind") == "external_boot_change_adopted"
+            for record in journal.archives("interventions")
+        )
+
+
 def test_takeover_drill_rejects_environment_mismatch_and_corrupt_record(tmp_path: Path) -> None:
     _identity, environment, evidence = _runtime_evidence()
     driver = _RuntimeDriver()
@@ -1818,6 +2283,8 @@ def test_passive_startup_requires_three_advancing_ordinary_frames_without_input(
     daemon = SessionDaemon.__new__(SessionDaemon)
     daemon.config = SimpleNamespace(profile=SimpleNamespace(character="Arthur", realm="Beta"))
     daemon.driver = Driver()
+    decoder_resets: list[str] = []
+    daemon.decoder = SimpleNamespace(reset_for_passive_startup=lambda: decoder_resets.append("reset"))
     daemon._startup_lock = threading.Lock()
     daemon._startup_evidence = None
     daemon._startup_operation = {"state": "not_checked", "advancingFrames": 0}
@@ -1852,6 +2319,7 @@ def test_passive_startup_requires_three_advancing_ordinary_frames_without_input(
     ]
 
     def capture_status(*, deadline, _passive_region_capability):
+        assert decoder_resets == ["reset"]
         assert deadline == _passive_region_capability.deadline_monotonic
         assert _passive_region_capability is daemon._passive_region_admission
         assert _passive_region_capability.generation == 70
@@ -1876,6 +2344,7 @@ def test_passive_startup_requires_three_advancing_ordinary_frames_without_input(
     assert daemon.driver.input_calls == (
         ["observer", "measure-readonly-environment"] if accepted else ["observer"]
     )
+    assert decoder_resets == ["reset"]
 
 
 @pytest.mark.parametrize("failure", ["observer", "identity", "generation"])
@@ -1945,6 +2414,8 @@ def test_passive_startup_refuses_drift_and_reaps_private_admission(failure: str)
     daemon = SessionDaemon.__new__(SessionDaemon)
     daemon.config = SimpleNamespace(profile=SimpleNamespace(character="Arthur", realm="Beta"))
     daemon.driver = driver
+    decoder_resets: list[str] = []
+    daemon.decoder = SimpleNamespace(reset_for_passive_startup=lambda: decoder_resets.append("reset"))
     daemon.controller = SimpleNamespace(lock=threading.RLock(), status=lambda: state)
     daemon._startup_lock = threading.Lock()
     daemon._startup_evidence = None
@@ -1955,6 +2426,7 @@ def test_passive_startup_refuses_drift_and_reaps_private_admission(failure: str)
     daemon._shutdown_event = threading.Event()
 
     def capture_status(*, deadline, _passive_region_capability):
+        assert decoder_resets == ["reset"]
         assert deadline == _passive_region_capability.deadline_monotonic
         driver.capture_calls += 1
         sample = samples.pop(0)
@@ -1979,6 +2451,7 @@ def test_passive_startup_refuses_drift_and_reaps_private_admission(failure: str)
     assert driver._monitor is None
     assert not driver.guardian.observer_process_groups
     assert not driver.guardian.armed
+    assert decoder_resets == ["reset"]
 
 
 def test_runtime_start_reports_drill_needed_without_arming_or_legacy_calibration(tmp_path) -> None:

@@ -36,6 +36,15 @@ class PixelDecoder:
         self.window_identity: str | None = None
         self._boot_change_allowed = False
 
+    def reset_for_passive_startup(self) -> None:
+        """Start an explicitly owned telemetry epoch for passive startup."""
+
+        self.boot = None
+        self.sequence = None
+        self.uptime_ms = None
+        self.crc32 = None
+        self._boot_change_allowed = False
+
     def allow_boot_change_once(self) -> None:
         """Arm the one fresh boot transition caused by a verified reload."""
 

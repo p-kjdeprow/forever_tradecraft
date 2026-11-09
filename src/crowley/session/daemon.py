@@ -7015,6 +7015,7 @@ class SessionDaemon:
                     raise DriverError("passive startup is cancelled by the controller stop request")
                 entry_generation = entry_status.generation
                 entry_state = entry_status.state
+            self.decoder.reset_for_passive_startup()
             identity = self.driver.resolve_identity(require_foreground=True)
             monitor = self.driver.start_input_observer()
             if not monitor.alive or monitor.failure_diagnostic is not None:

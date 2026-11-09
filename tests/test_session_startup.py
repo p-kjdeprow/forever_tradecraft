@@ -2010,6 +2010,13 @@ def _takeover_drill_fixture(tmp_path, evidence, human_event):
         active_process_groups = ()
         observer_process_groups = ()
 
+        def __init__(self):
+            self._lock = threading.RLock()
+            self._active_process_groups = set()
+
+        def on_revoke(self, _callback):
+            return None
+
     guardian = Guardian()
     callback = {"value": None}
     daemon_ref = {}
@@ -2067,6 +2074,9 @@ def _takeover_drill_fixture(tmp_path, evidence, human_event):
     monitor = Monitor()
     driver = DesktopDriver.__new__(DesktopDriver)
     backend = X11Backend.__new__(X11Backend)
+    backend._process_lock = threading.RLock()
+    backend._active_processes = set()
+    backend._active_process_groups = set()
     backend.observe_native_input_state = lambda _root: ((0, 0, 0), (), ())
     driver.backend = backend
     driver.guardian = guardian
@@ -2111,7 +2121,11 @@ def _takeover_drill_fixture(tmp_path, evidence, human_event):
                 generation=70,
                 stop_requested=False,
                 action_intent="",
+                action_result="",
+                restart_uncertain=False,
+                reconciliation_required=False,
             )
+            self.record = None
 
         def status(self):
             with self.lock:
@@ -2130,13 +2144,30 @@ def _takeover_drill_fixture(tmp_path, evidence, human_event):
             assert not monitor.alive
             assert callback["value"] is None
             assert daemon_ref["daemon"]._takeover_drill_operation["state"] == "awaiting_input"
+            self.record = record
             self.persisted.append(record)
+
+        @property
+        def takeover_drill_record(self):
+            return self.record
+
+        def resume_with_runtime_evidence(self, _evidence, *, expected_generation=None):
+            assert expected_generation == self.value.generation
+            self.value.state = ControllerState.RECONCILE
+            return self.value
+
+        @property
+        def executor_action_active(self):
+            return False
+
+        def mail_cycle_checkpoint(self):
+            return {"phase": "none"}
 
     controller = ControllerStub()
     daemon = SessionDaemon.__new__(SessionDaemon)
     daemon.controller = controller
     daemon.driver = driver
-    daemon.passive_startup = lambda: evidence
+    daemon.passive_startup = lambda **_kwargs: evidence
     daemon.status_dict = lambda: {
         "controllerState": controller.value.state.value,
         "takeoverDrill": {"state": daemon._takeover_drill_operation["state"]},
@@ -2150,8 +2181,150 @@ def _takeover_drill_fixture(tmp_path, evidence, human_event):
     daemon._takeover_cancel_lock = threading.Lock()
     daemon._takeover_cancel = threading.Event()
     daemon._takeover_event = None
+    daemon._motion_intent_lock = threading.RLock()
+    daemon._calibration_state_lock = threading.RLock()
+    daemon._calibration_operation = {"state": "idle"}
+    daemon._calibration_thread = None
+    daemon._native_construction_lock = threading.RLock()
+    daemon._native_construction_reservation = None
+    daemon._native_construction_ticket = None
+    daemon._native_construction_inflight = None
+    daemon._executor_continuation_capability = None
     daemon_ref["daemon"] = daemon
     return daemon, driver, guardian, monitor, controller
+
+
+def test_takeover_drill_preserves_inherited_intent_and_stop_until_resume_reconcile(tmp_path) -> None:
+    _identity, environment, evidence = _runtime_evidence()
+    human = XI2Event(
+        event_class=EventClass.KEY_PRESS,
+        type_number=2,
+        master_device=9,
+        source_device=9,
+        timestamp_ms=10,
+        detail=38,
+        root_xid=0x374,
+        event_xid=0x374,
+        child_xid=0x600001,
+    )
+    daemon, driver, _guardian, _monitor, _stub = _takeover_drill_fixture(tmp_path, evidence, human)
+    journal = tmp_path / "inherited-session.json"
+    mismatched_record = TakeoverDrillRecord.create("0" * 64, 11, observed_at=1_800_000_000)
+    journal.write_text(
+        json.dumps(
+            {
+                "schema": 1,
+                "state": ControllerState.PAUSED.value,
+                "mode": "repeat",
+                "generation": 70,
+                "leaseGeneration": 0,
+                "stopRequested": True,
+                "closeoutRequested": False,
+                "blocker": "inherited unresolved action",
+                "restartUncertain": True,
+                "reconciliationRequired": True,
+                "takeoverDrill": mismatched_record.to_json(),
+                "current": {
+                    "action": "open_ah",
+                    "actionAttempt": 1,
+                    "actionResult": "preparing",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    controller = Controller(journal, driver=driver)
+    daemon.controller = controller
+    daemon.status_dict = lambda: {
+        "controllerState": controller.status().state.value,
+        "takeoverDrill": {"state": daemon._takeover_drill_operation["state"]},
+        "nextAction": (
+            "provide_human_input" if daemon._takeover_drill_operation["state"] == "awaiting_input" else "wait"
+        ),
+    }
+    expected_fields = {
+        "stopRequested": True,
+        "restartUncertain": True,
+        "reconciliationRequired": True,
+        "action": "open_ah",
+        "actionResult": "preparing",
+    }
+
+    def durable_fields() -> dict[str, object]:
+        saved = json.loads(journal.read_text(encoding="utf-8"))
+        current = saved["current"]
+        return {
+            "stopRequested": saved["stopRequested"],
+            "restartUncertain": saved["restartUncertain"],
+            "reconciliationRequired": saved["reconciliationRequired"],
+            "action": current["action"],
+            "actionResult": current["actionResult"],
+        }
+
+    assert durable_fields() == expected_fields
+
+    needed = daemon.runtime_start(expected_generation=controller.status().generation, resume=True)
+    assert needed["nextAction"] == "takeover_drill"
+
+    passed = daemon.run_takeover_drill(expected_generation=controller.status().generation)
+    assert passed["takeoverDrill"]["state"] == "passed"
+    assert controller.status().state is ControllerState.PAUSED
+    assert durable_fields() == expected_fields
+    stored_after_drill = json.loads(journal.read_text(encoding="utf-8"))
+    assert stored_after_drill["takeoverDrill"] == controller.takeover_drill_record.to_json()
+    assert controller.takeover_drill_record.matches(environment)
+
+    resumed = daemon.runtime_start(expected_generation=controller.status().generation, resume=True)
+    assert resumed["nextAction"] == "reconcile"
+    assert resumed["controllerState"] == ControllerState.RECONCILE.value
+    assert durable_fields() == expected_fields
+    assert json.loads(journal.read_text(encoding="utf-8"))["state"] == ControllerState.RECONCILE.value
+
+
+def test_takeover_drill_refuses_an_unresolved_live_in_process_action(tmp_path) -> None:
+    _identity, _environment, evidence = _runtime_evidence()
+    daemon, driver, _guardian, _monitor, controller = _takeover_drill_fixture(tmp_path, evidence, None)
+    controller.value.action_intent = "open_ah"
+    calls: list[str] = []
+
+    def unexpected_passive_startup(**_kwargs):
+        calls.append("passive_startup")
+        raise AssertionError("live action must be refused before passive startup")
+
+    def unexpected_arm(_evidence):
+        calls.append("arm")
+        raise AssertionError("live action must be refused before arm")
+
+    def unexpected_hover(_generation, _evidence):
+        calls.append("hover")
+        raise AssertionError("live action must be refused before hover")
+
+    daemon.passive_startup = unexpected_passive_startup
+    driver.arm = unexpected_arm
+    driver.run_takeover_hover = unexpected_hover
+    lock_held = threading.Event()
+    release_lock = threading.Event()
+
+    def hold_motion_fence() -> None:
+        daemon._motion_intent_lock.acquire()
+        lock_held.set()
+        release_lock.wait(timeout=2.0)
+        daemon._motion_intent_lock.release()
+
+    holder = threading.Thread(target=hold_motion_fence, name="takeover-dispatch-fence-holder")
+    holder.start()
+    assert lock_held.wait(timeout=1.0)
+
+    try:
+        with pytest.raises(
+            DriverError, match="takeover drill is refused while an external action is unresolved"
+        ):
+            daemon.run_takeover_drill(expected_generation=controller.value.generation)
+        assert calls == []
+    finally:
+        release_lock.set()
+        holder.join(timeout=2.0)
+    assert not holder.is_alive()
 
 
 def _hover_failure_context(raw_blocks: list[str]) -> dict[str, Any]:

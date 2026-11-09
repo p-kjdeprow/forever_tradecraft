@@ -8,12 +8,14 @@ import json
 import os
 import secrets
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Any
 
+from .calibration import XTestInputProfile
+
 STARTUP_CONTRACT = "crowley-passive-startup-v1"
-TAKEOVER_CONTRACT = "crowley-takeover-hover-v4"
+TAKEOVER_CONTRACT = "crowley-takeover-hover-v5"
 PASSIVE_STARTUP_TIMEOUT_SECONDS = 15.0
 TAKEOVER_DRILL_ARM_RESERVE_SECONDS = 30.0
 TAKEOVER_DRILL_HUMAN_TIMEOUT_SECONDS = 120.0
@@ -107,6 +109,12 @@ def _canonical_hierarchy(
     return tuple(canonical)
 
 
+def _durable_xtest_profile(profile: XTestInputProfile) -> XTestInputProfile:
+    """Canonicalise only the seat attachment facts in a durable XTEST profile."""
+
+    return replace(profile, hierarchy=_canonical_hierarchy(profile.hierarchy))
+
+
 @dataclass(frozen=True)
 class StartupEnvironment:
     display: str
@@ -116,13 +124,14 @@ class StartupEnvironment:
     pointer_source: int
     pointer_master: int
     forwarded_echo_sources: tuple[int, ...]
-    xtest_profile: Any
+    xtest_profile: XTestInputProfile
     keymap_levels: tuple[tuple[int, tuple[str, ...]], ...]
     modifier_masks: tuple[tuple[str, int], ...]
     input_tool_version: str
     input_tool_sha256: str
 
     def canonical_payload(self) -> dict[str, Any]:
+        durable_xtest_profile = _durable_xtest_profile(self.xtest_profile)
         return {
             "contract": TAKEOVER_CONTRACT,
             "display": self.display,
@@ -132,7 +141,7 @@ class StartupEnvironment:
             "pointerSource": self.pointer_source,
             "pointerMaster": self.pointer_master,
             "forwardedEchoSources": _CANONICAL_FORWARDED_ECHO_SOURCES,
-            "xtestProfile": self.xtest_profile,
+            "xtestProfile": durable_xtest_profile,
             "keymapLevels": self.keymap_levels,
             "modifierMasks": self.modifier_masks,
             "inputToolVersion": self.input_tool_version,
@@ -181,7 +190,7 @@ class RuntimeInputEvidence:
         return self.environment.hierarchy
 
     @property
-    def xtest_profile(self) -> Any:
+    def xtest_profile(self) -> XTestInputProfile:
         return self.environment.xtest_profile
 
     @property
@@ -229,6 +238,7 @@ class RuntimeInputEvidence:
             "environment": self.environment.canonical_payload(),
             "runtimeHierarchy": self.environment.hierarchy,
             "runtimeForwardedEchoSources": self.environment.forwarded_echo_sources,
+            "runtimeXtestProfile": self.environment.xtest_profile,
             "identity": self.game_identity_fingerprint,
             "processStart": self.game_process_start,
             "geometry": self.game_geometry,

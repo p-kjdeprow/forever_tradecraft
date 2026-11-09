@@ -22,6 +22,7 @@ from crowley.session.calibration import (
     GTK_LAYOUT_ROOT_CHILD,
     InputCalibrationWorkflow,
     OwnedGtkCalibrationWindow,
+    XTestInputProfile,
     xinput_hierarchy,
     xtest_sources,
 )
@@ -112,6 +113,24 @@ def _floating_forwarded_hierarchy(
         else:
             rows.append((device_id, parent_id, role, name))
     return tuple(rows)
+
+
+def _xtest_profile_for_hierarchy(
+    hierarchy: tuple[tuple[int, int, str, str], ...],
+) -> XTestInputProfile:
+    return XTestInputProfile(
+        source_device=4,
+        parent_device=2,
+        name=next(row[3] for row in hierarchy if row[0] == 4),
+        classes=3,
+        axes=((0, "Rel X", "relative", -1.0, -1.0, 0), (1, "Rel Y", "relative", -1.0, -1.0, 0)),
+        enabled=1,
+        xtest_device=1,
+        ctm=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+        root_xid=0x374,
+        root_geometry=(0, 0, 1920, 1080),
+        hierarchy=hierarchy,
+    )
 
 
 @pytest.mark.skipif(shutil.which("Xvfb") is None, reason="private Xvfb is unavailable")
@@ -498,38 +517,30 @@ def test_explicit_codex_executable_matches_the_pinned_runtime_version(tmp_path: 
 
 
 def test_runtime_evidence_is_process_sealed_and_environment_bound() -> None:
-    class Profile:
-        root_xid = 0x374
-
-        def verify(self) -> None:
-            return None
-
-        def canonical_payload(self):
-            return ("private-test-profile",)
-
     class Identity:
         fingerprint = "game-identity"
         process_start = "42"
         child_geometry = (1, 2, 800, 600)
 
+    hierarchy = (
+        (2, 3, "master", "pointer:Virtual core pointer"),
+        (3, 2, "master", "keyboard:Virtual core keyboard"),
+        (4, 2, "slave", "pointer:Virtual core XTEST pointer"),
+        (5, 3, "slave", "keyboard:Virtual core XTEST keyboard"),
+        (6, 2, "slave", "pointer:xwayland-pointer:17"),
+        (7, 2, "slave", "pointer:xwayland-relative-pointer:17"),
+        (8, 2, "slave", "pointer:xwayland-pointer-gestures:17"),
+        (9, 3, "slave", "keyboard:xwayland-keyboard:17"),
+    )
     environment = StartupEnvironment(
         display=":private",
-        hierarchy=(
-            (2, 3, "master", "pointer:Virtual core pointer"),
-            (3, 2, "master", "keyboard:Virtual core keyboard"),
-            (4, 2, "slave", "pointer:Virtual core XTEST pointer"),
-            (5, 3, "slave", "keyboard:Virtual core XTEST keyboard"),
-            (6, 2, "slave", "pointer:xwayland-pointer:17"),
-            (7, 2, "slave", "pointer:xwayland-relative-pointer:17"),
-            (8, 2, "slave", "pointer:xwayland-pointer-gestures:17"),
-            (9, 3, "slave", "keyboard:xwayland-keyboard:17"),
-        ),
+        hierarchy=hierarchy,
         keyboard_source=5,
         keyboard_master=3,
         pointer_source=4,
         pointer_master=2,
         forwarded_echo_sources=(7,),
-        xtest_profile=Profile(),
+        xtest_profile=_xtest_profile_for_hierarchy(hierarchy),
         keymap_levels=((38, ("a", "A")),),
         modifier_masks=(("Shift_L", 1), ("Control_L", 4)),
         input_tool_version="input-v1",
@@ -605,54 +616,102 @@ def test_real_xinput_attached_and_floating_states_have_stable_identity() -> None
     assert resolve_forwarded_echo_sources(floating_hierarchy, 2) == ()
 
     _identity, environment, _evidence = _runtime_evidence()
-    attached = replace(environment, hierarchy=attached_hierarchy, forwarded_echo_sources=(8,))
-    floating = replace(environment, hierarchy=floating_hierarchy, forwarded_echo_sources=())
+    attached = replace(
+        environment,
+        hierarchy=attached_hierarchy,
+        forwarded_echo_sources=(8,),
+        xtest_profile=_xtest_profile_for_hierarchy(attached_hierarchy),
+    )
+    floating = replace(
+        environment,
+        hierarchy=floating_hierarchy,
+        forwarded_echo_sources=(),
+        xtest_profile=_xtest_profile_for_hierarchy(floating_hierarchy),
+    )
+    floating_keyboard_hierarchy = tuple(
+        (row[0], 0, "floating", "slave:xwayland-keyboard:17") if row[0] == 6 else row
+        for row in attached_hierarchy
+    )
     floating_keyboard = replace(
         attached,
-        hierarchy=tuple(
-            (row[0], 0, "floating", "slave:xwayland-keyboard:17") if row[0] == 6 else row
-            for row in attached_hierarchy
-        ),
+        hierarchy=floating_keyboard_hierarchy,
         forwarded_echo_sources=(),
+        xtest_profile=_xtest_profile_for_hierarchy(floating_keyboard_hierarchy),
     )
 
     assert attached.fingerprint == floating.fingerprint
     assert attached.fingerprint == floating_keyboard.fingerprint
 
 
+def test_changed_xtest_hierarchy_row_changes_environment_fingerprint() -> None:
+    _identity, environment, _evidence = _runtime_evidence()
+    changed_hierarchy = tuple(
+        (row[0], 99, row[2], row[3]) if row[0] == environment.xtest_profile.source_device else row
+        for row in environment.xtest_profile.hierarchy
+    )
+    changed_profile = replace(environment.xtest_profile, hierarchy=changed_hierarchy)
+    changed = replace(environment, xtest_profile=changed_profile)
+
+    assert changed.fingerprint != environment.fingerprint
+
+
+def test_runtime_evidence_seal_binds_exact_xtest_profile() -> None:
+    attached_hierarchy = xinput_hierarchy(_ATTACHED_XINPUT_TEXT)
+    floating_hierarchy = xinput_hierarchy(_FLOATING_XINPUT_TEXT)
+    identity, base_environment, base_evidence = _runtime_evidence()
+    attached_profile = _xtest_profile_for_hierarchy(attached_hierarchy)
+    runtime_profile = _xtest_profile_for_hierarchy(floating_hierarchy)
+    environment = replace(
+        base_environment,
+        hierarchy=attached_hierarchy,
+        forwarded_echo_sources=(8,),
+        xtest_profile=attached_profile,
+    )
+    evidence = mint_runtime_evidence(
+        readiness_boot=base_evidence.readiness_boot,
+        readiness_sequence=base_evidence.readiness_sequence,
+        environment=environment,
+        identity=identity,
+        keyboard_keymap=base_evidence.keyboard_keymap,
+        native_modifiers=base_evidence.native_modifiers,
+        native_held_keycodes=(),
+        native_held_buttons=(),
+        keyboard_profile=base_evidence.keyboard_profile,
+    )
+    replaced_environment = replace(environment, xtest_profile=runtime_profile)
+    replaced = replace(evidence, environment=replaced_environment)
+
+    assert replaced_environment.canonical_payload() == environment.canonical_payload()
+    with pytest.raises(ValueError, match="runtime input evidence seal is invalid"):
+        replaced.verify_seal()
+    assert not replaced.is_live
+
+
 def _runtime_evidence():
-    class Profile:
-        root_xid = 0x374
-
-        def verify(self) -> None:
-            return None
-
-        def canonical_payload(self):
-            return ("test-profile",)
-
     class Identity:
         fingerprint = "game-identity"
         process_start = "42"
         child_geometry = (10, 20, 800, 600)
 
+    hierarchy = (
+        (2, 3, "master", "pointer:Virtual core pointer"),
+        (3, 2, "master", "keyboard:Virtual core keyboard"),
+        (4, 2, "slave", "pointer:Virtual core XTEST pointer"),
+        (5, 3, "slave", "keyboard:Virtual core XTEST keyboard"),
+        (6, 2, "slave", "pointer:xwayland-pointer:17"),
+        (7, 2, "slave", "pointer:xwayland-relative-pointer:17"),
+        (8, 2, "slave", "pointer:xwayland-pointer-gestures:17"),
+        (9, 3, "slave", "keyboard:xwayland-keyboard:17"),
+    )
     environment = StartupEnvironment(
         display=":private",
-        hierarchy=(
-            (2, 3, "master", "pointer:Virtual core pointer"),
-            (3, 2, "master", "keyboard:Virtual core keyboard"),
-            (4, 2, "slave", "pointer:Virtual core XTEST pointer"),
-            (5, 3, "slave", "keyboard:Virtual core XTEST keyboard"),
-            (6, 2, "slave", "pointer:xwayland-pointer:17"),
-            (7, 2, "slave", "pointer:xwayland-relative-pointer:17"),
-            (8, 2, "slave", "pointer:xwayland-pointer-gestures:17"),
-            (9, 3, "slave", "keyboard:xwayland-keyboard:17"),
-        ),
+        hierarchy=hierarchy,
         keyboard_source=5,
         keyboard_master=3,
         pointer_source=4,
         pointer_master=2,
         forwarded_echo_sources=(7,),
-        xtest_profile=Profile(),
+        xtest_profile=_xtest_profile_for_hierarchy(hierarchy),
         keymap_levels=((38, ("a", "A")),),
         modifier_masks=(("Shift_L", 1), ("Control_L", 4)),
         input_tool_version="input-v1",

@@ -26,7 +26,8 @@ from .books import (
     load_commodity_books,
     valid_intervals,
 )
-from .time_to_sale import _jsonable, _reference, kaplan_meier
+from .common import jsonable, reference
+from .time_to_sale import kaplan_meier
 
 FAIR_WINDOW_SECONDS = 86400
 FAIR_MIN_BOOKS = 8
@@ -101,17 +102,19 @@ def _percentile(values: Sequence[Fraction], probability: Fraction) -> Fraction:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * weight
 
 
-def _fair_at(books: Sequence[Book], index: int, *, include_trend: bool = True) -> dict[str, Any]:
+def _fair_at(
+    books: Sequence[Book], index: int, *, include_trend: bool = True, min_books: int = FAIR_MIN_BOOKS
+) -> dict[str, Any]:
     current_t = books[index].t
     window_start = current_t - FAIR_WINDOW_SECONDS
     observations: list[tuple[float, Fraction]] = []
     for book in books:
         if window_start <= book.t < current_t:
-            reference = _reference(book)
-            if reference is not None:
-                observations.append((book.t, reference))
-    refs = [reference for _, reference in observations]
-    if len(refs) < FAIR_MIN_BOOKS:
+            book_reference = reference(book)
+            if book_reference is not None:
+                observations.append((book.t, book_reference))
+    refs = [value for _, value in observations]
+    if len(refs) < min_books:
         return {
             "value": None,
             "band": {"p25": None, "p75": None},
@@ -138,7 +141,9 @@ def _fair_at(books: Sequence[Book], index: int, *, include_trend: bool = True) -
     }
 
 
-def fair_value(books: Sequence[Book], index: int = -1) -> dict[str, Any]:
+def fair_value(
+    books: Sequence[Book], index: int = -1, *, include_trend: bool = True, min_books: int = FAIR_MIN_BOOKS
+) -> dict[str, Any]:
     """Return the strictly-past 24-hour fair-value estimate at ``index``."""
 
     if not books:
@@ -148,7 +153,7 @@ def fair_value(books: Sequence[Book], index: int = -1) -> dict[str, Any]:
             "trend_per_day": None,
             "n": 0,
         }
-    return _fair_at(books, index % len(books))
+    return _fair_at(books, index % len(books), include_trend=include_trend, min_books=min_books)
 
 
 def _fair_series(books: Sequence[Book]) -> list[dict[str, Any]]:
@@ -489,8 +494,8 @@ def risk_metrics(
     for index, interval in enumerate(valid):
         if interval is None:
             continue
-        before_ref = _reference(interval.before)
-        after_ref = _reference(interval.after)
+        before_ref = reference(interval.before)
+        after_ref = reference(interval.after)
         if before_ref is None or after_ref is None:
             continue
         log_change = math.log(float(after_ref)) - math.log(float(before_ref))
@@ -506,8 +511,8 @@ def risk_metrics(
         interval.dt
         for interval in valid
         if interval is not None
-        and _reference(interval.before) is not None
-        and _reference(interval.after) is not None
+        and reference(interval.before) is not None
+        and reference(interval.after) is not None
     )
     if len(regression) > 1:
         x_bar = sum(row[0] for row in regression) / len(regression)
@@ -623,7 +628,7 @@ def main(argv: list[str] | None = None) -> int:
     items = compute_metrics(books)
     report = {"house": args.house, "parameters": PARAMETERS, "items": items}
     with open(args.out, "w", encoding="utf-8") as handle:
-        json.dump(_jsonable(report), handle, indent=2, sort_keys=True)
+        json.dump(jsonable(report), handle, indent=2, sort_keys=True)
         handle.write("\n")
 
     print(f"items: {len(items)}")

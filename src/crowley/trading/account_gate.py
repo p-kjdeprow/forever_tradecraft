@@ -69,7 +69,11 @@ def _section(raw: Mapping[str, Any], name: str) -> Any:
 
 
 def load_account_snapshot(
-    conn: Any, house_key: str, character: str, capture_uid: str | None = None
+    conn: Any,
+    house_key: str,
+    character: str,
+    capture_uid: str | None = None,
+    as_of: datetime | None = None,
 ) -> AccountSnapshot:
     """Read the latest capture (or the pinned ``capture_uid``) for one house and character.
 
@@ -82,14 +86,16 @@ def load_account_snapshot(
         FROM account_captures AS c
         JOIN houses AS h ON h.id = c.house_id
         WHERE h.key = %s AND c.character = %s AND (%s::text IS NULL OR c.capture_uid = %s)
+          AND (%s::timestamptz IS NULL OR c.captured_at <= %s)
         ORDER BY c.captured_at DESC, c.id DESC
         LIMIT 1
         """,
-        (house_key, character, capture_uid, capture_uid),
+        (house_key, character, capture_uid, capture_uid, as_of, as_of),
     ).fetchone()
     if row is None:
         which = f"capture {capture_uid!r}" if capture_uid else "capture"
-        raise RuntimeError(f"no account {which} for character {character!r} in house {house_key!r}")
+        when = f" at or before {as_of.isoformat()}" if as_of is not None else ""
+        raise RuntimeError(f"no account {which} for character {character!r} in house {house_key!r}{when}")
     capture_id, uid, captured_at, digest, recipes, professions = row
     raw = {"recipes": recipes, "professions": professions}
     recipes = _section(raw, "recipes")

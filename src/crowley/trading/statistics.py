@@ -13,7 +13,7 @@ from heapq import heappop, heappush
 from multiprocessing import get_all_start_methods, get_context
 
 from crowley.analysis.books import MAX_GAP, Book, Interval, valid_intervals
-from crowley.analysis.time_to_sale import _reference
+from crowley.analysis.common import reference
 
 
 @dataclass(frozen=True)
@@ -383,7 +383,7 @@ def _percentile_sorted(values: Sequence[Fraction], probability: Fraction) -> Fra
 def _fair_series(
     books: Sequence[Book], references: Sequence[Fraction | None] | None = None
 ) -> list[FairStatistics]:
-    references = [_reference(book) for book in books] if references is None else list(references)
+    references = [reference(book) for book in books] if references is None else list(references)
     log_references = [None if reference is None else math.log(float(reference)) for reference in references]
     active: list[int] = []
     sorted_references: list[Fraction] = []
@@ -406,10 +406,10 @@ def _fair_series(
             expired = active.pop(0)
             slopes.remove_many(pairs_by_observation[expired])
             pairs_by_observation[expired].clear()
-            reference = references[expired]
-            if reference is None:
+            expired_reference = references[expired]
+            if expired_reference is None:
                 raise ValueError("fair statistics active observation has no reference price")
-            position = bisect_left(sorted_references, reference)
+            position = bisect_left(sorted_references, expired_reference)
             sorted_references.pop(position)
         prior = index - 1
         prior_reference = references[prior] if prior >= 0 else None
@@ -439,7 +439,7 @@ def _fair_series_worker(
     item: tuple[int, Sequence[Book]],
 ) -> tuple[int, tuple[tuple[int, int] | None, ...], list[FairStatistics]]:
     item_id, books = item
-    references = tuple(_reference(book) for book in books)
+    references = tuple(reference(book) for book in books)
     encoded_references = tuple(
         None if reference is None else (reference.numerator, reference.denominator)
         for reference in references

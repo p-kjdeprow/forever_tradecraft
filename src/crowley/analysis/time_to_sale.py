@@ -21,6 +21,7 @@ from .books import (
     common_ceiling,
     valid_intervals,
 )
+from .common import reference
 
 HORIZON = 86400
 CHECKPOINTS = (7200, 21600, 43200, 86400)
@@ -410,14 +411,30 @@ def replay_listing(
     )
 
 
-def _reference(book: Book) -> Fraction | None:
-    groups = sorted(book.groups, key=lambda group: (group.unit, group.result_id))
-    seen = 0
-    for group in groups:
-        seen += group.quantity
-        if seen >= 20:
-            return group.unit
-    return None
+def replay_many(
+    books: Sequence[Book],
+    starts: Iterable[tuple[int, Fraction | int | float | str]],
+    quantity: int,
+    *,
+    tie_share: Fraction | int | float | str = TIE_SHARE,
+) -> list[ReplayResult]:
+    """Replay hypothetical listings, each with its own ``(start_index, price)``.
+
+    The interval walks are prepared once and the per-price index is shared by starts with
+    the same price, so this is far cheaper than ``replay_listing`` called per start.
+    """
+
+    tie = _as_tie_share(tie_share)
+    prepared = _prepared_intervals(books)
+    indexes: dict[Fraction, _PriceIndex] = {}
+    results: list[ReplayResult] = []
+    for start, price in starts:
+        exact = as_fraction(price)
+        index = indexes.get(exact)
+        if index is None:
+            index = indexes[exact] = _price_index(books, prepared, exact, tie, None)
+        results.append(_fast_replay(index, start, int(quantity)))
+    return results
 
 
 def rule_prices(book: Book) -> dict[str, Fraction]:
@@ -428,9 +445,9 @@ def rule_prices(book: Book) -> dict[str, Fraction]:
         minimum = min(group.unit for group in book.groups)
         if minimum >= 2:
             result["undercut"] = minimum - 1
-    reference = _reference(book)
-    if reference is not None:
-        result.update((name, reference * multiplier) for name, multiplier in MULTIPLIERS)
+    reference_price = reference(book)
+    if reference_price is not None:
+        result.update((name, reference_price * multiplier) for name, multiplier in MULTIPLIERS)
     return result
 
 
@@ -444,22 +461,6 @@ def _nearest_quantity(quantity: int | float) -> int:
 def _nearest_multiplier(relative: Fraction | float) -> tuple[str, Fraction]:
     value = float(relative)
     return min(MULTIPLIERS, key=lambda pair: (abs(value - float(pair[1])), float(pair[1])))
-
-
-def _fraction_json(value: Fraction) -> int | str:
-    return value.numerator if value.denominator == 1 else f"{value.numerator}/{value.denominator}"
-
-
-def _jsonable(value: Any) -> Any:
-    """Convert exact analysis values to the stable JSON representation."""
-
-    if isinstance(value, Fraction):
-        return _fraction_json(value)
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-    return value
 
 
 def _item_books(books: dict[Any, Sequence[Book]] | Sequence[Book]) -> dict[Any, list[Book]]:
@@ -717,13 +718,13 @@ def _track_real_listing(
         if censor_time is None:
             censor_time = observed_until
             censor_reason = censor_reason or ("horizon" if observed_until >= HORIZON else "data_end")
-    reference = _reference(books[start_index])
+    reference_price = reference(books[start_index])
     minimum_previous = None
     if start_index:
         previous_prices = [candidate.unit for candidate in books[start_index - 1].groups]
         minimum_previous = min(previous_prices) if previous_prices else None
     undercut = minimum_previous is not None and group.unit < minimum_previous
-    relative = None if reference is None else group.unit / reference
+    relative = None if reference_price is None else group.unit / reference_price
     rule_bucket: str | None
     if undercut:
         rule_bucket = "undercut"
@@ -981,8 +982,7 @@ __all__ = [
     "kaplan_meier",
     "real_listings",
     "replay_listing",
+    "replay_many",
     "rule_prices",
     "validate",
-    "_jsonable",
-    "_reference",
 ]

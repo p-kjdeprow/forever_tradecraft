@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 
 import psycopg
 
 from .books import load_commodity_books
-from .time_to_sale import _jsonable, evaluate_rules, validate
+from .common import jsonable
+from .time_to_sale import evaluate_rules, validate
 
 
 def _validation_line(label: str, report: dict) -> str:
@@ -23,6 +25,11 @@ def _validation_line(label: str, report: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    args_list = sys.argv[1:] if argv is None else argv
+    if args_list and args_list[0] == "rank":
+        from .rank import main as rank_main
+
+        return rank_main(args_list[1:])
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database-url", required=True)
     parser.add_argument("--house", required=True, help="explicit house key")
@@ -30,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--tie-share", type=float, default=0.0)
     parser.add_argument("--split-t", type=float)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(args_list)
     if args.stride < 1:
         parser.error("--stride must be positive")
     with psycopg.connect(args.database_url) as conn:
@@ -48,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
         "validation": validation,
     }
     with open(args.out, "w", encoding="utf-8") as handle:
-        json.dump(_jsonable(report), handle, indent=2, sort_keys=True)
+        json.dump(jsonable(report), handle, indent=2, sort_keys=True)
         handle.write("\n")
 
     undercut = []

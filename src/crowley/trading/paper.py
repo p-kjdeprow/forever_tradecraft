@@ -74,6 +74,7 @@ REPLAY_MODULES: tuple[str, ...] = (
     "crowley/__init__.py",
     "crowley/analysis/__init__.py",
     "crowley/analysis/books.py",
+    "crowley/analysis/common.py",
     "crowley/analysis/time_to_sale.py",
     "crowley/core/__init__.py",
     "crowley/core/auction_rules.py",
@@ -101,6 +102,7 @@ REPLAY_MODULES: tuple[str, ...] = (
     "crowley/trading/strategies/common.py",
     "crowley/trading/strategies/crafting.py",
     "crowley/trading/strategies/dip_reversion.py",
+    "crowley/trading/strategies/pricing.py",
     "crowley/trading/strategies/snipe_flip.py",
     "crowley/trading/strategies/vendor_arb.py",
 )

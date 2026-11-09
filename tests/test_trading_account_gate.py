@@ -207,7 +207,7 @@ def _row(recipes, professions=None):
 def test_loader_reads_capture_rows_and_captured_skill_lines_without_db() -> None:
     conn = _conn(_row({"202": {"capturedAt": 1, "learned": [1, 2]}}))
     snapshot = load_account_snapshot(conn, "house", "Char", "uid-9")
-    assert conn.queries[0][1] == ("house", "Char", "uid-9", "uid-9")
+    assert conn.queries[0][1] == ("house", "Char", "uid-9", "uid-9", None, None)
     assert snapshot.capture_uid == "uid-9" and snapshot.content_digest == "a" * 64
     assert snapshot.known_spell_ids == {1, 2}
     assert dict(snapshot.skill_levels) == {202: 150, 171: 50}

@@ -12,7 +12,7 @@ from typing import Any
 import pytest
 
 from crowley.analysis.books import Book, Group, valid_intervals
-from crowley.analysis.time_to_sale import _reference
+from crowley.analysis.common import reference
 from crowley.trading import statistics as statistics_module
 
 try:
@@ -182,8 +182,8 @@ def _previous_statistics(books: dict[int, list[Book]]) -> dict[int, list[object]
                 purchased_copper += sum(
                     (unit * quantity for unit, quantity in interval.walk.consumed), Fraction(0)
                 )
-                before_ref = _reference(interval.before)
-                after_ref = _reference(interval.after)
+                before_ref = reference(interval.before)
+                after_ref = reference(interval.after)
                 if before_ref is not None and after_ref is not None:
                     change = math.log(float(after_ref)) - math.log(float(before_ref))
                     volatility_values.append(change / math.sqrt(interval.dt / 3600))

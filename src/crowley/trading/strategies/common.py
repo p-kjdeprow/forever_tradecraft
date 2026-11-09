@@ -37,6 +37,7 @@ def trustworthy_fair(
     *,
     min_fair_n: int = 16,
     max_band_width: FractionInput = 0.35,
+    min_demand_eligible_seconds: float = MIN_DEMAND_ELIGIBLE_SECONDS,
 ) -> bool:
     """Return whether the snapshot has enough history for a price decision."""
 
@@ -50,7 +51,7 @@ def trustworthy_fair(
         return False
     if (p75 - p25) / fair > as_fraction(max_band_width):
         return False
-    return demand > 0 and snapshot.demand_eligible_seconds >= MIN_DEMAND_ELIGIBLE_SECONDS
+    return demand > 0 and snapshot.demand_eligible_seconds >= min_demand_eligible_seconds
 
 
 def fair_value(snapshot: ItemSnapshot) -> Fraction:

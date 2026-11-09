@@ -27,16 +27,14 @@ from ..requirements import recipe_available
 from .common import (
     as_fraction,
     clears_vendor_floor,
-    fair_value,
     floor_fraction,
     fraction_parameter,
     held_quantity,
     item_inventory,
-    marginal_purchase,
-    target_sell_price,
     trustworthy_fair,
     vendor_purchase,
 )
+from .pricing import Source, output_target_price, recipe_requirements, source_reagent
 
 DEFAULT_PARAMS = {
     "name": "crafting",
@@ -58,30 +56,13 @@ DEFAULT_PARAMS = {
 
 
 @dataclass(frozen=True)
-class _Source:
-    item_id: int
-    quantity: int
-    kind: str
-    unit_limit: int
-    full_cost: Fraction
-
-
-@dataclass(frozen=True)
 class _Candidate:
     recipe: Recipe
     times: int
     cost: Fraction
     value: Fraction
     profit: Fraction
-    sources: tuple[_Source, ...]
-
-
-def _requirements(recipe: Recipe, times: int) -> dict[int, int]:
-    result: dict[int, int] = {}
-    for item_id, quantity in recipe.reagents:
-        if quantity > 0:
-            result[item_id] = result.get(item_id, 0) + quantity * times
-    return result
+    sources: tuple[Source, ...]
 
 
 def _projected_capacity(
@@ -207,12 +188,7 @@ class CraftingStrategy:
                 continue
             if listing.expires_t - market.t < 3_600:
                 continue
-            target = target_sell_price(
-                snapshot,
-                floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
-                floor_ratio=fraction_parameter(self.params, "floor_ratio"),
-                cap_ratio=fraction_parameter(self.params, "cap_ratio"),
-            )
+            target = output_target_price(snapshot, self.params)
             if not (
                 target < listing.unit_price
                 and Fraction(target) <= Fraction(listing.unit_price) * (1 - self._reprice_gap)
@@ -284,22 +260,10 @@ class CraftingStrategy:
             outputs[item_id] = (snapshot, facts, previous + quantity)
         return outputs or None
 
-    def _source(self, market: MarketView, item_id: int, quantity: int) -> _Source | None:
-        snapshot = market.items().get(item_id)
-        facts = market.facts(item_id)
-        ah = marginal_purchase(snapshot.levels, quantity) if snapshot is not None else None
-        vendor = None if facts is None else vendor_purchase(facts, quantity)
-        if ah is None and vendor is None:
-            return None
-        if ah is not None and (vendor is None or ah[0] <= vendor[1]):
-            return _Source(item_id, quantity, "ah", ah[1], ah[0])
-        assert vendor is not None
-        return _Source(item_id, quantity, "vendor", 0, Fraction(vendor[1]))
-
     def _actual_purchase_cost(
         self,
         market: MarketView,
-        source: _Source,
+        source: Source,
         inventory: Mapping[int, int],
     ) -> Fraction:
         missing = max(0, source.quantity - item_inventory(inventory, source.item_id))
@@ -346,14 +310,18 @@ class CraftingStrategy:
         if max_times <= 0:
             return None
 
+        targets = {
+            item_id: output_target_price(snapshot, self.params)
+            for item_id, (snapshot, _facts, _quantity) in outputs.items()
+        }
         best: _Candidate | None = None
         spend_limit = floor_fraction(
             fraction_parameter(self.params, "max_spend_share") * max(0, projected_cash)
         )
         for times in range(1, max_times + 1):
-            sources: list[_Source] = []
-            for item_id, quantity in _requirements(recipe, times).items():
-                source = self._source(market, item_id, quantity)
+            sources: list[Source] = []
+            for item_id, quantity in recipe_requirements(recipe, times).items():
+                source = source_reagent(market.items().get(item_id), market.facts(item_id), item_id, quantity)
                 if source is None:
                     sources = []
                     break
@@ -367,14 +335,8 @@ class CraftingStrategy:
             if purchase_cost > spend_limit:
                 continue
             value = Fraction(0)
-            for item_id, (snapshot, _facts, quantity) in outputs.items():
-                target = target_sell_price(
-                    snapshot,
-                    floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
-                    floor_ratio=fraction_parameter(self.params, "floor_ratio"),
-                    cap_ratio=fraction_parameter(self.params, "cap_ratio"),
-                )
-                value += quantity * times * target * (1 - market.rules.seller_cut) - market.deposit(
+            for item_id, (_snapshot, _facts, quantity) in outputs.items():
+                value += quantity * times * targets[item_id] * (1 - market.rules.seller_cut) - market.deposit(
                     item_id, quantity * times, self._listing_duration_hours
                 )
             cost = sum((source.full_cost for source in sources), Fraction(0))
@@ -516,12 +478,7 @@ class CraftingStrategy:
                 )
             ):
                 continue
-            target = target_sell_price(
-                snapshot,
-                floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
-                floor_ratio=fraction_parameter(self.params, "floor_ratio"),
-                cap_ratio=fraction_parameter(self.params, "cap_ratio"),
-            )
+            target = output_target_price(snapshot, self.params)
             if not clears_vendor_floor(market.rules, target, facts):
                 vendor_exits.append((item_id, quantity))
                 continue
@@ -562,12 +519,7 @@ class CraftingStrategy:
             facts = market.facts(item_id)
             assert facts is not None
             snapshot = market.items()[item_id]
-            target = target_sell_price(
-                snapshot,
-                floor_fraction(fraction_parameter(self.params, "buy_ratio") * fair_value(snapshot)),
-                floor_ratio=fraction_parameter(self.params, "floor_ratio"),
-                cap_ratio=fraction_parameter(self.params, "cap_ratio"),
-            )
+            target = output_target_price(snapshot, self.params)
             intents.append(Post(item_id, target, quantity, self._listing_duration_hours))
             projected_cash -= deposit
             inventory[item_id] = max(0, item_inventory(inventory, item_id) - quantity)

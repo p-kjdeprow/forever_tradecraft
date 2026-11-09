@@ -678,6 +678,20 @@ def test_capture_accepts_owned_writer_that_finishes_after_exit(
         assert image.size == IMAGE_SIZE
 
 
+def test_capture_started_after_release_uses_the_current_epoch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = _writer(tmp_path / "writer", _png_bytes((12, 22, 32, 255)), "complete")
+    backend = _backend(tmp_path, monkeypatch, writer)
+    backend.release_held_input()
+
+    result = backend.capture(
+        tmp_path / "capture.png", identity=_identity(), deadline_monotonic=time.monotonic() + 2.0
+    )
+
+    assert result.fingerprint == "capture-identity"
+
+
 def test_capture_waits_for_partial_png_and_decodes_all_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -792,7 +806,7 @@ def test_capture_revocation_epoch_blocks_delayed_writer_after_rearm(
     assert not list(tmp_path.glob(".*.capture-*"))
 
 
-def test_capture_revocation_epoch_blocks_lock_wait_after_rearm(
+def test_capture_revocation_epoch_blocks_lock_wait_after_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     writer = _writer(tmp_path / "writer", _png_bytes((16, 26, 36, 255)), "complete")
@@ -819,7 +833,6 @@ def test_capture_revocation_epoch_blocks_lock_wait_after_rearm(
         thread.start()
         time.sleep(0.05)
         backend.release_held_input()
-        backend.activate_generation(2)
         thread.join(2.0)
     finally:
         release.set()

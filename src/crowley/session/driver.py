@@ -178,6 +178,20 @@ class RuntimeReadinessError(DriverError):
         self.invalidation_cause = cause
 
 
+class _CancellationToken(Protocol):
+    def is_set(self) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _RevocationEpochToken:
+    backend: X11Backend
+    epoch: int
+
+    def is_set(self) -> bool:
+        with self.backend._process_lock:
+            return self.backend._capture_revocation_epoch != self.epoch
+
+
 @dataclass(frozen=True)
 class TelemetryRegionReceipt:
     """Immutable parent-side proof for one typed ScreenshotArea capture."""
@@ -1330,7 +1344,7 @@ class PinnedX11IdentityObserver:
         process: subprocess.Popen[bytes],
         *,
         deadline: float,
-        cancel_event: threading.Event | None,
+        cancel_event: _CancellationToken | None,
         close_event: threading.Event | None = None,
     ) -> tuple[bytes, bytes]:
         """Drain both pipes without allowing a child-held pipe to escape the deadline."""
@@ -1417,7 +1431,7 @@ class PinnedX11IdentityObserver:
         request: bytes,
         *,
         deadline: float,
-        cancel_event: threading.Event | None,
+        cancel_event: _CancellationToken | None,
         close_event: threading.Event | None = None,
     ) -> None:
         if process.stdin is None:
@@ -1562,7 +1576,7 @@ class PinnedX11IdentityObserver:
         *,
         xauthority: str,
         deadline_monotonic: float | None,
-        cancel_event: threading.Event | None = None,
+        cancel_event: _CancellationToken | None = None,
     ) -> dict[str, Any]:
         with self._lifecycle_lock:
             if self._closed or self._fd < 0:
@@ -1972,6 +1986,12 @@ class X11Backend:
             )
         return self._cancel_active.is_set()
 
+    @staticmethod
+    def _is_passive_epoch_cancelled(token: _RevocationEpochToken | None) -> bool:
+        """Check cancellation for a passive command captured after the last release."""
+
+        return token is not None and token.is_set()
+
     @_identity_latency_decorator("identity_x11_query")
     def _run(
         self,
@@ -1993,12 +2013,20 @@ class X11Backend:
     ) -> subprocess.CompletedProcess[str]:
         if admitted_button_gesture is not None:
             raise DriverError("button input requires a broker emission claim")
+        passive_token = (
+            self._capture_revocation_token() if generation is None and calibration_ticket is None else None
+        )
         environment = os.environ.copy()
         environment["DISPLAY"] = self.profile.display
         if not self.xauthority:
             raise DriverError("Xauthority path must be explicitly configured or inherited")
         environment["XAUTHORITY"] = self.xauthority
-        if self._is_cancelled(generation, calibration_ticket):
+        command_cancelled = (
+            self._is_cancelled(generation, calibration_ticket)
+            if generation is not None or calibration_ticket is not None
+            else self._is_passive_epoch_cancelled(passive_token)
+        )
+        if command_cancelled:
             raise DriverError("desktop action was cancelled")
         if deadline_monotonic is not None and (
             isinstance(deadline_monotonic, bool)
@@ -2245,7 +2273,12 @@ class X11Backend:
             if deadline_monotonic is not None and time.monotonic() >= float(deadline_monotonic):
                 raise DriverError("desktop action deadline expired before emission")
             admitted = spawn()
-            if self._is_cancelled(generation, calibration_ticket):
+            command_cancelled = (
+                self._is_cancelled(generation, calibration_ticket)
+                if generation is not None or calibration_ticket is not None
+                else self._is_passive_epoch_cancelled(passive_token)
+            )
+            if command_cancelled:
                 try:
                     admitted.kill()
                 except OSError:
@@ -2316,7 +2349,12 @@ class X11Backend:
             if deadline_monotonic is not None:
                 deadline = min(deadline, float(deadline_monotonic))
             while True:
-                if self._is_cancelled(generation, calibration_ticket):
+                command_cancelled = (
+                    self._is_cancelled(generation, calibration_ticket)
+                    if generation is not None or calibration_ticket is not None
+                    else self._is_passive_epoch_cancelled(passive_token)
+                )
+                if command_cancelled:
                     terminated = self._terminate_process(process)
                     if not terminated:
                         raise DriverError("desktop action termination could not be confirmed")
@@ -2332,6 +2370,8 @@ class X11Backend:
                     break
                 except subprocess.TimeoutExpired:
                     continue
+            if passive_token is not None and passive_token.is_set():
+                raise DriverError("desktop action was cancelled")
             if process.returncode:
                 raise DriverError(
                     f"desktop command failed: {' '.join(args)}: {stderr.strip() or process.returncode}"
@@ -3112,6 +3152,7 @@ class X11Backend:
         require_foreground: bool,
         deadline_monotonic: float | None,
     ) -> WindowIdentity:
+        revocation_token = self._capture_revocation_token()
         if not self.xauthority:
             raise DriverError("Xauthority path must be explicitly configured or inherited")
         if not self.profile.wine_prefix:
@@ -3120,8 +3161,10 @@ class X11Backend:
             self.profile,
             xauthority=self.xauthority,
             deadline_monotonic=deadline_monotonic,
-            cancel_event=self._cancel_active,
+            cancel_event=revocation_token,
         )
+        if revocation_token.is_set():
+            raise DriverError("identity observer cancelled")
         if (
             facts["matchingProcessCount"] != 1
             or facts["candidateWindowCount"] != 1
@@ -3777,10 +3820,18 @@ class X11Backend:
 
     def _capture_epoch_snapshot(self) -> int:
         with self._process_lock:
+            if not hasattr(self, "_capture_revocation_epoch"):
+                self._capture_revocation_epoch = 0
             return self._capture_revocation_epoch
 
+    def _capture_revocation_token(self) -> _RevocationEpochToken:
+        with self._process_lock:
+            if not hasattr(self, "_capture_revocation_epoch"):
+                self._capture_revocation_epoch = 0
+            return _RevocationEpochToken(self, self._capture_revocation_epoch)
+
     def _check_capture_epoch_locked(self, epoch: int) -> None:
-        if epoch != self._capture_revocation_epoch or self._cancel_active.is_set():
+        if epoch != self._capture_revocation_epoch:
             raise DriverError("desktop capture was revoked")
 
     def _check_capture_epoch(self, epoch: int) -> None:

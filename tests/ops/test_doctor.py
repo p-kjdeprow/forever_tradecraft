@@ -81,6 +81,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
     (tmp_path / "wine-prefix").mkdir()
     monkeypatch.setattr(install, "packaged_game_target", lambda: target)
     monkeypatch.setattr(doctor, "packaged_game_target", lambda: target)
+    monkeypatch.setattr(doctor, "_check_gnome_animations", lambda _problems: None)
     flavor = game_root / target.product_dir
     (flavor / "Interface" / "AddOns").mkdir(parents=True)
     account = flavor / "WTF" / "Account" / "850981908#1"
@@ -410,3 +411,40 @@ def test_doctor_rejects_dangling_or_non_executable_entrypoints(
     problems = "\n".join(doctor.doctor(environment, database_status=_current).problems)
     assert f"unit entrypoint is unavailable: {entrypoints / 'crowley-companion'}" in problems
     assert f"unit entrypoint is not executable: {entrypoints / 'crowley-session'}" in problems
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode", "expected"),
+    (
+        ("false\n", 0, None),
+        ("true\n", 0, "GNOME animations must be disabled"),
+        ("", 1, "gsettings failed"),
+    ),
+)
+def test_doctor_checks_gnome_animations(
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+    returncode: int,
+    expected: str | None,
+) -> None:
+    monkeypatch.setattr(
+        doctor.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, returncode, stdout, ""),
+    )
+    problems: list[str] = []
+    doctor._check_gnome_animations(problems)
+    if expected is None:
+        assert problems == []
+    else:
+        assert expected in "\n".join(problems)
+
+
+def test_doctor_reports_unavailable_gsettings(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(_command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("gsettings")
+
+    monkeypatch.setattr(doctor.subprocess, "run", unavailable)
+    problems: list[str] = []
+    doctor._check_gnome_animations(problems)
+    assert "gsettings is unavailable" in "\n".join(problems)

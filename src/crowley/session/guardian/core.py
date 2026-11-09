@@ -42,7 +42,7 @@ from ..input_events import (
     xi2_timestamp_valid,
 )
 from ..input_tool import NativeReleaseSpec
-from .correlation import ActionCorrelation, _Observation
+from .correlation import CORRELATION_WINDOW_MS, ActionCorrelation, EchoGraceExpectation, _Observation
 from .lease import GuardianError, InputLease
 from .watchdog import _watchdog_entry as _watchdog_entry_impl
 
@@ -192,6 +192,7 @@ class InputGuardian:
                 os.close(ready_write)
             os.close(ready_read)
         self._action: ActionCorrelation | None = None
+        self._echo_grace_expectations: list[EchoGraceExpectation] = []
         # Epochs are one-way.  A release callback or a later arm must never
         # make an already revoked ticket admissible again.
         self._canceled_epochs: set[int] = set()
@@ -414,6 +415,7 @@ class InputGuardian:
             self.armed = True
             self.revoked_reason = ""
             self._action = None
+            self._echo_grace_expectations.clear()
             self._watch_stop.clear()
             if self._watcher is None or not self._watcher.is_alive():
                 self._watcher = threading.Thread(
@@ -842,7 +844,8 @@ class InputGuardian:
                 raise GuardianError("input lease is revoked or generation is stale")
             if action is not None and self._action is not action:
                 raise GuardianError("input action is no longer current")
-            if action is not None and not action.complete:
+            current_action = self._action if action is None else action
+            if current_action is not None and not current_action.complete:
                 incomplete = True
             if incomplete:
                 # Clearing an incomplete correlation would turn late native
@@ -851,6 +854,26 @@ class InputGuardian:
                 pass
             else:
                 self._action = None
+                if current_action is not None and current_action.pending_echoes:
+                    deadline = self._clock() + CORRELATION_WINDOW_MS / 1000.0
+                    self._echo_grace_expectations.extend(
+                        EchoGraceExpectation(
+                            generation=current_action.generation,
+                            deadline_monotonic=deadline,
+                            timestamp=timestamp,
+                            target_xid=target,
+                            root_xy=root_xy,
+                            event_xy=event_xy,
+                            modifiers=modifiers,
+                            echo_sources=current_action.echo_sources,
+                            canonical_motion=current_action.canonical_motion,
+                            expected_root_xid=current_action.expected_root_xid,
+                            expected_event_xid=current_action.expected_event_xid,
+                            require_delivered_modifiers=current_action.require_delivered_modifiers,
+                        )
+                        for timestamp, target, root_xy, event_xy, modifiers in current_action.pending_echoes
+                    )
+                    current_action.pending_echoes.clear()
                 self._last_event_time_ms = None
                 self._held = False
                 self._held_keys.clear()
@@ -883,8 +906,16 @@ class InputGuardian:
 
         with self._lock:
             action = self._action
+            now = self._clock()
+            self._echo_grace_expectations[:] = [
+                expectation
+                for expectation in self._echo_grace_expectations
+                if expectation.generation == self.generation and now < expectation.deadline_monotonic
+            ]
+            grace_expectations = tuple(self._echo_grace_expectations)
             prior_timestamp = self._last_event_time_ms
             generation = self.generation
+            action_pending_echoes = tuple(action.pending_echoes) if action is not None else ()
         observation = _Observation(
             event=event,
             action=action,
@@ -892,6 +923,8 @@ class InputGuardian:
             generation=generation,
             event_class=getattr(event.event_class, "value", event.event_class),
             target=getattr(event, "target_xid", None),
+            grace_expectations=grace_expectations,
+            action_pending_echoes=action_pending_echoes,
         )
         self._observe_target_phase(observation)
         self._observe_admission_phase(observation)
@@ -908,12 +941,82 @@ class InputGuardian:
         )
         return False
 
+    @staticmethod
+    def _echo_expectation_matches(event: Any, expectation: EchoGraceExpectation) -> bool:
+        """Apply the exact forwarded-echo contract to one expectation."""
+
+        if (
+            getattr(event.event_class, "value", event.event_class) != "Motion"
+            or event.source_device not in expectation.echo_sources
+            or event.master_device != event.source_device
+        ):
+            return False
+        elapsed = xi2_timestamp_elapsed(expectation.timestamp, event.timestamp_ms)
+        return bool(
+            elapsed is not None
+            and elapsed <= CORRELATION_WINDOW_MS
+            and event.target_xid == expectation.target_xid
+            and (
+                not expectation.canonical_motion
+                or (
+                    getattr(event, "root_xid", None) == expectation.expected_root_xid
+                    and getattr(event, "event_xid", None) == expectation.expected_event_xid
+                )
+            )
+            and expectation.root_xy is not None
+            and expectation.event_xy is not None
+            and getattr(event, "root_xy", None) == expectation.root_xy
+            and getattr(event, "event_xy", None) == expectation.event_xy
+            and getattr(event, "modifiers", None) == expectation.modifiers
+        )
+
+    @staticmethod
+    def _action_echo_expectation(
+        action: ActionCorrelation,
+        pending: tuple[
+            int,
+            int | None,
+            tuple[float, float] | None,
+            tuple[float, float] | None,
+            tuple[int, int, int] | None,
+        ],
+    ) -> EchoGraceExpectation:
+        timestamp, target_xid, root_xy, event_xy, modifiers = pending
+        return EchoGraceExpectation(
+            generation=action.generation,
+            deadline_monotonic=action.deadline_monotonic,
+            timestamp=timestamp,
+            target_xid=target_xid,
+            root_xy=root_xy,
+            event_xy=event_xy,
+            modifiers=modifiers,
+            echo_sources=action.echo_sources,
+            canonical_motion=action.canonical_motion,
+            expected_root_xid=action.expected_root_xid,
+            expected_event_xid=action.expected_event_xid,
+            require_delivered_modifiers=action.require_delivered_modifiers,
+        )
+
+    @staticmethod
+    def _delivered_motion_modifiers_valid(event: Any) -> bool:
+        modifiers = getattr(event, "modifiers", None)
+        effective = getattr(event, "modifier_effective", None)
+        return bool(
+            isinstance(modifiers, (tuple, list))
+            and len(modifiers) == 3
+            and all(
+                isinstance(value, int) and not isinstance(value, bool) and value >= 0 for value in modifiers
+            )
+            and isinstance(effective, int)
+            and not isinstance(effective, bool)
+            and effective >= 0
+            and effective == (modifiers[0] | modifiers[1] | modifiers[2])
+        )
+
     def _observe_target_phase(self, observation: _Observation) -> None:
         """Validate target ancestry and correlate canonical/forwarded motion."""
 
         action = observation.action
-        if action is None:
-            return
         event = observation.event
         event_class = observation.event_class
         target = observation.target
@@ -925,6 +1028,17 @@ class InputGuardian:
         canonical_motion_checked = False
         canonical_raw_queued = False
         canonical_endpoint: tuple[int, int] | None = None
+        if action is None:
+            for index, expectation in enumerate(observation.grace_expectations):
+                if self._echo_expectation_matches(event, expectation):
+                    echo_match = True
+                    target_ok = True
+                    observation.grace_expectation = expectation
+                    observation.grace_index = index
+                    break
+            observation.target_ok = target_ok
+            observation.echo_match = echo_match
+            return
         # Raw and device-change records describe device transitions and
         # deliberately have no delivered target.  A forged/raw block that
         # carries a child XID must not inherit the delivered target proof.
@@ -1037,9 +1151,9 @@ class InputGuardian:
                             motion_match_index = action.motion_index
                         action.emitted_motion_count += 1
                         if action.echo_sources:
-                            # The forwarded record may arrive after a
-                            # later planned primary. Preserve each exact
-                            # pair and consume it in FIFO order below.
+                            # The forwarded record may arrive after a later
+                            # planned primary. Preserve every exact pair so
+                            # the source event can consume it in any order.
                             action.pending_echoes.append(
                                 (
                                     event.timestamp_ms,
@@ -1055,45 +1169,27 @@ class InputGuardian:
             target_ok
             and event_class == "Motion"
             and event.source_device in action.echo_sources
-            and action.pending_echoes
+            and observation.action_pending_echoes
         ):
             # The calibration proof establishes only the source
             # relationship. Runtime admission must pair each forwarded
             # record with an outstanding source-4 operation; old
             # calibration coordinates/timestamps are never replayed.
-            if action.canonical_motion:
-                pending_items = ((0, action.pending_echoes[0]),) if action.pending_echoes else ()
-            else:
-                pending_items = tuple(enumerate(action.pending_echoes))
+            pending_items = tuple(enumerate(observation.action_pending_echoes))
             for index, pending in pending_items:
-                (
-                    current_motion_timestamp,
-                    current_motion_target,
-                    current_root,
-                    current_event,
-                    current_modifiers,
-                ) = pending
-                elapsed = xi2_timestamp_elapsed(current_motion_timestamp, event.timestamp_ms)
-                if (
-                    event.master_device == event.source_device
-                    and elapsed is not None
-                    and elapsed <= 250
-                    and target == current_motion_target
-                    and (
-                        not action.canonical_motion
-                        or (
-                            getattr(event, "root_xid", None) == action.expected_root_xid
-                            and getattr(event, "event_xid", None) == action.expected_event_xid
-                        )
-                    )
-                    and current_root is not None
-                    and current_event is not None
-                    and getattr(event, "root_xy", None) == current_root
-                    and getattr(event, "event_xy", None) == current_event
-                    and getattr(event, "modifiers", None) == current_modifiers
-                ):
+                expectation = self._action_echo_expectation(action, pending)
+                if self._echo_expectation_matches(event, expectation):
                     echo_match = True
                     echo_pending_index = index
+                    observation.matched_echo_expectation = expectation
+                    break
+        if not echo_match and event_class == "Motion":
+            for index, expectation in enumerate(observation.grace_expectations):
+                if self._echo_expectation_matches(event, expectation):
+                    echo_match = True
+                    target_ok = True
+                    observation.grace_expectation = expectation
+                    observation.grace_index = index
                     break
         if (
             target_ok
@@ -1102,8 +1198,8 @@ class InputGuardian:
             and event.source_device in action.echo_sources
             and not echo_match
         ):
-            # A forwarded source is meaningful only as the exact echo of
-            # the oldest outstanding primary. Letting a mismatched source-7
+            # A forwarded source is meaningful only as the exact echo of an
+            # outstanding primary. Letting a mismatched source-7
             # Motion continue through the ordinary optional-Motion path
             # would silently accept wrong root/event identities or an
             # unpaired human record.
@@ -1148,6 +1244,34 @@ class InputGuardian:
         target_ok = observation.target_ok
         echo_match = observation.echo_match
         sequence_ok = True
+        now = self._clock()
+        timestamp = getattr(event, "timestamp_ms", None)
+        if (
+            observation.grace_expectation is None
+            and action is not None
+            and observation.echo_match
+            and observation.matched_echo_expectation is not None
+            and now > action.deadline_monotonic
+        ):
+            # An observation may have captured the current action before it
+            # completed. Reconcile a now-published grace expectation before
+            # applying the completed action's deadline.
+            observation.grace_expectation = self._reconcile_echo_grace_transition(observation, now)
+        if observation.grace_expectation is not None:
+            timestamp_ok = xi2_timestamp_valid(timestamp)
+            observation.sequence_ok = True
+            observation.now = now
+            observation.timestamp = timestamp
+            observation.timestamp_ok = timestamp_ok
+            observation.allowed = bool(
+                self.armed
+                and event_class == "Motion"
+                and echo_match
+                and target_ok
+                and timestamp_ok
+                and now < observation.grace_expectation.deadline_monotonic
+            )
+            return
         if action is not None and action.required_sequence:
             if event_class in action.optional_classes:
                 sequence_ok = True
@@ -1155,8 +1279,15 @@ class InputGuardian:
                 sequence_ok = event_class == action.required_sequence[action.sequence_index]
             else:
                 sequence_ok = False
-        now = self._clock()
-        timestamp = getattr(event, "timestamp_ms", None)
+        action_deadline = None
+        if action is not None:
+            action_deadline = action.deadline_monotonic
+        deadline_ok = action_deadline is not None and now <= action_deadline
+        if not deadline_ok and observation.echo_match and observation.matched_echo_expectation is not None:
+            # Let commit reconcile a finish that races this admission phase.
+            # If the action is still current, commit rechecks the deadline and
+            # rejects the stale echo without changing its correlation state.
+            deadline_ok = True
         pending_raw_primary = bool(
             action is not None
             and event_class == "Motion"
@@ -1187,7 +1318,8 @@ class InputGuardian:
             and (event_class != "RawMotion" or event.detail == RAW_MOTION_DETAIL)
             and sequence_ok
             and timestamp_ok
-            and action.started_monotonic <= now <= action.deadline_monotonic
+            and deadline_ok
+            and action.started_monotonic <= now
             and (
                 event_class != "Motion"
                 or echo_match
@@ -1222,6 +1354,27 @@ class InputGuardian:
         observation.timestamp_ok = timestamp_ok
         observation.allowed = allowed
 
+    def _reconcile_echo_grace_transition(
+        self, observation: _Observation, now: float
+    ) -> EchoGraceExpectation | None:
+        """Claim a moved echo expectation after the active action deadline."""
+
+        with self._lock:
+            if (
+                self.generation != observation.generation
+                or not self.armed
+                or self._action is observation.action
+            ):
+                return None
+            for expectation in self._echo_grace_expectations:
+                if (
+                    expectation.generation == observation.generation
+                    and now < expectation.deadline_monotonic
+                    and self._echo_expectation_matches(observation.event, expectation)
+                ):
+                    return expectation
+        return None
+
     def _observe_constraint_phase(self, observation: _Observation) -> None:
         """Apply detail, modifier, coordinate, and release constraints."""
 
@@ -1229,6 +1382,17 @@ class InputGuardian:
         event = observation.event
         event_class = observation.event_class
         allowed = observation.allowed
+        if observation.grace_expectation is not None:
+            if (
+                allowed
+                and observation.grace_expectation.require_delivered_modifiers
+                and event_class == "Motion"
+                and not getattr(event, "is_raw", False)
+                and not self._delivered_motion_modifiers_valid(event)
+            ):
+                allowed = False
+            observation.allowed = allowed
+            return
         detail_events = {
             "RawKeyPress",
             "KeyPress",
@@ -1334,13 +1498,7 @@ class InputGuardian:
             and action is not None
             and event_class in {"RawButtonRelease", "ButtonRelease"}
             and action.require_motion_before_release
-            and (
-                action.motion_index < len(action.expected_motion_trace)
-                or (
-                    action.echo_sources
-                    and (action.echo_index < action.emitted_motion_count or bool(action.pending_echoes))
-                )
-            )
+            and action.motion_index < len(action.expected_motion_trace)
         ):
             allowed = False
         if (
@@ -1408,6 +1566,8 @@ class InputGuardian:
         event = observation.event
         event_class = observation.event_class
         allowed = observation.allowed
+        if observation.grace_expectation is not None:
+            return
         if (
             allowed
             and action is not None
@@ -1483,9 +1643,50 @@ class InputGuardian:
             return
         with self._lock:
             action = observation.action
-            if self.generation != observation.generation or self._action is not action:
+            if self.generation != observation.generation or not self.armed:
                 observation.allowed = False
+            elif observation.grace_expectation is not None:
+                grace_index = next(
+                    (
+                        index
+                        for index, expectation in enumerate(self._echo_grace_expectations)
+                        if expectation is observation.grace_expectation
+                    ),
+                    None,
+                )
+                if grace_index is None:
+                    observation.allowed = False
+                else:
+                    self._echo_grace_expectations.pop(grace_index)
             else:
+                if self._action is not action:
+                    retry_index = None
+                    if observation.echo_match and observation.matched_echo_expectation is not None:
+                        retry_index = next(
+                            (
+                                index
+                                for index, expectation in enumerate(self._echo_grace_expectations)
+                                if expectation.generation == observation.generation
+                                and self._clock() < expectation.deadline_monotonic
+                                and self._echo_expectation_matches(
+                                    observation.event,
+                                    expectation,
+                                )
+                            ),
+                            None,
+                        )
+                    if retry_index is None:
+                        observation.allowed = False
+                    else:
+                        self._echo_grace_expectations.pop(retry_index)
+                    return
+                if (
+                    observation.echo_match
+                    and observation.matched_echo_expectation is not None
+                    and self._clock() > action.deadline_monotonic
+                ):
+                    observation.allowed = False
+                    return
                 if not observation.echo_match:
                     if observation.pending_raw_primary and observation.prior_timestamp is not None:
                         # The FIFO-head primary may be older in scalar
@@ -1536,6 +1737,7 @@ class InputGuardian:
             self.revoked_reason = reason
             self._calibration_epoch += 1
             self._calibration_ticket = None
+            self._echo_grace_expectations.clear()
             active = (
                 self._action is not None
                 or bool(self._active_process_groups)

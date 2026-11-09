@@ -128,6 +128,26 @@ input hierarchy, native tool, keymap, display or takeover contract requires a ne
 drill. Process IDs and routine addon boot changes do not invalidate the stored
 human evidence. Each new owner still collects fresh passive readiness.
 
+If a fresh owner inherits an unresolved action intent (for example,
+`current.action = "open_ah"` with `actionResult = "preparing"`) and the stored
+drill no longer matches the newly observed environment, `start`/`resume` first
+returns `nextAction = takeover_drill`. The drill is allowed while the controller
+is PAUSED or STOPPED, including when `stopRequested` is already true, only after
+the owner proves that no local action worker can be crossing its dispatch
+boundary: the motion fence, Guardian lease/held input, active process groups,
+calibration/native workers, executor continuation, and mail cycle must all be
+idle. A live in-process action is refused with the existing unresolved-action
+error.
+
+The drill performs only the bounded hover and human-input observation. It does
+not reconcile, replay, clear, or complete the intent, and it does not clear
+`reconciliationRequired`, `restartUncertain`, `stopRequested`, or the action
+result. A passing drill leaves the controller PAUSED (a STOPPED controller is
+paused for the drill) and leaves the stop request set. Run `resume` afterward;
+fresh scene evidence then enters the ordinary reconciliation path. In
+particular, an inherited `open_ah` intent with result `preparing` is observed
+against the current scene and is never blindly replayed.
+
 ## Pause, handback and failures
 
 Physical input revokes automation. For an explicit pause:

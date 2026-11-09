@@ -1309,6 +1309,7 @@ class _PassiveRegionCaptureCapability:
     observer_pid: int
     deadline_monotonic: float
     observer: Any
+    allow_takeover_drill: bool
 
 
 def _serialized_motion(method):
@@ -6576,7 +6577,9 @@ class SessionDaemon:
                 and passive_capability is None
             ):
                 raise DriverError("controller state does not admit a native region capture")
-            if admitted_status.stop_requested:
+            if admitted_status.stop_requested and not (
+                passive_capability is not None and passive_capability.allow_takeover_drill
+            ):
                 raise DriverError("controller stop request does not admit a native region capture")
             admitted_generation = admitted_status.generation
             admitted_state = required_state
@@ -6646,7 +6649,10 @@ class SessionDaemon:
                 if (
                     current.generation != admitted_generation
                     or current.state is not admitted_state
-                    or current.stop_requested
+                    or (
+                        current.stop_requested
+                        and not (passive_capability is not None and passive_capability.allow_takeover_drill)
+                    )
                 ):
                     raise DriverError("controller generation or state changed before observer admission")
                 # Controller -> construction -> Guardian is the sole
@@ -6977,8 +6983,14 @@ class SessionDaemon:
             self._invalidate_motion_admission()
             raise DriverError(str(exc)) from exc
 
-    def passive_startup(self) -> RuntimeInputEvidence:
-        """Collect fresh read-only readiness without using the input lease."""
+    def passive_startup(self, *, allow_stop_requested: bool = False) -> RuntimeInputEvidence:
+        """Collect fresh read-only readiness without using the input lease.
+
+        A takeover drill is an operator action performed while automation is
+        paused. Its readiness observation may therefore proceed with a
+        durable stop request still set; no controller action is dispatched by
+        this method.
+        """
 
         if not self._startup_lock.acquire(blocking=False):
             raise DriverError("passive startup check is already running")
@@ -6999,7 +7011,7 @@ class SessionDaemon:
                     ControllerState.BLOCKED,
                 }:
                     raise DriverError("passive startup is limited to stopped, paused, or blocked states")
-                if entry_status.stop_requested:
+                if entry_status.stop_requested and not allow_stop_requested:
                     raise DriverError("passive startup is cancelled by the controller stop request")
                 entry_generation = entry_status.generation
                 entry_state = entry_status.state
@@ -7017,7 +7029,7 @@ class SessionDaemon:
                 if (
                     current_status.generation != entry_generation
                     or current_status.state is not entry_state
-                    or current_status.stop_requested
+                    or (current_status.stop_requested and not allow_stop_requested)
                 ):
                     raise DriverError("controller state changed before passive startup capture admission")
                 with self._native_construction_lock:
@@ -7032,6 +7044,7 @@ class SessionDaemon:
                         observer_pid=observer_pid,
                         deadline_monotonic=deadline,
                         observer=monitor,
+                        allow_takeover_drill=allow_stop_requested,
                     )
                     self._passive_region_admission = passive_capability
                     if not self._passive_region_capability_matches_locked(
@@ -7060,7 +7073,7 @@ class SessionDaemon:
                     if (
                         current_status.generation != entry_generation
                         or current_status.state is not entry_state
-                        or current_status.stop_requested
+                        or (current_status.stop_requested and not allow_stop_requested)
                     ):
                         raise DriverError("controller state changed during passive startup")
                 sample = self.capture_status(
@@ -7072,7 +7085,7 @@ class SessionDaemon:
                     if (
                         current_status.generation != entry_generation
                         or current_status.state is not entry_state
-                        or current_status.stop_requested
+                        or (current_status.stop_requested and not allow_stop_requested)
                     ):
                         raise DriverError("controller state changed during passive startup capture")
                 if sample.window_identity != identity.fingerprint:
@@ -7119,7 +7132,7 @@ class SessionDaemon:
                 if (
                     current_status.generation != entry_generation
                     or current_status.state is not entry_state
-                    or current_status.stop_requested
+                    or (current_status.stop_requested and not allow_stop_requested)
                 ):
                     raise DriverError("controller state changed at passive startup completion")
                 with self._native_construction_lock:
@@ -7151,7 +7164,7 @@ class SessionDaemon:
                 if (
                     current_status.generation != entry_generation
                     or current_status.state is not entry_state
-                    or current_status.stop_requested
+                    or (current_status.stop_requested and not allow_stop_requested)
                     or self._shutdown_event.is_set()
                 ):
                     raise DriverError(
@@ -7231,7 +7244,13 @@ class SessionDaemon:
                 "controllerState": result.state.value,
                 "nextAction": "native_calibration",
             }
-        evidence = self.passive_startup()
+        with self.controller.lock:
+            allow_stop_requested = self.controller.status().stop_requested
+        evidence = (
+            self.passive_startup(allow_stop_requested=True)
+            if allow_stop_requested
+            else self.passive_startup()
+        )
         record = self.controller.takeover_drill_record
         if record is None or not record.matches(evidence.environment):
             self._startup_operation = {**self._startup_operation, "state": "takeover_needed"}
@@ -7269,6 +7288,66 @@ class SessionDaemon:
             self.driver.revoke("takeover drill canceled")
         return self.status_dict()
 
+    def _takeover_drill_action_is_idle(self) -> bool:
+        """Prove that this owner has no live action at the dispatch boundary."""
+
+        motion_lock = self._motion_intent_lock
+        if not motion_lock.acquire(blocking=False):
+            return False
+        motion_lock.release()
+
+        if not isinstance(self.driver, DesktopDriver) or not isinstance(self.driver.backend, X11Backend):
+            return False
+        guardian = self.driver.guardian
+        if not guardian._lock.acquire(blocking=False):
+            return False
+        try:
+            guardian_busy = guardian.armed or guardian.held or bool(guardian._active_process_groups)
+        finally:
+            guardian._lock.release()
+        if guardian_busy:
+            return False
+        backend = self.driver.backend
+        if not backend._process_lock.acquire(blocking=False):
+            return False
+        try:
+            backend_busy = bool(backend._active_process_groups or backend._active_processes)
+        finally:
+            backend._process_lock.release()
+        if backend_busy:
+            return False
+
+        if not self._calibration_state_lock.acquire(blocking=False):
+            return False
+        try:
+            calibration_state = self._calibration_operation.get("state")
+            calibration_thread = self._calibration_thread
+        finally:
+            self._calibration_state_lock.release()
+        if calibration_state in {"starting", "running"}:
+            return False
+        if calibration_thread is not None and calibration_thread.is_alive():
+            return False
+
+        if not self._native_construction_lock.acquire(blocking=False):
+            return False
+        try:
+            native_construction_busy = (
+                self._native_construction_reservation is not None
+                or self._native_construction_ticket is not None
+                or self._native_construction_inflight is not None
+            )
+        finally:
+            self._native_construction_lock.release()
+        if native_construction_busy:
+            return False
+        if self._executor_continuation_capability is not None:
+            return False
+        if self.controller.executor_action_active:
+            return False
+        mail_cycle = self.controller.mail_cycle_checkpoint()
+        return mail_cycle.get("phase") in {"none", "complete", "blocked"}
+
     def run_takeover_drill(
         self,
         *,
@@ -7287,6 +7366,7 @@ class SessionDaemon:
         awaiting_input_ns = 0
         runtime_evidence: RuntimeInputEvidence | None = None
         hover_failure_context: dict[str, Any] | None = None
+        admitted_action_intent = ""
         cleanup_pending = bool(self._takeover_drill_operation.get("cleanupPending", False))
         with self._takeover_cancel_lock:
             self._takeover_cancel.clear()
@@ -7304,10 +7384,9 @@ class SessionDaemon:
                 raise DriverError(f"takeover drill controller generation changed before {stage}")
             if status.state != ControllerState.PAUSED:
                 raise DriverError(f"takeover drill controller left PAUSED before {stage}")
-            if status.stop_requested:
-                raise DriverError(f"takeover drill stop was requested before {stage}")
             if status.action_intent and status.action_intent not in {"", "stop"}:
-                raise DriverError(f"takeover drill found an unresolved action before {stage}")
+                if not admitted_action_intent or status.action_intent != admitted_action_intent:
+                    raise DriverError(f"takeover drill found an unresolved action before {stage}")
             if self._takeover_cancel.is_set():
                 raise DriverError(f"takeover drill was canceled before {stage}")
 
@@ -7339,14 +7418,18 @@ class SessionDaemon:
                     raise DriverError("stale generation")
                 if status.state not in {ControllerState.STOPPED, ControllerState.PAUSED}:
                     raise DriverError("takeover drill requires a stopped or paused controller")
-                if status.stop_requested:
-                    raise DriverError("takeover drill is refused while stop is requested")
                 if status.action_intent and status.action_intent not in {"", "stop"}:
-                    raise DriverError("takeover drill is refused while an external action is unresolved")
+                    if not self._takeover_drill_action_is_idle():
+                        raise DriverError("takeover drill is refused while an external action is unresolved")
+                    admitted_action_intent = status.action_intent
             if status.state == ControllerState.STOPPED:
                 status = self.controller.pause("takeover drill preparation")
             drill_generation = status.generation
-            evidence = self.passive_startup()
+            evidence = (
+                self.passive_startup(allow_stop_requested=True)
+                if status.stop_requested
+                else self.passive_startup()
+            )
             runtime_evidence = evidence
             if not isinstance(self.driver, DesktopDriver) or not isinstance(self.driver.backend, X11Backend):
                 raise DriverError("takeover drill requires the owned native X11 driver")

@@ -116,7 +116,34 @@ def test_companion_legacy_state_is_rejected(tmp_path: Path) -> None:
         raise AssertionError("legacy companion state must not stand in for the current versioned contract")
 
 
-def test_qualify_saved_scan_extracts_complete_native_rows_and_owned_section(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("owned_section", "owned_complete"),
+    [
+        (
+            {
+                "status": "unqueried",
+                "query": {"kind": "unqueried"},
+                "reasonCode": "not_started",
+                "rowCount": 0,
+                "rows": [],
+            },
+            False,
+        ),
+        (
+            {
+                "status": "full",
+                "query": {"kind": "queried", "startedAt": 101, "finishedAt": 102},
+                "reasonCode": "ok",
+                "rowCount": 0,
+                "rows": [],
+            },
+            True,
+        ),
+    ],
+)
+def test_qualify_saved_scan_extracts_complete_native_rows_and_owned_section(
+    tmp_path: Path, owned_section: dict, owned_complete: bool
+) -> None:
     plan = load_catalog().scan_plan()
     uid = "native-428"
     observations: dict[str, dict] = {}
@@ -166,13 +193,7 @@ def test_qualify_saved_scan_extracts_complete_native_rows_and_owned_section(tmp_
         "planHash": plan["planHash"],
         "planJSON": plan["planJSON"],
         "observations": observations,
-        "owned": {
-            "status": "unqueried",
-            "query": {"kind": "unqueried"},
-            "reasonCode": "not_started",
-            "rowCount": 0,
-            "rows": [],
-        },
+        "owned": owned_section,
     }
     envelope = {
         "id": uid,
@@ -220,3 +241,5 @@ def test_qualify_saved_scan_extracts_complete_native_rows_and_owned_section(tmp_
     assert set(parsed.kinds) == {"commodity", "item"}
     assert len(parsed.item_evidence) == 428
     assert parsed.owned_rows == [] and parsed.owned_priced_row_count == 0
+    # An empty owned section qualifies only when the owned query completed.
+    assert parsed.owned_query_complete is owned_complete

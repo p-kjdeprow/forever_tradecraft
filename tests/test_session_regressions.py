@@ -582,6 +582,7 @@ def _qualified_sweep(uid: str, started_at: int) -> SweepEvidence:
         item_evidence=item_evidence,
         owned_rows=item_evidence[str(plan["itemIDs"][0])]["ownedRows"],
         owned_priced_row_count=1,
+        owned_query_complete=True,
     )
 
 
@@ -950,6 +951,7 @@ def test_qualifier_accepts_only_strict_bounded_commodity_source_incomplete(tmp_p
         item_evidence=item_evidence,
         owned_rows=item_evidence[next(iter(item_evidence))]["ownedRows"],
         owned_priced_row_count=1,
+        owned_query_complete=True,
     )
     journal = _state_file(tmp_path / "session.json", state=ControllerState.WAIT_DUE.value)
     controller = Controller(journal, driver=_FakeDriver(journal), recover_on_restart=False)

@@ -88,6 +88,7 @@ def _evidence(uid: str, started_at: int) -> SweepEvidence:
         item_evidence=item_evidence,
         owned_rows=[{"itemID": 1, "buyout": {"kind": "known", "copper": 1}}],
         owned_priced_row_count=1,
+        owned_query_complete=True,
     )
 
 

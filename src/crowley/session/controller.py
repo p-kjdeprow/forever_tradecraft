@@ -1842,6 +1842,9 @@ class Controller:
                 item_evidence=copy.deepcopy(record["itemEvidence"]),
                 owned_rows=copy.deepcopy(record["ownedRows"]),
                 owned_priced_row_count=int(record["ownedPricedRowCount"]),
+                # Records written before the completion witness existed do
+                # not prove the owned query; they cannot qualify.
+                owned_query_complete=record.get("ownedQueryComplete") is True,
             )
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise DriverError(f"qualification checkpoint is malformed: {exc}") from exc
@@ -6736,7 +6739,9 @@ class Controller:
             priced_total += priced_count
             owned_total += len(owned_rows)
             owned_priced_total += owned_priced
-        if not evidence.owned_rows or evidence.owned_priced_row_count <= 0:
+        # An account may have no auctions listed; the owned query must have
+        # completed, but owning a priced listing is not a sweep requirement.
+        if not evidence.owned_query_complete:
             return False, observed
         if owned_total != len(evidence.owned_rows) or owned_priced_total != evidence.owned_priced_row_count:
             return False, observed

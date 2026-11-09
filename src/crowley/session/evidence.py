@@ -46,6 +46,10 @@ class SweepEvidence:
     # one aggregate number.
     owned_rows: list[dict[str, Any]] = field(default_factory=list)
     owned_priced_row_count: int = 0
+    # The addon's own completion witness for the owned-auctions query:
+    # ``status == "full"`` with ``query.kind == "queried"`` proves the query
+    # ran and returned every row (which may be none).
+    owned_query_complete: bool = False
 
     def archive_record(self) -> dict[str, Any]:
         """Return the complete JSON-safe per-run evidence record."""
@@ -68,6 +72,7 @@ class SweepEvidence:
             "itemEvidence": copy.deepcopy(self.item_evidence),
             "ownedRows": copy.deepcopy(self.owned_rows),
             "ownedPricedRowCount": self.owned_priced_row_count,
+            "ownedQueryComplete": self.owned_query_complete,
             "envelope": copy.deepcopy(self.envelope),
         }
 
@@ -188,6 +193,12 @@ def qualify_saved_scan(
     owned_count = owned.get("rowCount")
     if isinstance(owned_count, bool) or not isinstance(owned_count, int) or owned_count != len(owned_rows):
         raise EvidenceError("format-2 payload owned row count is inconsistent")
+    owned_query = owned.get("query")
+    owned_query_complete = (
+        owned.get("status") == "full"
+        and isinstance(owned_query, dict)
+        and owned_query.get("kind") == "queried"
+    )
     owned_priced = sum(
         1
         for row in owned_rows
@@ -301,6 +312,7 @@ def qualify_saved_scan(
         item_evidence=item_evidence,
         owned_rows=owned_rows,
         owned_priced_row_count=owned_priced,
+        owned_query_complete=owned_query_complete,
     )
 
 

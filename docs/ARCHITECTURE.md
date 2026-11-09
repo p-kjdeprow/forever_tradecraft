@@ -24,15 +24,16 @@
 
 ## Launch target
 
-`src/crowley/data/game_target.json` is the strict packaged source for client/build,
-interface, product/executable, installation roots, locale, region/realm/house and
-scan policy. `tools/generate_launch_target.py` renders coordinated Python/Lua/TOC
+`src/crowley/data/targets/<targetId>.json` plus `selected` are the strict packaged
+source for client/build, interface, product/executable, locale, region/realm/house
+and scan policy. `tools/generate_launch_target.py` renders coordinated Python/Lua/TOC
 artifacts and staged configuration; `--check` detects drift without writing.
 Session and companion startup reject stale explicit identity, path or canonical
-plan values. See [LAUNCH_TARGET.md](LAUNCH_TARGET.md). Current values remain the
-verified beta target; they do not assert launch facts. The exporter supports enUS.
-Routes retain their measured beta provenance and are refused on another target
-until genuinely remeasured. Cadence remains the explicit 900-second policy.
+plan values. See [LAUNCH_TARGET.md](LAUNCH_TARGET.md). The selected target is the
+measured WoW Forever target; the packaged beta target is retained for fixtures and
+evidence, and Forever route provenance remains unmeasured. The exporter supports
+enUS. Beta routes are refused on another target until genuinely remeasured.
+Cadence remains the explicit 900-second policy.
 
 ## Client facts and remaining assumptions
 
@@ -70,6 +71,11 @@ until genuinely remeasured. Cadence remains the explicit 900-second policy.
 | `MERCHANT_CLOSE` is not a WoW Forever event; the event catalog names `MERCHANT_CLOSED`, and the merchant implementation uses that spelling | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/MerchantFrameDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_UIPanels_Game/{Mainline,Vanilla}/MerchantFrame.lua` | The removed alias must not be registered |
 | `PROFESSION_SHOW` and `PROFESSION_CLOSE` are not WoW Forever events; the profession API and frame use `TRADE_SKILL_SHOW` and `TRADE_SKILL_CLOSE` | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/TradeSkillUIDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_Professions/Blizzard_ProfessionsFrame.lua` | The removed aliases must not be registered |
 | `MAIL_UPDATE` and `TRADE_SKILL_UPDATE` are not present in the Forever event catalog or FrameXML usage; only `MAIL_INBOX_UPDATE`, `MERCHANT_UPDATE` and the trade-skill show/close events are registered here | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/MailInfoDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/TradeSkillUIDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_MailFrame/MailFrame.lua` | Update notifications remain unmodeled until a source-verified event is identified |
+| Battle.net 2.53.8 rejects a single invocation containing repeated `--exec` arguments | `deploy/launcher/crowley-world-of-warcraft.sh.in` | Keep each Battle.net command in its own invocation |
+| Battle.net requires `Client.SingleInstance` to be `"true"` for the launcher to reuse the logged-in instance; changing it while Battle.net runs is unsafe because it rewrites its config from memory | `deploy/launcher/crowley-world-of-warcraft.sh.in` | The launcher refuses to run before invoking Wine |
+| `launch_uid wowf` selects the WoW Forever product but does not start the game | `deploy/launcher/crowley-world-of-warcraft.sh.in` | Product selection and Play activation remain separate |
+| `focus play` followed by focusing the Battle.net window and pressing Return starts the selected game | `deploy/launcher/crowley-world-of-warcraft.sh.in` | The launcher fails if no Battle.net window appears or the owned game does not start |
+| Battle.net launches `_forever_/Wow.exe -launcherlogin -uid wowf`; direct game startup cannot issue the login ticket | `deploy/launcher/crowley-world-of-warcraft.sh.in` | Direct `Wow.exe -launcherlogin -uid wowf` startup fails with `WOW51900308` |
 
 `/crowley probe` saves the client's API surface for checking these. The scanner uses the
 client's `hooksecurefunc` callbacks to flag an external or user search that overlaps an

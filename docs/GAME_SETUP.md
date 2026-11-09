@@ -16,7 +16,7 @@ This starts the cached Battle.net installation with the restored Wine runtime.
 The entry is `~/.local/share/applications/net.lutris.world-of-warcraft-1.desktop`;
 it invokes the wrapper directly rather than depending on the deleted Lutris game
 registration. It checks exact process identity, owner and prefix to avoid a
-second beta client. Startup still requires the authenticated desktop session.
+second client. Startup still requires the authenticated desktop session.
 
 Before starting the launcher, provide the required host-session environment:
 
@@ -31,10 +31,15 @@ override it through the shell environment. Missing `CROWLEY_WINE`,
 `XAUTHORITY`, or `XDG_STATE_HOME` causes the launcher to fail loudly, and an
 unreadable Xauthority file is also refused.
 
-The Battle.net `--exec='launch WoW'` handoff to an already-running Battle.net is
-UNVERIFIED for Forever: a live test on 2026-11-08 started a second Battle.net
-that crashed. Until that handoff is verified, press Play in the running
-Battle.net instead.
+The launcher uses the verified Battle.net handoff: it ensures one logged-in
+Battle.net is running, invokes one `--exec` at a time (`launch_uid wowf`, then
+`focus play`), dismisses any dialog with Escape, activates the Battle.net Play
+window, and presses Return. Battle.net must have `Client.SingleInstance` set to
+`"true"`. Set that value only while Battle.net is stopped: a running Battle.net
+rewrites its configuration from memory, and starting a second instance deletes
+the saved login token. Battle.net is the only component that can issue the game
+login ticket; starting `_forever_/Wow.exe` directly with
+`-launcherlogin -uid wowf` fails with `WOW51900308`.
 
 The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).
 Render it from the selected target and preserve executable mode 0700 on the

@@ -4,10 +4,88 @@ from __future__ import annotations
 
 import os
 import tempfile
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from functools import lru_cache
 from pathlib import Path
+from typing import TYPE_CHECKING, Protocol
 
 import pytest
+
+if TYPE_CHECKING:
+    from crowley.core.game_target import GameTarget
+    from crowley.core.watchlist import Catalog
+
+
+class _CatalogLoader(Protocol):
+    def __call__(self, *, enforce_target: bool = True) -> Catalog: ...
+
+
+_REAL_SELECTED_TARGET: Callable[[], GameTarget] | None = None
+_REAL_LOAD_CATALOG: _CatalogLoader | None = None
+_FIXTURE_CATALOG: Catalog | None = None
+
+
+@lru_cache(maxsize=1)
+def _fixture_target() -> GameTarget:
+    from crowley.core.game_target import load_game_target
+
+    return load_game_target(Path(__file__).parent / "fixtures" / "targets" / "verified-beta.json")
+
+
+def _fixture_load_catalog(*, enforce_target: bool = True) -> Catalog:
+    del enforce_target
+    if _FIXTURE_CATALOG is None:
+        raise RuntimeError("test target pin was not initialized before catalog loading")
+    return _FIXTURE_CATALOG
+
+
+def _pin_fixture_target() -> None:
+    global _FIXTURE_CATALOG, _REAL_LOAD_CATALOG, _REAL_SELECTED_TARGET
+
+    from crowley.core import game_target, watchlist
+
+    _REAL_SELECTED_TARGET = game_target.selected_target
+    _REAL_LOAD_CATALOG = watchlist.load_catalog
+    watchlist.load_catalog.cache_clear()
+    game_target.packaged_game_target.cache_clear()
+    game_target.canonical_plan.cache_clear()
+
+    _FIXTURE_CATALOG = _REAL_LOAD_CATALOG(enforce_target=False).model_copy(
+        update={"client_build": _fixture_target().full_build, "reviewed_on": "2026-10-16"}
+    )
+    game_target.selected_target = _fixture_target
+    game_target.packaged_game_target = _fixture_target
+    watchlist.load_catalog = _fixture_load_catalog
+
+    from crowley.session import source_binding
+
+    real_read_resource = source_binding._read_resource
+
+    def fixture_read_resource(resource_name: str) -> bytes:
+        if resource_name == "targets/selected":
+            return b"verified-beta\n"
+        return real_read_resource(resource_name)
+
+    source_binding._read_resource = fixture_read_resource
+
+
+@pytest.fixture(scope="session")
+def packaged_selection_target() -> GameTarget:
+    """Return the real target named by the packaged selection file."""
+
+    if _REAL_SELECTED_TARGET is None:
+        raise RuntimeError("test target pin was not initialized before fixture use")
+    return _REAL_SELECTED_TARGET()
+
+
+@pytest.fixture(scope="session")
+def packaged_catalog() -> Catalog:
+    """Return the real packaged catalog for selection-binding tests."""
+
+    if _REAL_LOAD_CATALOG is None:
+        raise RuntimeError("test target pin was not initialized before fixture use")
+    return _REAL_LOAD_CATALOG(enforce_target=False)
+
 
 # These values are intentionally preserved: the DB URL controls the xdist guard,
 # and the toolchain path locates the pinned native build tool like XDG_CACHE_HOME.
@@ -77,6 +155,7 @@ def pytest_configure(config: pytest.Config) -> None:
     """Install hermetic roots before collection and guard the shared DB fixture."""
 
     _install_hermetic_environment()
+    _pin_fixture_target()
 
     database_url = os.environ.get("CROWLEY_TEST_DATABASE_URL")
     workers = getattr(config.option, "numprocesses", None)

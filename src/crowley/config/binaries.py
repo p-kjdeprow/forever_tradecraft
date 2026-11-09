@@ -41,17 +41,20 @@ class PinnedObserver:
 
 
 def resolve_pinned_observer(xdg: XdgDirs) -> PinnedObserver:
-    """Resolve the one reviewed observer publication under the XDG cache root."""
+    """Resolve the one reviewed observer publication under the XDG cache root.
 
+    ``crowley-native build observer`` publishes immutable releases under
+    ``v<protocol>/releases/<digest>/`` behind the atomic ``v<protocol>/current``
+    pointer, so readers resolve the binary and its manifest through ``current``.
+    """
+
+    current = xdg.crowley_cache / "x11-identity-observer" / f"v{pins.OBSERVER_PROTOCOL_VERSION}" / "current"
     return PinnedObserver(
-        path=xdg.crowley_cache / "x11-identity-observer" / f"v{pins.OBSERVER_PROTOCOL_VERSION}" / "observer",
+        path=current / "observer",
         sha256=pins.OBSERVER_ARTIFACT_SHA256,
         version=str(pins.OBSERVER_PROTOCOL_VERSION),
         provenance=pins.OBSERVER_PROVENANCE,
-        manifest_path=xdg.crowley_cache
-        / "x11-identity-observer"
-        / f"v{pins.OBSERVER_PROTOCOL_VERSION}"
-        / "observer.manifest.json",
+        manifest_path=current / "observer.manifest.json",
     )
 
 

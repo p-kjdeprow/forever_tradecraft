@@ -76,13 +76,21 @@ def _entrypoint_path(home: Path, value: str) -> Path:
 
 
 def _check_executable(path: Path, problems: list[str], label: str) -> None:
+    """Check one installed user entrypoint.
+
+    ``uv tool install`` publishes entrypoints as symlinks from ``~/.local/bin``
+    into the tool's own environment, so the link is resolved and its final
+    target must be a regular executable file.
+    """
+
     try:
-        info = path.lstat()
+        resolved = path.resolve(strict=True)
+        info = resolved.stat()
     except OSError:
         problems.append(f"{label} is unavailable: {path}")
         return
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        problems.append(f"{label} is not a regular file: {path}")
+    if not stat.S_ISREG(info.st_mode):
+        problems.append(f"{label} does not resolve to a regular file: {path}")
     elif not info.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
         problems.append(f"{label} is not executable: {path}")
 

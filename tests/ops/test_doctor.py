@@ -382,3 +382,31 @@ def test_doctor_accepts_companion_rendered_data_and_queue_lua(
 
     report = doctor.doctor(environment, database_status=_current)
     assert report.ok, report.problems
+
+
+def test_doctor_accepts_uv_tool_symlinked_entrypoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment, _game_root = _setup(tmp_path, monkeypatch)
+    entrypoints = tmp_path / "home" / ".local" / "bin"
+    tool_bin = tmp_path / "home" / ".local" / "share" / "uv" / "tools" / "crowley" / "bin"
+    tool_bin.mkdir(parents=True)
+    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-session"):
+        target = tool_bin / name
+        (entrypoints / name).rename(target)
+        (entrypoints / name).symlink_to(target)
+    report = doctor.doctor(environment, database_status=_current)
+    assert report.problems == ()
+
+
+def test_doctor_rejects_dangling_or_non_executable_entrypoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    environment, _game_root = _setup(tmp_path, monkeypatch)
+    entrypoints = tmp_path / "home" / ".local" / "bin"
+    (entrypoints / "crowley-companion").unlink()
+    (entrypoints / "crowley-companion").symlink_to(tmp_path / "missing")
+    (entrypoints / "crowley-session").chmod(0o600)
+    problems = "\n".join(doctor.doctor(environment, database_status=_current).problems)
+    assert f"unit entrypoint is unavailable: {entrypoints / 'crowley-companion'}" in problems
+    assert f"unit entrypoint is not executable: {entrypoints / 'crowley-session'}" in problems

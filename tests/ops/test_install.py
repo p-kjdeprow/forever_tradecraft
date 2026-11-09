@@ -224,6 +224,16 @@ def test_launcher_selects_the_target_product_without_repeated_exec(tmp_path: Pat
     ]
     assert len(exec_invocations) == 1
     assert exec_invocations[0].count("--exec") == 1
+    assert "--class '^battle\\.net\\.exe$'" in rendered
+    assert "--name" not in rendered  # xdotool shares one pattern across --class/--name
+    assert "getwindowname" in rendered
+    assert "-b remove,maximized_vert,maximized_horz" in rendered
+    assert "-remove WM_NORMAL_HINTS" in rendered
+    assert "_MOTIF_WM_HINTS '0x2, 0x0, 0x0, 0x0, 0x0'" in rendered
+    assert "_NET_WM_STATE_FULLSCREEN" in rendered
+    assert "xwininfo -id" in rendered
+    assert "xdotool key --clearmodifiers Return" in rendered
+    assert "xdotool click" not in rendered
 
 
 def test_launcher_rejects_missing_single_instance_before_wine(

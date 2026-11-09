@@ -324,7 +324,7 @@ def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path, disp
     """Render the reviewed launcher from target, host display, and game paths."""
 
     resolved_game_root = _absolute_path(game_root, "launcher game root")
-    expected_argv0 = rf"C:\Program Files (x86)\World of Warcraft\{target.product_dir}\{target.executable}"
+    expected_argv0 = target.windows_argv0
     resolved_wine_prefix = _absolute_path(wine_prefix, "launcher Wine prefix")
     replacements = {
         b"{{GAME_ROOT}}": shlex.quote(str(resolved_game_root)).encode("utf-8"),

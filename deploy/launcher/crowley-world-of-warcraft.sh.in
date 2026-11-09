@@ -12,7 +12,13 @@ umask 077
 #      a second instance that deletes the saved login token);
 #   2. select the product with one --exec per invocation (Battle.net rejects a
 #      repeated --exec);
-#   3. dismiss any Battle.net dialog, focus Play and activate it with Return.
+#   3. un-maximize the Battle.net window (keyboard Play activation does nothing
+#      while it is maximized), dismiss any dialog, focus Play and activate it
+#      with Return;
+#   4. make the game window real fullscreen and press Return once at character
+#      select to enter the world.
+# Only keyboard and window-manager operations are used here; this launcher never
+# clicks.
 GAME_ROOT={{GAME_ROOT}}
 PRODUCT_DIR={{PRODUCT_DIR}}
 EXECUTABLE={{EXECUTABLE}}
@@ -83,7 +89,7 @@ fi
 grep -Eq '"SingleInstance"[[:space:]]*:[[:space:]]*"true"' "$BATTLE_NET_CONFIG" \
     || fail 'Battle.net Client.SingleInstance must be "true"; stop Battle.net and set it before launching.'
 
-LOGDIR="${XDG_STATE_HOME:?set XDG_STATE_HOME in the authenticated graphical session}/crowley/executor-evidence"
+LOGDIR="${XDG_STATE_HOME:?XDG_STATE_HOME is not set; run the launcher from the authenticated graphical session, which provides it}/crowley/executor-evidence"
 mkdir -p -m 0700 "$LOGDIR"
 chmod 700 "$LOGDIR"
 
@@ -94,6 +100,10 @@ game_env() {
         DXVK_STATE_CACHE_PATH="$PREFIX" __GL_DXVK_OPTIMIZATIONS=1 \
         __GL_SHADER_DISK_CACHE=1 __GL_SHADER_DISK_CACHE_PATH="$PREFIX" WINEDEBUG=-all \
         "$@"
+}
+
+x11() {
+    DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" "$@"
 }
 
 battle_net_exec() {
@@ -124,13 +134,26 @@ fi
 battle_net_exec "launch_uid $PRODUCT"
 battle_net_exec 'focus play'
 
-window=$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool search --onlyvisible --name '^Battle\.net$' | sed -n '1p')
-[ -n "$window" ] || fail 'No visible Battle.net window to activate Play in.'
-DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool windowactivate --sync "$window"
-DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool key --clearmodifiers Escape
+# The real main window is the visible battle.net.exe-class window named
+# "Battle.net"; a name-only search also matches mutter's frame windows.
+# xdotool applies its class and name flags to one shared pattern (OR), so search by
+# class only and filter on the exact window name.  No match exits 1.
+candidates=$(x11 xdotool search --onlyvisible --class '^battle\.net\.exe$' 2>/dev/null) || candidates=''
+window=''
+window_count=0
+for candidate in $candidates; do
+    [ "$(x11 xdotool getwindowname "$candidate" 2>/dev/null)" = 'Battle.net' ] || continue
+    window=$candidate
+    window_count=$((window_count + 1))
+done
+[ "$window_count" -eq 1 ] || fail "Expected exactly one visible Battle.net window, found $window_count."
+x11 wmctrl -i -r "$window" -b remove,maximized_vert,maximized_horz
+sleep 1
+x11 xdotool windowactivate --sync "$window"
+x11 xdotool key --clearmodifiers Escape
 battle_net_exec 'focus play'
-DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool windowactivate --sync "$window"
-DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool key --clearmodifiers Return
+x11 xdotool windowactivate --sync "$window"
+x11 xdotool key --clearmodifiers Return
 
 waited=0
 until owned_game_running; do
@@ -142,22 +165,51 @@ done
 # The client's windowed-fullscreen mode is mapped by Wine as a window maximized
 # into the desktop work area (below the top bar, beside the dock).  Crowley's
 # calibration pins the client at the display origin at full display size, so
-# ask the window manager for real fullscreen and verify the result.
+# ask the window manager for real fullscreen and verify the result.  Wine maps
+# the window with fixed-size WM_NORMAL_HINTS and _MOTIF_WM_HINTS limited to
+# move|close, so the window manager would ignore a fullscreen request; clear
+# both hints first.
 game_window=''
 waited=0
 while [ -z "$game_window" ]; do
     [ "$waited" -lt "$GAME_TIMEOUT_SECONDS" ] || fail 'The game window did not appear.'
-    game_window=$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool search --onlyvisible --class "^$WINDOW_CLASS\$" 2>/dev/null | sed -n '1p') || game_window=''
+    game_window=$(x11 xdotool search --onlyvisible --class "^$WINDOW_CLASS\$" 2>/dev/null | sed -n '1p') || game_window=''
     [ -n "$game_window" ] || { sleep 1; waited=$((waited + 1)); }
 done
-DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" wmctrl -i -r "$game_window" -b add,fullscreen
-display_size=$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool getdisplaygeometry)
+request_fullscreen() {
+    x11 xprop -id "$game_window" -remove WM_NORMAL_HINTS
+    x11 xprop -id "$game_window" -f _MOTIF_WM_HINTS 32c -set _MOTIF_WM_HINTS '0x2, 0x0, 0x0, 0x0, 0x0'
+    x11 wmctrl -i -r "$game_window" -b add,fullscreen
+}
+display_size=$(x11 xdotool getdisplaygeometry)
+display_wxh=$(printf '%s' "$display_size" | tr ' ' x)
 waited=0
 while :; do
-    eval "$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool getwindowgeometry --shell "$game_window")"
-    [ "$X $Y $WIDTH $HEIGHT" = "0 0 $display_size" ] && break
-    [ "$waited" -lt 15 ] || fail "The game window is not fullscreen at the display origin: $X $Y $WIDTH $HEIGHT."
+    eval "$(x11 xdotool getwindowgeometry --shell "$game_window")"
+    state=$(x11 xprop -id "$game_window" _NET_WM_STATE)
+    children=$(x11 xwininfo -id "$game_window" -children)
+    child_count=$(printf '%s\n' "$children" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\) child.*/\1/p')
+    child_size=$(printf '%s\n' "$children" | sed -n 's/^[[:space:]]*0x[0-9a-f]*.*[[:space:]]\([0-9][0-9]*x[0-9][0-9]*\)+[-0-9]*+[-0-9]*[[:space:]].*/\1/p' | sed -n '1p')
+    if [ "$X $Y $WIDTH $HEIGHT" = "0 0 $display_size" ] \
+        && printf '%s\n' "$state" | grep -Fq _NET_WM_STATE_FULLSCREEN \
+        && [ "$child_count" = 1 ] \
+        && [ "$child_size" = "$display_wxh" ]; then
+        break
+    fi
+    # Wine can re-apply its hints while the client is still starting, so the
+    # request is repeated until the verified state is reached.
+    request_fullscreen
+    [ "$waited" -lt 30 ] || fail "The game window is not fullscreen at the display origin: $X $Y $WIDTH $HEIGHT, state '$state', $child_count child(ren) of size '$child_size'."
     sleep 1
     waited=$((waited + 1))
 done
+
+# Enter World.  The -launcherlogin flow logs in with the last character
+# selected, so the client sits at character select.  The shell has no cheap
+# detector for that screen, so wait a fixed settle period, then send one Return
+# (Return at character select is Enter World).  No click is involved.
+CHARACTER_SELECT_SETTLE_SECONDS=45
+sleep "$CHARACTER_SELECT_SETTLE_SECONDS"
+x11 xdotool windowactivate --sync "$game_window"
+x11 xdotool key --clearmodifiers Return
 printf '%s\n' 'WoW client started by Battle.net.'

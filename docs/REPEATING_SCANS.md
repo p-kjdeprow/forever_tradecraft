@@ -195,6 +195,26 @@ binding, verifies the result, and never calls SaveBindings. It requires a newer
 HUD confirming AH-open before scanning. Automated clicks elsewhere retain the
 one-per-second limit and the curved, timed full press/release executor.
 
+### Unattended recovery
+
+`crowley-session-supervisor.service` resumes documented transient blockers
+(including `reopen deadline expired` and reload-phase deadlines) and never
+touches PAUSED or STOPPED. If status answers BLOCKED with the same blocker for 10
+minutes (`--relaunch-threshold-seconds`), it relaunches. It never relaunches while
+status is unanswered (the daemon may be starting over a PAUSED takeover) or for a
+blocker that names explicit reconciliation. **Before touching the client while the
+session is BLOCKED, run `crowley-session pause`**: a BLOCKED session does not watch
+for human input, and the relaunch would close the game. A relaunch: stop
+`crowley-session.service`, terminate the owned game process (same comm, uid,
+Windows argv0 and `WINEPREFIX` rule as the launcher), run
+`crowley-world-of-warcraft`, start the session unit and, once status answers
+BLOCKED, resume once with the current generation (consumed by any other state). At most one relaunch per 30
+minutes; after 3 relaunches with no SCANNING/WAIT_DUE in between it logs
+`relaunch_budget_exhausted` and only keeps polling. The launcher needs
+`CROWLEY_WINE` in `secrets.env` (the operator adds it; `crowley-ops doctor`
+checks it); the unit supplies `DISPLAY`, `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`,
+`PATH` and passes `XAUTHORITY`. Startup after a relaunch takes several minutes.
+
 A server disconnect can leave a collection gap. Retain the last original scan and
 its exact upload/loaded-ACK evidence, recover the current scene, and reconcile.
 Do not repeat a submitted command merely because a later receipt failed.

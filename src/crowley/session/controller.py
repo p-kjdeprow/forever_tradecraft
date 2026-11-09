@@ -6893,6 +6893,18 @@ class Controller:
             self._deadline_at = 0
             self._blocker = reason
             self._reconciliation_required = True
+            reload_dispatched = self._action_intent in {
+                "save_reload",
+                "ack_reload",
+                "enter_world",
+            } and self._action_result not in {"", "complete", "abandoned_after_restart"}
+            if reload_dispatched:
+                # A dispatched reload or world entry may have changed the
+                # client boot after this block.  Resume must reconcile it the
+                # same way a process restart does (restart-boot transition
+                # admitted against the recorded reference boot), never as an
+                # unexplained boot change.
+                self._restart_uncertain = True
             self._state = ControllerState.BLOCKED
             self._streak = 0
             self._cadence_seed_start = None

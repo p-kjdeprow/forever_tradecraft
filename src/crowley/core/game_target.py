@@ -87,6 +87,12 @@ class GameTarget:
     initial_price_levels: int
     route_provenance: str
 
+    @property
+    def windows_argv0(self) -> str:
+        """argv0 Wine reports for the game process started by Battle.net."""
+
+        return rf"C:\Program Files (x86)\World of Warcraft\{self.product_dir}\{self.executable}"
+
     @classmethod
     def from_mapping(cls, raw: object) -> GameTarget:
         top = _object(

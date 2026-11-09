@@ -33,8 +33,10 @@ unreadable Xauthority file is also refused.
 
 The launcher uses the verified Battle.net handoff: it ensures one logged-in
 Battle.net is running, invokes one `--exec` at a time (`launch_uid wowf`, then
-`focus play`), dismisses any dialog with Escape, activates the Battle.net Play
-window, and presses Return. Battle.net must have `Client.SingleInstance` set to
+`focus play`). It selects the one visible `battle.net.exe`-class window named
+`Battle.net` (failing unless exactly one matches), un-maximizes it because
+keyboard Play activation does nothing while it is maximized, activates it,
+dismisses any dialog with Escape, focuses Play again, and presses Return. Battle.net must have `Client.SingleInstance` set to
 `"true"`. Set that value only while Battle.net is stopped: a running Battle.net
 rewrites its configuration from memory, and starting a second instance deletes
 the saved login token. Battle.net is the only component that can issue the game
@@ -61,7 +63,14 @@ Required client settings (stored by the client per account):
   once in game with `/console SoftTargetInteract 2`.
 - The display is 1920x1080 and the client runs windowed-fullscreen
   (`gxMaximize 1` in `_forever_/WTF/Config.wtf`); the launcher then makes the
-  window fullscreen at the origin. The telemetry canvas is pinned to a
+  window fullscreen at the origin. Wine maps the window with fixed-size
+  `WM_NORMAL_HINTS` and `_MOTIF_WM_HINTS` limited to move|close, which makes the
+  window manager ignore a fullscreen request, so the launcher removes
+  `WM_NORMAL_HINTS` and resets `_MOTIF_WM_HINTS` with `xprop` first, then
+  verifies `_NET_WM_STATE_FULLSCREEN`, display-sized outer geometry and a single
+  display-sized child, failing loudly after 30 s. Once verified, it waits a
+  fixed 45 s for character select (the shell has no detector for it) and sends
+  one `Return` (Enter World). The launcher never clicks. The telemetry canvas is pinned to a
   1920x1080 client.
 
 The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).

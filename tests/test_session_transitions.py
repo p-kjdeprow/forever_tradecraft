@@ -743,6 +743,42 @@ def test_restart_boot_transition_is_single_use_for_reload_intents(tmp_path: Path
     assert "boot" in second.blocker
 
 
+@pytest.mark.parametrize("state", [ControllerState.SAVE_RELOAD_SENT, ControllerState.ACK_RELOAD_SENT])
+def test_blocked_dispatched_reload_resumes_into_restart_boot_reconciliation(
+    tmp_path: Path, state: ControllerState
+) -> None:
+    # Live 2026-11-09: a reload deadline expired on a loaded host, the reload
+    # then completed, and the resumed RECONCILE rejected its new boot as an
+    # unexpected change.  The block must keep the dispatched effect uncertain.
+    action = (
+        ActionKind.SAVE_RELOAD.value
+        if state is ControllerState.SAVE_RELOAD_SENT
+        else ActionKind.ACK_RELOAD.value
+    )
+    journal = _journal(
+        tmp_path / f"{state.value}-deadline.json",
+        state=state.value,
+        generation=4,
+        current={
+            "action": action,
+            "actionAttempt": 3,
+            "actionResult": "dispatched",
+            "frameBoot": "pre-effect-boot",
+            "restartReferenceBoot": "pre-effect-boot",
+        },
+    )
+    controller = Controller(journal, driver=_Driver(), recover_on_restart=False)
+    blocked = controller.block(f"deadline expired in {state.value}")
+    assert blocked.state is ControllerState.BLOCKED
+    assert journal.read()["restartUncertain"] is True
+    assert controller.resume().state is ControllerState.RECONCILE
+    first = controller.observe_frame(boot="post-effect-boot", sequence=1, crc32=1)
+    assert first.state is ControllerState.RECONCILE
+    second = controller.observe_frame(boot="second-post-effect-boot", sequence=2, crc32=2)
+    assert second.state is ControllerState.BLOCKED
+    assert "boot" in second.blocker
+
+
 def test_restart_boot_transition_is_rejected_for_unrelated_intent(tmp_path: Path) -> None:
     journal = _journal(
         tmp_path / "logout-boot-churn.json",

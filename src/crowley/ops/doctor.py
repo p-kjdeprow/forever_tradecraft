@@ -687,6 +687,8 @@ def doctor(
             _check_launcher(plan, problems)
     values = _check_secrets(xdg, problems)
     _check_database(values, problems, database_status)
+    if values and not values.get("CROWLEY_WINE"):
+        problems.append("CROWLEY_WINE is missing from secrets.env (the relaunch launcher needs it)")
     _check_account(ops, problems)
     return DoctorReport(tuple(dict.fromkeys(problems)))
 

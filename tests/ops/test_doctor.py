@@ -124,7 +124,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
     (config / "session.toml").write_bytes(session_template)
     secrets = config / "secrets.env"
     secrets.write_text(
-        "CROWLEY_DATABASE_URL=postgresql://test\nCROWLEY_API_TOKEN=test\n",
+        "CROWLEY_DATABASE_URL=postgresql://test\nCROWLEY_API_TOKEN=test\nCROWLEY_WINE=/opt/wine/bin/wine\n",
         encoding="utf-8",
     )
     secrets.chmod(0o600)

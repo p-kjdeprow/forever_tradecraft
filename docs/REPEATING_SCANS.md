@@ -128,6 +128,19 @@ input hierarchy, native tool, keymap, display or takeover contract requires a ne
 drill. Process IDs and routine addon boot changes do not invalidate the stored
 human evidence. Each new owner still collects fresh passive readiness.
 
+Fresh passive readiness also carries the addon's current boot epoch. If an idle
+logout and world re-entry changed that boot while Crowley was paused, `start` or
+`resume` adopts the new epoch, resets the durable frame sequence/CRC baseline,
+and archives an `external_boot_change_adopted` intervention with the old and new
+boots. This is allowed only when no action or recovery fence is active; scan
+work, native calibration or construction recovery, reload waits, qualification,
+and an unresolved `save_reload`, `ack_reload`, `enter_world`, or `logout`
+transition remain fenced and block an unexpected boot exactly as before. Valid
+native-construction checkpoints remain fenced until their explicit recovery path
+consumes them; malformed checkpoints remain fenced fail-closed. An inherited
+`open_ah` preparation is observed against the fresh scene and is never replayed
+blindly.
+
 If a fresh owner inherits an unresolved action intent (for example,
 `current.action = "open_ah"` with `actionResult = "preparing"`) and the stored
 drill no longer matches the newly observed environment, `start`/`resume` first

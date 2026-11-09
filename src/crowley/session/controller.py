@@ -106,6 +106,27 @@ _ACTION_ALIASES = {
 _SCANNER_PHASE_UNSET = object()
 _EXECUTOR_TERMINAL_RESULTS = frozenset({"dry_run", "succeeded", "failed", "refused", "skipped"})
 
+_PASSIVE_BOOT_ADOPTION_BLOCKED_STATES = frozenset(
+    {
+        ControllerState.SCANNING,
+        ControllerState.NATIVE_CALIBRATION,
+        ControllerState.SAVE_RELOAD_SENT,
+        ControllerState.SAVE_RELOAD_WAIT,
+        ControllerState.ACK_RELOAD_SENT,
+        ControllerState.ACK_RELOAD_WAIT,
+        ControllerState.QUALIFY_PENDING,
+    }
+)
+_PASSIVE_BOOT_ADOPTION_BLOCKED_INTENTS = frozenset(
+    {
+        ActionKind.SCAN.value,
+        ActionKind.SAVE_RELOAD.value,
+        ActionKind.ACK_RELOAD.value,
+        ActionKind.ENTER_WORLD.value,
+        ActionKind.LOGOUT.value,
+    }
+)
+
 
 def _expected_executor_result_count(pre_executor: dict[str, Any], pre_count: int) -> int:
     """Return the producer's causal resultCount for one admitted button.
@@ -2167,6 +2188,69 @@ class Controller:
         self._calibration_invalidated_reason = ""
         self._runtime_readiness_invalidation = None
 
+    def _adopt_passive_boot_if_allowed(self, evidence: RuntimeInputEvidence) -> bool:
+        """Bind a fresh passive boot without crossing an in-flight effect fence."""
+
+        if (
+            self._state in _PASSIVE_BOOT_ADOPTION_BLOCKED_STATES
+            or self._resume_state in _PASSIVE_BOOT_ADOPTION_BLOCKED_STATES
+        ):
+            return False
+        if not self._native_construction_valid or self._native_construction is not None:
+            return False
+        if self._action_intent in _PASSIVE_BOOT_ADOPTION_BLOCKED_INTENTS and self._action_result not in {
+            "",
+            "complete",
+            "abandoned_after_restart",
+        }:
+            return False
+        new_boot = evidence.readiness_boot
+        old_boot = self._frame_boot
+        if old_boot == new_boot:
+            return True
+        prior_frame = (self._frame_boot, self._frame_sequence, self._frame_crc32)
+        prior_history = copy.deepcopy(self._history)
+        self._frame_boot = new_boot
+        self._frame_sequence = 0
+        self._frame_crc32 = 0
+        try:
+            if old_boot:
+                outcome_id = hashlib.sha256(
+                    f"passive-boot-adoption|{old_boot}|{new_boot}|"
+                    f"{self._action_attempt}|{self._action_intent}".encode()
+                ).hexdigest()
+                record = {
+                    "outcomeId": outcome_id,
+                    "kind": "external_boot_change_adopted",
+                    "oldBoot": old_boot,
+                    "newBoot": new_boot,
+                    "generation": self._generation,
+                    "state": self._resume_state.value,
+                    "intent": self._action_intent,
+                }
+                history = [
+                    *self._history,
+                    {
+                        "at": self.wall_clock(),
+                        "action": "external_boot_change_adopted",
+                        "state": self._state.value,
+                        "generation": self._generation,
+                        "uid": self._last_uid,
+                    },
+                ][-200:]
+                checkpoint = self._outcome_checkpoint()
+                checkpoint["history"] = history
+                checkpoint["lastAction"] = "external_boot_change_adopted"
+                self.journal.append_archive_bundle({"interventions": record}, checkpoint=checkpoint)
+                self._history = history
+            else:
+                self._save(last_action="passive_boot_bound")
+        except Exception:
+            self._frame_boot, self._frame_sequence, self._frame_crc32 = prior_frame
+            self._history = prior_history
+            raise
+        return True
+
     def resume_with_runtime_evidence(
         self,
         evidence: RuntimeInputEvidence,
@@ -2184,6 +2268,8 @@ class Controller:
                 raise RuntimeError("stale generation")
             if self._state not in {ControllerState.PAUSED, ControllerState.BLOCKED, ControllerState.STOPPED}:
                 raise RuntimeError(f"cannot resume from {self._state}")
+            self._validate_runtime_evidence(evidence)
+            self._adopt_passive_boot_if_allowed(evidence)
             self._accept_runtime_evidence(evidence)
         return self.resume(expected_generation=expected_generation)
 
@@ -4222,6 +4308,10 @@ class Controller:
                     raise RuntimeError(
                         "runtime start cannot replace unresolved durable action evidence; use resume"
                     )
+                if not self._adopt_passive_boot_if_allowed(runtime_evidence):
+                    raise RuntimeError(
+                        "runtime start cannot adopt passive boot while durable work is unresolved; use resume"
+                    )
             requested_mode = SessionMode(mode)
             if requested_mode == SessionMode.INTERACTION:
                 # Interaction startup uses the same durable calibration gates as
@@ -4268,7 +4358,7 @@ class Controller:
                 self._action_attempt = 0
                 self._action_result = ""
                 self._action_started_at = 0
-                self._frame_boot = ""
+                self._frame_boot = runtime_evidence.readiness_boot if runtime_evidence is not None else ""
                 self._frame_sequence = 0
                 self._frame_crc32 = 0
                 self._restart_reference_boot = ""

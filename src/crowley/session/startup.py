@@ -13,7 +13,7 @@ from enum import StrEnum
 from typing import Any
 
 STARTUP_CONTRACT = "crowley-passive-startup-v1"
-TAKEOVER_CONTRACT = "crowley-takeover-hover-v3"
+TAKEOVER_CONTRACT = "crowley-takeover-hover-v4"
 PASSIVE_STARTUP_TIMEOUT_SECONDS = 15.0
 TAKEOVER_DRILL_ARM_RESERVE_SECONDS = 30.0
 TAKEOVER_DRILL_HUMAN_TIMEOUT_SECONDS = 120.0
@@ -32,6 +32,14 @@ TAKEOVER_DRILL_OPERATION_TIMEOUT_SECONDS = (
     + TAKEOVER_DRILL_CLEANUP_RESERVE_SECONDS
 )
 _PROCESS_KEY = secrets.token_bytes(32)
+_COMPOSITOR_FORWARDED_DEVICE_PREFIXES = (
+    ("xwayland-pointer:", "pointer"),
+    ("xwayland-relative-pointer:", "pointer"),
+    ("xwayland-pointer-gestures:", "pointer"),
+    ("xwayland-keyboard:", "keyboard"),
+)
+_CANONICAL_FORWARDED_ATTACHMENT = (0, "compositor-forwarded")
+_CANONICAL_FORWARDED_ECHO_SOURCES: tuple[int, ...] = ()
 
 
 class InvalidationCause(StrEnum):
@@ -61,6 +69,44 @@ def _canonical(value: Any) -> bytes:
     return json.dumps(_jsonable(value), sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
 
 
+def _compositor_forwarded_device(name: str) -> tuple[str, str, str] | None:
+    observed_kind, separator, device_name = name.partition(":")
+    if separator != ":":
+        return None
+    for prefix, expected_kind in _COMPOSITOR_FORWARDED_DEVICE_PREFIXES:
+        if device_name.startswith(prefix):
+            return observed_kind, expected_kind, device_name
+    return None
+
+
+def _canonical_hierarchy(
+    hierarchy: tuple[tuple[int, int, str, str], ...],
+) -> tuple[tuple[int, int, str, str], ...]:
+    """Keep forwarded device identity while removing only seat attachment state."""
+
+    canonical: list[tuple[int, int, str, str]] = []
+    for device_id, parent_id, role, name in hierarchy:
+        forwarded = _compositor_forwarded_device(name)
+        if forwarded is not None:
+            observed_kind, expected_kind, device_name = forwarded
+            attached = role == "slave" and parent_id > 0 and observed_kind == expected_kind
+            floating = role == "floating" and parent_id == 0 and observed_kind == "slave"
+        else:
+            attached = floating = False
+        if attached or floating:
+            canonical.append(
+                (
+                    device_id,
+                    _CANONICAL_FORWARDED_ATTACHMENT[0],
+                    _CANONICAL_FORWARDED_ATTACHMENT[1],
+                    f"{expected_kind}:{device_name}",
+                )
+            )
+        else:
+            canonical.append((device_id, parent_id, role, name))
+    return tuple(canonical)
+
+
 @dataclass(frozen=True)
 class StartupEnvironment:
     display: str
@@ -80,12 +126,12 @@ class StartupEnvironment:
         return {
             "contract": TAKEOVER_CONTRACT,
             "display": self.display,
-            "hierarchy": self.hierarchy,
+            "hierarchy": _canonical_hierarchy(self.hierarchy),
             "keyboardSource": self.keyboard_source,
             "keyboardMaster": self.keyboard_master,
             "pointerSource": self.pointer_source,
             "pointerMaster": self.pointer_master,
-            "forwardedEchoSources": self.forwarded_echo_sources,
+            "forwardedEchoSources": _CANONICAL_FORWARDED_ECHO_SOURCES,
             "xtestProfile": self.xtest_profile,
             "keymapLevels": self.keymap_levels,
             "modifierMasks": self.modifier_masks,
@@ -181,6 +227,8 @@ class RuntimeInputEvidence:
             "readinessBoot": self.readiness_boot,
             "readinessSequence": self.readiness_sequence,
             "environment": self.environment.canonical_payload(),
+            "runtimeHierarchy": self.environment.hierarchy,
+            "runtimeForwardedEchoSources": self.environment.forwarded_echo_sources,
             "identity": self.game_identity_fingerprint,
             "processStart": self.game_process_start,
             "geometry": self.game_geometry,
@@ -236,29 +284,45 @@ def resolve_forwarded_echo_sources(
     Retained host traces show the XTEST slave attached to the virtual core
     pointer and its delivered echo on the unique ``xwayland-relative-pointer``
     slave attached to that same master. Other pointer slaves (including the
-    absolute and gesture devices) are not forwarding evidence. A missing,
-    duplicated, or differently attached relay blocks startup.
+    absolute and gesture devices) are not forwarding evidence. A sole floating
+    relay is accepted as having no echo source; a missing, duplicated, or
+    differently attached relay blocks startup.
     """
 
     if isinstance(pointer_master, bool) or not isinstance(pointer_master, int) or pointer_master <= 0:
         raise ValueError("runtime pointer master is malformed")
-    relays = [
-        row
-        for row in hierarchy
-        if isinstance(row, tuple)
-        and len(row) == 4
-        and row[2] == "slave"
-        and isinstance(row[3], str)
-        and row[3].casefold().startswith("pointer:xwayland-relative-pointer:")
-        and isinstance(row[0], int)
-        and not isinstance(row[0], bool)
-        and row[0] > 0
-        and isinstance(row[1], int)
-        and not isinstance(row[1], bool)
-    ]
-    if len(relays) != 1 or relays[0][1] != pointer_master:
+    relays: list[tuple[int, int, str, str]] = []
+    for row in hierarchy:
+        if (
+            not isinstance(row, tuple)
+            or len(row) != 4
+            or not isinstance(row[3], str)
+            or isinstance(row[0], bool)
+            or not isinstance(row[0], int)
+            or row[0] <= 0
+            or isinstance(row[1], bool)
+            or not isinstance(row[1], int)
+        ):
+            continue
+        forwarded = _compositor_forwarded_device(row[3])
+        if (
+            forwarded is not None
+            and forwarded[1] == "pointer"
+            and forwarded[2].casefold().startswith("xwayland-relative-pointer:")
+        ):
+            relays.append(row)
+    if len(relays) != 1:
         raise ValueError("runtime forwarded Xwayland relative-pointer relay is absent or ambiguous")
-    return (relays[0][0],)
+    relay_id, parent_id, role, name = relays[0]
+    forwarded = _compositor_forwarded_device(name)
+    if forwarded is None:
+        raise ValueError("runtime forwarded Xwayland relative-pointer relay is absent or ambiguous")
+    observed_kind, expected_kind, _device_name = forwarded
+    if role == "floating" and parent_id == 0 and observed_kind == "slave":
+        return ()
+    if role == "slave" and parent_id == pointer_master and observed_kind == expected_kind:
+        return (relay_id,)
+    raise ValueError("runtime forwarded Xwayland relative-pointer relay is absent or ambiguous")
 
 
 def is_measured_human_action(event: Any, environment: StartupEnvironment) -> bool:

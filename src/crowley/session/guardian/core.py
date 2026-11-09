@@ -1683,7 +1683,9 @@ class InputGuardian:
                 if (
                     observation.echo_match
                     and observation.matched_echo_expectation is not None
-                    and self._clock() > action.deadline_monotonic
+                    # A matched echo always belongs to a correlated action;
+                    # fail closed if that invariant is ever broken.
+                    and (action is None or self._clock() > action.deadline_monotonic)
                 ):
                     observation.allowed = False
                     return

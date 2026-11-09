@@ -79,7 +79,7 @@ def test_quantity_change_is_inconsistent_and_unknown_time_left_is_not_sale():
 
 def test_commodity_fractional_price_buckets_report_churn():
     before = _obs(100, [_row(1, 5, price=(1, 2))], kind="commodity")
-    after = _obs(110, [_row(2, 2, price=(1, 2))], kind="commodity")
+    after = _obs(110, [_row(1, 2, price=(1, 2))], kind="commodity")
     result = compare_observations(before, after)
     assert result["commodityDepletionUnits"] == 3
     assert result["aggregateCommodityChurnUnits"] == 3
@@ -262,8 +262,8 @@ def test_freshness_uses_actual_query_end_when_sweep_finishes_later():
 
 def test_commodity_rates_use_commodity_exposure_and_aggregate_intervals():
     first = _obs(7000, [_row(1, 5, price=(1, 2))], kind="commodity")
-    second = _obs(7010, [_row(2, 2, price=(1, 2))], kind="commodity")
-    third = _obs(7020, [_row(3, 4, price=(1, 2))], kind="commodity")
+    second = _obs(7010, [_row(1, 2, price=(1, 2))], kind="commodity")
+    third = _obs(7020, [_row(1, 4, price=(1, 2))], kind="commodity")
     report = volume_report([third, first, second], hours=1, end=7030)
     assert report["commodityDepletionUnits"] == 3
     assert report["commodityReplenishmentUnits"] == 2
@@ -326,3 +326,101 @@ def test_variant_projection_filters_after_numeric_row_ordering():
     assert list(projected["rows"]) == ["row:1", "row:2", "row:3"]
     assert [row["unitPrice"]["numerator"] for row in projected["rows"].values()] == [1, 2, 10]
     assert list(observation["rows"]) == list(shuffled_rows)
+
+
+# --- commodity bottom-walk fixtures (route-vs-analysis parity lives in tests/test_server.py) ---
+
+
+def _commodity_pair(before_rows, after_rows, *, start=100, gap=10, **kwargs):
+    return (
+        _obs(start, before_rows, kind="commodity", **kwargs),
+        _obs(start + gap, after_rows, kind="commodity", **kwargs),
+    )
+
+
+def _assert_parity(before, after, expected_depletion, expected_replenishment):
+    result = compare_observations(before, after)
+    assert result["valid"]
+    assert (result["commodityDepletionUnits"], result["commodityReplenishmentUnits"]) == (
+        expected_depletion,
+        expected_replenishment,
+    )
+
+
+def test_commodity_partial_bottom_group_stops_walk_above_it():
+    before, after = _commodity_pair(
+        [_row(1, 5, price=(10, 1)), _row(2, 5, price=(20, 1))],
+        [_row(1, 2, price=(10, 1)), _row(2, 1, price=(20, 1))],
+    )
+    # Group 2 lost units too, but the walk stops at the partially bought bottom group.
+    _assert_parity(before, after, 3, 0)
+
+
+def test_commodity_floor_rises_when_cheapest_group_is_cleared():
+    before, after = _commodity_pair(
+        [_row(1, 5, price=(10, 1)), _row(2, 4, price=(20, 1)), _row(3, 6, price=(30, 1))],
+        [_row(2, 1, price=(20, 1)), _row(3, 6, price=(30, 1))],
+    )
+    _assert_parity(before, after, 8, 0)
+
+
+def test_commodity_new_listing_at_same_price_does_not_hide_a_sale():
+    # Price-level netting (the retired estimator) saw 5 -> 5 here and reported zero.
+    before, after = _commodity_pair(
+        [_row(1, 5, price=(10, 1))],
+        [_row(1, 2, price=(10, 1)), _row(9, 3, price=(10, 1))],
+    )
+    _assert_parity(before, after, 3, 3)
+
+
+def test_commodity_quantity_increase_is_replenishment_not_depletion():
+    before, after = _commodity_pair([_row(1, 2, price=(10, 1))], [_row(1, 6, price=(10, 1))])
+    _assert_parity(before, after, 0, 4)
+
+
+def test_commodity_expired_bottom_group_is_skipped_not_sold():
+    before, after = _commodity_pair(
+        [_row(1, 5, price=(10, 1), seconds=30), _row(2, 4, price=(20, 1))],
+        [_row(2, 1, price=(20, 1))],
+    )
+    _assert_parity(before, after, 3, 0)
+
+
+def test_commodity_price_cap_excludes_groups_above_common_ceiling():
+    def bounded(start, rows, cap):
+        observation = _obs(start, rows, kind="commodity", coverage="bounded")
+        observation["cutoff"] = {"kind": "price", "numerator": cap, "denominator": 1}
+        return observation
+
+    before = bounded(100, [_row(1, 5, price=(10, 1)), _row(2, 5, price=(25, 1))], 25)
+    after = bounded(110, [_row(2, 1, price=(25, 1))], 20)
+    # Common ceiling is 20: group 2 is out of scope, so only group 1 is consumed.
+    _assert_parity(before, after, 5, 0)
+
+
+def test_commodity_price_cap_boundary_group_is_in_scope():
+    def bounded(start, rows):
+        observation = _obs(start, rows, kind="commodity", coverage="bounded")
+        observation["cutoff"] = {"kind": "price", "numerator": 20, "denominator": 1}
+        return observation
+
+    before = bounded(100, [_row(1, 5, price=(10, 1)), _row(2, 5, price=(20, 1))])
+    after = bounded(110, [])
+    _assert_parity(before, after, 10, 0)
+
+
+def test_commodity_gap_beyond_shared_max_gap_is_excluded():
+    from crowley.analysis.books import MAX_GAP
+
+    before, after = _commodity_pair([_row(1, 5)], [_row(1, 1)], gap=MAX_GAP)
+    assert compare_observations(before, after)["valid"]
+    before, after = _commodity_pair([_row(1, 5)], [_row(1, 1)], gap=MAX_GAP + 1)
+    result = compare_observations(before, after)
+    assert not result["valid"]
+    assert "interval_too_long" in result["excludedIntervals"]
+
+
+def test_commodity_non_exact_time_left_fails_loudly():
+    before, after = _commodity_pair([_row(1, 5, seconds=None)], [_row(1, 1, seconds=None)])
+    with pytest.raises(ValueError, match="exact timeLeft"):
+        compare_observations(before, after)

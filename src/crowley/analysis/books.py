@@ -213,6 +213,77 @@ def _owners(row_data: Any) -> int:
     return owners
 
 
+def add_group_row(
+    groups: dict[int | str, Group],
+    result_id: int | str,
+    unit: Fraction,
+    quantity: int,
+    time_left: int | float,
+    owners: int,
+) -> None:
+    """Fold one captured row into its persistent price-level group.
+
+    Rows sharing a ``result_id`` are one group: quantities add and the earliest
+    expiry wins. Differing unit prices or owner counts are contract violations.
+    """
+
+    prior = groups.get(result_id)
+    if prior is None:
+        groups[result_id] = Group(result_id, unit, quantity, time_left, owners)
+        return
+    if prior.unit != unit:
+        raise ValueError("one commodity result_id has multiple unit prices")
+    if prior.owners != owners:
+        raise ValueError("one commodity result_id has multiple owner counts")
+    groups[result_id] = Group(
+        result_id, unit, prior.quantity + quantity, min(prior.time_left_seconds, time_left), owners
+    )
+
+
+def book_from_observation(
+    observation: dict[str, Any], rows: Iterable[dict[str, Any]], *, started_at: int
+) -> Book:
+    """Build a commodity ``Book`` from a wire observation and its (already variant-filtered) rows."""
+
+    cutoff = observation.get("cutoff")
+    if not isinstance(cutoff, dict):
+        raise ValueError("commodity observation cutoff is not an object")
+    groups: dict[int | str, Group] = {}
+    for row in rows:
+        result_id = row.get("resultID")
+        if type(result_id) is not int:
+            raise ValueError("commodity row has no integer resultID")
+        unit_price = row["unitPrice"]
+        add_group_row(
+            groups,
+            result_id,
+            _fraction(unit_price["numerator"], unit_price["denominator"]),
+            int(row["quantity"]),
+            _exact_seconds(row),
+            _owners(row),
+        )
+    return Book(
+        t=float(started_at),
+        groups=list(groups.values()),
+        ceiling=_cutoff(cutoff),
+        item_id=observation.get("itemID"),
+    )
+
+
+def replenished_units(before: Book, after: Book) -> int:
+    """Units added to the common-ceiling scope: new groups plus quantity increases."""
+
+    common = common_ceiling(before.ceiling, after.ceiling)
+    before_by_id = _group_map(before)
+    total = 0
+    for group in after.groups:
+        if common is not None and group.unit > common:
+            continue
+        prior = before_by_id.get(group.result_id)
+        total += max(group.quantity - (prior.quantity if prior is not None else 0), 0)
+    return total
+
+
 class _CommodityRow(NamedTuple):
     sweep_id: int
     started_at: object
@@ -336,17 +407,7 @@ def load_commodity_books(
         row_data = row.row_data
         time_left = _exact_seconds(row_data)
         owners = _owners(row_data)
-        prior = entry["groups"].get(result_id)
-        if prior is None:
-            entry["groups"][result_id] = Group(result_id, unit, quantity, time_left, owners)
-        else:
-            if prior.unit != unit:
-                raise ValueError("one commodity result_id has multiple unit prices")
-            if prior.owners != owners:
-                raise ValueError("one commodity result_id has multiple owner counts")
-            entry["groups"][result_id] = Group(
-                result_id, unit, prior.quantity + quantity, min(prior.time_left_seconds, time_left), owners
-            )
+        add_group_row(entry["groups"], result_id, unit, quantity, time_left, owners)
 
     for entry in grouped.values():
         book = Book(

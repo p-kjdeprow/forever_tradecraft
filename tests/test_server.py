@@ -173,7 +173,15 @@ def legacy_client(tmp_path, monkeypatch):
     get_settings.cache_clear()
 
 
-def scan(uid: str, faction: str, *, ruleset: str = "normal", price: int = 100, at: int | None = None) -> dict:
+def scan(
+    uid: str,
+    faction: str,
+    *,
+    ruleset: str = "normal",
+    price: int = 100,
+    at: int | None = None,
+    quantity: int = 10,
+) -> dict:
     at = at or int(time.time())
     body = {
         "schemaVersion": 2,
@@ -200,7 +208,7 @@ def scan(uid: str, faction: str, *, ruleset: str = "normal", price: int = 100, a
             "bonusIDs": [],
         },
         "link": {"kind": "unknown"},
-        "quantity": 10,
+        "quantity": quantity,
         "price": {"kind": "unit", "copper": price},
         "unitPrice": {"numerator": price, "denominator": 1},
         "owners": {
@@ -210,7 +218,7 @@ def scan(uid: str, faction: str, *, ruleset: str = "normal", price: int = 100, a
             "containsAccountItem": False,
             "identityKind": "grouped",
         },
-        "timeLeft": {"kind": "unknown"},
+        "timeLeft": {"kind": "exact", "seconds": 3600},
     }
     observation = {
         "itemID": 2589,
@@ -985,6 +993,41 @@ def test_volume_route_uses_market_rows_only(client):
     body = response.json()
     assert body["intervals"][0]["kind"] == "commodity"
     assert body["marketActualSalesEstimate"] is None
+
+
+def test_volume_route_depletion_matches_analysis_books(client):
+    """The HTTP route and the analysis package must report one bottom-walk."""
+
+    from crowley.analysis.books import load_commodity_books, valid_intervals
+
+    now = int(time.time())
+    for index, (quantity, at) in enumerate([(10, now - 90), (6, now - 60), (2, now - 30), (2, now)]):
+        response = client.post("/v1/scans", json=scan(f"p{index}", "horde", quantity=quantity, at=at))
+        assert response.status_code == 200, response.text
+    body = client.get("/v1/houses/us-normal-horde/items/2589/volume?hours=24").json()
+    route = [entry["commodityDepletionUnits"] for entry in body["intervals"]]
+    with psycopg.connect(DB_URL) as conn:
+        books = load_commodity_books(conn, "us-normal-horde")[2589]
+    walked = [sum(units for _, units in interval.consumed) for interval in valid_intervals(books) if interval]
+    assert route == walked == [4, 4, 0]
+
+
+def test_volume_route_fails_loudly_on_malformed_commodity_time_left(client):
+    now = int(time.time())
+    assert client.post("/v1/scans", json=scan("m1", "horde", at=now - 30)).status_code == 200
+    assert client.post("/v1/scans", json=scan("m2", "horde", quantity=5, at=now)).status_code == 200
+    with psycopg.connect(DB_URL, autocommit=True) as conn:
+        conn.execute(
+            "UPDATE market_observations SET observation = jsonb_set("
+            "observation, '{rows,row:1,timeLeft}', '{\"kind\": \"unknown\"}')"
+        )
+    # compare_observations deliberately fails the whole report when any row in the
+    # read margin is malformed (fail loudly) instead of skipping the interval.
+    with TestClient(
+        client.app, raise_server_exceptions=False, headers={"Authorization": f"Bearer {TOKEN}"}
+    ) as strict:
+        response = strict.get("/v1/houses/us-normal-horde/items/2589/volume?hours=24")
+    assert response.status_code >= 500
 
 
 def test_real_addon_envelope_reaches_archive_history_and_volume(client):

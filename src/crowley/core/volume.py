@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Iterable
 from copy import deepcopy
 from fractions import Fraction
 from typing import Any
+
+from crowley.analysis.books import book_from_observation, replenished_units, valid_intervals
 
 MAX_INTERVAL_SECONDS = 1800
 NORMALIZATION_POLICY = "item-per-auction-unit-signed-time-left-v3"
@@ -301,6 +302,9 @@ def compare_observations(
     expiry_gap = current_end - prior_start
     if exposure <= 0:
         exclusions.append("nonpositive_exposure")
+    # This 1800 s end-to-start check applies to every kind. For commodities the
+    # shared 1260 s start-to-start rule (analysis.books.MAX_GAP, enforced below)
+    # is the binding one.
     if expiry_gap > MAX_INTERVAL_SECONDS:
         exclusions.append("interval_too_long")
     ceiling, coverage_error = _common_ceiling(left, right)
@@ -337,18 +341,22 @@ def compare_observations(
         "commodityReplenishmentUnits": 0,
     }
     if kind == "commodity":
-        commodity_before: defaultdict[Fraction, int] = defaultdict(int)
-        commodity_after: defaultdict[Fraction, int] = defaultdict(int)
-        for row in left_rows:
-            commodity_before[_ratio(row["unitPrice"])] += row["quantity"]
-        for row in right_rows:
-            commodity_after[_ratio(row["unitPrice"])] += row["quantity"]
-        for price in set(commodity_before) | set(commodity_after):
-            delta = commodity_before[price] - commodity_after[price]
-            if delta > 0:
-                result["commodityDepletionUnits"] += delta
-            elif delta < 0:
-                result["commodityReplenishmentUnits"] -= delta
+        # One bottom-walk implementation: the analysis package's. Depletion is
+        # what the walk consumed from the cheapest persistent groups; the
+        # interval must also satisfy the shared chain-gap rule.
+        before_book = book_from_observation(left, left_rows, started_at=left_window[0])
+        after_book = book_from_observation(right, right_rows, started_at=right_window[0])
+        interval = valid_intervals([before_book, after_book])[0]
+        if interval is None:
+            result = _base_result(elapsed=exposure, expiry_gap=expiry_gap)
+            # valid_intervals rejects dt <= 0 (zero-length start spacing) as well
+            # as dt > MAX_GAP; label them separately.
+            result["excludedIntervals"] = [
+                "nonpositive_interval" if right_window[0] - left_window[0] <= 0 else "interval_too_long"
+            ]
+            return result
+        result["commodityDepletionUnits"] = sum(units for _, units in interval.consumed)
+        result["commodityReplenishmentUnits"] = replenished_units(before_book, after_book)
         result["aggregateCommodityChurnUnits"] = (
             result["commodityDepletionUnits"] + result["commodityReplenishmentUnits"]
         )

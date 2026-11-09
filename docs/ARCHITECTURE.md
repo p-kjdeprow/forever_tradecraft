@@ -39,6 +39,7 @@ Cadence remains the explicit 900-second policy.
 
 | Assumption | Where | If wrong |
 |---|---|---|
+| Commodity rows always carry an exact `timeLeft` (verified live on builds 70374, 70450, 70862) | `analysis/books.py`, `core/volume.py` | `ValueError`; the volume route returns a 5xx and the analysis loader raises |
 | Interface 16001; a plain `Crowley.toc` loads | `addon/*/*.toc` | Addon missing from the list |
 | Commodities and non-equipment use native `MakeItemKey` + `SendSearchQuery`; equipment uses an explicitly zeroed comparison key + `SendSellSearchQuery` | `Scanner.lua` | Native full-sweep verification includes recipe 2555, containers 4238/4240/4241/4245/5765, and equipment 873 |
 | Item-search and commodity-search events follow the observed paths; freshness barriers reject stale, unrelated and foreign results | `Scanner.lua` | Full sweep `beta-normal-alliance-1792040351-Arthur-6643` verified 428 active IDs and native recipe, container, equipment and commodity results; item identity and freshness barriers remain required because result events have no request ID |
@@ -171,6 +172,15 @@ only new observations whose end windows fall inside the request. It reports actu
 seconds, common proved price scope, excluded intervals, commodity depletion/replenishment,
 individual candidate units per observed hour labelled `UNCALIBRATED`, and a separate own-Sold
 evidence section. Market actual-sales estimates and confidence intervals remain null.
+
+Commodity depletion uses the single bottom-walk in `analysis/books.py` (the route and the
+analysis/trading code share it). Commodity rows are grouped by persistent `result_id`; only
+depletion of the cheapest groups counts (the walk stops at the first untouched or partially
+bought group, and a vanished group that could have expired is skipped, not counted).
+Replenishment is new groups plus quantity increases within the common price ceiling. An
+interval needs a start-to-start gap in (0, 1260] s (`MAX_GAP`, the binding rule; the 1800 s
+end-to-start check still applies to all kinds). A commodity row without an exact `timeLeft`
+raises and fails the report rather than being skipped.
 
 Accepted envelopes are archived as gzip JSON under the retained content-addressed
 `data_dir/raw/format2/<digest-prefix>/<digest>.json.gz` so observations can be replayed without

@@ -98,6 +98,12 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         assert "WorkingDirectory=" not in text
         if name.endswith(".service"):
             assert "EnvironmentFile=%E/crowley/secrets.env" in text
+        if name in {"crowley-session.service", "crowley-session-supervisor.service"}:
+            # The socket directory is tmpfs; the units recreate it after a reboot.
+            service = parser["Service"]
+            assert service["RuntimeDirectory"] == "crowley"
+            assert service["RuntimeDirectoryMode"] == "0700"
+            assert service["RuntimeDirectoryPreserve"] == "yes"
 
 
 def test_dry_run_writes_nothing_and_does_not_reload_systemd(

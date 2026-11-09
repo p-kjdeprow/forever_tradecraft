@@ -11,6 +11,11 @@ Environment=DISPLAY=:0
 Environment=WAYLAND_DISPLAY=wayland-0
 Environment=XDG_RUNTIME_DIR=%t
 PassEnvironment=XAUTHORITY
+# The IPC socket lives in %t/crowley, which is tmpfs and gone after a reboot.
+# Both units create it (private, kept across unit restarts).
+RuntimeDirectory=crowley
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 Restart=on-failure
 RestartSec=5s
 

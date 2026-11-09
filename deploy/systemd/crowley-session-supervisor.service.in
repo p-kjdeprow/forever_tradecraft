@@ -19,6 +19,11 @@ PassEnvironment=XAUTHORITY
 # A relaunch may start Battle.net, which then parents the game client.  Stopping or
 # restarting the supervisor must not take that process tree down with it.
 KillMode=process
+# The IPC socket lives in %t/crowley, which is tmpfs and gone after a reboot.
+# Both units create it (private, kept across unit restarts).
+RuntimeDirectory=crowley
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
 Restart=on-failure
 RestartSec=5s
 

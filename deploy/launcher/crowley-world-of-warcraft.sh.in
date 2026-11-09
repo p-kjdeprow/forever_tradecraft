@@ -110,21 +110,35 @@ battle_net_exec() {
     game_env "$WINE" "$BATTLE_NET" --exec="$1" >>"$LOGDIR/launcher.log" 2>&1 </dev/null
 }
 
-newest_battle_net_log() {
-    ls -t "$BATTLE_NET_LOGS"/battle.net-*.log 2>/dev/null | sed -n '1p'
+# Battle.net names each log battle.net-<UTC timestamp>.log, so names sort in
+# creation order.  Its short-lived helper processes write their own small logs,
+# so the login evidence is searched in every log created after the launch, not
+# only the most recently modified one.
+latest_battle_net_log_name() {
+    ls "$BATTLE_NET_LOGS" 2>/dev/null | grep -E '^battle\.net-[0-9T.]+\.log$' | LC_ALL=C sort | sed -n '$p'
+}
+
+logs_created_after() {
+    ls "$BATTLE_NET_LOGS" 2>/dev/null | grep -E '^battle\.net-[0-9T.]+\.log$' | LC_ALL=C sort \
+        | awk -v after="$1" '$0 > after { print }'
 }
 
 if ! battle_net_running; then
-    before=$(newest_battle_net_log)
+    before=$(latest_battle_net_log_name)
     game_env setsid "$WINE" "$BATTLE_NET" >>"$LOGDIR/launcher.log" 2>&1 </dev/null &
     waited=0
+    logged_in=''
     while :; do
-        log=$(newest_battle_net_log)
-        if [ -n "$log" ] && [ "$log" != "$before" ]; then
-            grep -Fq "GameAccount added to family: family=WoW account=GameAccount(WoW:$PRODUCT " "$log" && break
-            grep -Fq 'UAuth: browser state changed: LoginCredential' "$log" \
-                && fail 'Battle.net requires an interactive login; its saved login token is gone.'
-        fi
+        for name in $(logs_created_after "$before"); do
+            log="$BATTLE_NET_LOGS/$name"
+            if grep -Fq 'UAuth: browser state changed: LoginCredential' "$log"; then
+                fail 'Battle.net requires an interactive login; its saved login token is gone.'
+            fi
+            if grep -Fq "GameAccount added to family: family=WoW account=GameAccount(WoW:$PRODUCT " "$log"; then
+                logged_in=1
+            fi
+        done
+        [ -z "$logged_in" ] || break
         [ "$waited" -lt "$LOGIN_TIMEOUT_SECONDS" ] || fail 'Battle.net did not finish logging in.'
         sleep 1
         waited=$((waited + 1))

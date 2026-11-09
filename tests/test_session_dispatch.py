@@ -12,7 +12,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from crowley.session import pointer_execution as pointer_execution_module
 from crowley.session.calibration import OwnedGtkCalibrationWindow, OwnedWindow, XTestInputProfile
 from crowley.session.driver import (
     DesktopDriver,
@@ -42,7 +41,7 @@ def _private_pointer_click_rate_state(tmp_path: Path, monkeypatch: pytest.Monkey
 
     state_directory = tmp_path / "pointer-click-rate"
     state_directory.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_execution_module, "_session_state_directory", lambda: state_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: state_directory)
 
 
 def test_keyboard_profile_exactly_covers_runtime_actions_and_commands(tmp_path: Path) -> None:

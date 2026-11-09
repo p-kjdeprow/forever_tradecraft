@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextvars
 import copy
 import ctypes
-import errno
 import fcntl
 import hashlib
 import json
@@ -33,6 +32,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Protocol, cast
 
+from crowley.gui import capture, keyboard
 from crowley.platform.paths import XdgDirs
 
 from .driver_runner import GuardedActionRunner
@@ -284,14 +284,6 @@ def _open_sealed_executable(path: Path, expected_sha256: str) -> tuple[int, str]
     return image_fd, digest
 
 
-class _IncompleteCaptureOutput(DriverError):
-    """The screenshot writer has not exposed a complete PNG yet."""
-
-
-class _InvalidCaptureOutput(DriverError):
-    """The screenshot writer exposed a terminally invalid PNG result."""
-
-
 DRIVER_VERSION = "native-x11-3"
 GNOME_CAPTURE_LOCK_PATH: Path | None = None
 
@@ -320,113 +312,71 @@ def _capture_deadline(deadline_monotonic: float | None) -> float:
     return deadline
 
 
+class _IncompleteCaptureOutput(DriverError):
+    """The screenshot writer has not exposed a complete PNG yet."""
+
+
+class _InvalidCaptureOutput(DriverError):
+    """The screenshot writer exposed a terminally invalid PNG result."""
+
+
+def _driver_error(exc: capture.CaptureError) -> DriverError:
+    """Re-raise a shared capture failure as the driver's own error type."""
+
+    if isinstance(exc, capture.InvalidCaptureOutput):
+        return _InvalidCaptureOutput(str(exc))
+    if isinstance(exc, capture.IncompleteCaptureOutput):
+        return _IncompleteCaptureOutput(str(exc))
+    return DriverError(str(exc))
+
+
 @contextmanager
 def _capture_lock(deadline_monotonic: float, *, check: Callable[[], None] | None = None):
     """Hold the private cross-process GNOME screenshot serialization lock."""
 
-    import fcntl
-
-    lock_path = _capture_lock_path()
-    parent = lock_path.parent
     try:
-        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        parent_lstat = parent.lstat()
-        parent_stat = parent.stat()
-    except OSError as exc:
-        raise DriverError(f"GNOME capture lock directory is unavailable: {exc}") from exc
-    if (
-        stat.S_ISLNK(parent_lstat.st_mode)
-        or not stat.S_ISDIR(parent_stat.st_mode)
-        or parent_stat.st_uid != os.getuid()
-        or stat.S_IMODE(parent_stat.st_mode) != 0o700
-    ):
-        raise DriverError("GNOME capture lock directory is not a private owned directory")
-
-    try:
-        existing = lock_path.lstat()
-    except FileNotFoundError:
-        existing = None
-    except OSError as exc:
-        raise DriverError(f"GNOME capture lock path cannot be inspected: {exc}") from exc
-    if existing is not None and (
-        not stat.S_ISREG(existing.st_mode)
-        or existing.st_uid != os.getuid()
-        or stat.S_IMODE(existing.st_mode) != 0o600
-    ):
-        raise DriverError("GNOME capture lock path is not a private owned regular file")
-
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(lock_path, flags, 0o600)
-    except OSError as exc:
-        raise DriverError(f"GNOME capture lock cannot be opened safely: {exc}") from exc
-    try:
-        metadata = os.fstat(fd)
-        if (
-            not stat.S_ISREG(metadata.st_mode)
-            or metadata.st_uid != os.getuid()
-            or stat.S_IMODE(metadata.st_mode) != 0o600
-        ):
-            raise DriverError("GNOME capture lock is not a private owned regular file")
-        while True:
-            if check is not None:
-                check()
-            remaining = deadline_monotonic - time.monotonic()
-            if remaining <= 0:
-                raise DriverError("GNOME capture lock deadline expired while waiting")
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError as exc:
-                if exc.errno not in {errno.EACCES, errno.EAGAIN}:
-                    raise DriverError(f"GNOME capture lock failed: {exc}") from exc
-                time.sleep(min(0.01, remaining))
-        try:
-            if check is not None:
-                check()
+        with capture.capture_lock(deadline_monotonic, check=check, lock_path=_capture_lock_path()):
             yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
+    except capture.CaptureError as exc:
+        raise _driver_error(exc) from exc
 
 
 def _validate_complete_png(path: Path, minimum_size: tuple[int, int]) -> None:
     """Require a newly written PNG whose bytes can be fully decoded."""
 
     try:
-        from PIL import Image, UnidentifiedImageError
+        capture.validate_complete_png(path, minimum_size)
+    except capture.CaptureError as exc:
+        raise _driver_error(exc) from exc
 
-        try:
-            with path.open("rb") as stream:
-                prefix = stream.read(8)
-        except FileNotFoundError as exc:
-            raise _IncompleteCaptureOutput("output is not present yet") from exc
-        if prefix != b"\x89PNG\r\n\x1a\n":
-            if len(prefix) < 8:
-                raise _IncompleteCaptureOutput("PNG signature is incomplete")
-            raise _InvalidCaptureOutput("GNOME screenshot format is not PNG")
 
-        with Image.open(path) as image:
-            if image.format != "PNG":
-                raise _InvalidCaptureOutput("GNOME screenshot format is not PNG")
-            if image.width < minimum_size[0] or image.height < minimum_size[1]:
-                raise _InvalidCaptureOutput("GNOME screenshot is smaller than the verified client")
-            image.verify()
-        with Image.open(path) as image:
-            if image.format != "PNG":
-                raise _InvalidCaptureOutput("GNOME screenshot format changed")
-            if image.width < minimum_size[0] or image.height < minimum_size[1]:
-                raise _InvalidCaptureOutput("GNOME screenshot is smaller than the verified client")
-            image.load()
-    except (_IncompleteCaptureOutput, _InvalidCaptureOutput):
-        raise
-    except UnidentifiedImageError as exc:
-        raise _IncompleteCaptureOutput(f"PNG is not decodable yet: {exc}") from exc
-    except DriverError:
-        raise
-    except (FileNotFoundError, OSError, SyntaxError, ValueError) as exc:
-        raise _IncompleteCaptureOutput(f"GNOME screenshot is not a complete PNG: {exc}") from exc
+def _producer_failure(process: subprocess.Popen[str], context: str) -> DriverError:
+    """Preserve a terminal producer exit and its actual stderr."""
+
+    return _driver_error(capture.producer_failure(process, context))
+
+
+@_identity_latency_decorator("png_publication")
+def _wait_for_complete_png(
+    path: Path,
+    minimum_size: tuple[int, int],
+    deadline_monotonic: float,
+    *,
+    check: Callable[[], None] | None = None,
+    process: subprocess.Popen[str] | None = None,
+    protocol_socket: socket.socket | None = None,
+) -> None:
+    try:
+        capture.wait_for_complete_png(
+            path,
+            minimum_size,
+            deadline_monotonic,
+            check=check,
+            process=process,
+            protocol_socket=protocol_socket,
+        )
+    except capture.CaptureError as exc:
+        raise _driver_error(exc) from exc
 
 
 def _validate_exact_png(path: Path, size: tuple[int, int]) -> None:
@@ -590,82 +540,6 @@ def _json_record(
     if not isinstance(record, dict):
         raise DriverError("telemetry owner protocol record is not an object")
     return record
-
-
-def _producer_failure(process: subprocess.Popen[str], context: str) -> DriverError:
-    """Preserve a terminal producer exit and its actual stderr."""
-
-    return_code = process.poll()
-    detail = ""
-    try:
-        _stdout, stderr = process.communicate(timeout=0)
-        if stderr:
-            detail = stderr.strip()
-    except (OSError, ValueError, subprocess.SubprocessError):
-        pass
-    suffix = f"; stderr={detail!r}" if detail else ""
-    return DriverError(f"{context}: exit={return_code}{suffix}")
-
-
-@_identity_latency_decorator("png_publication")
-def _wait_for_complete_png(
-    path: Path,
-    minimum_size: tuple[int, int],
-    deadline_monotonic: float,
-    *,
-    check: Callable[[], None] | None = None,
-    process: subprocess.Popen[str] | None = None,
-    protocol_socket: socket.socket | None = None,
-) -> None:
-    last_error = "output is not present yet"
-    while True:
-        if check is not None:
-            check()
-        try:
-            _validate_complete_png(path, minimum_size)
-            if check is not None:
-                check()
-            return
-        except _InvalidCaptureOutput:
-            raise
-        except _IncompleteCaptureOutput as exc:
-            last_error = str(exc)
-        if process is not None:
-            return_code = process.poll()
-            if return_code is not None:
-                if return_code != 0:
-                    raise _producer_failure(
-                        process, f"telemetry producer exited before PNG completion: {last_error}"
-                    )
-                if check is not None:
-                    check()
-                try:
-                    _validate_complete_png(path, minimum_size)
-                except _InvalidCaptureOutput:
-                    raise
-                except _IncompleteCaptureOutput as exc:
-                    raise _producer_failure(
-                        process, f"telemetry producer exited before PNG completion: {exc}"
-                    ) from exc
-                if check is not None:
-                    check()
-                return
-        if protocol_socket is not None:
-            readable, _writable, _exceptional = select.select([protocol_socket], [], [], 0)
-            if readable:
-                try:
-                    if not protocol_socket.recv(1, socket.MSG_PEEK):
-                        if process is not None:
-                            raise _producer_failure(
-                                process, "telemetry producer closed before PNG completion"
-                            )
-                        raise DriverError("telemetry producer protocol closed before PNG completion")
-                except BlockingIOError:
-                    pass
-        remaining = deadline_monotonic - time.monotonic()
-        if remaining <= 0:
-            raise DriverError(f"GNOME screenshot did not become a complete PNG before deadline: {last_error}")
-        time.sleep(min(0.01, remaining))
 
 
 def _validate_x11_display_screen(display: str) -> None:
@@ -3268,63 +3142,16 @@ class X11Backend:
 
     @staticmethod
     def _keysym_for_char(char: str) -> str | None:
-        if char.isascii() and char.isalpha() and char.isupper():
-            return f"Shift_L+{char.lower()}"
-        if char.isascii() and char.isalnum():
-            return char
-        return {
-            "/": "slash",
-            " ": "space",
-            "-": "minus",
-            "=": "equal",
-            ";": "semicolon",
-            "'": "apostrophe",
-            ",": "comma",
-            "(": "Shift_L+9",
-            ")": "Shift_L+0",
-        }.get(char)
+        return keyboard.keysym_for_char(char)
 
     @staticmethod
     def _keyboard_transition_argv(
         steps: tuple[tuple[str, str], ...], keymap: Mapping[str, int]
     ) -> tuple[list[str], frozenset[str]]:
-        """Build exact keycode transitions and their bounded held-key set.
-
-        Numeric keycode tokens make xdotool send the measured physical key
-        directly. Passing modifier keysyms through xdotool's keysym path also
-        causes it to synthesize that modifier from the key's own modifier map,
-        producing an unmatched raw release on this server.
-        """
-
-        if not steps or not isinstance(keymap, Mapping):
-            raise DriverError("keyboard transition chain is empty")
-        argv = ["xdotool"]
-        held: list[str] = []
-        for phase, keysym in steps:
-            if not isinstance(keysym, str) or not re.fullmatch(r"[A-Za-z0-9_.+-]+", keysym):
-                raise DriverError("keyboard transition keysym is malformed")
-            keycode = keymap.get(keysym)
-            if isinstance(keycode, bool) or not isinstance(keycode, int) or not 8 <= keycode <= 255:
-                raise DriverError(f"keyboard transition keysym {keysym!r} has no measured keycode")
-            # xdo first tries XStringToKeysym and only then parses a numeric
-            # keycode. Three digits keep keycodes 8 and 9 distinct from the
-            # printable keysyms "8" and "9".
-            physical = f"{keycode:03d}"
-            if phase == "press":
-                if physical in held:
-                    raise DriverError("keyboard transition presses a key that is already held")
-                held.append(physical)
-                argv.extend(("keydown", physical))
-            elif phase == "release":
-                if not held or physical != held[-1]:
-                    raise DriverError("keyboard transition releases a key that is not held")
-                held.pop()
-                argv.extend(("keyup", physical))
-            else:
-                raise DriverError("keyboard transition phase is malformed")
-        if held:
-            raise DriverError("keyboard transition chain leaves a key held")
-        return argv, frozenset(f"{keymap[keysym]:03d}" for _phase, keysym in steps)
+        try:
+            return keyboard.transition_argv(steps, keymap)
+        except keyboard.KeyboardError as exc:
+            raise DriverError(str(exc)) from exc
 
     def _key(
         self,
@@ -3353,20 +3180,12 @@ class X11Backend:
         keymap: Mapping[str, int],
         deadline_monotonic: float | None = None,
     ) -> None:
-        # ``xdotool type`` emits one opaque command with no way to correlate
-        # each character's raw/delivered press and release.  Emit the bounded
-        # allowlisted text as one XTEST key action per character so the
-        # guardian can require the exact multi-character stream and modifier
-        # state while retaining every currently owned key for cancellation.
+        # One XTEST key action per character (see ``crowley.gui.keyboard``).
         for char in text:
-            mapped = self._keysym_for_char(char)
-            if mapped is None:
-                raise DriverError(f"character {char!r} has no allowlisted XTEST keysym")
-            components = tuple(part for part in mapped.split("+") if part)
-            transitions = tuple(
-                [("press", component) for component in components]
-                + [("release", component) for component in reversed(components)]
-            )
+            try:
+                transitions = keyboard.char_transitions(char)
+            except keyboard.KeyboardError as exc:
+                raise DriverError(str(exc)) from exc
             argv, held = self._keyboard_transition_argv(transitions, keymap)
             self._run(
                 argv,

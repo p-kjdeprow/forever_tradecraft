@@ -3930,14 +3930,13 @@ def test_real_x11_producer_result_reaches_arm_and_guardian_max_to_zero_echo(
     """Keep the producer, parser, native arm checks, and Guardian proof connected."""
 
     from crowley.session import driver as driver_module
-    from crowley.session import pointer_execution as pointer_execution_module
     from crowley.session.calibration import KeyboardProbeOperation, KeyboardProbeStep, xinput_hierarchy
     from tests.test_session_native_regressions import _render_events as render_native_events
 
     capture = json.loads(NATIVE_PROFILE_CAPTURE.read_text(encoding="utf-8"))
     rate_directory = tmp_path / "pointer-click-rate"
     rate_directory.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_execution_module, "_session_state_directory", lambda: rate_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: rate_directory)
     outputs = {entry["name"]: entry["stdout"] for entry in capture["commands"]}
     xinput_script = tmp_path / "xinput-fixture"
     xinput_script.write_text(

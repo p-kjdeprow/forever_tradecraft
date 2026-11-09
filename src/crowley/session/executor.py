@@ -14,14 +14,33 @@ from enum import StrEnum
 from statistics import median
 from typing import Final
 
-
-class ExecutorError(ValueError):
-    """Raised when a plan or its input is outside the bounded contract."""
-
-
-class PointerButton(StrEnum):
-    LEFT = "left"
-    RIGHT = "right"
+from crowley.gui.pointer import (
+    _DEFAULT_MOTION_PROFILE,
+    _MIN_EXECUTABLE_DURATION,
+    _MIN_PATH_INTERVALS,
+    BindingMetadata,
+    ClickEvent,
+    ClickEventKind,
+    ClickPlan,
+    DemonstrationRole,
+    ExecutorError,
+    MotionProfile,
+    Point,
+    PointerButton,
+    PointerSample,
+    PointerTarget,
+    PointerTrajectory,
+    Rect,
+    _bounded,
+    _duration,
+    _finite,
+    _path_samples,
+    _positive,
+    _positive_int,
+    _text,
+    plan_pointer_curve,
+    plan_single_click,
+)
 
 
 class KeyRole(StrEnum):
@@ -29,339 +48,6 @@ class KeyRole(StrEnum):
     MOVE_BACKWARD = "move_backward"
     STRAFE_LEFT = "strafe_left"
     STRAFE_RIGHT = "strafe_right"
-
-
-class DemonstrationRole(StrEnum):
-    POINTER = "pointer"
-    CAMERA = "camera"
-    MOVE = "move"
-
-
-class ClickEventKind(StrEnum):
-    PRESS = "press"
-    RELEASE = "release"
-
-
-def _finite(value: float, name: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
-        raise ExecutorError(f"{name} must be finite")
-    return float(value)
-
-
-def _positive(value: float, name: str) -> float:
-    value = _finite(value, name)
-    if value <= 0:
-        raise ExecutorError(f"{name} must be positive")
-    return value
-
-
-def _nonnegative(value: float, name: str) -> float:
-    value = _finite(value, name)
-    if value < 0:
-        raise ExecutorError(f"{name} must be nonnegative")
-    return value
-
-
-def _bounded(value: float, name: str, lower: float, upper: float) -> float:
-    value = _finite(value, name)
-    if not lower <= value <= upper:
-        raise ExecutorError(f"{name} must be in [{lower}, {upper}]")
-    return value
-
-
-def _text(value: str, name: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ExecutorError(f"{name} must be non-empty text")
-    return value
-
-
-def _positive_int(value: int, name: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise ExecutorError(f"{name} must be a positive integer")
-    return value
-
-
-def _pixel_int(
-    value: float,
-    name: str,
-    *,
-    positive: bool = False,
-    allow_negative: bool = False,
-) -> float:
-    """Validate a native pixel coordinate/count without silently rounding it."""
-    value = _finite(value, name)
-    if (
-        value != math.floor(value)
-        or (positive and value < 1)
-        or (not positive and not allow_negative and value < 0)
-    ):
-        raise ExecutorError(f"{name} must be a nonnegative integer pixel value")
-    return value
-
-
-def _quantize_pixel(value: float) -> float:
-    """Round half away from zero, matching deterministic native integer emission."""
-    return float(math.floor(value + 0.5) if value >= 0 else math.ceil(value - 0.5))
-
-
-def _require_pixel_point(point: Point, name: str = "point") -> None:
-    if not isinstance(point, Point):
-        raise ExecutorError(f"{name} must be Point")
-    _pixel_int(point.x, f"{name}.x", allow_negative=True)
-    _pixel_int(point.y, f"{name}.y", allow_negative=True)
-
-
-@dataclass(frozen=True, slots=True)
-class Point:
-    x: float
-    y: float
-
-    def __post_init__(self) -> None:
-        _finite(self.x, "point.x")
-        _finite(self.y, "point.y")
-
-    def to_pixel(self) -> Point:
-        """Return the deterministic integer pixel used by native input emission."""
-        return Point(_quantize_pixel(self.x), _quantize_pixel(self.y))
-
-
-@dataclass(frozen=True, slots=True)
-class Rect:
-    x: float
-    y: float
-    width: float
-    height: float
-
-    def __post_init__(self) -> None:
-        _pixel_int(self.x, "rect.x", allow_negative=True)
-        _pixel_int(self.y, "rect.y", allow_negative=True)
-        _pixel_int(self.width, "rect.width", positive=True)
-        _pixel_int(self.height, "rect.height", positive=True)
-
-    @property
-    def right(self) -> float:
-        """Inclusive coordinate of the final addressable client pixel."""
-        return self.x + self.width - 1
-
-    @property
-    def bottom(self) -> float:
-        """Inclusive coordinate of the final addressable client pixel."""
-        return self.y + self.height - 1
-
-    @property
-    def right_edge(self) -> float:
-        """Exclusive X edge used when converting native width to pixel bounds."""
-        return self.x + self.width
-
-    @property
-    def bottom_edge(self) -> float:
-        """Exclusive Y edge used when converting native height to pixel bounds."""
-        return self.y + self.height
-
-    def contains(self, point: Point) -> bool:
-        return self.x <= point.x <= self.right and self.y <= point.y <= self.bottom
-
-    def clip(self, point: Point) -> Point:
-        return Point(min(max(point.x, self.x), self.right), min(max(point.y, self.y), self.bottom))
-
-    def encloses(self, other: Rect) -> bool:
-        if not isinstance(other, Rect):
-            raise ExecutorError("rect enclosure requires a Rect")
-        return (
-            self.x <= other.x
-            and self.y <= other.y
-            and other.right <= self.right
-            and other.bottom <= self.bottom
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class BindingMetadata:
-    """The minimum identity/capture binding a later driver must revalidate."""
-
-    identity_fingerprint: str
-    capture_id: str
-    capture_sequence: int
-    generation: int
-    target_xid: int
-    target_ancestry: tuple[int, ...]
-    source: str = "native-visual"
-    boot: str = ""
-
-    def __post_init__(self) -> None:
-        _text(self.identity_fingerprint, "identity_fingerprint")
-        _text(self.capture_id, "capture_id")
-        _text(self.source, "source")
-        if not isinstance(self.boot, str) or len(self.boot) > 96:
-            raise ExecutorError("boot must be bounded text")
-        _positive_int(self.capture_sequence, "capture_sequence")
-        _positive_int(self.generation, "generation")
-        _positive_int(self.target_xid, "target_xid")
-        if not isinstance(self.target_ancestry, tuple):
-            raise ExecutorError("target_ancestry must be an immutable tuple")
-        if not self.target_ancestry or self.target_xid not in self.target_ancestry:
-            raise ExecutorError("target_ancestry must contain target_xid")
-        if any(type(item) is not int or item <= 0 for item in self.target_ancestry):
-            raise ExecutorError("target_ancestry must contain positive window ids")
-
-
-@dataclass(frozen=True, slots=True)
-class PointerTarget:
-    control: str
-    bounds: Rect
-    binding: BindingMetadata
-    padding: float = 1.0
-
-    def __post_init__(self) -> None:
-        _text(self.control, "control")
-        if not isinstance(self.bounds, Rect):
-            raise ExecutorError("bounds must be a Rect")
-        if not isinstance(self.binding, BindingMetadata):
-            raise ExecutorError("binding must be BindingMetadata")
-        _pixel_int(self.padding, "padding")
-        if self.padding * 2 >= min(self.bounds.width, self.bounds.height):
-            raise ExecutorError("padding leaves no safe interior target")
-
-    @property
-    def safe_point(self) -> Point:
-        """Return a deterministic addressable pixel near the interior center."""
-        return Point(
-            self.bounds.x + (self.bounds.width - 1) // 2,
-            self.bounds.y + (self.bounds.height - 1) // 2,
-        )
-
-    @property
-    def safe_bounds(self) -> Rect:
-        return Rect(
-            self.bounds.x + self.padding,
-            self.bounds.y + self.padding,
-            self.bounds.width - 2 * self.padding,
-            self.bounds.height - 2 * self.padding,
-        )
-
-
-@dataclass(frozen=True, slots=True)
-class MotionProfile:
-    """Bounded deterministic motion parameters; no raw demonstrations are retained.
-
-    ``duration_intercept`` and ``duration_slope`` are the fitted timing model
-    parameters.  The model is ``intercept + slope * log2(1 + distance /
-    target_width)``.  ``preferred_speed`` remains a compatible role-specific
-    displacement/pulse preference; it is not another pointer-duration term.
-    """
-
-    preferred_speed: float = 900.0
-    min_duration: float = 0.08
-    max_duration: float = 2.0
-    sample_hz: float = 60.0
-    curvature: float = 0.08
-    min_dwell: float = 0.05
-    max_dwell: float = 0.35
-    role: DemonstrationRole = DemonstrationRole.POINTER
-    duration_intercept: float = 0.25
-    duration_slope: float = 0.095
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.role, DemonstrationRole):
-            raise ExecutorError("profile role must be a closed DemonstrationRole value")
-        _bounded(self.preferred_speed, "preferred_speed", 1.0, 5000.0)
-        _bounded(self.min_duration, "min_duration", _MIN_EXECUTABLE_DURATION, 10.0)
-        # Keep saved profiles inside the installed xdotool/Guardian budgets.
-        _bounded(self.max_duration, "max_duration", self.min_duration, 4.0)
-        _bounded(self.sample_hz, "sample_hz", 10.0, 240.0)
-        if self.min_duration * self.sample_hz < _MIN_PATH_INTERVALS:
-            raise ExecutorError("min_duration and sample_hz must provide three bounded path intervals")
-        if math.ceil(self.max_duration * self.sample_hz) + 1 > _MAX_PATH_SAMPLES:
-            raise ExecutorError("duration and sample_hz exceed the bounded path sample budget")
-        _bounded(self.curvature, "curvature", -0.35, 0.35)
-        _bounded(self.min_dwell, "min_dwell", _MIN_EXECUTABLE_DURATION, 2.0)
-        _bounded(self.max_dwell, "max_dwell", self.min_dwell, 2.0)
-        _bounded(self.duration_intercept, "duration_intercept", _MIN_EXECUTABLE_DURATION, 2.0)
-        _bounded(self.duration_slope, "duration_slope", 0.001, 1.0)
-
-
-@dataclass(frozen=True, slots=True)
-class PointerSample:
-    at: float
-    point: Point
-
-    def __post_init__(self) -> None:
-        _require_pixel_point(self.point, "sample.point")
-        _nonnegative(self.at, "sample.at")
-
-
-@dataclass(frozen=True, slots=True)
-class PointerTrajectory:
-    samples: tuple[PointerSample, ...]
-    duration: float
-    endpoint: Point
-    binding: BindingMetadata
-    control: str
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.samples, tuple):
-            raise ExecutorError("samples must be an immutable tuple")
-        if not isinstance(self.endpoint, Point) or not isinstance(self.binding, BindingMetadata):
-            raise ExecutorError("trajectory endpoint and binding have invalid types")
-        _text(self.control, "control")
-        if len(self.samples) < 2:
-            raise ExecutorError("trajectory requires a start and endpoint")
-        _positive(self.duration, "trajectory.duration")
-        if self.samples[-1].point != self.endpoint:
-            raise ExecutorError("trajectory endpoint must be exact")
-        previous = -1.0
-        for sample in self.samples:
-            if not isinstance(sample, PointerSample):
-                raise ExecutorError("trajectory samples must be PointerSample values")
-            if sample.at < previous:
-                raise ExecutorError("trajectory times must be monotonic")
-            previous = sample.at
-        if self.samples[0].at != 0.0 or self.samples[-1].at != self.duration:
-            raise ExecutorError("trajectory must start at zero and end at duration")
-
-
-@dataclass(frozen=True, slots=True)
-class ClickEvent:
-    kind: ClickEventKind
-    at: float
-    point: Point
-    button: PointerButton
-
-    def __post_init__(self) -> None:
-        if not isinstance(self.kind, ClickEventKind):
-            raise ExecutorError("click event kind must be ClickEventKind")
-        _require_pixel_point(self.point, "click event point")
-        if not isinstance(self.button, PointerButton):
-            raise ExecutorError("click event button must be PointerButton")
-        _nonnegative(self.at, "click event time")
-
-
-@dataclass(frozen=True, slots=True)
-class ClickPlan:
-    point: Point
-    dwell: float
-    button: PointerButton
-    binding: BindingMetadata
-    control: str
-    client_bounds: Rect
-
-    def __post_init__(self) -> None:
-        _require_pixel_point(self.point, "click point")
-        if not isinstance(self.button, PointerButton):
-            raise ExecutorError("click button must be PointerButton")
-        if not isinstance(self.binding, BindingMetadata):
-            raise ExecutorError("binding must be BindingMetadata")
-        if not isinstance(self.client_bounds, Rect) or not self.client_bounds.contains(self.point):
-            raise ExecutorError("click point must be inside verified client bounds")
-        _text(self.control, "control")
-        _bounded(self.dwell, "dwell", _MIN_EXECUTABLE_DURATION, 2.0)
-
-    @property
-    def events(self) -> tuple[ClickEvent, ClickEvent]:
-        return (
-            ClickEvent(ClickEventKind.PRESS, 0.0, self.point, self.button),
-            ClickEvent(ClickEventKind.RELEASE, self.dwell, self.point, self.button),
-        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,9 +216,6 @@ class MotionDemonstration:
         _bounded(self.curvature, "demonstration curvature", -0.35, 0.35)
 
 
-_MAX_PATH_SAMPLES: Final = 4096
-_MIN_PATH_INTERVALS: Final = 3.0
-_MIN_EXECUTABLE_DURATION: Final = 0.02
 _MIN_MOVE_PULSE: Final = 0.05
 _MAX_MOVE_PULSE: Final = 0.35
 _MIN_DURATION_INTERCEPT: Final = _MIN_EXECUTABLE_DURATION
@@ -546,131 +229,8 @@ _MAX_DURATION_SLOPE: Final = 1.0
 CAMERA_ENDPOINT_TOLERANCE_PIXELS: Final = 40.0
 
 
-def _smoothstep(value: float) -> float:
-    return value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
-
-
-def _path_samples(
-    start: Point,
-    end: Point,
-    bounds: Rect,
-    duration: float,
-    sample_hz: float,
-    curvature: float,
-) -> tuple[PointerSample, ...]:
-    start = start.to_pixel()
-    end = end.to_pixel()
-    if not bounds.contains(start) or not bounds.contains(end):
-        raise ExecutorError("path endpoints must be inside client bounds")
-    distance = math.hypot(end.x - start.x, end.y - start.y)
-    if distance <= 0:
-        raise ExecutorError("path endpoints must differ")
-    if duration * sample_hz < _MIN_PATH_INTERVALS:
-        raise ExecutorError("duration and sample rate must provide three bounded intervals")
-    midpoint = Point((start.x + end.x) / 2, (start.y + end.y) / 2)
-    perpendicular = Point(-(end.y - start.y) / distance, (end.x - start.x) / distance)
-    control = bounds.clip(
-        Point(
-            # A quadratic Bézier reaches half its control-point offset at
-            # its midpoint.  Doubling the control offset therefore makes the
-            # observed peak deviation equal the stored curvature fraction.
-            midpoint.x + perpendicular.x * distance * curvature * 2.0,
-            midpoint.y + perpendicular.y * distance * curvature * 2.0,
-        )
-    )
-    count = min(_MAX_PATH_SAMPLES - 1, max(1, math.ceil(duration * sample_hz)))
-    samples: list[PointerSample] = []
-    for index in range(count + 1):
-        linear = index / count
-        t = 0.0 if index == 0 else duration if index == count else duration * linear
-        progress = _smoothstep(linear)
-        one_minus = 1.0 - progress
-        point = Point(
-            one_minus * one_minus * start.x
-            + 2 * one_minus * progress * control.x
-            + progress * progress * end.x,
-            one_minus * one_minus * start.y
-            + 2 * one_minus * progress * control.y
-            + progress * progress * end.y,
-        )
-        emitted = end if index == count else start if index == 0 else point.to_pixel()
-        if not bounds.contains(emitted):
-            raise ExecutorError("quantized path sample escaped client bounds")
-        samples.append(PointerSample(t, emitted))
-    return tuple(samples)
-
-
-def _duration(distance: float, target_width: float, profile: MotionProfile) -> float:
-    """Return the bounded Fitts-style movement duration for one target."""
-    index_of_difficulty = math.log2(1.0 + distance / max(target_width, 0.1))
-    requested = profile.duration_intercept + profile.duration_slope * index_of_difficulty
-    return min(profile.max_duration, max(profile.min_duration, requested))
-
-
-_DEFAULT_MOTION_PROFILE: Final = MotionProfile()
 _DEFAULT_CAMERA_PROFILE: Final = MotionProfile(role=DemonstrationRole.CAMERA)
 _DEFAULT_WAIT_POLICY: Final = WaitPolicy()
-
-
-def plan_pointer_curve(
-    start: Point,
-    target: PointerTarget,
-    client_bounds: Rect,
-    *,
-    profile: MotionProfile = _DEFAULT_MOTION_PROFILE,
-) -> PointerTrajectory:
-    """Build a bounded, smooth pointer path to the target's safe interior."""
-    if (
-        not isinstance(start, Point)
-        or not isinstance(target, PointerTarget)
-        or not isinstance(client_bounds, Rect)
-    ):
-        raise ExecutorError("pointer start, target and client_bounds have invalid types")
-    if not isinstance(profile, MotionProfile):
-        raise ExecutorError("profile must be MotionProfile")
-    if profile.role is not DemonstrationRole.POINTER:
-        raise ExecutorError("pointer plan requires a pointer profile")
-    start = start.to_pixel()
-    endpoint = target.safe_point
-    if not client_bounds.encloses(target.bounds):
-        raise ExecutorError("target must be inside client bounds")
-    distance = math.hypot(endpoint.x - start.x, endpoint.y - start.y)
-    if distance <= 0:
-        raise ExecutorError("pointer start already equals target; no movement plan")
-    duration = _duration(distance, min(target.safe_bounds.width, target.safe_bounds.height), profile)
-    samples = _path_samples(start, endpoint, client_bounds, duration, profile.sample_hz, profile.curvature)
-    return PointerTrajectory(samples, duration, endpoint, target.binding, target.control)
-
-
-def plan_single_click(
-    target: PointerTarget,
-    client_bounds: Rect,
-    *,
-    button: PointerButton = PointerButton.LEFT,
-    dwell: float | None = None,
-    profile: MotionProfile = _DEFAULT_MOTION_PROFILE,
-) -> ClickPlan:
-    """Build one semantic-button press and matching release at a safe target point."""
-    if not isinstance(target, PointerTarget) or not isinstance(client_bounds, Rect):
-        raise ExecutorError("click target and client_bounds have invalid types")
-    if not client_bounds.encloses(target.bounds):
-        raise ExecutorError("click target must be inside verified client bounds")
-    if not isinstance(button, PointerButton):
-        raise ExecutorError("click button must be PointerButton")
-    if not isinstance(profile, MotionProfile):
-        raise ExecutorError("profile must be MotionProfile")
-    if profile.role is not DemonstrationRole.POINTER:
-        raise ExecutorError("click plan requires a pointer profile")
-    selected_dwell = (profile.min_dwell + profile.max_dwell) / 2 if dwell is None else dwell
-    _bounded(selected_dwell, "dwell", profile.min_dwell, profile.max_dwell)
-    return ClickPlan(
-        target.safe_point,
-        selected_dwell,
-        button,
-        target.binding,
-        target.control,
-        client_bounds,
-    )
 
 
 def plan_key_hold(role: KeyRole, duration: float, binding: BindingMetadata) -> KeyHoldPlan:

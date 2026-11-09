@@ -1562,8 +1562,6 @@ def test_private_xvfb_calibration_workflow_captures_every_typed_motion_transitio
 ) -> None:
     """Run the owned workflow around a private GTK target and retain its full probe trace."""
 
-    from crowley.session import pointer_execution as pointer_execution_module
-
     xvfb, display, x11, xdisplay = start_private_xvfb(
         lambda display_fd: (
             "Xvfb",
@@ -1606,7 +1604,7 @@ def test_private_xvfb_calibration_workflow_captures_every_typed_motion_transitio
         )
         rate_directory = tmp_path / "pointer-click-rate"
         rate_directory.mkdir(mode=0o700)
-        monkeypatch.setattr(pointer_execution_module, "_session_state_directory", lambda: rate_directory)
+        monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: rate_directory)
         profile = DriverProfile(display=display, xauthority=str(xauthority))
         backend = X11Backend(
             profile, input_tool=fixture_input_tool(tmp_path / "input-tool", xdotool_executable)

@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from crowley.gui import click_gate
 from crowley.session import pointer_execution
 from crowley.session.calibration import XTestInputProfile
 from crowley.session.config import SessionConfig
@@ -196,7 +197,7 @@ def _motion_pair(
 def _driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, executable_source: str = "") -> DesktopDriver:
     rate_directory = tmp_path / "pointer-rate-state"
     rate_directory.mkdir(mode=0o700, exist_ok=True)
-    monkeypatch.setattr(pointer_execution, "_session_state_directory", lambda: rate_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: rate_directory)
     backend = X11Backend(
         DriverProfile(display=":actions", xauthority=str(tmp_path / "Xauthority")),
         input_tool=fixture_input_tool(tmp_path / "tool", executable_source or "/bin/true"),
@@ -635,7 +636,7 @@ def test_runtime_pointer_gesture_seed_and_emission_timing_reach_driver_receipt(
     backend._focus = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
     backend.pointer_position = lambda **_kwargs: tuple(pointer)  # type: ignore[method-assign]
     backend._run = run_action  # type: ignore[method-assign]
-    monkeypatch.setattr(pointer_execution.secrets, "randbits", lambda _bits: seed)
+    monkeypatch.setattr("crowley.gui.pointer.secrets.randbits", lambda _bits: seed)
     monkeypatch.setattr(driver, "_verify_current_xtest_profile", lambda *_args, **_kwargs: None)
     anchor = MeasuredAnchor(
         action="logout",
@@ -835,7 +836,7 @@ def test_executor_receipt_is_call_local_across_backend_substitution(
     backend.consume_measured_anchor = lambda _name, _anchor: backend._consumed_anchor_seals.add(
         anchor.evidence_hash
     )  # type: ignore[method-assign]
-    monkeypatch.setattr(pointer_execution.secrets, "randbits", lambda _bits: 0x123456789)
+    monkeypatch.setattr("crowley.gui.pointer.secrets.randbits", lambda _bits: 0x123456789)
     generation = driver.guardian.arm(driver._input_evidence)
     backend.activate_generation(generation)
     if cleanup_failure:
@@ -3331,7 +3332,7 @@ def test_world_click_deadline_after_durable_precommit_refuses_press(
         hover_name="Mailbox",
         chat_focused=False,
     )
-    original_write_state = pointer_execution._write_state
+    original_write_state = click_gate._write_state
 
     def slow_write_state(directory, state):  # type: ignore[no-untyped-def]
         original_write_state(directory, state)
@@ -3339,7 +3340,7 @@ def test_world_click_deadline_after_durable_precommit_refuses_press(
         while time.monotonic() < deadline:
             time.sleep(0.005)
 
-    monkeypatch.setattr(pointer_execution, "_write_state", slow_write_state)
+    monkeypatch.setattr("crowley.gui.click_gate._write_state", slow_write_state)
     deadline = time.monotonic() + 0.25
     try:
         with pytest.raises(DriverError, match="deadline"):
@@ -3354,7 +3355,7 @@ def test_world_click_deadline_after_durable_precommit_refuses_press(
                 target_name="Mailbox",
             )
         assert boundary_entered.is_set()
-        state = pointer_execution._read_state(tmp_path / "pointer-rate-state")
+        state = click_gate._read_state(tmp_path / "pointer-rate-state")
         assert state is not None
         assert state["lastPressMonotonicNs"] is None
         assert state["nextAllowedMonotonicNs"] > time.monotonic_ns()
@@ -3448,7 +3449,7 @@ def test_world_click_guardian_wait_expiry_retains_actual_press_rate_record(
                 target_name="Mailbox",
             )
         assert boundary_entered.is_set()
-        state = pointer_execution._read_state(tmp_path / "pointer-rate-state")
+        state = click_gate._read_state(tmp_path / "pointer-rate-state")
         assert state is not None
         assert isinstance(state["lastPressMonotonicNs"], int)
         assert commands and commands[-1][1:3] == ["mousedown", "1"]

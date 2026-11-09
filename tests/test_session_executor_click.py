@@ -505,7 +505,7 @@ def test_unarmed_lua_button_click_composes_through_daemon_and_records_dry_run(
 
     driver.measured_anchor_provider = provide_anchor  # type: ignore[method-assign]
     driver._verify_current_xtest_profile = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
-    monkeypatch.setattr(pointer_execution.secrets, "randbits", lambda _bits: 0x123456789)
+    monkeypatch.setattr("crowley.gui.pointer.secrets.randbits", lambda _bits: 0x123456789)
     generation = driver.guardian.arm(driver._input_evidence)
     backend.activate_generation(generation)
     click_dispatch_count = 0

@@ -4,6 +4,7 @@
     "companion": 0,
     "core": 0,
     "data": 0,
+    "gui": 0,
     "native": 5,
     "ops": 4,
     "server": 0,

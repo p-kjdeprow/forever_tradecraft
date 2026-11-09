@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from crowley.gui import click_gate
 from crowley.session import pointer_execution as pointer_exec
 from crowley.session.executor import BindingMetadata, Point, PointerButton, PointerTarget, Rect
 
@@ -76,11 +77,10 @@ def test_native_motion_argv_is_positive_bounded_and_rejects_warp() -> None:
 def test_failed_durable_precommit_refuses_before_click_go(tmp_path: Path, monkeypatch) -> None:
     state_dir = tmp_path / "runtime"
     state_dir.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_exec, "_session_state_directory", lambda: state_dir)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: state_dir)
     permit = pointer_exec.acquire_click_rate_permit()
     monkeypatch.setattr(
-        pointer_exec,
-        "_write_state",
+        "crowley.gui.click_gate._write_state",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(pointer_exec.PointerExecutionError("disk full")),
     )
     try:
@@ -96,8 +96,8 @@ def test_deadline_after_durable_precommit_keeps_reservation_without_press(
 ) -> None:
     state_dir = tmp_path / "runtime"
     state_dir.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_exec, "_session_state_directory", lambda: state_dir)
-    original_write_state = pointer_exec._write_state
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: state_dir)
+    original_write_state = click_gate._write_state
     boundary_entered = threading.Event()
     deadline: float
 
@@ -107,14 +107,14 @@ def test_deadline_after_durable_precommit_keeps_reservation_without_press(
         while time.monotonic() < deadline:
             time.sleep(0.005)
 
-    monkeypatch.setattr(pointer_exec, "_write_state", slow_write_state)
+    monkeypatch.setattr("crowley.gui.click_gate._write_state", slow_write_state)
     permit = pointer_exec.acquire_click_rate_permit()
     deadline = time.monotonic() + 0.25
     try:
         with pytest.raises(pointer_exec.PointerExecutionError, match="after durable precommit"):
             permit.precommit(deadline_monotonic=deadline)
         assert boundary_entered.is_set()
-        state = pointer_exec._read_state(state_dir)
+        state = click_gate._read_state(state_dir)
         assert state is not None
         assert state["lastPressMonotonicNs"] is None
         assert state["nextAllowedMonotonicNs"] > time.monotonic_ns()
@@ -127,9 +127,11 @@ def test_deadline_after_durable_precommit_keeps_reservation_without_press(
 def test_boot_identity_change_resets_only_the_old_monotonic_domain(tmp_path: Path, monkeypatch) -> None:
     state_dir = tmp_path / "runtime"
     state_dir.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_exec, "_session_state_directory", lambda: state_dir)
-    monkeypatch.setattr(pointer_exec, "_boot_identity", lambda: "11111111-1111-1111-1111-111111111111")
-    pointer_exec._write_state(
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: state_dir)
+    monkeypatch.setattr(
+        "crowley.gui.click_gate._boot_identity", lambda: "11111111-1111-1111-1111-111111111111"
+    )
+    click_gate._write_state(
         state_dir,
         {
             "version": 1,
@@ -149,10 +151,10 @@ def test_process_death_after_go_boundary_preserves_spacing_for_next_owner(
 ) -> None:
     state_dir = tmp_path / "runtime"
     state_dir.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_exec, "_session_state_directory", lambda: state_dir)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: state_dir)
     # Keep the non-configurable one-second click interval while making the
     # conservative pre-press latency reserve short enough for this test.
-    monkeypatch.setattr(pointer_exec, "_GO_LATENCY_RESERVE_NS", 50_000_000)
+    monkeypatch.setattr("crowley.gui.click_gate._GO_LATENCY_RESERVE_NS", 50_000_000)
     context = multiprocessing.get_context("fork")
     parent, child = context.Pipe(duplex=False)
     owner = context.Process(target=_reserve_then_wait, args=(str(state_dir), child))
@@ -161,7 +163,7 @@ def test_process_death_after_go_boundary_preserves_spacing_for_next_owner(
     try:
         assert parent.poll(3.0)
         assert parent.recv() == "GO_BOUNDARY_REACHED"
-        state = pointer_exec._read_state(state_dir)
+        state = click_gate._read_state(state_dir)
         assert state is not None
         assert state["nextAllowedMonotonicNs"] > time.monotonic_ns()
         owner.kill()

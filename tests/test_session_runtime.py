@@ -26,7 +26,6 @@ from crowley.core.luawriter import render_assignment
 from crowley.core.scanformat import encode_json_payload
 from crowley.core.watchlist import load_catalog
 from crowley.session import Controller, ControllerState, DesktopDriver, SessionConfig, SessionDaemon
-from crowley.session import pointer_execution as pointer_execution_module
 from crowley.session.calibration import (
     LinuxProcStatusVmHwmReset5,
     NativeCalibrationRunner,
@@ -75,7 +74,7 @@ def _private_pointer_click_rate_state(tmp_path: Path, monkeypatch: pytest.Monkey
 
     state_directory = tmp_path / "pointer-click-rate"
     state_directory.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_execution_module, "_session_state_directory", lambda: state_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: state_directory)
 
 
 class _FixtureNativeMemoryMeter(LinuxProcStatusVmHwmReset5):

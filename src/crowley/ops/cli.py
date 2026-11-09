@@ -8,11 +8,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+from crowley.gui.capture import CaptureError
+from crowley.gui.input_tool import InputToolError
+from crowley.gui.pointer import ExecutorError, PointerExecutionError
 from crowley.ops import backup, battle_net, doctor, health, install
-from crowley.session.driver import DriverError
-from crowley.session.executor import ExecutorError
-from crowley.session.input_tool import InputToolError
-from crowley.session.pointer_execution import PointerExecutionError
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -69,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
             PointerExecutionError,
             InputToolError,
             ExecutorError,
-            DriverError,
+            CaptureError,
             subprocess.TimeoutExpired,
             OSError,
         ) as exc:

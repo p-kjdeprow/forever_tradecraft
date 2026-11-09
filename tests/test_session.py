@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-import crowley.session.protocol as protocol_module
+import crowley.gui.frames as protocol_module
 from crowley.session import Controller, ControllerState, SessionMode
 from crowley.session.calibration import (
     CalibrationError,

@@ -1050,6 +1050,6 @@ def test_manifest_rejects_legacy_missing_build_inputs(tmp_path: Path) -> None:
 def test_private_artifact_rejects_foreign_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = _artifact_copy(tmp_path)
     current_uid = os.getuid()
-    monkeypatch.setattr("crowley.session.input_tool.os.getuid", lambda: current_uid + 1)
+    monkeypatch.setattr("crowley.gui.input_tool.os.getuid", lambda: current_uid + 1)
     with pytest.raises(InputToolError, match="not user-owned"):
         verify_artifact(root)

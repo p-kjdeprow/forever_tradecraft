@@ -23,8 +23,9 @@ import signal
 import subprocess
 import time
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any, Protocol, TextIO
+
+from crowley.gui.process import OwnedGameMatcher, owned_game_pids
 
 # Blockers recorded by the controller on a loaded host that clear on a fresh
 # passive-readiness pass.  Matching is an exact ``str.startswith``; anything
@@ -85,10 +86,9 @@ class SystemRelaunchRunner:
         term_wait: float = 20.0,
         kill_wait: float = 10.0,
     ) -> None:
-        self._comm = game_executable[:15]  # /proc/PID/comm is truncated to 15 bytes
-        self._argv0 = game_argv0
-        self._prefix = wine_prefix
-        self._uid = os.getuid()
+        self._matcher = OwnedGameMatcher.for_game(
+            game_executable=game_executable, game_argv0=game_argv0, wine_prefix=wine_prefix
+        )
         self._term_wait = term_wait
         self._kill_wait = kill_wait
 
@@ -107,24 +107,7 @@ class SystemRelaunchRunner:
             raise RuntimeError(f"systemctl start failed: {result.stderr.decode(errors='replace').strip()}")
 
     def _owned_game_pids(self) -> list[int]:
-        pids: list[int] = []
-        for proc in Path("/proc").iterdir():
-            if not proc.name.isdigit():
-                continue
-            try:
-                if (proc / "comm").read_text().rstrip("\n") != self._comm:
-                    continue
-                if proc.stat().st_uid != self._uid:
-                    continue
-                argv0 = (proc / "cmdline").read_bytes().split(b"\0", 1)[0].decode(errors="replace")
-                if argv0 != self._argv0:
-                    continue
-                environ = (proc / "environ").read_bytes().split(b"\0")
-            except OSError:
-                continue  # exited, or not ours to read
-            if f"WINEPREFIX={self._prefix}".encode() in environ:
-                pids.append(int(proc.name))
-        return pids
+        return owned_game_pids(self._matcher)
 
     def _signal_all(self, sig: signal.Signals) -> list[int]:
         pids = self._owned_game_pids()

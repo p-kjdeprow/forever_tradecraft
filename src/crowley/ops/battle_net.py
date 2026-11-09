@@ -23,14 +23,19 @@ from pathlib import Path
 
 from PIL import Image
 
-from crowley.platform.paths import XdgDirs
-from crowley.session.executor import BindingMetadata, Point, PointerButton, PointerTarget, Rect
-from crowley.session.input_tool import PinnedInputTool
-from crowley.session.pointer_execution import (
-    acquire_click_rate_permit,
+from crowley.gui import capture
+from crowley.gui.click_gate import acquire_click_rate_permit
+from crowley.gui.input_tool import PinnedInputTool
+from crowley.gui.pointer import (
+    BindingMetadata,
+    Point,
+    PointerButton,
+    PointerTarget,
+    Rect,
     build_pointer_motion_chain,
     plan_human_pointer,
 )
+from crowley.platform.paths import XdgDirs
 
 WINDOW_CLASS_PATTERN = r"^battle\.net\.exe$"
 WINDOW_NAME = "Battle.net"
@@ -203,6 +208,10 @@ def _run(args: Sequence[str]) -> str:
     return completed.stdout
 
 
+def _run_discarding_output(args: list[str], _timeout: float) -> None:
+    _run(args)
+
+
 def find_battle_net_window() -> int:
     """Find the one visible battle.net.exe-class window named exactly Battle.net."""
 
@@ -298,15 +307,11 @@ def _is_window_or_descendant(xid: int, ancestor: int) -> bool:
 
 
 def _capture(directory: Path, display: tuple[int, int]) -> Image.Image:
-    """Capture under the driver's cross-process screenshot lock; wait for a complete PNG."""
-
-    from crowley.session.driver import _capture_lock, _wait_for_complete_png
+    """Capture under the cross-process screenshot lock; wait for a complete PNG."""
 
     path = directory / "battle-net.png"
     deadline = time.monotonic() + _COMMAND_TIMEOUT_SECONDS
-    with _capture_lock(deadline):
-        _run(["gnome-screenshot", "-f", str(path)])
-        _wait_for_complete_png(path, display, deadline)
+    capture.capture_screen(path, display, deadline_monotonic=deadline, run=_run_discarding_output)
     with Image.open(path) as opened:
         image = opened.convert("RGB")
     if image.size != display:

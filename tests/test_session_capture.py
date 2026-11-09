@@ -17,6 +17,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from crowley.gui import capture as capture_module
 from crowley.session import driver as driver_module
 from crowley.session.driver import DriverError, DriverProfile, WindowIdentity, X11Backend
 from tests.test_session_input_tool import fixture_input_tool
@@ -155,13 +156,13 @@ def test_wait_for_complete_png_revocation_wins_before_final_read(
     path.write_bytes(valid[:24])
     process = _BoundaryProcess(path, payload=valid)
     validation_calls: list[int] = []
-    original_validate = driver_module._validate_complete_png
+    original_validate = capture_module.validate_complete_png
 
     def record_validation(*args: object, **kwargs: object) -> None:
         validation_calls.append(1)
         original_validate(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(driver_module, "_validate_complete_png", record_validation)
+    monkeypatch.setattr(capture_module, "validate_complete_png", record_validation)
     checks = 0
 
     def revoke_before_final_read() -> None:

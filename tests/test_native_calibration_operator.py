@@ -22,6 +22,7 @@ from typing import Any
 import pytest
 from PIL import Image, ImageOps
 
+from crowley.gui import click_gate
 from crowley.native import build as native_build
 from crowley.native import matcher as matcher_runtime
 from crowley.native import pins
@@ -53,7 +54,7 @@ def _writable_pointer_rate_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         state.mkdir(mode=0o700, exist_ok=True)
         return state
 
-    monkeypatch.setattr(pointer_execution, "_session_state_directory", state_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", state_directory)
     from crowley.session import input_tool
 
     legacy_tool_root = input_tool.private_tool_root()
@@ -1142,11 +1143,11 @@ def _production_main_owner_fixture(
     # cache before redirecting HOME so the pinned helpers stay discoverable.
     os.environ["XDG_CACHE_HOME"] = str(XdgDirs.from_environ(os.environ).cache_home)
     os.environ["HOME"] = str(fixture_home)
-    from crowley.session import pointer_execution
+    from crowley.gui import click_gate
 
     pointer_state = Path(error_path).parent / "fixture-pointer-state"
     pointer_state.mkdir(mode=0o700, exist_ok=True)
-    pointer_execution._session_state_directory = lambda: pointer_state
+    click_gate._session_state_directory = lambda: pointer_state
 
     if watchdog_info_path:
         real_watchdog_init = operator.Watchdog.__init__
@@ -2597,7 +2598,7 @@ def test_receipt_is_private_atomic_and_rejects_forbidden_fields(tmp_path):
 def test_fixed_input_publishes_before_press_and_clears_after_release(tmp_path: Path, monkeypatch):
     rate_directory = tmp_path / "rate-state"
     rate_directory.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_execution, "_session_state_directory", lambda: rate_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: rate_directory)
 
     class Tool:
         proc_path = "/proc/self/fd/5"
@@ -2659,7 +2660,7 @@ def test_fixed_input_real_owned_click_uses_gesture_gate_and_exact_button_action(
     }
     rate_directory = tmp_path / "rate-state"
     rate_directory.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_execution, "_session_state_directory", lambda: rate_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: rate_directory)
     tool = operator.PinnedInputTool.from_root(artifact)
     watchdog = operator.Watchdog(tool, interval=0.02, environment=environment)
     input_device = operator.FixedInput(tool, watchdog=watchdog, environment=environment)
@@ -2704,7 +2705,7 @@ def test_fixed_input_real_owned_click_uses_gesture_gate_and_exact_button_action(
         assert "--sync" not in rows[0]
         assert rows[1][:3] == ["mousedown", "1", "sleep"]
         assert rows[1][-2:] == ["mouseup", "1"]
-        state = pointer_execution._read_state(rate_directory)
+        state = click_gate._read_state(rate_directory)
         assert state is not None
         assert state["lastPressMonotonicNs"] == result["rateRecordMonotonicNs"]
         assert state["nextAllowedMonotonicNs"] == result["rateRecordMonotonicNs"] + 1_000_000_000
@@ -2768,7 +2769,7 @@ def test_click_complete_deadline_refuses_before_pointer_motion(
 ):
     rate_directory = tmp_path / "rate-state"
     rate_directory.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_execution, "_session_state_directory", lambda: rate_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: rate_directory)
 
     class Tool:
         proc_path = "/proc/self/fd/5"
@@ -2816,7 +2817,7 @@ def test_click_complete_deadline_refuses_before_pointer_motion(
 def test_fixed_input_refusal_before_go_clears_ownership_without_release(tmp_path: Path, monkeypatch):
     rate_directory = tmp_path / "rate-state"
     rate_directory.mkdir(mode=0o700)
-    monkeypatch.setattr(pointer_execution, "_session_state_directory", lambda: rate_directory)
+    monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: rate_directory)
 
     class Tool:
         proc_path = "/proc/self/fd/5"

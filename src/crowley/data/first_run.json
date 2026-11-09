@@ -2,8 +2,8 @@
   "schema_version": 1,
   "id": "first-run",
   "revision": 2,
-  "client_build": "1.60.1.70450",
-  "reviewed_on": "2026-10-16",
+  "client_build": "1.60.1.70862",
+  "reviewed_on": "2026-11-08",
   "initial_price_levels": 20,
   "items": [
     {

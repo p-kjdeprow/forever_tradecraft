@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "targetId": "forever-us-camwow7",
+  "client": {
+    "fullBuild": "1.60.1.70862",
+    "interface": 16001,
+    "executable": "Wow.exe",
+    "windowClass": "wow.exe",
+    "product": "wowf",
+    "productDir": "_forever_",
+    "locale": "enUS"
+  },
+  "context": {
+    "region": "us",
+    "ruleset": "normal",
+    "realm": "CAMWOW US1 Realm 7 PvE",
+    "faction": "Alliance",
+    "house": "us-normal-alliance",
+    "nativeRegionId": 1
+  },
+  "scan": {
+    "catalogId": "first-run",
+    "catalogRevision": 2,
+    "cadenceSeconds": 900,
+    "sweepCapSeconds": 600,
+    "initialPriceLevels": 20
+  },
+  "routeProvenance": "unmeasured on client build 70862"
+}

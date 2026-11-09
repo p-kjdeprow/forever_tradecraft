@@ -4,9 +4,19 @@ umask 077
 
 # Rendered by crowley-ops from the selected packaged target.  The placeholders
 # are target facts; CROWLEY_WINE remains a host-provided Wine binary path.
+#
+# Battle.net is the only component that can issue the game's login ticket, so
+# the game is started through Battle.net's own Play action:
+#   1. ensure one logged-in Battle.net runs in the prefix (Client.SingleInstance
+#      must be "true" so later invocations reach it over IPC instead of starting
+#      a second instance that deletes the saved login token);
+#   2. select the product with one --exec per invocation (Battle.net rejects a
+#      repeated --exec);
+#   3. dismiss any Battle.net dialog, focus Play and activate it with Return.
 GAME_ROOT={{GAME_ROOT}}
 PRODUCT_DIR={{PRODUCT_DIR}}
 EXECUTABLE={{EXECUTABLE}}
+PRODUCT={{PRODUCT}}
 PREFIX={{WINE_PREFIX}}
 WINE="${CROWLEY_WINE:?set CROWLEY_WINE to the reviewed Wine executable}"
 
@@ -15,29 +25,116 @@ XAUTHORITY_VALUE="${XAUTHORITY:?set XAUTHORITY to the reviewed Xwayland authoriz
 [ -r "$XAUTHORITY_VALUE" ] || { printf '%s\n' 'No readable Xauthority for the active desktop.' >&2; exit 1; }
 
 BATTLE_NET="$PREFIX/drive_c/Program Files (x86)/Battle.net/Battle.net.exe"
+BATTLE_NET_USER_DIR="$PREFIX/drive_c/users/$(id -un)"
+BATTLE_NET_CONFIG="$BATTLE_NET_USER_DIR/AppData/Roaming/Battle.net/Battle.net.config"
+BATTLE_NET_LOGS="$BATTLE_NET_USER_DIR/AppData/Local/Battle.net/Logs"
+LOGIN_TIMEOUT_SECONDS=180
+GAME_TIMEOUT_SECONDS=120
+
+fail() {
+    printf '%s\n' "$1" >&2
+    exit 1
+}
 
 OWNER_UID=$(id -u)
 EXPECTED_ARGV0={{EXPECTED_ARGV0}}
-for proc in /proc/[0-9]*; do
-    [ -r "$proc/comm" ] || continue
-    [ "$(sed -n '1p' "$proc/comm")" = "$EXECUTABLE" ] || continue
-    [ -r "$proc/status" ] || continue
-    [ "$(sed -n 's/^Uid:[[:space:]]*\([0-9]*\).*/\1/p' "$proc/status" | sed -n '1p')" = "$OWNER_UID" ] || continue
-    [ -r "$proc/cmdline" ] || continue
-    argv0=$(tr '\000' '\n' < "$proc/cmdline" | sed -n '1p')
-    [ "$argv0" = "$EXPECTED_ARGV0" ] || continue
-    [ -r "$proc/environ" ] || continue
-    tr '\000' '\n' < "$proc/environ" 2>/dev/null | grep -Fqx "WINEPREFIX=$PREFIX" || continue
+owned_game_running() {
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/comm" ] || continue
+        [ "$(sed -n '1p' "$proc/comm")" = "$EXECUTABLE" ] || continue
+        [ -r "$proc/status" ] || continue
+        [ "$(sed -n 's/^Uid:[[:space:]]*\([0-9]*\).*/\1/p' "$proc/status" | sed -n '1p')" = "$OWNER_UID" ] || continue
+        [ -r "$proc/cmdline" ] || continue
+        argv0=$(tr '\000' '\n' < "$proc/cmdline" | sed -n '1p')
+        [ "$argv0" = "$EXPECTED_ARGV0" ] || continue
+        [ -r "$proc/environ" ] || continue
+        tr '\000' '\n' < "$proc/environ" 2>/dev/null | grep -Fqx "WINEPREFIX=$PREFIX" || continue
+        return 0
+    done
+    return 1
+}
+
+# The main Battle.net process has no arguments.  Wine reports its argv0 as the
+# Unix path when it was started from a shell (this launcher) and as the Windows
+# path when a Windows process (autostart, Battle.net's updater) started it.
+# Helper processes carry --type=..., and transient --exec invocations carry
+# --exec=..., so both are excluded by the empty second argument.
+battle_net_running() {
+    for proc in /proc/[0-9]*; do
+        [ -r "$proc/cmdline" ] || continue
+        argv0=$(tr '\000' '\n' < "$proc/cmdline" | sed -n '1p')
+        [ "$argv0" = "$BATTLE_NET" ] || [ "$argv0" = 'C:\Program Files (x86)\Battle.net\Battle.net.exe' ] || continue
+        [ "$(tr '\000' '\n' < "$proc/cmdline" | sed -n '2p')" = '' ] || continue
+        [ "$(sed -n 's/^Uid:[[:space:]]*\([0-9]*\).*/\1/p' "$proc/status" | sed -n '1p')" = "$OWNER_UID" ] || continue
+        tr '\000' '\n' < "$proc/environ" 2>/dev/null | grep -Fqx "WINEPREFIX=$PREFIX" || continue
+        return 0
+    done
+    return 1
+}
+
+if owned_game_running; then
     printf '%s\n' 'Owned WoW client already running; launch refused.' >&2
     exit 0
-done
+fi
+
+[ -f "$GAME_ROOT/$PRODUCT_DIR/$EXECUTABLE" ] || fail "Game executable is missing: $GAME_ROOT/$PRODUCT_DIR/$EXECUTABLE"
+[ -r "$BATTLE_NET_CONFIG" ] || fail "Battle.net configuration is unreadable: $BATTLE_NET_CONFIG"
+grep -Eq '"SingleInstance"[[:space:]]*:[[:space:]]*"true"' "$BATTLE_NET_CONFIG" \
+    || fail 'Battle.net Client.SingleInstance must be "true"; stop Battle.net and set it before launching.'
 
 LOGDIR="${XDG_STATE_HOME:?set XDG_STATE_HOME in the authenticated graphical session}/crowley/executor-evidence"
 mkdir -p -m 0700 "$LOGDIR"
 chmod 700 "$LOGDIR"
-exec env DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" \
-    WINEPREFIX="$PREFIX" WINEARCH=win64 WINEESYNC=1 STAGING_SHARED_MEMORY=1 \
-    DXVK_CONFIG_FILE="$PREFIX/dxvk.conf" DXVK_HUD=compiler \
-    DXVK_STATE_CACHE_PATH="$PREFIX" __GL_DXVK_OPTIMIZATIONS=1 \
-    __GL_SHADER_DISK_CACHE=1 __GL_SHADER_DISK_CACHE_PATH="$PREFIX" WINEDEBUG=-all \
-    "$WINE" "$BATTLE_NET" --exec='launch WoW' --exec='focus play'
+
+game_env() {
+    env DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" \
+        WINEPREFIX="$PREFIX" WINEARCH=win64 WINEESYNC=1 STAGING_SHARED_MEMORY=1 \
+        DXVK_CONFIG_FILE="$PREFIX/dxvk.conf" DXVK_HUD=compiler \
+        DXVK_STATE_CACHE_PATH="$PREFIX" __GL_DXVK_OPTIMIZATIONS=1 \
+        __GL_SHADER_DISK_CACHE=1 __GL_SHADER_DISK_CACHE_PATH="$PREFIX" WINEDEBUG=-all \
+        "$@"
+}
+
+battle_net_exec() {
+    game_env "$WINE" "$BATTLE_NET" --exec="$1" >>"$LOGDIR/launcher.log" 2>&1 </dev/null
+}
+
+newest_battle_net_log() {
+    ls -t "$BATTLE_NET_LOGS"/battle.net-*.log 2>/dev/null | sed -n '1p'
+}
+
+if ! battle_net_running; then
+    before=$(newest_battle_net_log)
+    game_env setsid "$WINE" "$BATTLE_NET" >>"$LOGDIR/launcher.log" 2>&1 </dev/null &
+    waited=0
+    while :; do
+        log=$(newest_battle_net_log)
+        if [ -n "$log" ] && [ "$log" != "$before" ]; then
+            grep -Fq "GameAccount added to family: family=WoW account=GameAccount(WoW:$PRODUCT " "$log" && break
+            grep -Fq 'UAuth: browser state changed: LoginCredential' "$log" \
+                && fail 'Battle.net requires an interactive login; its saved login token is gone.'
+        fi
+        [ "$waited" -lt "$LOGIN_TIMEOUT_SECONDS" ] || fail 'Battle.net did not finish logging in.'
+        sleep 1
+        waited=$((waited + 1))
+    done
+fi
+
+battle_net_exec "launch_uid $PRODUCT"
+battle_net_exec 'focus play'
+
+window=$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool search --onlyvisible --name '^Battle\.net$' | sed -n '1p')
+[ -n "$window" ] || fail 'No visible Battle.net window to activate Play in.'
+DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool windowactivate --sync "$window"
+DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool key --clearmodifiers Escape
+battle_net_exec 'focus play'
+DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool windowactivate --sync "$window"
+DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool key --clearmodifiers Return
+
+waited=0
+until owned_game_running; do
+    [ "$waited" -lt "$GAME_TIMEOUT_SECONDS" ] || fail 'Battle.net did not start the game.'
+    sleep 1
+    waited=$((waited + 1))
+done
+printf '%s\n' 'WoW client started by Battle.net.'

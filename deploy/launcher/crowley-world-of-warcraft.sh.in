@@ -12,13 +12,17 @@ umask 077
 #      a second instance that deletes the saved login token);
 #   2. select the product with one --exec per invocation (Battle.net rejects a
 #      repeated --exec);
-#   3. un-maximize the Battle.net window (keyboard Play activation does nothing
-#      while it is maximized), dismiss any dialog, focus Play and activate it
-#      with Return;
-#   4. make the game window real fullscreen and press Return once at character
-#      select to enter the world.
-# Only keyboard and window-manager operations are used here; this launcher never
-# clicks.
+#   3. un-maximize the Battle.net window, activate it and click Play with
+#      `crowley-ops battle-net-play`.  After a fresh start the embedded Chromium
+#      view has no keyboard focus, so Return does nothing and Tab reaches the
+#      logo menu (which contains Log Out); the click is therefore the only safe
+#      activation.  It is a full simulated human click (curved, Fitts-timed
+#      pointer path through the pinned XTEST emitter, held under the canonical
+#      click-rate gate), never a bare click command.  If the game has not started
+#      after GAME_START_ATTEMPT_SECONDS the click is retried, at most
+#      PLAY_ATTEMPTS clicks in all;
+#   4. make the game window real fullscreen and press Return once (keyboard, to
+#      the game window) at character select to enter the world.
 GAME_ROOT={{GAME_ROOT}}
 PRODUCT_DIR={{PRODUCT_DIR}}
 EXECUTABLE={{EXECUTABLE}}
@@ -37,6 +41,8 @@ BATTLE_NET_CONFIG="$BATTLE_NET_USER_DIR/AppData/Roaming/Battle.net/Battle.net.co
 BATTLE_NET_LOGS="$BATTLE_NET_USER_DIR/AppData/Local/Battle.net/Logs"
 LOGIN_TIMEOUT_SECONDS=180
 GAME_TIMEOUT_SECONDS=120
+GAME_START_ATTEMPT_SECONDS=20
+PLAY_ATTEMPTS=3
 
 fail() {
     printf '%s\n' "$1" >&2
@@ -88,6 +94,9 @@ fi
 [ -r "$BATTLE_NET_CONFIG" ] || fail "Battle.net configuration is unreadable: $BATTLE_NET_CONFIG"
 grep -Eq '"SingleInstance"[[:space:]]*:[[:space:]]*"true"' "$BATTLE_NET_CONFIG" \
     || fail 'Battle.net Client.SingleInstance must be "true"; stop Battle.net and set it before launching.'
+# crowley-ops is installed next to this launcher and resolved from PATH (the
+# supervisor unit sets PATH to the user's bin directory).
+CROWLEY_OPS=$(command -v crowley-ops) || fail 'crowley-ops is not on PATH; install Crowley first.'
 
 LOGDIR="${XDG_STATE_HOME:?XDG_STATE_HOME is not set; run the launcher from the authenticated graphical session, which provides it}/crowley/executor-evidence"
 mkdir -p -m 0700 "$LOGDIR"
@@ -164,16 +173,24 @@ done
 x11 wmctrl -i -r "$window" -b remove,maximized_vert,maximized_horz
 sleep 1
 x11 xdotool windowactivate --sync "$window"
-x11 xdotool key --clearmodifiers Escape
-battle_net_exec 'focus play'
-x11 xdotool windowactivate --sync "$window"
-x11 xdotool key --clearmodifiers Return
 
-waited=0
-until owned_game_running; do
-    [ "$waited" -lt "$GAME_TIMEOUT_SECONDS" ] || fail 'Battle.net did not start the game.'
-    sleep 1
-    waited=$((waited + 1))
+# Each attempt captures the screen afresh, locates the blue Play button and
+# clicks it; the click gate guarantees at least 1 s between automated clicks.
+attempt=1
+while :; do
+    # Never click again once the game process exists.
+    ! owned_game_running || break
+    x11 "$CROWLEY_OPS" battle-net-play --window "$window" >>"$LOGDIR/launcher.log" 2>&1 \
+        || fail 'Clicking the Battle.net Play button failed; see launcher.log.'
+    waited=0
+    while [ "$waited" -lt "$GAME_START_ATTEMPT_SECONDS" ] && ! owned_game_running; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    ! owned_game_running || break
+    [ "$attempt" -lt "$PLAY_ATTEMPTS" ] || fail 'Battle.net did not start the game after clicking Play.'
+    attempt=$((attempt + 1))
+    x11 xdotool windowactivate --sync "$window"
 done
 
 # The client's windowed-fullscreen mode is mapped by Wine as a window maximized

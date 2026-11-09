@@ -238,8 +238,20 @@ def test_launcher_selects_the_target_product_without_repeated_exec(tmp_path: Pat
     assert "_MOTIF_WM_HINTS '0x2, 0x0, 0x0, 0x0, 0x0'" in rendered
     assert "_NET_WM_STATE_FULLSCREEN" in rendered
     assert "xwininfo -id" in rendered
-    assert "xdotool key --clearmodifiers Return" in rendered
+    # The only keyboard Return is the Enter World press sent to the game window.
+    assert rendered.count("xdotool key") == 1
+    assert "x11 xdotool key --clearmodifiers Return" in rendered
+    assert rendered.index("battle-net-play") < rendered.index("xdotool key --clearmodifiers Return")
+    assert rendered.index("xdotool key --clearmodifiers Return") > rendered.index(
+        'xdotool windowactivate --sync "$game_window"'
+    )
+    assert "xdotool key --clearmodifiers Escape" not in rendered
+    assert rendered.count("battle_net_exec 'focus play'") == 1
+    assert '"$CROWLEY_OPS" battle-net-play --window "$window"' in rendered
+    assert "PLAY_ATTEMPTS=3" in rendered
+    assert "GAME_START_ATTEMPT_SECONDS=20" in rendered
     assert "xdotool click" not in rendered
+    assert "mousemove" not in rendered
 
 
 def test_launcher_rejects_missing_single_instance_before_wine(

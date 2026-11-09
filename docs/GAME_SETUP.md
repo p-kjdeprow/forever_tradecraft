@@ -33,10 +33,23 @@ unreadable Xauthority file is also refused.
 
 The launcher uses the verified Battle.net handoff: it ensures one logged-in
 Battle.net is running, invokes one `--exec` at a time (`launch_uid wowf`, then
-`focus play`). It selects the one visible `battle.net.exe`-class window named
-`Battle.net` (failing unless exactly one matches), un-maximizes it because
-keyboard Play activation does nothing while it is maximized, activates it,
-dismisses any dialog with Escape, focuses Play again, and presses Return. Battle.net must have `Client.SingleInstance` set to
+`focus play`, which selects the product page). It selects the one visible
+`battle.net.exe`-class window named `Battle.net` (failing unless exactly one
+matches), un-maximizes it, activates it and runs `crowley-ops battle-net-play`.
+That command captures the screen with `gnome-screenshot`, finds the large solid
+blue Play button (exactly one blue region of plausible size in the window's
+bottom-left quarter whose label is the four glyphs of "Play", roughly centred;
+it fails loudly otherwise) and clicks inside its inner 60% as a full simulated human click: a
+seeded, curved, Fitts-timed pointer path through the pinned XTEST emitter, a real
+press and release, held under the canonical click-rate gate (at least 1 s between
+automated clicks). Motion, an endpoint and target-window check, and the press are
+separate emissions, as in the session driver. The seed and plan are recorded under
+`$XDG_STATE_HOME/crowley/executor-evidence/`. Keyboard activation is not used:
+after a fresh Battle.net start the embedded Chromium view has no keyboard focus,
+`focus play` does not move it, Return does nothing, and Tab reaches the logo menu
+(which contains Log Out). If the game has not started within 20 s the click is
+retried (fresh capture) up to 2 more times, then the launcher fails. The launcher
+resolves `crowley-ops` from `PATH` and requires `CROWLEY_WINE`. Battle.net must have `Client.SingleInstance` set to
 `"true"`. Set that value only while Battle.net is stopped: a running Battle.net
 rewrites its configuration from memory, and starting a second instance deletes
 the saved login token. Battle.net is the only component that can issue the game
@@ -70,7 +83,7 @@ Required client settings (stored by the client per account):
   verifies `_NET_WM_STATE_FULLSCREEN`, display-sized outer geometry and a single
   display-sized child, failing loudly after 30 s. Once verified, it waits a
   fixed 45 s for character select (the shell has no detector for it) and sends
-  one `Return` (Enter World). The launcher never clicks. The telemetry canvas is pinned to a
+  one `Return` (Enter World). The launcher's only automated click is the Battle.net Play click above; this step is keyboard-only. The telemetry canvas is pinned to a
   1920x1080 client.
 
 The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).

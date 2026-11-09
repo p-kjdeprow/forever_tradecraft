@@ -4,10 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-from crowley.ops import backup, doctor, health, install
+from crowley.ops import backup, battle_net, doctor, health, install
+from crowley.session.driver import DriverError
+from crowley.session.executor import ExecutorError
+from crowley.session.input_tool import InputToolError
+from crowley.session.pointer_execution import PointerExecutionError
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -26,6 +31,8 @@ def _parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--dry-run", action="store_true")
     install_parser.add_argument("--force", action="store_true")
     install_parser.add_argument("--dev-addon-from", type=Path)
+    play = sub.add_parser("battle-net-play", help="click Battle.net's Play button like a human")
+    play.add_argument("--window", type=int, help="Battle.net window id; found by class and name if omitted")
     sub.add_parser("doctor", help="check the installed runtime")
     sub.add_parser("compose-file", help="print the packaged Docker Compose file")
     image = sub.add_parser("image", help="build the Crowley server image")
@@ -53,6 +60,22 @@ def main(argv: list[str] | None = None) -> int:
             print(str(exc), file=sys.stderr)
             return 2
         print(install.diff_text(result))
+        return 0
+    if args.command == "battle-net-play":
+        try:
+            evidence = battle_net.click_play(args.window)
+        except (
+            battle_net.BattleNetPlayError,
+            PointerExecutionError,
+            InputToolError,
+            ExecutorError,
+            DriverError,
+            subprocess.TimeoutExpired,
+            OSError,
+        ) as exc:
+            print(f"battle-net-play: {exc}".splitlines()[0], file=sys.stderr)
+            return 1
+        print(f"battle-net-play: clicked Play; evidence {evidence}")
         return 0
     if args.command == "doctor":
         report = doctor.doctor()

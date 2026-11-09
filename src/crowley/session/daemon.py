@@ -11560,7 +11560,7 @@ class SessionDaemon:
                 if current_edit == {"active": False, "focused": False, "text": ""}:
                     snapshot, frame = current, next_frame
                     return
-                allowed_intermediate = [{"active": True, "focused": True, "text": ""}]
+                allowed_intermediate: list[object] = [{"active": True, "focused": True, "text": ""}]
                 if stale:
                     allowed_intermediate.append(edit)
                 if current_edit not in allowed_intermediate:

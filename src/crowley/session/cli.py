@@ -8,6 +8,7 @@ import json
 import math
 import os
 import socket
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -1134,11 +1135,11 @@ def _supervise_command(args: argparse.Namespace, socket_path: Path) -> int:
             request,
             min_resume_interval=args.min_resume_interval,
             failure_budget=args.failure_budget,
-            out=os.sys.stdout,
+            out=sys.stdout,
         )
         run_supervisor(supervisor, poll_seconds=args.poll_seconds)
     except (SupervisorError, ValueError) as exc:
-        print(f"error: {exc}", file=os.sys.stderr)
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
 
@@ -1244,7 +1245,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return _motion_profile_command(args)
         except (OSError, ValueError) as exc:
-            print(f"error: {exc}", file=os.sys.stderr)
+            print(f"error: {exc}", file=sys.stderr)
             return 1
     if args.command in _FULL_CONFIG_COMMANDS:
         config = load_daemon_config(

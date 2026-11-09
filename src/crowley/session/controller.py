@@ -4220,8 +4220,25 @@ class Controller:
                 and self._frame_boot == self._restart_reference_boot
                 and boot != self._restart_reference_boot
             )
+            # A reload intent that never crossed its dispatch boundary cannot
+            # have changed the boot.  A new boot after a restart then means a
+            # new client process (crash, reboot, relaunch).  Admit that one
+            # boot so reconciliation can account for the cycle (normally as an
+            # unrecoverable rejection); any further change is churn.
+            undispatched_restart_boot = (
+                self._restart_uncertain
+                and self._action_intent in {"save_reload", "ack_reload"}
+                and self._action_result in {"pending", "preparing"}
+                and not self._restart_reference_boot
+                and not self._restart_observed_boot
+                and bool(self._frame_boot)
+                and boot != self._frame_boot
+            )
+            if undispatched_restart_boot:
+                self._restart_observed_boot = boot
             if (
                 self._frame_boot
+                and not undispatched_restart_boot
                 and self._state
                 not in {
                     ControllerState.SAVE_RELOAD_SENT,
@@ -4267,7 +4284,12 @@ class Controller:
                         "client boot changed after reload",
                         invalidation_cause=InvalidationCause.TELEMETRY_INVALID,
                     )
-            elif self._frame_boot and boot != self._frame_boot and not restart_boot_transition:
+            elif (
+                self._frame_boot
+                and boot != self._frame_boot
+                and not restart_boot_transition
+                and not undispatched_restart_boot
+            ):
                 return self.block(
                     "client boot changed outside reload",
                     invalidation_cause=InvalidationCause.TELEMETRY_INVALID,

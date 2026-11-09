@@ -779,6 +779,53 @@ def test_blocked_dispatched_reload_resumes_into_restart_boot_reconciliation(
     assert "boot" in second.blocker
 
 
+@pytest.mark.parametrize("result", ["pending", "preparing"])
+def test_undispatched_reload_admits_one_new_client_boot_after_restart(tmp_path: Path, result: str) -> None:
+    # Live 2026-11-09: a reboot killed the client while save_reload was still
+    # pending; the relaunched client's boot blocked every reconcile forever.
+    journal = _journal(
+        tmp_path / f"undispatched-{result}.json",
+        state=ControllerState.RECONCILE.value,
+        generation=4,
+        restartUncertain=True,
+        reconciliationRequired=True,
+        current={
+            "action": ActionKind.SAVE_RELOAD.value,
+            "actionAttempt": 3,
+            "actionResult": result,
+            "frameBoot": "old-client-boot",
+        },
+    )
+    controller = Controller(journal, driver=_Driver())
+    assert controller.resume().state is ControllerState.RECONCILE
+    first = controller.observe_frame(boot="new-client-boot", sequence=1, crc32=1)
+    assert first.state is ControllerState.RECONCILE
+    assert journal.read()["current"]["restartObservedBoot"] == "new-client-boot"
+    second = controller.observe_frame(boot="another-client-boot", sequence=2, crc32=2)
+    assert second.state is ControllerState.BLOCKED
+    assert "boot" in second.blocker
+
+
+def test_dispatched_reload_without_reference_still_blocks_new_boot(tmp_path: Path) -> None:
+    journal = _journal(
+        tmp_path / "dispatched-no-reference.json",
+        state=ControllerState.RECONCILE.value,
+        generation=4,
+        restartUncertain=True,
+        reconciliationRequired=True,
+        current={
+            "action": ActionKind.SAVE_RELOAD.value,
+            "actionAttempt": 3,
+            "actionResult": "dispatched",
+            "frameBoot": "old-client-boot",
+        },
+    )
+    controller = Controller(journal, driver=_Driver())
+    assert controller.resume().state is ControllerState.RECONCILE
+    blocked = controller.observe_frame(boot="new-client-boot", sequence=1, crc32=1)
+    assert blocked.state is ControllerState.BLOCKED
+
+
 def test_restart_boot_transition_is_rejected_for_unrelated_intent(tmp_path: Path) -> None:
     journal = _journal(
         tmp_path / "logout-boot-churn.json",

@@ -22,6 +22,7 @@ from crowley.session.calibration import (
     GTK_LAYOUT_ROOT_CHILD,
     InputCalibrationWorkflow,
     OwnedGtkCalibrationWindow,
+    xinput_hierarchy,
     xtest_sources,
 )
 from crowley.session.cli import SessionIPC
@@ -51,6 +52,66 @@ from crowley.session.startup import (
 )
 from tests.support.config import fixture_codex_path, fixture_host
 from tests.x11_startup import start_private_xvfb
+
+_FORWARDED_DEVICE_PREFIXES = (
+    "xwayland-pointer:",
+    "xwayland-relative-pointer:",
+    "xwayland-pointer-gestures:",
+    "xwayland-keyboard:",
+)
+_ATTACHED_HIERARCHY = (
+    (2, 3, "master", "pointer:Virtual core pointer"),
+    (3, 2, "master", "keyboard:Virtual core keyboard"),
+    (4, 2, "slave", "pointer:Virtual core XTEST pointer"),
+    (5, 3, "slave", "keyboard:Virtual core XTEST keyboard"),
+    (6, 3, "slave", "keyboard:xwayland-keyboard:17"),
+    (7, 2, "slave", "pointer:xwayland-pointer:17"),
+    (8, 2, "slave", "pointer:xwayland-relative-pointer:17"),
+    (9, 2, "slave", "pointer:xwayland-pointer-gestures:17"),
+)
+_FLOATING_HIERARCHY = (
+    (2, 3, "master", "pointer:Virtual core pointer"),
+    (3, 2, "master", "keyboard:Virtual core keyboard"),
+    (4, 2, "slave", "pointer:Virtual core XTEST pointer"),
+    (5, 3, "slave", "keyboard:Virtual core XTEST keyboard"),
+    (6, 3, "slave", "keyboard:xwayland-keyboard:17"),
+    (7, 0, "floating", "slave:xwayland-pointer:17"),
+    (8, 0, "floating", "slave:xwayland-relative-pointer:17"),
+    (9, 0, "floating", "slave:xwayland-pointer-gestures:17"),
+)
+_ATTACHED_XINPUT_TEXT = (
+    "⎡ Virtual core pointer                    \tid=2\t[master pointer  (3)]\n"
+    "⎜   ↳ Virtual core XTEST pointer              \tid=4\t[slave  pointer  (2)]\n"
+    "⎣ Virtual core keyboard                   \tid=3\t[master keyboard (2)]\n"
+    "    ↳ Virtual core XTEST keyboard             \tid=5\t[slave  keyboard (3)]\n"
+    "    ↳ xwayland-keyboard:17                    \tid=6\t[slave  keyboard (3)]\n"
+    "    ↳ xwayland-pointer:17                     \tid=7\t[slave  pointer  (2)]\n"
+    "    ↳ xwayland-relative-pointer:17            \tid=8\t[slave  pointer  (2)]\n"
+    "    ↳ xwayland-pointer-gestures:17            \tid=9\t[slave  pointer  (2)]\n"
+)
+_FLOATING_XINPUT_TEXT = (
+    "⎡ Virtual core pointer                    \tid=2\t[master pointer  (3)]\n"
+    "⎜   ↳ Virtual core XTEST pointer              \tid=4\t[slave  pointer  (2)]\n"
+    "⎣ Virtual core keyboard                   \tid=3\t[master keyboard (2)]\n"
+    "    ↳ Virtual core XTEST keyboard             \tid=5\t[slave  keyboard (3)]\n"
+    "    ↳ xwayland-keyboard:17                    \tid=6\t[slave  keyboard (3)]\n"
+    "∼ xwayland-pointer:17                         \tid=7\t[floating slave]\n"
+    "∼ xwayland-relative-pointer:17                \tid=8\t[floating slave]\n"
+    "∼ xwayland-pointer-gestures:17                \tid=9\t[floating slave]\n"
+)
+
+
+def _floating_forwarded_hierarchy(
+    hierarchy: tuple[tuple[int, int, str, str], ...],
+) -> tuple[tuple[int, int, str, str], ...]:
+    rows: list[tuple[int, int, str, str]] = []
+    for device_id, parent_id, role, name in hierarchy:
+        _kind, _separator, device_name = name.partition(":")
+        if device_name.startswith(_FORWARDED_DEVICE_PREFIXES):
+            rows.append((device_id, 0, "floating", f"slave:{device_name}"))
+        else:
+            rows.append((device_id, parent_id, role, name))
+    return tuple(rows)
 
 
 @pytest.mark.skipif(shutil.which("Xvfb") is None, reason="private Xvfb is unavailable")
@@ -493,28 +554,70 @@ def test_runtime_evidence_is_process_sealed_and_environment_bound() -> None:
 
 
 def test_forwarded_echo_source_is_the_unique_retained_xwayland_relay() -> None:
-    hierarchy = (
-        (2, 3, "master", "pointer:Virtual core pointer"),
-        (3, 2, "master", "keyboard:Virtual core keyboard"),
-        (4, 2, "slave", "pointer:Virtual core XTEST pointer"),
-        (5, 3, "slave", "keyboard:Virtual core XTEST keyboard"),
-        (6, 2, "slave", "pointer:xwayland-pointer:17"),
-        (7, 2, "slave", "pointer:xwayland-relative-pointer:17"),
-        (8, 2, "slave", "pointer:xwayland-pointer-gestures:17"),
-        (9, 3, "slave", "keyboard:xwayland-keyboard:17"),
-    )
-    assert resolve_forwarded_echo_sources(hierarchy, 2) == (7,)
+    hierarchy = _ATTACHED_HIERARCHY
+    assert resolve_forwarded_echo_sources(hierarchy, 2) == (8,)
+    assert resolve_forwarded_echo_sources(_FLOATING_HIERARCHY, 2) == ()
     with pytest.raises(ValueError, match="absent or ambiguous"):
-        resolve_forwarded_echo_sources(tuple(row for row in hierarchy if row[0] != 7), 2)
+        resolve_forwarded_echo_sources(tuple(row for row in hierarchy if row[0] != 8), 2)
     with pytest.raises(ValueError, match="absent or ambiguous"):
         resolve_forwarded_echo_sources(
             (*hierarchy, (10, 2, "slave", "pointer:xwayland-relative-pointer:18")), 2
         )
     with pytest.raises(ValueError, match="absent or ambiguous"):
         resolve_forwarded_echo_sources(
-            tuple((row[0], 99, *row[2:]) if row[0] == 7 else row for row in hierarchy),
+            tuple((row[0], 99, *row[2:]) if row[0] == 8 else row for row in hierarchy),
             2,
         )
+
+
+def test_unexpected_forwarded_kind_is_not_canonicalized_or_accepted() -> None:
+    invalid_attached = tuple(
+        (row[0], row[1], row[2], "keyboard:xwayland-relative-pointer:17") if row[0] == 8 else row
+        for row in _ATTACHED_HIERARCHY
+    )
+    with pytest.raises(ValueError, match="absent or ambiguous"):
+        resolve_forwarded_echo_sources(invalid_attached, 2)
+
+    _identity, environment, _evidence = _runtime_evidence()
+    valid = replace(environment, hierarchy=_ATTACHED_HIERARCHY, forwarded_echo_sources=(8,))
+    invalid = replace(environment, hierarchy=invalid_attached, forwarded_echo_sources=())
+    assert invalid.fingerprint != valid.fingerprint
+
+    invalid_floating = tuple(
+        (row[0], row[1], row[2], "pointer:xwayland-relative-pointer:17") if row[0] == 8 else row
+        for row in _FLOATING_HIERARCHY
+    )
+    floating = replace(environment, hierarchy=_FLOATING_HIERARCHY, forwarded_echo_sources=())
+    floating_with_invalid_kind = replace(
+        environment,
+        hierarchy=invalid_floating,
+        forwarded_echo_sources=(),
+    )
+    assert floating_with_invalid_kind.fingerprint != floating.fingerprint
+
+
+def test_real_xinput_attached_and_floating_states_have_stable_identity() -> None:
+    attached_hierarchy = xinput_hierarchy(_ATTACHED_XINPUT_TEXT)
+    floating_hierarchy = xinput_hierarchy(_FLOATING_XINPUT_TEXT)
+    assert attached_hierarchy == _ATTACHED_HIERARCHY
+    assert floating_hierarchy == _FLOATING_HIERARCHY
+    assert resolve_forwarded_echo_sources(attached_hierarchy, 2) == (8,)
+    assert resolve_forwarded_echo_sources(floating_hierarchy, 2) == ()
+
+    _identity, environment, _evidence = _runtime_evidence()
+    attached = replace(environment, hierarchy=attached_hierarchy, forwarded_echo_sources=(8,))
+    floating = replace(environment, hierarchy=floating_hierarchy, forwarded_echo_sources=())
+    floating_keyboard = replace(
+        attached,
+        hierarchy=tuple(
+            (row[0], 0, "floating", "slave:xwayland-keyboard:17") if row[0] == 6 else row
+            for row in attached_hierarchy
+        ),
+        forwarded_echo_sources=(),
+    )
+
+    assert attached.fingerprint == floating.fingerprint
+    assert attached.fingerprint == floating_keyboard.fingerprint
 
 
 def _runtime_evidence():
@@ -567,6 +670,78 @@ def _runtime_evidence():
         keyboard_profile=(),
     )
     return Identity(), environment, evidence
+
+
+def test_forwarded_seat_attachment_is_not_durable_environment_identity() -> None:
+    identity, attached, evidence = _runtime_evidence()
+    floating = replace(
+        attached,
+        hierarchy=_floating_forwarded_hierarchy(attached.hierarchy),
+        forwarded_echo_sources=(),
+    )
+    floating_evidence = mint_runtime_evidence(
+        readiness_boot=evidence.readiness_boot,
+        readiness_sequence=evidence.readiness_sequence,
+        environment=floating,
+        identity=identity,
+        keyboard_keymap=evidence.keyboard_keymap,
+        native_modifiers=evidence.native_modifiers,
+        native_held_keycodes=(),
+        native_held_buttons=(),
+        keyboard_profile=evidence.keyboard_profile,
+    )
+
+    assert attached.hierarchy != floating.hierarchy
+    assert attached.canonical_payload() == floating.canonical_payload()
+    assert attached.fingerprint == floating.fingerprint
+    assert attached.canonical_payload()["forwardedEchoSources"] == ()
+    assert floating_evidence.is_live
+    assert floating_evidence.forwarded_echo_sources == frozenset()
+
+
+def test_runtime_evidence_seal_binds_exact_hierarchy_and_echo_sources() -> None:
+    _identity, attached, evidence = _runtime_evidence()
+    floating = replace(
+        attached,
+        hierarchy=_floating_forwarded_hierarchy(attached.hierarchy),
+        forwarded_echo_sources=(),
+    )
+    replaced = replace(evidence, environment=floating)
+
+    with pytest.raises(ValueError, match="runtime input evidence seal is invalid"):
+        replaced.verify_seal()
+    assert not replaced.is_live
+
+
+def test_non_forwarded_hierarchy_facts_still_change_environment_fingerprint() -> None:
+    _identity, attached, _evidence = _runtime_evidence()
+    changed_xtest = replace(
+        attached,
+        hierarchy=tuple((row[0], 99, row[2], row[3]) if row[0] == 4 else row for row in attached.hierarchy),
+    )
+    changed_master = replace(
+        attached,
+        hierarchy=tuple((row[0], 99, row[2], row[3]) if row[0] == 2 else row for row in attached.hierarchy),
+    )
+    changed_other = replace(
+        attached,
+        hierarchy=(*attached.hierarchy, (10, 0, "floating", "pointer:physical-touchpad")),
+    )
+
+    assert changed_xtest.fingerprint != attached.fingerprint
+    assert changed_master.fingerprint != attached.fingerprint
+    assert changed_other.fingerprint != attached.fingerprint
+
+
+def test_takeover_drill_record_matches_across_forwarded_seat_attachment() -> None:
+    _identity, attached, _evidence = _runtime_evidence()
+    floating = replace(
+        attached,
+        hierarchy=_floating_forwarded_hierarchy(attached.hierarchy),
+        forwarded_echo_sources=(),
+    )
+    record = TakeoverDrillRecord.create(attached.fingerprint, 12, observed_at=1_800_000_000)
+    assert record.matches(floating)
 
 
 def test_runtime_keyboard_profile_matches_retained_xi2_modifier_transitions() -> None:
@@ -1388,6 +1563,7 @@ def test_observer_loss_revoke_propagates_typed_cause_and_pauses(tmp_path: Path) 
     ("changed_fact", "expected_cause"),
     [
         ("hierarchy", InvalidationCause.INPUT_ENVIRONMENT_CHANGED),
+        ("floating_hierarchy", InvalidationCause.INPUT_ENVIRONMENT_CHANGED),
         ("identity", InvalidationCause.GAME_PROCESS_CHANGED),
     ],
 )
@@ -1432,6 +1608,8 @@ def test_runtime_arm_rejection_blocks_with_observed_typed_cause_and_retains_dril
     hierarchy = evidence.xinput_hierarchy
     if changed_fact == "hierarchy":
         driver.input_hierarchy = lambda: (*hierarchy, (99, 2, "slave", "pointer:unowned"))
+    elif changed_fact == "floating_hierarchy":
+        driver.input_hierarchy = lambda: _floating_forwarded_hierarchy(hierarchy)
     else:
         driver.input_hierarchy = lambda: hierarchy
     driver.xtest_input_profile = lambda _hierarchy: evidence.xtest_profile
@@ -1457,6 +1635,65 @@ def test_runtime_arm_rejection_blocks_with_observed_typed_cause_and_retains_dril
     assert controller.runtime_readiness_invalidation is expected_cause
     assert controller._runtime_startup_evidence is None
     assert controller.takeover_drill_record == record
+
+
+def test_armed_forwarded_seat_transition_revokes_and_requires_fresh_passive_readiness(
+    tmp_path: Path,
+) -> None:
+    _identity, environment, evidence = _runtime_evidence()
+    guardian = InputGuardian(tmp_path / "seatfloat-transition.lock", parent_pid=os.getpid())
+    driver = DesktopDriver.__new__(DesktopDriver)
+    driver.backend = SimpleNamespace()
+    driver.guardian = guardian
+    driver._input_evidence = evidence
+    driver._active_revocation_cause = InvalidationCause.UNKNOWN
+    driver._calibration_action_lock = threading.RLock()
+    driver._queued = []
+    driver._calibration_ticket = None
+    driver._calibration_due_waiters = {}
+    driver._revoke_callbacks = []
+    driver._held_input = False
+    driver._monitor = None
+    driver._monitor_calibration = False
+    driver._takeover_input_callback = None
+    guardian.on_revoke(driver._on_guardian_revoke)
+
+    controller = Controller(tmp_path / "seatfloat-transition.json", driver=driver)
+    try:
+        controller.pause("prepare armed seat transition")
+        record = TakeoverDrillRecord.create(environment.fingerprint, 31, observed_at=1_800_000_000)
+        controller.persist_takeover_drill(record)
+        controller._accept_runtime_evidence(evidence)
+        controller._state = ControllerState.RECONCILE
+        controller._resume_state = ControllerState.RECONCILE
+        controller._lease_generation = guardian.arm(evidence)
+
+        hierarchy_change = XI2Event(
+            1,
+            EventClass.DEVICE_CHANGED,
+            8,
+            8,
+            15,
+            0,
+            None,
+            None,
+            None,
+        )
+        driver._external_input(hierarchy_change)
+
+        assert not guardian.armed
+        assert controller.runtime_readiness_invalidation is InvalidationCause.UNKNOWN
+        assert controller._runtime_startup_evidence is None
+        assert controller._input_evidence is None
+        assert controller.takeover_drill_record == record
+        assert controller.status().state is ControllerState.PAUSED
+
+        fresh_gate = controller.resume(expected_generation=controller.status().generation)
+        assert fresh_gate.state is ControllerState.NATIVE_CALIBRATION
+        assert not controller._native_calibrated
+        assert not controller._input_calibrated
+    finally:
+        guardian.close()
 
 
 @pytest.mark.parametrize(
@@ -2225,6 +2462,13 @@ def test_takeover_human_sample_requires_measured_source_role_and_attachment() ->
     assert not is_measured_human_action(unknown_source, environment)
     assert not is_measured_human_action(wrong_attachment_role, environment)
     assert not is_measured_human_action(forwarded_echo, environment)
+    floating_environment = replace(
+        environment,
+        hierarchy=_floating_forwarded_hierarchy(environment.hierarchy),
+        forwarded_echo_sources=(),
+    )
+    floating_action = XI2Event(6, EventClass.MOTION, 6, 6, 15, 0, 0x374, 0x374, 0x600001)
+    assert not is_measured_human_action(floating_action, floating_environment)
 
 
 @pytest.mark.parametrize(

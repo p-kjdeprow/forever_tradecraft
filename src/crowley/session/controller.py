@@ -2179,8 +2179,10 @@ class Controller:
         if not evidence.is_live:
             raise DriverError("runtime startup evidence is not live in this process")
         record = self._takeover_drill_record if self._takeover_drill_valid else None
-        if record is None or not record.matches(evidence.environment):
-            raise DriverError("a matching durable takeover drill is required before runtime input")
+        if record is None:
+            # A stored drill for the current contract suffices; environment
+            # drift (reboot, device reconnect) does not require the operator.
+            raise DriverError("a durable takeover drill is required before runtime input")
 
     def _accept_runtime_evidence(self, evidence: RuntimeInputEvidence) -> None:
         self._validate_runtime_evidence(evidence)

@@ -123,9 +123,12 @@ and leaves automation paused. Start repeat mode using the returned generation:
 crowley-session --config ~/.config/crowley/session.toml start --mode repeat --generation <after-drill-generation>
 ```
 
-The record survives controller restarts and ordinary addon reloads. A changed
-input hierarchy, native tool, keymap, display or takeover contract requires a new
-drill. Process IDs and routine addon boot changes do not invalidate the stored
+The record survives controller restarts, ordinary addon reloads, reboots and
+input-device changes: one passed drill for the current takeover contract is enough,
+because the Xwayland device hierarchy changes on every reboot or receiver
+reconnect and unattended scanning must not need the operator. Only a missing or
+corrupt record, or a new takeover contract, asks for a drill again. Runtime
+human-input detection (pause on genuine input) is unchanged. Process IDs and routine addon boot changes do not invalidate the stored
 human evidence. Each new owner still collects fresh passive readiness.
 
 Fresh passive readiness also carries the addon's current boot epoch. If an idle

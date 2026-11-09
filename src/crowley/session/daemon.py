@@ -7270,7 +7270,11 @@ class SessionDaemon:
             else self.passive_startup()
         )
         record = self.controller.takeover_drill_record
-        if record is None or not record.matches(evidence.environment):
+        # One passed drill for the current takeover contract is enough.  The
+        # input-device hierarchy (Xwayland seat names and device IDs) changes on
+        # every reboot or receiver reconnect, and the operator must not be needed
+        # for unattended scanning.  Runtime human-input detection is unchanged.
+        if record is None:
             self._startup_operation = {**self._startup_operation, "state": "takeover_needed"}
             self._takeover_drill_operation = {"state": "needed", "failure": ""}
             return self.status_dict() | {
@@ -14344,7 +14348,7 @@ class SessionDaemon:
             next_action = "wait"
         elif drill_state == "awaiting_input":
             next_action = "provide_human_input"
-        elif drill is None or (startup_evidence is not None and not drill_matches):
+        elif drill is None:
             next_action = "takeover_drill"
         elif self.driver.guardian.armed:
             next_action = "automatic"

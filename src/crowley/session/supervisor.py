@@ -33,6 +33,9 @@ TRANSIENT_BLOCKER_PREFIXES: tuple[str, ...] = (
     "desktop command timed out: gnome-screenshot",
     "identity observer deadline expired",
     "identity observer timed out",
+    # The same observer timeouts when they happen during automatic restart startup.
+    "automatic restart startup failed: identity observer deadline expired",
+    "automatic restart startup failed: identity observer timed out",
     "corrupt telemetry frame: invalid pixel crop",
     "Stormwind scene or blocking UI changed during command readback",
     # Re-opening the AH after the ack reload missed its deadline on an overloaded

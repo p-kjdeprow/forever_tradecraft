@@ -294,3 +294,9 @@ def test_failed_step_ends_attempt_without_resume_and_restores_daemon():
     fake.now += 5
     s.step()
     assert fake.resumes == []
+
+
+def test_restart_startup_observer_timeouts_are_transient():
+    assert sup.is_transient_blocker("automatic restart startup failed: identity observer timed out")
+    assert sup.is_transient_blocker("automatic restart startup failed: identity observer deadline expired")
+    assert not sup.is_transient_blocker("automatic restart startup failed: something else")

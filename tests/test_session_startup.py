@@ -1935,7 +1935,7 @@ def test_passive_boot_adoption_does_not_cross_native_construction_checkpoint(
         )
 
 
-def test_takeover_drill_rejects_environment_mismatch_and_corrupt_record(tmp_path: Path) -> None:
+def test_takeover_drill_survives_environment_drift_but_rejects_corrupt_record(tmp_path: Path) -> None:
     _identity, environment, evidence = _runtime_evidence()
     driver = _RuntimeDriver()
     journal = tmp_path / "session.json"
@@ -1962,17 +1962,18 @@ def test_takeover_drill_rejects_environment_mismatch_and_corrupt_record(tmp_path
         native_held_buttons=(),
         keyboard_profile=other_evidence.keyboard_profile,
     )
-    with pytest.raises(DriverError, match="matching durable takeover drill"):
-        controller.start_with_runtime_evidence(other_evidence)
-    assert controller.status().state == ControllerState.PAUSED
-    assert not driver.guardian.armed
+    # A reboot or receiver reconnect changes the input environment; one passed
+    # drill for the current contract still admits fresh runtime evidence.
+    controller.start_with_runtime_evidence(other_evidence)
+    assert controller.status().state != ControllerState.PAUSED
+    controller.pause("prepare corrupt-record check")
 
     raw = json.loads(journal.read_text())
     raw["takeoverDrill"]["fingerprint"] = "0" * 64
     journal.write_text(json.dumps(raw))
     refused = Controller(journal, driver=_RuntimeDriver())
     assert refused.takeover_drill_record is None
-    with pytest.raises(DriverError, match="matching durable takeover drill"):
+    with pytest.raises(DriverError, match="durable takeover drill is required"):
         refused.resume_with_runtime_evidence(evidence, expected_generation=refused.status().generation)
 
 
@@ -2682,7 +2683,7 @@ def test_takeover_drill_preserves_inherited_intent_and_stop_until_resume_reconci
     )
     daemon, driver, _guardian, _monitor, _stub = _takeover_drill_fixture(tmp_path, evidence, human)
     journal = tmp_path / "inherited-session.json"
-    mismatched_record = TakeoverDrillRecord.create("0" * 64, 11, observed_at=1_800_000_000)
+    # No stored drill: environment drift alone no longer asks for one.
     journal.write_text(
         json.dumps(
             {
@@ -2696,7 +2697,6 @@ def test_takeover_drill_preserves_inherited_intent_and_stop_until_resume_reconci
                 "blocker": "inherited unresolved action",
                 "restartUncertain": True,
                 "reconciliationRequired": True,
-                "takeoverDrill": mismatched_record.to_json(),
                 "current": {
                     "action": "open_ah",
                     "actionAttempt": 1,

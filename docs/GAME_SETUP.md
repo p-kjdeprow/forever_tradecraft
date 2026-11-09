@@ -53,6 +53,17 @@ org.gnome.desktop.interface enable-animations` prints `false`. The screenshot
 flash otherwise generates XI2 crossing and motion events on the fullscreen game
 window, which the Guardian correctly treats as unattributed input.
 
+Required client settings (stored by the client per account):
+
+- `SoftTargetInteract` must be `2` (keyboard) or `3` (any). The WoW Forever
+  default is `1` (gamepad only), and the session refuses to open the auction
+  house with "native keyboard interaction is disabled (mode='gamepad')". Set it
+  once in game with `/console SoftTargetInteract 2`.
+- The display is 1920x1080 and the client runs windowed-fullscreen
+  (`gxMaximize 1` in `_forever_/WTF/Config.wtf`); the launcher then makes the
+  window fullscreen at the origin. The telemetry canvas is pinned to a
+  1920x1080 client.
+
 The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).
 Render it from the selected target and preserve executable mode 0700 on the
 installed wrapper. Keep recovery evidence private under the XDG state directory.

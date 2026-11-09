@@ -75,7 +75,7 @@ class ProtocolContract:
         return cls(len(item_ids), cadence, sweep_cap_seconds, levels, tuple(item_ids))
 
 
-DEFAULT_PROTOCOL_CONTRACT = ProtocolContract(428, 900, 600, 20, tuple())
+DEFAULT_PROTOCOL_CONTRACT = ProtocolContract(427, 900, 600, 20, tuple())
 PLAN_COUNT = DEFAULT_PROTOCOL_CONTRACT.plan_count
 PLAN_CADENCE = DEFAULT_PROTOCOL_CONTRACT.cadence_seconds
 PLAN_CAP = DEFAULT_PROTOCOL_CONTRACT.sweep_cap_seconds

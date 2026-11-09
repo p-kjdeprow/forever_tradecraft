@@ -51,7 +51,7 @@ def test_selected_target_is_identity_only_and_plan_is_cached(
     assert not hasattr(target, "installation")
     assert not hasattr(target, "game_root")
     assert not hasattr(target, "wine_prefix")
-    assert len(canonical_plan(target)["itemIDs"]) == 428
+    assert len(canonical_plan(target)["itemIDs"]) == 427
     assert canonical_plan(target) is canonical_plan(target)
     assert target.full_build == packaged_catalog.client_build
 
@@ -221,7 +221,7 @@ def test_generator_rebinds_catalog_for_an_alternate_target(tmp_path: Path) -> No
     )
     assert rendered["targetId"] == "synthetic-target"
     generated = (tmp_path / "addon/Crowley/GeneratedTarget.lua").read_text(encoding="utf-8")
-    assert "count = 427" in generated
+    assert "count = 426" in generated
 
 
 def test_generator_rejects_broken_toc_load_order() -> None:

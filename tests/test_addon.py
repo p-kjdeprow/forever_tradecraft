@@ -670,17 +670,19 @@ def test_equipment_uses_zeroed_sell_key_and_preserves_variant_result_key():
     client = WowClient()
     client.login()
     client.set_canonical_plan()
-    client.set_auctions([Auction(873, "Sword", 1, 500, itemLevel=40, itemSuffix=7, classID=2, auctionID=873)])
-    client.set_key_warm([873])
+    client.set_auctions(
+        [Auction(2825, "Sword", 1, 500, itemLevel=40, itemSuffix=7, classID=2, auctionID=2825)]
+    )
+    client.set_key_warm([2825])
     client.fire("AUCTION_HOUSE_SHOW")
     client.slash("scan")
     client.run_timers()
 
-    observation = decoded_payload(client)["observations"]["873"]
+    observation = decoded_payload(client)["observations"]["2825"]
     query = next(
         event
         for event in client.query_trace["events"]
-        if event["type"] == "query_send" and event.get("operation") == "search" and event["itemID"] == 873
+        if event["type"] == "query_send" and event.get("operation") == "search" and event["itemID"] == 2825
     )
     row = next(iter(observation["rows"].values()))
     assert observation["coverage"] == "full"
@@ -688,11 +690,11 @@ def test_equipment_uses_zeroed_sell_key_and_preserves_variant_result_key():
     assert query["classID"] == 2
     assert query["equipment"] is True
     assert query["nativeMethod"] == "SendSellSearchQuery"
-    assert query["nativeKey"] == {"itemID": 873, "itemLevel": 0, "itemSuffix": 0, "battlePetSpeciesID": 0}
+    assert query["nativeKey"] == {"itemID": 2825, "itemLevel": 0, "itemSuffix": 0, "battlePetSpeciesID": 0}
     assert row["rawItemKey"]["itemLevel"] == 40
     assert row["rawItemKey"]["itemSuffix"] == 7
-    assert row["itemKey"] == "873:s7:l40"
-    equipment_methods = [entry for entry in client.query_methods if entry["itemID"] == 873]
+    assert row["itemKey"] == "2825:s7:l40"
+    equipment_methods = [entry for entry in client.query_methods if entry["itemID"] == 2825]
     assert equipment_methods[0]["itemLevel"] == 0
 
 
@@ -702,7 +704,7 @@ def test_missing_item_class_is_incomplete_and_does_not_stall_remaining_items():
     client.set_canonical_plan()
     client.set_auctions(
         [
-            Auction(873, "Sword", 1, 500, itemLevel=40, classID=None, auctionID=873),
+            Auction(2825, "Sword", 1, 500, itemLevel=40, classID=None, auctionID=2825),
             Auction(2555, "Linen", 27, 100, itemLevel=15, classID=9, auctionID=2555),
         ]
     )
@@ -712,8 +714,8 @@ def test_missing_item_class_is_incomplete_and_does_not_stall_remaining_items():
     client.run_timers()
 
     observations = decoded_payload(client)["observations"]
-    assert observations["873"]["coverage"] == "incomplete"
-    assert observations["873"]["reasonCode"] == "metadata_unavailable"
+    assert observations["2825"]["coverage"] == "incomplete"
+    assert observations["2825"]["reasonCode"] == "metadata_unavailable"
     assert observations["2555"]["coverage"] == "full"
     assert observations["2555"]["rowCount"] == 1
     sends = [
@@ -2311,7 +2313,7 @@ def test_representative_full_watchlist_payload_size_is_measured():
         ]
     )
     # A one-second response cadence keeps the real rolling 100/60s transport
-    # window active while allowing all 428 initial queries to finish within the
+    # window active while allowing all 427 initial queries to finish within the
     # 600-second sweep budget.
     client.set_event_behavior(delay=1)
     client.fire("AUCTION_HOUSE_SHOW")
@@ -2323,8 +2325,8 @@ def test_representative_full_watchlist_payload_size_is_measured():
         client.advance_with_timers(1)
     raw = next(iter(savedvars.loads(client.saved_variables())["CrowleyDB"]["scans"].values()))
     payload = decoded_payload(client)
-    assert raw["numObservations"] == 428
-    assert raw["numRows"] == 428
+    assert raw["numObservations"] == 427
+    assert raw["numRows"] == 427
     assert all(observation["coverage"] == "full" for observation in payload["observations"].values())
     # This is a measured representative fixture, not a wire-size promise.  Keep a
     # generous budget so a harmless encoder change cannot turn the test brittle.
@@ -2390,9 +2392,18 @@ def test_bounded_commodity_has_known_witness_and_strict_roundtrip():
     client.set_auctions(
         [Auction(2589, "Linen", 1, price, isCommodity=True, auctionID=price) for price in range(1, 22)]
     )
+    client.state.fastCanonical = False
     client.fire("AUCTION_HOUSE_SHOW")
     client.slash("scan")
-    client.run_timers()
+    for _ in range(700):
+        # Linen sits late enough in the plan that the real rolling send throttle would
+        # time its query out; clear the throttle so this test isolates bounded coverage.
+        client.lua.globals().CrowleyDB.querySendTimes = client.lua.table()
+        client.state.sendLog = client.lua.table()
+        client.run_timers()
+        if list(client.lua.globals().CrowleyDB.scans.items()):
+            break
+        client.advance_with_timers(1)
     raw = next(iter(savedvars.loads(client.saved_variables())["CrowleyDB"]["scans"].values()))
     parsed = validate_v2_envelope(envelope(raw))["decoded"]
     observation = parsed["observations"]["2589"]
@@ -4228,7 +4239,7 @@ def test_canonical_gate_accepts_shipped_plan_and_rejects_short_plan_before_start
     client.set_canonical_plan()
     assert client.publish_agent()["plan"] == {
         "hash": load_catalog().scan_plan()["planHash"],
-        "count": 428,
+        "count": 427,
         "cadenceSeconds": 900,
         "sweepCapSeconds": 600,
         "initialPriceLevels": 20,

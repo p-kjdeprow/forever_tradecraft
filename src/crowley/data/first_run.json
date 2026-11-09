@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "id": "first-run",
-  "revision": 2,
+  "revision": 3,
   "client_build": "1.60.1.70862",
-  "reviewed_on": "2026-11-08",
+  "reviewed_on": "2026-11-09",
   "initial_price_levels": 20,
   "items": [
     {
@@ -287,7 +287,7 @@
       "roles": [
         "discovery"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Fixed-stat level-35 caster staff; tooltip explicitly allows Priest, Shaman, Mage, Warlock and Druid. Observe sparse named-equipment pricing separately from commodity depth.",
       "evidence": "client_data",
@@ -4274,7 +4274,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -4299,7 +4299,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -4547,6 +4547,30 @@
       ]
     },
     {
+      "item_id": 4589,
+      "name": "Long Elegant Feather",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/4589",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 4592,
       "name": "Longjaw Mud Snapper",
       "category": "consumables",
@@ -4569,6 +4593,30 @@
         "https://bindonforever.com/item/4592",
         "https://bindonforever.com/professions/cooking",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/cooking-plans.json"
+      ]
+    },
+    {
+      "item_id": 4596,
+      "name": "Minor Discolored Healing Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/4596",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -4640,7 +4688,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -4905,6 +4953,78 @@
       "source_urls": [
         "https://bindonforever.com/item/5642",
         "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 5762,
+      "name": "Red Linen Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/5762",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 5763,
+      "name": "Red Woolen Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/5763",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 5764,
+      "name": "Green Silk Pack",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/5764",
+        "https://bindonforever.com/professions/tailoring"
       ]
     },
     {
@@ -5198,6 +5318,106 @@
         "https://bindonforever.com/item/6044",
         "https://bindonforever.com/professions/blacksmithing",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json"
+      ]
+    },
+    {
+      "item_id": 6048,
+      "name": "Shadow Protection Potion",
+      "category": "consumables",
+      "tags": [
+        "potion",
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy",
+        "tailoring"
+      ],
+      "roles": [
+        "input",
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy and Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6048",
+        "https://bindonforever.com/professions/alchemy",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 6049,
+      "name": "Fire Protection Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6049",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 6050,
+      "name": "Frost Protection Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6050",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 6052,
+      "name": "Nature Protection Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6052",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -5674,6 +5894,30 @@
       ]
     },
     {
+      "item_id": 6373,
+      "name": "Elixir of Fire Power",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6373",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 6452,
       "name": "Anti-Venom",
       "category": "consumables",
@@ -5813,7 +6057,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -6136,6 +6380,30 @@
       ]
     },
     {
+      "item_id": 7072,
+      "name": "Naga Scale",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/7072",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 7075,
       "name": "Core of Earth",
       "category": "trade_goods",
@@ -6261,6 +6529,30 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/7078",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 7079,
+      "name": "Globe of Water",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/7079",
         "https://bindonforever.com/professions/tailoring"
       ]
     },
@@ -6564,7 +6856,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -7178,7 +7470,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -7632,6 +7924,54 @@
       ]
     },
     {
+      "item_id": 9179,
+      "name": "Elixir of Greater Intellect",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/9179",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 9187,
+      "name": "Elixir of Greater Agility",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/9187",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 9206,
       "name": "Elixir of Greater Strength",
       "category": "consumables",
@@ -7703,6 +8043,30 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/9260",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 9262,
+      "name": "Black Vitriol",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/9262",
         "https://bindonforever.com/professions/alchemy"
       ]
     },
@@ -7855,6 +8219,30 @@
       ]
     },
     {
+      "item_id": 10051,
+      "name": "Red Mageweave Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/10051",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 10285,
       "name": "Shadow Silk",
       "category": "trade_goods",
@@ -7925,7 +8313,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -8181,7 +8569,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -8257,7 +8645,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -8848,7 +9236,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -8874,7 +9262,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -8902,7 +9290,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Supports Blacksmithing, Enchanting and Leatherworking recipes beyond leveling route seeds.",
       "evidence": "client_data",
@@ -8975,7 +9363,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -8999,7 +9387,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -9023,7 +9411,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -9197,7 +9585,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -9223,7 +9611,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -9247,7 +9635,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -9272,7 +9660,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -9296,7 +9684,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -9322,7 +9710,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -9348,7 +9736,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -9441,6 +9829,32 @@
       ]
     },
     {
+      "item_id": 12804,
+      "name": "Powerful Mojo",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy",
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy and Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/12804",
+        "https://bindonforever.com/professions/alchemy",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 12808,
       "name": "Essence of Undeath",
       "category": "trade_goods",
@@ -9466,6 +9880,30 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/12808",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 12809,
+      "name": "Guardian Stone",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/12809",
         "https://bindonforever.com/professions/tailoring"
       ]
     },
@@ -9498,6 +9936,30 @@
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/leatherworking",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 12811,
+      "name": "Righteous Orb",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/12811",
         "https://bindonforever.com/professions/tailoring"
       ]
     },
@@ -9685,6 +10147,30 @@
       ]
     },
     {
+      "item_id": 13445,
+      "name": "Elixir of Greater Defense",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13445",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 13446,
       "name": "Major Healing Potion",
       "category": "consumables",
@@ -9697,7 +10183,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -9706,6 +10192,78 @@
       "source_urls": [
         "https://bindonforever.com/item/13446",
         "https://bindonforever.com/professions/first-aid"
+      ]
+    },
+    {
+      "item_id": 13452,
+      "name": "Elixir of the Mongoose",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13452",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 13453,
+      "name": "Elixir of Brute Force",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13453",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 13454,
+      "name": "Greater Arcane Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13454",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -10427,6 +10985,110 @@
       ]
     },
     {
+      "item_id": 13510,
+      "name": "Flask of the Titans",
+      "category": "consumables",
+      "tags": [
+        "potion",
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input",
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13510",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 13511,
+      "name": "Flask of Distilled Wisdom",
+      "category": "consumables",
+      "tags": [
+        "potion",
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input",
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13511",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 13512,
+      "name": "Flask of Supreme Power",
+      "category": "consumables",
+      "tags": [
+        "potion",
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input",
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13512",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 13513,
+      "name": "Flask of Chromatic Resistance",
+      "category": "consumables",
+      "tags": [
+        "potion",
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input",
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/13513",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 13519,
       "name": "Recipe: Flask of the Titans",
       "category": "recipes",
@@ -10490,7 +11152,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -10592,7 +11254,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -10645,7 +11307,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -10693,7 +11355,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -10717,7 +11379,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -10741,7 +11403,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -10765,7 +11427,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -10884,6 +11546,30 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/14155",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 14156,
+      "name": "Bottomless Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/14156",
         "https://bindonforever.com/professions/tailoring"
       ]
     },
@@ -11161,7 +11847,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -11190,7 +11876,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -11267,7 +11953,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Red Dragonscale is an input to verified client recipes in Leatherworking; broadens coverage beyond the reference site's selected leveling routes.",
       "evidence": "client_data",
@@ -11291,7 +11977,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Blue Dragonscale is an input to verified client recipes in Leatherworking; broadens coverage beyond the reference site's selected leveling routes.",
       "evidence": "client_data",
@@ -11316,7 +12002,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Black Dragonscale is an input to verified client recipes in Leatherworking; broadens coverage beyond the reference site's selected leveling routes.",
       "evidence": "client_data",
@@ -11340,7 +12026,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Input to Devilsaur equipment and Persuader; investigate demand without asserting current competitiveness.",
       "evidence": "client_data",
@@ -11392,7 +12078,7 @@
         "input",
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -11417,7 +12103,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -11443,7 +12129,7 @@
         "input",
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -11467,7 +12153,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -11491,7 +12177,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -11516,7 +12202,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -11541,7 +12227,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -11673,7 +12359,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -11699,7 +12385,7 @@
         "discovery",
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Unlocks Crusader weapon enchant; requires Enchanting 300 and uses Large Brilliant Shards/Righteous Orbs.",
       "evidence": "client_data",
@@ -11707,6 +12393,78 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/16252"
+      ]
+    },
+    {
+      "item_id": 17010,
+      "name": "Fiery Core",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/17010",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 17011,
+      "name": "Lava Core",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/17011",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 17012,
+      "name": "Core Leather",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/17012",
+        "https://bindonforever.com/professions/tailoring"
       ]
     },
     {
@@ -11823,7 +12581,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -11873,7 +12631,7 @@
         "input",
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -11923,7 +12681,7 @@
         "discovery",
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Unlocks a utility craft; requires Engineering 265 and Goblin Engineer specialization.",
       "evidence": "client_data",
@@ -12007,6 +12765,54 @@
       ]
     },
     {
+      "item_id": 19726,
+      "name": "Bloodvine",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/19726",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 19943,
+      "name": "Massive Mojo",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/19943",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 20008,
       "name": "Living Action Potion",
       "category": "consumables",
@@ -12055,6 +12861,30 @@
       ]
     },
     {
+      "item_id": 20381,
+      "name": "Dreamscale",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/20381",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 20424,
       "name": "Sandworm Meat",
       "category": "trade_goods",
@@ -12068,7 +12898,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -12093,7 +12923,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured.",
       "evidence": "client_data",
@@ -12102,6 +12932,30 @@
       "source_urls": [
         "https://bindonforever.com/item/20452",
         "https://bindonforever.com/professions/cooking"
+      ]
+    },
+    {
+      "item_id": 20520,
+      "name": "Dark Rune",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/20520",
+        "https://bindonforever.com/professions/tailoring"
       ]
     },
     {
@@ -12117,7 +12971,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -12141,7 +12995,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -12165,7 +13019,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -12189,7 +13043,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -12213,7 +13067,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -12237,7 +13091,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -12475,6 +13329,78 @@
       ]
     },
     {
+      "item_id": 21340,
+      "name": "Soul Pouch",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/21340",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 21341,
+      "name": "Felcloth Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/21341",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 21342,
+      "name": "Core Felcloth Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/21342",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 22246,
       "name": "Enchanted Mageweave Pouch",
       "category": "containers",
@@ -12521,6 +13447,78 @@
       "binding": "bind_on_equip",
       "source_urls": [
         "https://bindonforever.com/item/22248",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 22249,
+      "name": "Big Bag of Enchantment",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/22249",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 22251,
+      "name": "Cenarion Herb Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/22251",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 22252,
+      "name": "Satchel of Cenarius",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/22252",
         "https://bindonforever.com/professions/tailoring"
       ]
     },
@@ -12572,6 +13570,175 @@
       "source_urls": [
         "https://bindonforever.com/item/22308",
         "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 22682,
+      "name": "Frozen Rune",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/22682",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 213369,
+      "name": "Faintly Glowing Leather",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/213369",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 213379,
+      "name": "Hyperconductive Arcano-Filament",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input",
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/213379",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 215430,
+      "name": "Gnomeregan Fallout",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/215430",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 227844,
+      "name": "Leather-Reinforced Runecloth Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/227844",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 234012,
+      "name": "Hive Thistle",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/234012",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 241650,
+      "name": "Major Discolored Healing Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/241650",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -12650,6 +13817,30 @@
       ]
     },
     {
+      "item_id": 247242,
+      "name": "Superior Discolored Healing Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/247242",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 247786,
       "name": "Mote of Magic",
       "category": "trade_goods",
@@ -12688,7 +13879,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -12697,6 +13888,102 @@
       "source_urls": [
         "https://bindonforever.com/item/248815",
         "https://bindonforever.com/professions/mining"
+      ]
+    },
+    {
+      "item_id": 248819,
+      "name": "Fel Crystal",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/248819",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 248821,
+      "name": "Demonsage",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/248821",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 248822,
+      "name": "Death Lotus",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/248822",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 248823,
+      "name": "Marefoil",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/248823",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -12712,7 +13999,7 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -12941,6 +14228,54 @@
       "source_urls": [
         "https://bindonforever.com/item/249425",
         "https://bindonforever.com/professions/engineering"
+      ]
+    },
+    {
+      "item_id": 249427,
+      "name": "Pristine Leather",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/249427",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 249428,
+      "name": "Pristine Hide",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/249428",
+        "https://bindonforever.com/professions/tailoring"
       ]
     },
     {
@@ -13537,7 +14872,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -13561,7 +14896,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -13585,7 +14920,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -13609,7 +14944,7 @@
       "roles": [
         "output"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "core",
       "reason": "Compare ingredients with a selected armor or weapon enhancement; verify use requirements and turnover before trading.",
       "evidence": "client_data",
@@ -14180,6 +15515,30 @@
       ]
     },
     {
+      "item_id": 254139,
+      "name": "Bottomless Reagent Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/254139",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 255723,
       "name": "Manual: Greater Healing Potion",
       "category": "recipes",
@@ -14240,7 +15599,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -14290,7 +15649,7 @@
       "roles": [
         "recipe"
       ],
-      "status": "active",
+      "status": "research",
       "pool": "discovery",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
@@ -14299,6 +15658,174 @@
       "source_urls": [
         "https://bindonforever.com/item/264204",
         "https://bindonforever.com/professions/engineering"
+      ]
+    },
+    {
+      "item_id": 273125,
+      "name": "Lich's Index Finger",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/273125",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 273131,
+      "name": "Bottled Screams",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/273131",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 274030,
+      "name": "Malleable Essence of Nature",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/274030",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 274273,
+      "name": "Flask of Natural Accuracy",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/274273",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 274274,
+      "name": "Flask of Natural Aggression",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/274274",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 274275,
+      "name": "Flask of Natural Precision",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/274275",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 274276,
+      "name": "Flask of Natural Swiftness",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 3 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/274276",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -14347,6 +15874,30 @@
       "source_urls": [
         "https://bindonforever.com/item/274389",
         "https://bindonforever.com/professions/engineering"
+      ]
+    },
+    {
+      "item_id": 279271,
+      "name": "Felblood Soul Bag",
+      "category": "containers",
+      "tags": [
+        "bag"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Compare complete material costs with useful bag tiers for leveling characters and alts; turnover is not yet measured. Added in revision 3 to focus the scan on Tailoring markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "bind_on_equip",
+      "source_urls": [
+        "https://bindonforever.com/item/279271",
+        "https://bindonforever.com/professions/tailoring"
       ]
     },
     {

@@ -16,6 +16,7 @@ umask 077
 GAME_ROOT={{GAME_ROOT}}
 PRODUCT_DIR={{PRODUCT_DIR}}
 EXECUTABLE={{EXECUTABLE}}
+WINDOW_CLASS={{WINDOW_CLASS}}
 PRODUCT={{PRODUCT}}
 PREFIX={{WINE_PREFIX}}
 WINE="${CROWLEY_WINE:?set CROWLEY_WINE to the reviewed Wine executable}"
@@ -134,6 +135,28 @@ DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool key --clearmodif
 waited=0
 until owned_game_running; do
     [ "$waited" -lt "$GAME_TIMEOUT_SECONDS" ] || fail 'Battle.net did not start the game.'
+    sleep 1
+    waited=$((waited + 1))
+done
+
+# The client's windowed-fullscreen mode is mapped by Wine as a window maximized
+# into the desktop work area (below the top bar, beside the dock).  Crowley's
+# calibration pins the client at the display origin at full display size, so
+# ask the window manager for real fullscreen and verify the result.
+game_window=''
+waited=0
+while [ -z "$game_window" ]; do
+    [ "$waited" -lt "$GAME_TIMEOUT_SECONDS" ] || fail 'The game window did not appear.'
+    game_window=$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool search --onlyvisible --class "^$WINDOW_CLASS\$" 2>/dev/null | sed -n '1p') || game_window=''
+    [ -n "$game_window" ] || { sleep 1; waited=$((waited + 1)); }
+done
+DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" wmctrl -i -r "$game_window" -b add,fullscreen
+display_size=$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool getdisplaygeometry)
+waited=0
+while :; do
+    eval "$(DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" xdotool getwindowgeometry --shell "$game_window")"
+    [ "$X $Y $WIDTH $HEIGHT" = "0 0 $display_size" ] && break
+    [ "$waited" -lt 15 ] || fail "The game window is not fullscreen at the display origin: $X $Y $WIDTH $HEIGHT."
     sleep 1
     waited=$((waited + 1))
 done

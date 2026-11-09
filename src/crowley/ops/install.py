@@ -331,6 +331,7 @@ def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path, disp
         b"{{PRODUCT_DIR}}": shlex.quote(target.product_dir).encode("utf-8"),
         b"{{EXECUTABLE}}": shlex.quote(target.executable).encode("utf-8"),
         b"{{PRODUCT}}": shlex.quote(target.product).encode("utf-8"),
+        b"{{WINDOW_CLASS}}": shlex.quote(target.window_class).encode("utf-8"),
         b"{{WINE_PREFIX}}": shlex.quote(str(resolved_wine_prefix)).encode("utf-8"),
         b"{{EXPECTED_ARGV0}}": shlex.quote(expected_argv0).encode("utf-8"),
         b"{{DISPLAY}}": shlex.quote(display).encode("utf-8"),

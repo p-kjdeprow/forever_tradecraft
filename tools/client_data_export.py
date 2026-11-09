@@ -23,6 +23,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
 
+from crowley.config import host_config_path, load_host_config
 from crowley.core.client_data import (
     EXPECTED_CLIENT_BUILD,
     TABLE_COLUMNS,
@@ -660,8 +661,7 @@ def _parser() -> argparse.ArgumentParser:
     export = subparsers.add_parser("export")
     export.add_argument(
         "--install",
-        default=_TARGET.game_root,
-        help="parent game installation root (defaults to the packaged target)",
+        help="parent game installation root (defaults to the host config's game_root)",
     )
     export.add_argument("--out-root")
     export.add_argument("--image", default=IMAGE)
@@ -681,7 +681,8 @@ def main(argv: list[str] | None = None) -> int:
             build_image(tag=args.tag)
             return 0
         if args.command == "export":
-            path = export_client_data(args.install, args.out_root, image=args.image)
+            install = args.install or load_host_config(host_config_path()).game_root
+            path = export_client_data(install, args.out_root, image=args.image)
             print(path)
             return 0
         if args.command == "load":

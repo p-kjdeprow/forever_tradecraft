@@ -242,10 +242,13 @@ def _resource_names() -> frozenset[str]:
     target_id = selected_text[:-1]
     if _TARGET_ID_RE.fullmatch(target_id) is None:
         raise SourceBindingError("bound target selection contains an invalid targetId")
-    return RESOURCE_BOUNDARY_FILES | {
-        f"targets/{target_id}.json",
-        f"routes/{target_id}/stormwind.json",
-    }
+    names = RESOURCE_BOUNDARY_FILES | {f"targets/{target_id}.json"}
+    # Same rule as the session resolver: a target owns a mailbox route only
+    # through its packaged routes/<targetId>/ directory.  Without it the session
+    # has no route, so there is no route resource to bind.
+    if resources.files("crowley.data").joinpath("routes", target_id).is_dir():
+        names = names | {f"routes/{target_id}/stormwind.json"}
+    return names
 
 
 def _relative_import_base(module_name: str, level: int, *, is_package: bool) -> str:

@@ -24,7 +24,9 @@ def test_declared_safety_closure_is_exact() -> None:
     assert source_binding.RESOURCE_BOUNDARY_FILES <= resource_names
     selected = (source_binding._read_resource("targets/selected")).decode("ascii").strip()
     assert f"resource:targets/{selected}.json" in binding.manifest
-    assert f"resource:routes/{selected}/stormwind.json" in binding.manifest
+    route_bound = f"resource:routes/{selected}/stormwind.json" in binding.manifest
+    has_route_directory = source_binding.resources.files("crowley.data").joinpath("routes", selected).is_dir()
+    assert route_bound is has_route_directory
     assert binding.digest == source_binding.manifest_digest(binding.manifest)
 
 
@@ -126,7 +128,7 @@ def test_non_editable_style_package_location_builds_binding(tmp_path: Path) -> N
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == str(len(source_binding.SAFETY_MODULES) + 4)
+    assert result.stdout.strip() == str(len(source_binding.build_source_binding().manifest))
 
 
 def test_fresh_cli_process_has_no_unbound_crowley_source_modules(tmp_path: Path) -> None:
@@ -192,3 +194,20 @@ def test_file_swapped_during_read_is_rejected(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setattr(privfs.os, "read", swapping_read)
     with pytest.raises(source_binding.SourceBindingError, match="source cannot be read"):
         source_binding.build_source_binding()
+
+
+@pytest.mark.parametrize(("target_id", "bound"), [("verified-beta", True), ("forever-us-camwow7", False)])
+def test_route_resource_is_bound_only_for_targets_with_a_route_directory(
+    monkeypatch: pytest.MonkeyPatch, target_id: str, bound: bool
+) -> None:
+    original = source_binding._read_resource
+
+    def selected(resource_name: str) -> bytes:
+        if resource_name == "targets/selected":
+            return f"{target_id}\n".encode("ascii")
+        return original(resource_name)
+
+    monkeypatch.setattr(source_binding, "_read_resource", selected)
+    names = source_binding._resource_names()
+    assert f"targets/{target_id}.json" in names
+    assert (f"routes/{target_id}/stormwind.json" in names) is bound

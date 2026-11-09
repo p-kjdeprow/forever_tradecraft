@@ -22,6 +22,7 @@ from crowley.session.driver import (
     DriverProfile,
     MeasuredAnchor,
     PinnedX11IdentityObserver,
+    RecordingBackend,
     WindowIdentity,
     X11Backend,
 )
@@ -210,6 +211,64 @@ def _driver(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, executable_sourc
     driver.input_hierarchy = lambda **_kwargs: driver._input_evidence.xinput_hierarchy  # type: ignore[method-assign]
     backend.xtest_input_profile = lambda _hierarchy, **_kwargs: driver._input_evidence.xtest_profile  # type: ignore[method-assign]
     return driver
+
+
+def test_production_driver_consecutive_focus_actions_consume_prior_echo_grace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A second production driver action starts while the first echo is in grace."""
+
+    backend = RecordingBackend(identity=_identity())
+    driver = DesktopDriver(
+        profile=DriverProfile(display=":actions"),
+        backend=backend,
+        lease_path=tmp_path / "consecutive-focus.lock",
+    )
+    generation = driver.guardian.arm(_evidence())
+    original_begin = driver.guardian.begin_action
+    first = True
+
+    def begin_with_echo_grace(action_generation: int, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal first
+        action = original_begin(action_generation, **kwargs)
+        if first:
+            first = False
+            action.echo_sources = frozenset({7})
+            action.pending_echoes.append((100, 0x101, (10.0, 20.0), (10.0, 20.0), (0, 0, 0)))
+        return action
+
+    monkeypatch.setattr(driver.guardian, "begin_action", begin_with_echo_grace)
+    original_backend_action = backend.action
+    action_calls = 0
+
+    def observe_late_echo(name: str, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal action_calls
+        if action_calls == 1:
+            assert driver.guardian.observe(
+                SimpleNamespace(
+                    event_class="Motion",
+                    source_device=7,
+                    master_device=7,
+                    target_xid=0x101,
+                    timestamp_ms=101,
+                    root_xy=(10.0, 20.0),
+                    event_xy=(10.0, 20.0),
+                    modifiers=(0, 0, 0),
+                    modifier_effective=0,
+                )
+            )
+        action_calls += 1
+        return original_backend_action(name, **kwargs)
+
+    monkeypatch.setattr(backend, "action", observe_late_echo)
+    try:
+        driver.run("focus_game", generation, precondition=lambda _identity: True)
+        driver.run("focus_game", generation, precondition=lambda _identity: True)
+        assert action_calls == 2
+        assert driver.guardian.armed
+        assert [event["name"] for event in backend.events] == ["focus_game", "focus_game"]
+    finally:
+        driver.close()
 
 
 def _build_logout_anchor(
@@ -2451,6 +2510,135 @@ def test_pinned_identity_rejects_wrong_outer_parent(tmp_path: Path) -> None:
         backend.input_tool.close()
 
 
+def test_release_cancels_inflight_identity_but_not_a_later_passive_read(tmp_path: Path) -> None:
+    xauthority = tmp_path / "Xauthority"
+    xauthority.touch(mode=0o600)
+    wine_prefix = tmp_path / "wine"
+    profile = DriverProfile(
+        display=":0",
+        xauthority=str(xauthority),
+        wine_prefix=str(wine_prefix),
+        executable="WowB.exe",
+    )
+    facts = {
+        "protocolVersion": 1,
+        "matchingProcessCount": 1,
+        "candidateWindowCount": 1,
+        "pid": 10,
+        "start": "start",
+        "exe": "WowB.exe",
+        "statusName": "WowB.exe",
+        "loader": "wine-preloader",
+        "winePrefix": str(wine_prefix),
+        "xid": 100,
+        "title": "World of Warcraft",
+        "class": "wowb.exe,wowb.exe",
+        "outer": 100,
+        "child": 101,
+        "outerRoot": 1,
+        "outerParent": 1,
+        "outerGeometry": [0, 0, 1928, 1092],
+        "childGeometry": [0, 0, 1920, 1080],
+        "outerChildren": [101],
+        "focus": 101,
+        "active": 101,
+        "display": ":0",
+        "nonce": "nonce",
+        "binaryDigest": "digest",
+        "timingsNs": {"proc": 10, "x11": 20, "total": 30},
+    }
+    started = threading.Event()
+    allow_success = threading.Event()
+    failures: list[BaseException] = []
+
+    def invoke(_profile: DriverProfile, *, cancel_event, **_kwargs: object) -> dict[str, object]:
+        if allow_success.is_set():
+            return facts
+        started.set()
+        while not cancel_event.is_set():
+            time.sleep(0.005)
+        raise DriverError("identity observer cancelled")
+
+    backend = X11Backend(profile, input_tool=fixture_input_tool(tmp_path / "tool"))
+    backend._identity_observer = SimpleNamespace(invoke=invoke, close=lambda: None)
+
+    def resolve() -> None:
+        try:
+            backend.resolve_identity(deadline_monotonic=time.monotonic() + 5.0)
+        except BaseException as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+
+    worker = threading.Thread(target=resolve)
+    worker.start()
+    try:
+        assert started.wait(timeout=2.0)
+        backend.release_held_input()
+        worker.join(timeout=2.0)
+        assert not worker.is_alive()
+        assert len(failures) == 1
+        assert isinstance(failures[0], DriverError)
+        assert str(failures[0]) == "identity observer cancelled"
+        allow_success.set()
+        identity = backend.resolve_identity(deadline_monotonic=time.monotonic() + 1.0)
+        assert identity.xid == 100
+        assert backend._cancel_active.is_set()
+    finally:
+        backend.close()
+        backend.input_tool.close()
+
+
+def test_release_allows_a_later_passive_desktop_command(tmp_path: Path) -> None:
+    xauthority = tmp_path / "Xauthority"
+    xauthority.touch(mode=0o600)
+    backend = X11Backend(
+        DriverProfile(display=":passive-run", xauthority=str(xauthority)),
+        input_tool=fixture_input_tool(tmp_path / "tool"),
+    )
+    try:
+        backend.release_held_input()
+        result = backend._run(["xdotool", "search", "--name", "World of Warcraft"])
+        assert result.returncode == 0
+    finally:
+        backend.close()
+        backend.input_tool.close()
+
+
+def test_release_cancels_an_inflight_passive_desktop_command(tmp_path: Path) -> None:
+    xauthority = tmp_path / "Xauthority"
+    xauthority.touch(mode=0o600)
+    backend = X11Backend(
+        DriverProfile(display=":passive-run-race", xauthority=str(xauthority)),
+        input_tool=fixture_input_tool(tmp_path / "tool"),
+    )
+    errors: list[BaseException] = []
+
+    def run_command() -> None:
+        try:
+            backend._run(
+                ["sleep", "30"],
+                timeout=5.0,
+            )
+        except BaseException as exc:  # pragma: no cover - assertion below reports the exception
+            errors.append(exc)
+
+    worker = threading.Thread(target=run_command)
+    worker.start()
+    try:
+        deadline = time.monotonic() + 2.0
+        while not backend._active_processes and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert backend._active_processes
+        backend.release_held_input()
+        worker.join(timeout=2.0)
+        assert not worker.is_alive()
+        assert len(errors) == 1
+        assert isinstance(errors[0], DriverError)
+        assert str(errors[0]) == "desktop action was cancelled"
+    finally:
+        backend.close()
+        backend.input_tool.close()
+
+
 def test_unsafe_observer_mode_is_rejected_before_input_or_lease(tmp_path: Path, monkeypatch) -> None:
     observer = tmp_path / "observer"
     observer.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
@@ -2643,7 +2831,7 @@ def test_pinned_observer_cancellation_reaps_its_process_group(tmp_path: Path) ->
     worker.start()
     try:
         time.sleep(0.05)
-        backend._cancel_active.set()
+        backend.release_held_input()
         worker.join(timeout=2)
         assert not worker.is_alive()
         assert len(errors) == 1
@@ -2694,7 +2882,7 @@ def test_pinned_observer_cancellation_reaps_real_elf_child(tmp_path: Path) -> No
     worker.start()
     try:
         time.sleep(0.05)
-        backend._cancel_active.set()
+        backend.release_held_input()
         worker.join(timeout=2)
         assert not worker.is_alive()
         assert len(errors) == 1

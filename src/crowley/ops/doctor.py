@@ -601,6 +601,26 @@ def _check_database(values: Mapping[str, str], problems: list[str], status_fn: D
         problems.append(f"database migrations are not current: {', '.join(details)}")
 
 
+def _check_gnome_animations(problems: list[str]) -> None:
+    """Require the screenshot flash to be disabled before native capture."""
+
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        problems.append(f"GNOME animation setting could not be checked: gsettings is unavailable ({exc})")
+        return
+    if result.returncode != 0:
+        problems.append("GNOME animation setting could not be checked: gsettings failed")
+    elif result.stdout.strip() != "false":
+        problems.append("GNOME animations must be disabled: enable-animations is not false")
+
+
 def _check_account(resolved: OpsResolvedConfig | None, problems: list[str]) -> None:
     if resolved is None:
         return
@@ -640,6 +660,7 @@ def doctor(
     except ValueError as exc:
         return DoctorReport((f"XDG paths invalid: {exc}",))
     target = packaged_game_target()
+    _check_gnome_animations(problems)
     host = _check_host(xdg, problems)
     _check_tunables(xdg, problems)
     _check_pinned_binaries(xdg, environment, problems)

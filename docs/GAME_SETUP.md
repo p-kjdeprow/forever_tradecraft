@@ -41,6 +41,18 @@ the saved login token. Battle.net is the only component that can issue the game
 login ticket; starting `_forever_/Wow.exe` directly with
 `-launcherlogin -uid wowf` fails with `WOW51900308`.
 
+Disable GNOME animations before using native screenshots or the takeover hover:
+
+```sh
+gsettings set org.gnome.desktop.interface enable-animations false
+crowley-ops doctor
+```
+
+The doctor refuses the host unless `gsettings get
+org.gnome.desktop.interface enable-animations` prints `false`. The screenshot
+flash otherwise generates XI2 crossing and motion events on the fullscreen game
+window, which the Guardian correctly treats as unattributed input.
+
 The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).
 Render it from the selected target and preserve executable mode 0700 on the
 installed wrapper. Keep recovery evidence private under the XDG state directory.

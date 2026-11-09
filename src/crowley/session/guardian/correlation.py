@@ -12,6 +12,8 @@ from typing import Any
 
 from ..input_events import RawMotionPairing
 
+CORRELATION_WINDOW_MS = 250
+
 
 @dataclass
 class ActionCorrelation:
@@ -102,14 +104,28 @@ class ActionCorrelation:
     def complete(self) -> bool:
         return (
             self.sequence_index >= len(self.required_sequence)
-            and (
-                not self.echo_sources
-                or (self.echo_index >= self.emitted_motion_count and not self.pending_echoes)
-            )
             and self.positioning_index >= len(self.expected_positioning_trace)
             and self.motion_index >= len(self.expected_motion_trace)
             and not self.raw_motion_pairing.pending
         )
+
+
+@dataclass(frozen=True, slots=True)
+class EchoGraceExpectation:
+    """One exact forwarded echo that remains admissible after completion."""
+
+    generation: int
+    deadline_monotonic: float
+    timestamp: int
+    target_xid: int | None
+    root_xy: tuple[float, float] | None
+    event_xy: tuple[float, float] | None
+    modifiers: tuple[int, int, int] | None
+    echo_sources: frozenset[int]
+    canonical_motion: bool
+    expected_root_xid: int | None
+    expected_event_xid: int | None
+    require_delivered_modifiers: bool
 
 
 @dataclass(slots=True)
@@ -127,6 +143,20 @@ class _Observation:
     motion_match_index: int | None = None
     positioning_match_index: int | None = None
     echo_pending_index: int | None = None
+    grace_expectation: EchoGraceExpectation | None = None
+    grace_index: int | None = None
+    grace_expectations: tuple[EchoGraceExpectation, ...] = ()
+    matched_echo_expectation: EchoGraceExpectation | None = None
+    action_pending_echoes: tuple[
+        tuple[
+            int,
+            int | None,
+            tuple[float, float] | None,
+            tuple[float, float] | None,
+            tuple[int, int, int] | None,
+        ],
+        ...,
+    ] = ()
     canonical_motion_checked: bool = False
     canonical_raw_queued: bool = False
     canonical_endpoint: tuple[int, int] | None = None

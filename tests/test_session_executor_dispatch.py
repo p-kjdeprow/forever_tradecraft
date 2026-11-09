@@ -782,9 +782,9 @@ def test_guardian_requires_one_forwarded_echo_per_emitted_motion(tmp_path: Path)
     try:
         assert guardian.observe(_event("Motion", 90, target=0x700101, root=(10, 20)))
         assert guardian.observe(_event("Motion", 91, target=0x700101, root=(30, 40)))
-        assert not action.complete
+        assert action.complete
         assert guardian.observe(_event("Motion", 100, target=0x700101, root=(10, 20), source=7, master=7))
-        assert not action.complete
+        assert action.complete
         assert guardian.observe(_event("Motion", 101, target=0x700101, root=(30, 40), source=7, master=7))
         assert action.complete
         assert action.echo_index == 2

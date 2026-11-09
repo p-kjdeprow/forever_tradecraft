@@ -86,6 +86,7 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         "crowley-paper-trading.service",
         "crowley-paper-trading.timer",
         "crowley-session.service",
+        "crowley-session-supervisor.service",
     }
     for name, raw in units.items():
         text = raw.decode("utf-8")

@@ -2143,3 +2143,17 @@ def test_conflicting_retry_payload_is_rejected_without_mutating_archive(tmp_path
         journal.append_archive_bundle(conflict, checkpoint=copy.deepcopy(DEFAULT_STATE))
     assert journal.archives("runs")[0]["value"] == 1
     assert journal.read()["archives"]["runs"]["count"] == 1
+
+
+def test_tick_never_rewrites_a_pause_into_a_deadline_block(tmp_path) -> None:
+    from crowley.session.controller import Controller, ControllerState
+    from crowley.session.journal import Journal
+
+    journal = Journal(tmp_path / "pause-deadline.json")
+    controller = Controller(journal, driver=_Driver(), recover_on_restart=False)
+    with controller._mutex:
+        controller._state = ControllerState.PAUSED
+        controller._deadline = 1.0
+        controller._deadline_at = 1
+    status = controller.tick()
+    assert status.state is ControllerState.PAUSED

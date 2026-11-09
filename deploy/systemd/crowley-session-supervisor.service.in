@@ -1,0 +1,14 @@
+[Unit]
+Description=Crowley session transient-blocker supervisor
+After=crowley-session.service
+
+[Service]
+Type=simple
+# Resumes only allowlisted transient BLOCKED states; never PAUSED.
+ExecStart=%h/.local/bin/crowley-session --config %E/crowley/session.toml supervise
+EnvironmentFile=%E/crowley/secrets.env
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

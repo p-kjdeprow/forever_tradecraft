@@ -128,6 +128,7 @@ SAFETY_MODULES = frozenset(
         "crowley.session.route_walk",
         "crowley.session.source_binding",
         "crowley.session.startup",
+        "crowley.session.supervisor",
     }
 )
 

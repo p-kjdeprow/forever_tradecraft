@@ -35,6 +35,14 @@ from .startup import (
     TAKEOVER_DRILL_OPERATION_TIMEOUT_SECONDS,
     TAKEOVER_DRILL_TRANSPORT_MARGIN_SECONDS,
 )
+from .supervisor import (
+    DEFAULT_FAILURE_BUDGET,
+    DEFAULT_MIN_RESUME_INTERVAL_SECONDS,
+    DEFAULT_POLL_SECONDS,
+    Supervisor,
+    SupervisorError,
+)
+from .supervisor import run as run_supervisor
 
 _IPC_REQUEST_MAX_BYTES = 4096
 _IPC_RESPONSE_MAX_BYTES = 524288
@@ -1106,6 +1114,35 @@ def _motion_profile_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _supervise_command(args: argparse.Namespace, socket_path: Path) -> int:
+    """Resume documented transient blockers; see ``supervisor.py``."""
+
+    def request(payload: dict[str, Any]) -> dict[str, Any]:
+        # Same per-command transport bounds as the status/resume subcommands.
+        timeout = 20.0 if payload["command"] == "resume" else 5.0
+        try:
+            return _socket_request(socket_path, payload, timeout=timeout)
+        except TimeoutError:
+            return {"ok": False, "error": "IPC operation timed out"}
+        except (ConnectionRefusedError, FileNotFoundError, json.JSONDecodeError):
+            return {"ok": False, "error": "session daemon is not running"}
+        except OSError as exc:
+            return {"ok": False, "error": f"IPC transport failed: {exc}"}
+
+    try:
+        supervisor = Supervisor(
+            request,
+            min_resume_interval=args.min_resume_interval,
+            failure_budget=args.failure_budget,
+            out=os.sys.stdout,
+        )
+        run_supervisor(supervisor, poll_seconds=args.poll_seconds)
+    except (SupervisorError, ValueError) as exc:
+        print(f"error: {exc}", file=os.sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="crowley-session")
     parser.add_argument("--config", default="~/.config/crowley/session.toml")
@@ -1121,6 +1158,10 @@ def main(argv: list[str] | None = None) -> int:
     for command in ("takeover-drill", "takeover-drill-cancel"):
         subparsers.add_parser(command).add_argument("--generation", type=int, required=True)
     subparsers.add_parser("daemon")
+    supervise = subparsers.add_parser("supervise")
+    supervise.add_argument("--poll-seconds", type=float, default=DEFAULT_POLL_SECONDS)
+    supervise.add_argument("--min-resume-interval", type=float, default=DEFAULT_MIN_RESUME_INTERVAL_SECONDS)
+    supervise.add_argument("--failure-budget", type=int, default=DEFAULT_FAILURE_BUDGET)
     subparsers.add_parser("native-bootstrap").add_argument("--generation", type=int, required=True)
     subparsers.add_parser("native-construction-prepare").add_argument("--generation", type=int, required=True)
     subparsers.add_parser("native-construction-control-preflight").add_argument(
@@ -1246,6 +1287,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.socket
         else load_config(Path(args.config).expanduser())
     )
+    if args.command == "supervise":
+        return _supervise_command(args, client_config.socket)
     request = {"command": args.command.replace("-", "_")}
     if hasattr(args, "mode"):
         request["mode"] = args.mode

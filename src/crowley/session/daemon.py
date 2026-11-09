@@ -11512,12 +11512,24 @@ class SessionDaemon:
                 previous = next_frame
             raise DriverError("empty focused chat EditBox did not appear before its bounded deadline")
 
-        def close_empty_chat() -> None:
+        def close_empty_chat(*, discard_stale_text: bool = False) -> None:
             nonlocal snapshot, frame
             edit = snapshot.get("chatEdit")
             if edit == {"active": False, "focused": False, "text": ""}:
                 return
-            if edit != {"active": True, "focused": True, "text": ""}:
+            stale = (
+                discard_stale_text
+                and isinstance(edit, dict)
+                and edit.get("active") is True
+                and edit.get("focused") is True
+                and isinstance(edit.get("text"), str)
+                and edit.get("text") != ""
+                # Only Crowley's own interrupted command text is discarded;
+                # anything else (for example human typing while the lease was
+                # not held) fails loudly for the operator.
+                and any(command.startswith(edit["text"]) for command in DesktopDriver.COMMANDS)
+            )
+            if edit != {"active": True, "focused": True, "text": ""} and not stale:
                 raise DriverError("Auction House interaction requires an empty focused or closed chat buffer")
             self.driver.run(
                 "escape_command_buffer",
@@ -11543,8 +11555,13 @@ class SessionDaemon:
                 if current_edit == {"active": False, "focused": False, "text": ""}:
                     snapshot, frame = current, next_frame
                     return
-                if current_edit != {"active": True, "focused": True, "text": ""}:
+                allowed_intermediate = [{"active": True, "focused": True, "text": ""}]
+                if stale:
+                    allowed_intermediate.append(edit)
+                if current_edit not in allowed_intermediate:
                     raise DriverError("Escape left an unexpected active chat buffer")
+                # Discarding stale text can take more than one telemetry tick
+                # to settle; keep waiting for the verified closed buffer.
                 previous = next_frame
             raise DriverError("empty chat EditBox did not close before its bounded deadline")
 
@@ -11558,7 +11575,14 @@ class SessionDaemon:
             if edit == {"active": True, "focused": True, "text": ""}:
                 return
             if isinstance(edit, dict) and edit.get("active") is True:
-                raise DriverError("active chat buffer is not an empty focused command line")
+                # An interrupted earlier command can leave its unsubmitted text
+                # in the focused buffer.  Human typing revokes the lease before
+                # this point, so the text is Crowley's own: discard it with the
+                # guarded Escape and require a verified closed buffer.
+                close_empty_chat(discard_stale_text=True)
+                edit = snapshot.get("chatEdit", {})
+                if edit != {"active": False, "focused": False, "text": ""}:
+                    raise DriverError("active chat buffer is not an empty focused command line")
             if not world_closed(snapshot):
                 raise DriverError("Stormwind world scene is not verified before opening chat")
             self.driver.run(
@@ -12573,6 +12597,9 @@ class SessionDaemon:
                 return self.status_dict()
             except (DriverError, EvidenceError, ModelError, OSError, ValueError) as exc:
                 self.last_error = str(exc)
+                # The blocker string alone does not say which step failed;
+                # keep the stack in the service journal for diagnosis.
+                _LOGGER.warning("session step blocked: %s", self.last_error, exc_info=exc)
                 self._block_if_current(self.last_error, generation)
             return self.status_dict()
         capture_deadline: float | None = None
@@ -12716,6 +12743,7 @@ class SessionDaemon:
                     self._block_if_current(self.last_error, generation)
                 return self.status_dict()
             self.last_error = str(exc)
+            _LOGGER.warning("session capture blocked: %s", self.last_error, exc_info=exc)
             self._block_if_current(self.last_error, generation)
             return self.status_dict()
         if capture_deadline is not None and capture_clock is not None and capture_clock() >= capture_deadline:
@@ -12815,6 +12843,7 @@ class SessionDaemon:
                 # still uncertain.  Keep the durable reconcile intent intact.
                 return self.status_dict()
             self.last_error = str(exc)
+            _LOGGER.warning("session action blocked: %s", self.last_error, exc_info=exc)
             self._block_if_current(self.last_error, generation)
         else:
             self.last_error = ""
@@ -13997,6 +14026,18 @@ class SessionDaemon:
             )
             return
         if status.state == ControllerState.UPLOAD_WAIT and self.config.companion_state:
+            if not status.last_uid:
+                # The cycle UID is persisted only while a scan is pending; an
+                # upload wait restored without it has no scan to match.  The
+                # companion uploads saved scans on its own, so close the cycle
+                # as unqualified and continue on cadence.
+                self.controller.reject_late_upload(
+                    "",
+                    expected_generation=status.generation,
+                    expected_state=ControllerState.UPLOAD_WAIT,
+                    fence=fence,
+                )
+                return
             evidence = self.current_evidence
             meta = (
                 evidence.envelope
@@ -14035,7 +14076,13 @@ class SessionDaemon:
             if upload_time is None:
                 return
             if upload_time < finish or upload_time - finish > self.config.upload_deadline_seconds:
-                raise EvidenceError("upload was outside the 60-second finish deadline")
+                self.controller.reject_late_upload(
+                    status.last_uid,
+                    expected_generation=status.generation,
+                    expected_state=ControllerState.UPLOAD_WAIT,
+                    fence=fence,
+                )
+                return
             self.controller.uploaded(
                 status.last_uid,
                 accepted=True,

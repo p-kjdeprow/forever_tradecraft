@@ -4170,6 +4170,12 @@ class Controller:
                 expected_generation=expected_generation, expected_state=expected_state, fence=fence
             ):
                 return self.status()
+            if self._state in {ControllerState.PAUSED, ControllerState.STOPPED}:
+                # A pause or stop is a durable hold (human takeover, guardian
+                # revocation, operator).  An action deadline left over from the
+                # interrupted step must not rewrite that hold into a generic
+                # BLOCKED state and lose its reason.
+                return self.status()
             if (self._deadline and self.clock() >= self._deadline) or (
                 self._deadline_at and self.wall_clock() >= self._deadline_at
             ):
@@ -5680,11 +5686,15 @@ class Controller:
                     self._clear_intent("open_ah_not_effective")
                     outcome = f"open_ah_not_effective_in_{scene}"
             elif (
-                intent == "save_reload"
-                and not uid
-                and self._action_result == "preparing"
+                not uid
                 and complete_facts
                 and scanner_idle is True
+                and (
+                    (intent == "save_reload" and self._action_result == "preparing")
+                    # The cycle UID is persisted only while pending; after a
+                    # restart an upload wait without it has no scan to match.
+                    or intent == "upload_wait"
+                )
             ):
                 # A save/reload that never crossed its dispatch boundary and
                 # carries no cycle UID has no scan to account for; the stable
@@ -5696,8 +5706,8 @@ class Controller:
                 self._pending = False
                 self._resume_state = ControllerState.WAIT_DUE
                 self._state = self._calibration_gate_state()
-                self._clear_intent("save_reload_without_cycle_uid")
-                outcome = "save_reload_without_cycle_uid_cleared"
+                self._clear_intent(f"{intent}_without_cycle_uid")
+                outcome = f"{intent}_without_cycle_uid_cleared"
             elif intent == "stop" and self._stop_requested:
                 self._restart_uncertain = False
                 self._reconciliation_required = False
@@ -6070,6 +6080,52 @@ class Controller:
             self._state = ControllerState.UPLOAD_WAIT
             self._begin_intent("upload_wait", deadline_seconds=self.upload_deadline_seconds)
             self._save(last_action="stable_saved")
+            return self.status()
+
+    def reject_late_upload(
+        self,
+        uid: str,
+        *,
+        expected_generation: int | None = None,
+        expected_state: ControllerState | str | set[ControllerState | str] | None = None,
+        fence: ObservationFence | None = None,
+    ) -> ControllerStatus:
+        """Close a cycle whose companion upload missed its finish deadline.
+
+        The scan is already uploaded and stored, so there is nothing to retry;
+        the cycle simply cannot qualify.  Archive it as rejected and continue
+        on cadence instead of re-blocking on the same late upload forever.
+        """
+
+        with self._mutex:
+            if not self._admitted(
+                expected_generation=expected_generation, expected_state=expected_state, fence=fence
+            ):
+                return self.status()
+            if self._state != ControllerState.UPLOAD_WAIT:
+                raise RuntimeError(f"cannot reject a late upload from {self._state}")
+            if uid != self._last_uid:
+                return self.block("upload UID mismatch")
+            reason = "upload outside finish deadline"
+            rejection_state = self._qualification_state_snapshot()
+            self._evidence_meta["qualification"] = "rejected"
+            self._evidence_meta["rejectionReason"] = reason
+            self._pending = False
+            self._archive(
+                "evidence",
+                {
+                    "kind": "upload",
+                    "uid": uid,
+                    "accepted": False,
+                    "generation": self._generation,
+                    "evidence": copy.deepcopy(self._evidence_meta),
+                },
+            )
+            self._archive_staged_outcome(rejection_state, result="rejected", reason=reason, kind="upload")
+            self._clear_intent("late_upload_rejected")
+            self._blocker = ""
+            self._state = ControllerState.WAIT_DUE
+            self._save(last_action="late_upload_rejected")
             return self.status()
 
     def uploaded(

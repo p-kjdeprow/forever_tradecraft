@@ -12,9 +12,12 @@ Shared agent workflows live in `.agents/skills/`; see `AGENTS.md` for when to us
 - Schema changes go in a new `src/crowley/server/migrations/NNN_*.sql`; never edit applied ones.
 - Automated clicks are hard-capped at human speed: at most one per second, enforced in code as
   at least 1.0 s between consecutive automated clicks. No config, flag or caller may raise it.
-- Every automated click is a full simulated human action through the session executor: curved,
-  Fitts-timed pointer movement with human variability (submovements, endpoint scatter, seeded
-  and recorded), then a real button press and release. Never warp the pointer or move linearly.
+- Every automated click is a full simulated human action: curved, Fitts-timed pointer movement
+  with human variability (submovements, endpoint scatter, seeded and recorded), then a real
+  button press and release, with target and focus verified before the press. Never warp the
+  pointer or move linearly.
+- Keep the scan loop small: a new state, mode or safety layer needs a concrete invariant it
+  protects or a failure it fixes.
 - Ask before committing, pushing, or destroying data.
 
 ## Commands

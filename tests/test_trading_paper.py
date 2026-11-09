@@ -812,15 +812,18 @@ def test_production_paper_full_and_resumed_persisted_rows_match(tmp_path: Path):
                     """,
                     (export_id,),
                 )
-                for ability_id, profession in ((3938, "alchemy"), (3939, "engineering")):
+                for ability_id, skill_line_id, profession in (
+                    (3938, 171, "alchemy"),
+                    (3939, 202, "engineering"),
+                ):
                     conn.execute(
                         """
                         INSERT INTO client_recipe_skill_lines
                             (export_id, spell_id, ability_id, skill_line_id, profession,
                              min_rank, yellow, green_derived, grey, acquire_method, flags)
-                        VALUES (%s, 3938, %s, 164, %s, 1, 1, 1, 1, 0, 0)
+                        VALUES (%s, 3938, %s, %s, %s, 1, 1, 1, 1, 0, 0)
                         """,
-                        (export_id, ability_id, profession),
+                        (export_id, ability_id, skill_line_id, profession),
                     )
                 conn.execute(
                     """

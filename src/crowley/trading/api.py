@@ -73,6 +73,44 @@ class ItemFacts:
 
 
 @dataclass(frozen=True)
+class SkillRequirement:
+    """One profession skill line a recipe is learned and crafted under (client data)."""
+
+    skill_line_id: int
+    profession: str
+    min_rank: int
+    yellow: int
+    green: int
+    grey: int
+    acquire_method: int
+
+
+@dataclass(frozen=True)
+class TeachingRequirement:
+    """The skill a teaching item requires to use, from its client item row."""
+
+    item_id: int
+    skill_line_id: int
+    rank: int
+
+
+@dataclass(frozen=True)
+class RecipeAcquisition:
+    """How a recipe is learned.
+
+    ``teaching_item_ids`` (sorted, unique) are every item that teaches it.
+    ``teaching_requirements`` (sorted by item id) cover only those with client item data;
+    the real learn requirement of an item-taught recipe is there, not in
+    ``SkillRequirement.min_rank`` (which is 1 for most professions).
+    Empty ``skill_lines`` means not loaded from client data.
+    """
+
+    teaching_item_ids: tuple[int, ...] = ()
+    skill_lines: tuple[SkillRequirement, ...] = ()
+    teaching_requirements: tuple[TeachingRequirement, ...] = ()
+
+
+@dataclass(frozen=True)
 class Recipe:
     """A crafting recipe with fixed yields only (random-yield recipes are not offered)."""
 
@@ -88,6 +126,7 @@ class Recipe:
     totems: tuple[int, ...] = ()
     totem_categories: tuple[int, ...] = ()
     spell_focus: int | None = None
+    acquisition: RecipeAcquisition = RecipeAcquisition()
 
 
 @dataclass(frozen=True)

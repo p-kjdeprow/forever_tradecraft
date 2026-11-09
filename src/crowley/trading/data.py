@@ -9,7 +9,7 @@ from typing import Any, NamedTuple
 from crowley.analysis.books import load_commodity_books
 from crowley.core.watchlist import Catalog, load_catalog
 
-from .api import ItemFacts, Recipe
+from .api import ItemFacts, Recipe, RecipeAcquisition, SkillRequirement, TeachingRequirement
 from .recipes import validate_recipes
 
 
@@ -49,7 +49,20 @@ class _RecipeRow(NamedTuple):
 
 class _SkillRow(NamedTuple):
     spell_id: int
+    skill_line_id: int
     profession: str
+    min_rank: int
+    yellow: int
+    green: int
+    grey: int
+    acquire_method: int
+
+
+class _TeacherRow(NamedTuple):
+    spell_id: int
+    teaching_item_id: int
+    required_skill: int | None
+    required_skill_rank: int | None
 
 
 class _ReagentRow(NamedTuple):
@@ -209,10 +222,25 @@ def load_recipes(conn: Any, house_key: str, client_build: str | None = None) -> 
         _SkillRow(*row)
         for row in conn.execute(
             """
-        SELECT spell_id, profession
+        SELECT spell_id, skill_line_id, profession, min_rank, yellow, green_derived, grey,
+               acquire_method
         FROM client_recipe_skill_lines
         WHERE export_id = %s
-        ORDER BY spell_id, profession
+        ORDER BY spell_id, skill_line_id, ability_id
+        """,
+            (export_id,),
+        ).fetchall()
+    )
+    teacher_rows = tuple(
+        _TeacherRow(*row)
+        for row in conn.execute(
+            """
+        SELECT t.spell_id, t.teaching_item_id, i.required_skill, i.required_skill_rank
+        FROM client_recipe_teachers AS t
+        LEFT JOIN client_items AS i
+          ON i.export_id = t.export_id AND i.item_id = t.teaching_item_id
+        WHERE t.export_id = %s
+        ORDER BY t.spell_id, t.teaching_item_id
         """,
             (export_id,),
         ).fetchall()
@@ -278,8 +306,38 @@ def load_recipes(conn: Any, house_key: str, client_build: str | None = None) -> 
         ).fetchall()
     )
     professions: dict[int, set[str]] = {}
+    skill_lines: dict[int, list[SkillRequirement]] = {}
     for row in skill_rows:
         professions.setdefault(row.spell_id, set()).add(row.profession)
+        requirement = SkillRequirement(
+            row.skill_line_id,
+            row.profession,
+            row.min_rank,
+            row.yellow,
+            row.green,
+            row.grey,
+            row.acquire_method,
+        )
+        lines = skill_lines.setdefault(row.spell_id, [])
+        if lines and lines[-1].skill_line_id == row.skill_line_id:
+            # The client lists one row per SkillLineAbility; several abilities
+            # can teach the same spell in the same skill line.  They must agree.
+            if lines[-1] != requirement:
+                raise ValueError(
+                    f"recipe {row.spell_id} has conflicting requirements in skill line {row.skill_line_id}"
+                )
+            continue
+        lines.append(requirement)
+    teachers: dict[int, list[int]] = {}
+    teaching: dict[int, list[TeachingRequirement]] = {}
+    for row in teacher_rows:
+        teachers.setdefault(row.spell_id, []).append(row.teaching_item_id)
+        if row.required_skill is not None:
+            if row.required_skill_rank is None:
+                raise ValueError(f"teaching item {row.teaching_item_id} has a skill but no rank")
+            teaching.setdefault(row.spell_id, []).append(
+                TeachingRequirement(row.teaching_item_id, row.required_skill, row.required_skill_rank)
+            )
     reagents: dict[int, list[tuple[int, int]]] = {}
     for row in reagent_rows:
         reagents.setdefault(row.spell_id, []).append((row.item_id, row.count))
@@ -341,9 +399,14 @@ def load_recipes(conn: Any, house_key: str, client_build: str | None = None) -> 
                 totems=tuple(totems.get(spell_id, ())),
                 totem_categories=tuple(categories.get(spell_id, ())),
                 spell_focus=spell_focus.get(spell_id),
+                acquisition=RecipeAcquisition(
+                    tuple(teachers.get(spell_id, ())),
+                    tuple(skill_lines.get(spell_id, ())),
+                    tuple(teaching.get(spell_id, ())),
+                ),
             )
         )
-    return validate_recipes(result)
+    return validate_recipes(result, client_data=True)
 
 
 def load_client_data(

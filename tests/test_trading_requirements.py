@@ -13,7 +13,17 @@ from crowley.core.house import House
 from crowley.trading import __main__ as cli
 from crowley.trading import paper
 from crowley.trading.accounts import Account
-from crowley.trading.api import Craft, CraftingCapabilities, ItemFacts, ItemSnapshot, Level, Recipe
+from crowley.trading.api import (
+    Craft,
+    CraftingCapabilities,
+    ItemFacts,
+    ItemSnapshot,
+    Level,
+    Recipe,
+    RecipeAcquisition,
+    SkillRequirement,
+    TeachingRequirement,
+)
 from crowley.trading.data import load_recipes
 from crowley.trading.engine import run_backtest
 from crowley.trading.execution import ExecutionContext, execute_intent
@@ -128,7 +138,7 @@ def test_duplicate_recipe_spells_are_rejected() -> None:
         validate_recipes((_recipe(), _recipe()))
 
 
-def test_loader_preserves_requirement_rows() -> None:
+def _skill_line_loader(skill_rows):
     class Cursor:
         def __init__(self, rows=(), one=None):
             self.rows = rows
@@ -147,7 +157,49 @@ def test_loader_preserves_requirement_rows() -> None:
             if "FROM client_recipes" in query:
                 return Cursor(rows=[(1, 0, 0, None, "no_teaching_item")])
             if "client_recipe_skill_lines" in query:
-                return Cursor(rows=[(1, "engineering")])
+                return Cursor(rows=skill_rows)
+            if "client_recipe_reagents" in query:
+                return Cursor(rows=[(1, 10, 1)])
+            if "client_recipe_outputs" in query:
+                return Cursor(rows=[(1, 11, 1, "fixed")])
+            return Cursor()
+
+    return Connection()
+
+
+def test_loader_collapses_identical_ability_rows_and_rejects_conflicts() -> None:
+    # Live 70862 data lists one row per SkillLineAbility; several abilities can
+    # teach one spell in the same skill line.
+    row = (1, 202, "engineering", 1, 105, 130, 155, 0)
+    loaded = load_recipes(_skill_line_loader([row, row]), "house", "1.0.1")
+    assert loaded[0].acquisition.skill_lines == (SkillRequirement(202, "engineering", 1, 105, 130, 155, 0),)
+    conflicting = (1, 202, "engineering", 5, 105, 130, 155, 0)
+    with pytest.raises(ValueError, match="conflicting requirements in skill line 202"):
+        load_recipes(_skill_line_loader([row, conflicting]), "house", "1.0.1")
+
+
+def test_loader_preserves_requirement_rows() -> None:
+    class Cursor:
+        def __init__(self, rows=(), one=None):
+            self.rows = rows
+            self.one = one
+
+        def fetchall(self):
+            return self.rows
+
+        def fetchone(self):
+            return self.one
+
+    class Connection:
+        def execute(self, query, _params):
+            if "latest_client_export" in query:
+                return Cursor(one=(7, "1.0.1"))
+            if "FROM client_recipes" in query:
+                return Cursor(rows=[(1, 0, 0, None, "teaching_item_with_item_data")])
+            if "client_recipe_skill_lines" in query:
+                return Cursor(rows=[(1, 202, "engineering", 100, 110, 120, 130, 1)])
+            if "client_recipe_teachers" in query:
+                return Cursor(rows=[(1, 55, 202, 300), (1, 77, 202, 225)])
             if "client_recipe_reagents" in query:
                 return Cursor(rows=[(1, 10, 1)])
             if "client_recipe_outputs" in query:
@@ -164,6 +216,11 @@ def test_loader_preserves_requirement_rows() -> None:
     assert loaded[0].totems == (3938,)
     assert loaded[0].totem_categories == (162,)
     assert loaded[0].spell_focus == 1
+    assert loaded[0].acquisition == RecipeAcquisition(
+        (55, 77),
+        (SkillRequirement(202, "engineering", 100, 110, 120, 130, 1),),
+        (TeachingRequirement(55, 202, 300), TeachingRequirement(77, 202, 225)),
+    )
 
 
 def test_reports_bind_capabilities_and_gate_counts() -> None:

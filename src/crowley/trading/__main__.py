@@ -20,7 +20,8 @@ from crowley.core.auction_rules import rules_for_house
 from crowley.core.house import House
 from crowley.core.queue import QueueFormatError
 
-from .api import CraftingCapabilities
+from .account_gate import known_recipes, load_account_snapshot, require_captured_professions
+from .api import CraftingCapabilities, Recipe
 from .data import load_client_data, load_commodity_books
 from .engine import run_backtest
 from .numbers import as_fraction
@@ -105,6 +106,29 @@ def _capabilities(
     }
     values.update({key: value for key, value in overrides.items() if value is not None})
     return capabilities_from_mapping(values)
+
+
+def _gate_recipes(
+    conn,
+    house: str,
+    character: str | None,
+    capture_uid: str | None,
+    professions: frozenset[str],
+    recipes: tuple[Recipe, ...],
+) -> tuple[tuple[Recipe, ...], dict[str, object] | None]:
+    """Opt-in account gate: with a character, only recipes it knows survive.
+
+    Raises when there is no capture, or when a profession the strategies use was not captured
+    (an uncaptured profession would otherwise silently drop all of its crafting)."""
+
+    if character is None:
+        if capture_uid is not None:
+            raise ValueError("--account-capture-uid requires --account-character")
+        return recipes, None
+    snapshot = load_account_snapshot(conn, house, character, capture_uid)
+    require_captured_professions(recipes, snapshot, professions)
+    gated = known_recipes(recipes, snapshot)
+    return gated, {**snapshot.metadata(), "recipes_before": len(recipes), "recipes_after": len(gated)}
 
 
 def _server_url(explicit: str | None) -> str:
@@ -198,6 +222,11 @@ def main(argv: list[str] | None = None) -> int:
     backtest.add_argument("--tool-item-ids")
     backtest.add_argument("--tool-category-ids")
     backtest.add_argument("--spell-focus-ids")
+    backtest.add_argument(
+        "--account-character",
+        help="gate crafting to recipes this character knows in the latest account capture",
+    )
+    backtest.add_argument("--account-capture-uid", help="pin the gate to this capture instead of the latest")
     paper_create = subparsers.add_parser("paper-create")
     paper_create.add_argument("--database-url")
     paper_create.add_argument("--name", required=True)
@@ -369,6 +398,14 @@ def main(argv: list[str] | None = None) -> int:
                     books[item_id] = selected_books
                 books = {item_id: item_books for item_id, item_books in books.items() if item_books}
                 facts, recipes = load_client_data(loader_connection, args.house, client_build)
+                recipes, account_gate = _gate_recipes(
+                    loader_connection,
+                    args.house,
+                    args.account_character,
+                    args.account_capture_uid,
+                    frozenset().union(*(getattr(s, "professions", frozenset()) for s in strategies)),
+                    recipes,
+                )
                 represented_sweeps = len(all_sweeps) - excluded_without_books
                 excluded_by_window = represented_sweeps - len(window_sweeps)
                 excluded_by_build = len(window_sweeps) - len(selected_sweeps)
@@ -394,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
                 "client_build": client_build,
                 "window": {"start": args.start, "end": args.end, "build": args.build},
                 "capital_copper": capital,
+                "account_gate": account_gate,
                 "capabilities": capabilities.canonical,
                 "capabilities_hash": capabilities_hash(capabilities),
                 "wind_down_hours": args.wind_down_hours,

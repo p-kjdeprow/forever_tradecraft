@@ -3,6 +3,7 @@ from __future__ import annotations
 import configparser
 import json
 import os
+import pwd
 import shutil
 import subprocess
 import tomllib
@@ -200,6 +201,89 @@ def test_launcher_uses_host_display_and_requires_xauthority(tmp_path: Path) -> N
     )
     assert completed.returncode != 0
     assert "set XAUTHORITY" in completed.stderr
+
+
+def test_launcher_selects_the_target_product_without_repeated_exec(tmp_path: Path) -> None:
+    environment, game_root, _runtime = _environment(tmp_path)
+    target = load_game_target(TARGET_FIXTURE)
+    plan = install.build_plan(install.InstallRequest(game_root=game_root), environment)
+    launcher = next(
+        item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
+    )
+    assert launcher is not None
+    rendered = launcher.decode("utf-8")
+
+    assert f"PRODUCT={target.product}" in rendered
+    assert 'battle_net_exec "launch_uid $PRODUCT"' in rendered
+    assert f"EXECUTABLE={target.executable}" in rendered
+    exec_invocations = [
+        line
+        for line in rendered.splitlines()
+        if line.startswith('    game_env "$WINE" "$BATTLE_NET" --exec=')
+    ]
+    assert len(exec_invocations) == 1
+    assert exec_invocations[0].count("--exec") == 1
+
+
+def test_launcher_rejects_missing_single_instance_before_wine(
+    tmp_path: Path,
+) -> None:
+    environment, game_root, _runtime = _environment(tmp_path)
+    target = load_game_target(TARGET_FIXTURE)
+    executable = game_root / target.product_dir / target.executable
+    executable.parent.mkdir(parents=True, exist_ok=True)
+    executable.write_bytes(b"game executable")
+
+    user_name = pwd.getpwuid(os.getuid()).pw_name
+    config = (
+        tmp_path
+        / "wine"
+        / "drive_c"
+        / "users"
+        / user_name
+        / "AppData"
+        / "Roaming"
+        / "Battle.net"
+        / "Battle.net.config"
+    )
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("{}", encoding="utf-8")
+
+    wine = tmp_path / "wine-recorder"
+    record = tmp_path / "wine-invocations"
+    wine.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$CROWLEY_WINE_RECORD"\n', encoding="utf-8")
+    wine.chmod(0o700)
+    xauthority = tmp_path / "Xauthority"
+    xauthority.write_bytes(b"xauthority")
+
+    plan = install.build_plan(install.InstallRequest(game_root=game_root), environment)
+    launcher = next(
+        item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
+    )
+    assert launcher is not None
+    launcher_path = tmp_path / "launcher"
+    launcher_path.write_bytes(launcher)
+    launcher_path.chmod(0o700)
+
+    child_environment = dict(environment)
+    child_environment.update(
+        {
+            "CROWLEY_WINE": str(wine),
+            "CROWLEY_WINE_RECORD": str(record),
+            "XAUTHORITY": str(xauthority),
+        }
+    )
+    completed = subprocess.run(
+        [str(launcher_path)],
+        env=child_environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode != 0
+    assert 'Client.SingleInstance must be "true"' in completed.stderr
+    assert not record.exists()
 
 
 def test_install_copies_addon_units_and_manifest_and_is_idempotent(

@@ -6,6 +6,8 @@ import base64
 import hashlib
 import json
 import math
+import shutil
+import tempfile
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,6 +24,27 @@ TARGET = load_game_target(Path(__file__).parent / "fixtures" / "targets" / "veri
 _NEXT_AUCTION_ID = 1
 _BYTE_ATLAS_PATH = ADDONS / "Crowley" / "Textures" / "ByteAtlas.tga"
 _BYTE_ATLAS: Image.Image | None = None
+_ADDON_TREES: dict[tuple[str, str, str, str], Path] = {}
+_ADDON_TEMPORARIES: dict[tuple[str, str, str, str], tempfile.TemporaryDirectory[str]] = {}
+
+
+def _temporary_addon_tree(target: GameTarget, catalog: Catalog) -> Path:
+    plan = target_scan_plan(catalog, target)
+    plan_hash = str(plan["planHash"])
+    key = (target.target_id, target.full_build, target.house, plan_hash)
+    existing = _ADDON_TREES.get(key)
+    if existing is not None:
+        return existing
+
+    temporary = tempfile.TemporaryDirectory(prefix="crowley-addon-tests-")
+    root = Path(temporary.name) / "addon"
+    shutil.copytree(ADDONS, root)
+    generated = render_generated_lua(target, plan)
+    (root / "Crowley" / "GeneratedTarget.lua").write_text(generated, encoding="utf-8")
+    _ADDON_TEMPORARIES[key] = temporary
+    _ADDON_TREES[key] = root
+    return root
+
 
 STUBS = r"""
 local harness = ...
@@ -1336,21 +1359,15 @@ class WowClient:
 
     def _load_addon(self) -> None:
         # Load order mirrors the client: dependency Crowley_Data first, then Crowley's TOC.
-        self.run_file(ADDONS / "Crowley_Data" / "Data.lua")
-        self.run_file(ADDONS / "Crowley_Data" / "Queue.lua")
+        catalog = self.catalog if self.catalog is not None else load_catalog()
+        addon_root = _temporary_addon_tree(self.target, catalog)
+        self.run_file(addon_root / "Crowley_Data" / "Data.lua")
+        self.run_file(addon_root / "Crowley_Data" / "Queue.lua")
         if self.queue is not None:
             self.lua.globals().CROWLEY_QUEUE = self._to_lua(self.queue)
-        for line in (ADDONS / "Crowley" / "Crowley.toc").read_text().splitlines():
+        for line in (addon_root / "Crowley" / "Crowley.toc").read_text().splitlines():
             if line.endswith(".lua"):
-                if line == "GeneratedTarget.lua" and self.target != TARGET:
-                    plan = target_scan_plan(self.catalog or load_catalog(), self.target)
-                    source = render_generated_lua(self.target, plan)
-                    chunk = self.lua.globals().loadstring(source, "@GeneratedTarget.lua")
-                    if chunk is None:
-                        raise SyntaxError("failed to load generated target")
-                    chunk("Crowley", self.ns)
-                else:
-                    self.run_file(ADDONS / "Crowley" / line)
+                self.run_file(addon_root / "Crowley" / line)
 
     def inject_saved_variables(self, value: dict) -> None:
         """Inject SavedVariables after file execution and before ADDON_LOADED."""

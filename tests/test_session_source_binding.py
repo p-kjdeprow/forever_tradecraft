@@ -110,6 +110,7 @@ def test_missing_bound_module_fails_loudly(monkeypatch: pytest.MonkeyPatch) -> N
 def test_non_editable_style_package_location_builds_binding(tmp_path: Path) -> None:
     package_root = tmp_path / "site-packages"
     shutil.copytree(Path(__file__).resolve().parents[1] / "src" / "crowley", package_root / "crowley")
+    (package_root / "crowley/data/targets/selected").write_text("verified-beta\n", encoding="ascii")
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(package_root)
     result = subprocess.run(
@@ -130,10 +131,14 @@ def test_non_editable_style_package_location_builds_binding(tmp_path: Path) -> N
 
 
 def test_fresh_cli_process_has_no_unbound_crowley_source_modules(tmp_path: Path) -> None:
+    package_root = tmp_path / "site-packages"
+    shutil.copytree(Path(__file__).resolve().parents[1] / "src" / "crowley", package_root / "crowley")
+    (package_root / "crowley/data/targets/selected").write_text("verified-beta\n", encoding="ascii")
     script = """
 import sys
 from pathlib import Path
 
+sys.path.insert(0, PACKAGE_ROOT)
 import crowley.session.cli
 
 def crowley_sources():
@@ -160,6 +165,7 @@ if "crowley.data" not in loaded_after_cli:
     raise SystemExit("crowley.data was not loaded by the session CLI entry module")
 print("ok")
 """
+    script = script.replace("PACKAGE_ROOT", repr(str(package_root)))
     result = subprocess.run(
         [sys.executable, "-I", "-c", script],
         cwd=tmp_path,

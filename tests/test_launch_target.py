@@ -18,15 +18,15 @@ from crowley.companion.config import CompanionSettings
 from crowley.companion.sync import Companion
 from crowley.core import savedvars
 from crowley.core.game_target import (
+    GameTarget,
     GameTargetError,
     canonical_plan,
     load_game_target,
     load_target,
     packaged_game_target,
-    selected_target,
     target_scan_plan,
 )
-from crowley.core.watchlist import load_catalog
+from crowley.core.watchlist import Catalog, load_catalog
 from crowley.session import daemon
 from crowley.session.controller import Controller
 from crowley.session.decoder import PixelDecoder
@@ -42,18 +42,73 @@ CATALOG_PATH = ROOT / "src" / "crowley" / "data" / "first_run.json"
 ROUTE_PATH = ROOT / "src" / "crowley" / "data" / "routes" / "verified-beta" / "stormwind.json"
 
 
-def test_selected_target_is_identity_only_and_plan_is_cached() -> None:
-    target = selected_target()
-    assert target == load_target("verified-beta")
-    assert target == packaged_game_target()
-    value = json.loads(TARGET_PATH.read_text(encoding="utf-8"))
+def test_selected_target_is_identity_only_and_plan_is_cached(
+    packaged_selection_target: GameTarget,
+    packaged_catalog: Catalog,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from crowley.core import watchlist
+
+    target = packaged_selection_target
+    canonical_plan.cache_clear()
+
+    def real_catalog_loader(*, enforce_target: bool = True) -> Catalog:
+        del enforce_target
+        return packaged_catalog
+
+    monkeypatch.setattr(watchlist, "load_catalog", real_catalog_loader)
+    assert target == load_target(target.target_id)
+    value = json.loads(
+        (ROOT / "src" / "crowley" / "data" / "targets" / f"{target.target_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
     assert "installation" not in value
     assert not hasattr(target, "installation")
     assert not hasattr(target, "game_root")
     assert not hasattr(target, "wine_prefix")
     assert len(canonical_plan(target)["itemIDs"]) == 428
     assert canonical_plan(target) is canonical_plan(target)
-    assert target.full_build == load_catalog().client_build
+    assert target.full_build == packaged_catalog.client_build
+
+
+def test_fixture_target_pin_is_independent_of_packaged_selection(
+    packaged_selection_target: GameTarget,
+) -> None:
+    selected_id = (
+        (ROOT / "src" / "crowley" / "data" / "targets" / "selected").read_text(encoding="ascii").strip()
+    )
+
+    assert packaged_game_target().target_id == "verified-beta"
+    assert packaged_selection_target.target_id == selected_id
+
+
+def test_real_packaged_selection_binds_real_catalog_in_fresh_process(tmp_path: Path) -> None:
+    script = """
+import sys
+
+sys.path.insert(0, PACKAGE_ROOT)
+from crowley.core.game_target import selected_target
+from crowley.core.watchlist import load_catalog
+
+target = selected_target()
+catalog = load_catalog()
+assert target.catalog_id == catalog.id
+assert target.catalog_revision == catalog.revision
+assert target.full_build == catalog.client_build
+assert target.initial_price_levels == catalog.initial_price_levels
+print(target.target_id)
+""".replace("PACKAGE_ROOT", repr(str(ROOT / "src")))
+    result = subprocess.run(
+        [sys.executable, "-I", "-c", script],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip()
 
 
 @pytest.mark.parametrize(
@@ -117,6 +172,9 @@ def test_generator_writes_target_catalog_lua_and_tocs_without_toml_staging(tmp_p
     catalog = tmp_path / "first_run.json"
     shutil.copy2(TARGET_PATH, target)
     shutil.copy2(ROOT / "src/crowley/data/first_run.json", catalog)
+    catalog_value = json.loads(catalog.read_text(encoding="utf-8"))
+    catalog_value["client_build"] = "1.60.1.70450"
+    catalog.write_text(json.dumps(catalog_value), encoding="utf-8")
     result = subprocess.run(
         [
             sys.executable,
@@ -146,6 +204,7 @@ def test_generator_writes_target_catalog_lua_and_tocs_without_toml_staging(tmp_p
 def test_generator_rebinds_catalog_for_an_alternate_target(tmp_path: Path) -> None:
     _copy_generator_trees(tmp_path)
     catalog_value = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
+    catalog_value["client_build"] = "1.60.1.70450"
     catalog_value["items"][0]["status"] = "research"
     catalog = tmp_path / "first_run.json"
     catalog.write_text(json.dumps(catalog_value), encoding="utf-8")
@@ -425,6 +484,9 @@ def test_generator_check_mode_never_writes_missing_artifacts(tmp_path: Path) -> 
     catalog = tmp_path / "first_run.json"
     shutil.copy2(TARGET_PATH, target)
     shutil.copy2(CATALOG_PATH, catalog)
+    catalog_value = json.loads(catalog.read_text(encoding="utf-8"))
+    catalog_value["client_build"] = "1.60.1.70450"
+    catalog.write_text(json.dumps(catalog_value), encoding="utf-8")
 
     result = subprocess.run(
         [
@@ -445,6 +507,8 @@ def test_generator_check_mode_never_writes_missing_artifacts(tmp_path: Path) -> 
     )
 
     assert result.returncode != 0
+    assert "generated artifacts drifted:" in result.stderr
+    assert "GeneratedTarget.lua" in result.stderr
     assert not (tmp_path / "addon/Crowley/GeneratedTarget.lua").exists()
 
 

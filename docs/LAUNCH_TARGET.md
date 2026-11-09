@@ -2,9 +2,11 @@
 
 Crowley keeps strict target contracts at
 `src/crowley/data/targets/<targetId>.json`, with the active target named by
-`src/crowley/data/targets/selected`. The selected contract is the verified beta target until a
-future launch is explicitly measured and qualified; no launch-day build,
-realm, route, or economy facts are inferred here. The contract supplies the
+`src/crowley/data/targets/selected`. The selected contract is now the measured
+WoW Forever target `forever-us-camwow7`. The historical `verified-beta` target
+remains packaged for retained fixtures and evidence; its beta facts are not
+relabeled as Forever facts. Forever route provenance is unmeasured, so no route
+is inferred from the beta evidence. The contract supplies the
 full client build, native build/interface, executable/window class,
 product/flavor, locale, realm, faction/house, route provenance, and scan
 cadence/cap/price-level settings. It contains no installation, account,
@@ -44,9 +46,9 @@ uv run python tools/generate_launch_target.py --write
 
 `--check` never writes. `--write` updates only generated repository artifacts;
 it does not modify live configuration, installed game files, Data.lua,
-SavedVariables, routes, or evidence. The current beta route is accepted only with its exact measured
-provenance and verified beta full build; changing the target rejects that
-historical route until a new route is measured.
+SavedVariables, routes, or evidence. The historical beta route is accepted only
+with its exact measured provenance and verified beta full build; selecting the
+Forever target rejects that route until a new route is measured.
 
 The scan cadence is deliberately a fixed 900-second policy because the current
 wire contract admits only that cadence. A future target change must first add a

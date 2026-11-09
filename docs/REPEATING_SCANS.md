@@ -248,3 +248,11 @@ commands manage deliberately supplied summaries. See the
 timing model. Numeric imports do not establish live human calibration. Current
 live acceptance and deployment status are recorded at the top of
 [HANDOFF.md](HANDOFF.md).
+
+### Idle logout and inherited AH opens
+
+WoW logs an idle character out to character select after about 30 minutes. An
+inherited, unresolved `open_ah` intent is cleared when the fresh scene shows the
+auction house closed in world, or shows character select: opening the AH is
+idempotent, so the normal cycle (login recovery, then the cadence-anchored reopen)
+continues. An open AH, or an unproven scene, keeps the intent unresolved.

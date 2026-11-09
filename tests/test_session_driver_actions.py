@@ -3057,6 +3057,110 @@ def test_desktop_run_passes_one_absolute_deadline_through_x11_keyboard_action(
         driver.close()
 
 
+def test_named_key_action_plans_the_zero_padded_keycodes_the_emitter_publishes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    driver = _driver(tmp_path, monkeypatch)
+    native_calls: list[tuple[list[str], float | None]] = []
+    _install_deadline_keyboard_runtime(driver, monkeypatch, native_calls)
+    generation = driver.guardian.arm(driver._input_evidence)
+    driver.backend.activate_generation(generation)
+    driver.guardian.finish_action = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    planned: list[object] = []
+    begin_action = driver.guardian.begin_action
+
+    def spy_begin_action(*args, **kwargs):
+        planned.append(kwargs.get("held_keys"))
+        return begin_action(*args, **kwargs)
+
+    driver.guardian.begin_action = spy_begin_action  # type: ignore[method-assign]
+    try:
+        driver.run(
+            "open_chat",
+            generation,
+            precondition=lambda _identity: True,
+            postcondition=lambda _identity: True,
+        )
+        assert planned == [{"036"}]
+    finally:
+        driver.close()
+
+
+@pytest.mark.parametrize("keycode", ["36", True, 7, 256], ids=["str", "bool", "low", "high"])
+def test_named_key_action_rejects_a_malformed_sealed_keycode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, keycode: object
+) -> None:
+    driver = _driver(tmp_path, monkeypatch)
+    native_calls: list[tuple[list[str], float | None]] = []
+    _install_deadline_keyboard_runtime(driver, monkeypatch, native_calls)
+    monkeypatch.setattr(
+        driver,
+        "_keyboard_operation_facts",
+        lambda *_args, **_kwargs: (("press", "Return", keycode, (0, 0, 0), 0),),
+    )
+    generation = driver.guardian.arm(driver._input_evidence)
+    driver.backend.activate_generation(generation)
+    try:
+        with pytest.raises(DriverError, match="malformed keycode"):
+            driver.run(
+                "open_chat",
+                generation,
+                precondition=lambda _identity: True,
+                postcondition=lambda _identity: True,
+            )
+        assert native_calls == []
+    finally:
+        driver.close()
+
+
+def _command_readback_daemon(texts: list[str]) -> tuple[SessionDaemon, list[SimpleNamespace]]:
+    """A daemon whose capture_status yields a new fresh frame per call: each text, then the last forever."""
+
+    frames: list[SimpleNamespace] = []
+
+    def capture_status(*, deadline):
+        del deadline
+        index = len(frames)
+        snapshot = {
+            "render": {"nativePhase": "normal", "nativeOrdinal": 0},
+            "chatEdit": {"active": True, "focused": True, "text": texts[min(index, len(texts) - 1)]},
+        }
+        frames.append(
+            SimpleNamespace(boot="boot", sequence=10 + index, snapshot=SimpleNamespace(value=snapshot))
+        )
+        return SimpleNamespace(kind="FRESH", frame=frames[-1])
+
+    daemon = SessionDaemon.__new__(SessionDaemon)
+    daemon.capture_status = capture_status  # type: ignore[method-assign]
+    return daemon, frames
+
+
+def test_command_readback_skips_a_strict_prefix_frame_and_sinks_only_the_final_frame() -> None:
+    daemon, frames = _command_readback_daemon(["/crow", "/crowley status"])
+    sunk: list[object] = []
+    text = daemon._read_command_buffer(expected="/crowley status", frame_sink=sunk.append)
+    assert text == "/crowley status"
+    assert sunk == [frames[1]]
+
+
+def test_command_readback_returns_non_prefix_text_immediately() -> None:
+    daemon, frames = _command_readback_daemon(["/other", "/crowley status"])
+    sunk: list[object] = []
+    text = daemon._read_command_buffer(expected="/crowley status", frame_sink=sunk.append)
+    assert text == "/other"
+    assert sunk == [frames[0]]
+
+
+def test_command_readback_fails_when_the_prefix_never_completes() -> None:
+    daemon, _frames = _command_readback_daemon(["/crow"])
+    sunk: list[object] = []
+    with pytest.raises(DriverError, match="command readback did not contain a fresh frame"):
+        daemon._read_command_buffer(
+            expected="/crowley status", frame_sink=sunk.append, deadline_monotonic=time.monotonic() + 0.3
+        )
+    assert sunk == []
+
+
 def test_deadline_expiring_inside_focus_blocks_later_keyboard_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3109,7 +3213,7 @@ def test_prepare_command_deadline_stops_before_submit_after_slow_readback(
     boundary_entered = threading.Event()
     deadline: float
 
-    def slow_readback() -> str:
+    def slow_readback(_expected: str) -> str:
         boundary_entered.set()
         while time.monotonic() < deadline:
             time.sleep(0.005)
@@ -3156,7 +3260,7 @@ def test_prepare_command_forwards_submit_precondition_and_rejects_changed_guard(
                 generation,
                 "/crowley status",
                 {"chatEdit": {"active": True, "focused": True, "text": ""}},
-                readback=lambda: "/crowley status",
+                readback=lambda _expected: "/crowley status",
                 precondition=guard_changes_after_typing,
                 deadline_monotonic=deadline,
             )

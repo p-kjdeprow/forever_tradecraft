@@ -3540,7 +3540,7 @@ def test_stormwind_route_verifies_target_and_binding_between_commands() -> None:
             assert generation == 7
             assert kwargs["precondition"](identity)
             self.calls.append(("command", command))
-            assert kwargs["readback"]() == command
+            assert kwargs["readback"](command) == command
             assert kwargs["postcondition"](identity)
 
     daemon = SessionDaemon.__new__(SessionDaemon)
@@ -3880,3 +3880,175 @@ def test_stormwind_route_refuses_before_chat_without_keyboard_interaction(
             dispatch_allowed=lambda: None,
         )
     assert daemon.driver.calls == []
+
+
+def _inherited_open_ah_controller(tmp_path: Path):
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-after-idle-logout")
+    journal = Journal(tmp_path / "inherited-open-ah-closed.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 11,
+            "resumeState": ControllerState.RECONCILE.value,
+            "restartUncertain": True,
+            "reconciliationRequired": True,
+            "blocker": "operator paused before Auction House dispatch",
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 12, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "action": "open_ah",
+            "actionAttempt": 1,
+            "actionResult": "preparing",
+            "frameBoot": "boot-before-idle-logout",
+            "frameSequence": 97,
+            "frameCrc32": 1234,
+        }
+    )
+    journal.write(value)
+    controller = Controller(journal, driver=_RuntimeDriver())
+    controller.resume_with_runtime_evidence(evidence, expected_generation=controller.status().generation)
+    return controller, journal
+
+
+@pytest.mark.parametrize(
+    ("scene", "ah_open"),
+    [("world", False), ("character_select", None)],
+)
+def test_inherited_open_ah_with_closed_auction_house_is_cleared_for_the_normal_cycle(
+    tmp_path: Path, scene: str, ah_open: bool | None
+) -> None:
+    controller, journal = _inherited_open_ah_controller(tmp_path)
+    fence = controller.observation_fence()
+    reconciled = controller.reconcile_restart(
+        observed_boot="boot-after-idle-logout",
+        observed_scene=scene,
+        observed_ah_open=ah_open,
+        action_postcondition=False if ah_open is False else None,
+        expected_generation=fence.generation,
+        expected_state=ControllerState.RECONCILE,
+        fence=fence,
+    )
+    assert reconciled.action_intent == ""
+    assert journal.read()["restartUncertain"] is False
+    assert journal.archives("interventions")[-1]["outcome"] == f"open_ah_not_effective_in_{scene}"
+
+
+def test_inherited_open_ah_stays_unresolved_without_a_proven_scene(tmp_path: Path) -> None:
+    controller, journal = _inherited_open_ah_controller(tmp_path)
+    fence = controller.observation_fence()
+    reconciled = controller.reconcile_restart(
+        observed_boot="boot-after-idle-logout",
+        observed_scene="",
+        observed_ah_open=None,
+        action_postcondition=None,
+        expected_generation=fence.generation,
+        expected_state=ControllerState.RECONCILE,
+        fence=fence,
+    )
+    assert reconciled.action_intent == "open_ah"
+    assert journal.read()["restartUncertain"] is True
+
+
+def test_inherited_open_ah_at_character_select_with_ah_open_stays_unresolved(tmp_path: Path) -> None:
+    controller, journal = _inherited_open_ah_controller(tmp_path)
+    fence = controller.observation_fence()
+    reconciled = controller.reconcile_restart(
+        observed_boot="boot-after-idle-logout",
+        observed_scene="character_select",
+        observed_ah_open=True,
+        action_postcondition=True,
+        expected_generation=fence.generation,
+        expected_state=ControllerState.RECONCILE,
+        fence=fence,
+    )
+    assert reconciled.action_intent == "open_ah"
+    assert journal.read()["restartUncertain"] is True
+
+
+def _inherited_save_reload_controller(tmp_path: Path, *, uid: str = "", action_result: str = "preparing"):
+    _identity, environment, _old_evidence = _runtime_evidence()
+    evidence = _runtime_evidence_with_boot("boot-after-save-reload")
+    journal = Journal(tmp_path / "inherited-save-reload.json")
+    value = journal.read()
+    value.update(
+        {
+            "state": ControllerState.PAUSED.value,
+            "generation": 11,
+            "resumeState": ControllerState.RECONCILE.value,
+            "restartUncertain": True,
+            "reconciliationRequired": True,
+            "blocker": "operator paused before save/reload dispatch",
+            "takeoverDrill": TakeoverDrillRecord.create(
+                environment.fingerprint, 12, observed_at=1_800_000_000
+            ).to_json(),
+        }
+    )
+    value["current"].update(
+        {
+            "action": "save_reload",
+            "actionAttempt": 1,
+            "actionResult": action_result,
+            "uid": uid,
+            "frameBoot": "boot-before-save-reload",
+            "frameSequence": 97,
+            "frameCrc32": 1234,
+        }
+    )
+    journal.write(value)
+    controller = Controller(journal, driver=_RuntimeDriver())
+    controller.resume_with_runtime_evidence(evidence, expected_generation=controller.status().generation)
+    return controller, journal
+
+
+def _reconcile_save_reload(controller: Controller, *, scanner_idle: bool = True):
+    fence = controller.observation_fence()
+    return controller.reconcile_restart(
+        observed_boot="boot-after-save-reload",
+        observed_scene="world",
+        scanner_phase="ready",
+        scanner_idle=scanner_idle,
+        stable_scan_ids=frozenset(),
+        stable_sweep_ids=frozenset(),
+        stable_scan_verified=True,
+        stable_files_complete=True,
+        expected_generation=fence.generation,
+        expected_state=ControllerState.RECONCILE,
+        fence=fence,
+    )
+
+
+def test_inherited_save_reload_without_cycle_uid_is_cleared_for_the_next_cycle(tmp_path: Path) -> None:
+    controller, journal = _inherited_save_reload_controller(tmp_path)
+    reconciled = _reconcile_save_reload(controller)
+    assert reconciled.action_intent == ""
+    assert journal.read()["restartUncertain"] is False
+    assert journal.read()["resumeState"] == ControllerState.WAIT_DUE.value
+    assert journal.archives("interventions")[-1]["outcome"] == "save_reload_without_cycle_uid_cleared"
+
+
+@pytest.mark.parametrize(
+    ("uid", "action_result", "scanner_idle"),
+    [
+        ("cycle-uid-1", "preparing", True),
+        ("", "dispatched", True),
+        ("", "preparing", False),
+    ],
+    ids=["has-uid", "dispatched", "scanner-busy"],
+)
+def test_inherited_save_reload_is_not_cleared_when_the_no_cycle_proof_does_not_hold(
+    tmp_path: Path, uid: str, action_result: str, scanner_idle: bool
+) -> None:
+    controller, journal = _inherited_save_reload_controller(tmp_path, uid=uid, action_result=action_result)
+    reconciled = _reconcile_save_reload(controller, scanner_idle=scanner_idle)
+    assert reconciled.state is ControllerState.BLOCKED
+    assert "unrecoverable save_reload cycle" in reconciled.blocker
+    assert not any(
+        record.get("outcome") == "save_reload_without_cycle_uid_cleared"
+        for record in journal.archives("interventions")
+    )

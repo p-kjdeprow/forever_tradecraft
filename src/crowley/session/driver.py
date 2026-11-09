@@ -8798,7 +8798,13 @@ class DesktopDriver:
                     keysym = step[1]
                     if not isinstance(keysym, str) or not keysym:
                         raise DriverError("sealed keyboard operation has malformed keysym")
-                    held_keys.update(part for part in keysym.split("+") if part)
+                    keycode = step[2]
+                    if isinstance(keycode, bool) or not isinstance(keycode, int) or not 8 <= keycode <= 255:
+                        raise DriverError("sealed keyboard operation has malformed keycode")
+                    # The emitter publishes physical holds as the zero-padded
+                    # keycodes it passes to xdo (see _keyboard_transition_argv),
+                    # so the admitted plan names the same physical items.
+                    held_keys.add(f"{keycode:03d}")
         echo_proof: tuple[tuple[Any, ...], ...] = ()
         echo_sources: frozenset[int] = frozenset()
         if pointer_action:
@@ -9518,7 +9524,7 @@ class DesktopDriver:
         command: str,
         telemetry: dict[str, Any],
         *,
-        readback: Callable[[], str] | None = None,
+        readback: Callable[[str], str] | None = None,
         precondition: Callable[[WindowIdentity], bool] | None = None,
         postcondition: Callable[[WindowIdentity], bool] | None = None,
         deadline_monotonic: float | None = None,
@@ -9539,7 +9545,7 @@ class DesktopDriver:
             deadline_monotonic=deadline_monotonic,
         )
         self._check_deadline(deadline_monotonic, "command deadline expired before EditBox readback")
-        observed = readback()
+        observed = readback(command)
         self._check_deadline(deadline_monotonic, "command deadline expired after EditBox readback")
         if observed != command:
             # Even cleanup of an unexpected EditBox value follows the same
@@ -9548,8 +9554,8 @@ class DesktopDriver:
                 self.run(
                     "escape_command_buffer",
                     generation,
-                    precondition=lambda identity: readback() == observed,
-                    postcondition=lambda identity: readback() == "",
+                    precondition=lambda identity: readback(observed) == observed,
+                    postcondition=lambda identity: readback("") == "",
                     deadline_monotonic=deadline_monotonic,
                 )
             finally:

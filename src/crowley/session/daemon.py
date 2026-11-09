@@ -6740,6 +6740,7 @@ class SessionDaemon:
     def _read_command_buffer(
         self,
         *,
+        expected: str,
         previous: Any | None = None,
         frame_sink: Callable[[Any], None] | None = None,
         deadline_monotonic: float | None = None,
@@ -6788,9 +6789,20 @@ class SessionDaemon:
                 value = snapshot.get("chatEdit")
                 if not isinstance(value, dict) or not isinstance(value.get("text"), str):
                     raise DriverError("command readback omitted the active EditBox text")
+                text = value["text"]
+                if text != expected and expected.startswith(text):
+                    # The one-Hz telemetry tick can land while the typed
+                    # characters are still being rendered.  A strict prefix of
+                    # the requested command is an in-progress buffer, not a
+                    # mismatch: wait for the next fresh frame within the same
+                    # bounded deadline.  Any other text is returned as-is and
+                    # fails the caller's exact comparison.
+                    previous = frame
+                    time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+                    continue
                 if frame_sink is not None:
                     frame_sink(frame)
-                return value["text"]
+                return text
             time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         raise DriverError("command readback did not contain a fresh frame")
 
@@ -6868,7 +6880,7 @@ class SessionDaemon:
                 generation,
                 command,
                 snapshot,
-                readback=self._read_command_buffer,
+                readback=lambda expected: self._read_command_buffer(expected=expected),
                 precondition=identity_guard,
                 postcondition=identity_guard,
             )
@@ -11567,10 +11579,11 @@ class SessionDaemon:
             dispatch_allowed()
             readback_frames: list[Any] = []
 
-            def readback() -> str:
+            def readback(expected: str) -> str:
                 dispatch_allowed()
                 captured_frames: list[Any] = []
                 observed = self._read_command_buffer(
+                    expected=expected,
                     previous=frame,
                     frame_sink=captured_frames.append,
                     deadline_monotonic=deadline_monotonic,

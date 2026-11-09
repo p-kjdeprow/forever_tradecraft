@@ -5651,6 +5651,16 @@ class Controller:
                         and action_postcondition is True
                     )
                 )
+                # Opening the auction house is idempotent: an observed closed AH
+                # (in world or back at character select) proves there is no
+                # effect left to account for, and repeating the open cannot
+                # duplicate an external market effect.  The normal cycle then
+                # recovers the scene and reopens it.
+                open_ah_not_effective = (
+                    intent == "open_ah"
+                    and observed_ah_open is not True
+                    and (scene == "character_select" or (scene == "world" and observed_ah_open is False))
+                )
                 if named_ok:
                     self._restart_uncertain = False
                     self._reconciliation_required = True
@@ -5661,6 +5671,33 @@ class Controller:
                     self._state = self._calibration_gate_state()
                     self._clear_intent("postcondition_observed")
                     outcome = f"{intent}_postcondition_observed"
+                elif open_ah_not_effective:
+                    self._restart_uncertain = False
+                    self._reconciliation_required = True
+                    self._pending = False
+                    self._resume_state = ControllerState.WAIT_DUE
+                    self._state = self._calibration_gate_state()
+                    self._clear_intent("open_ah_not_effective")
+                    outcome = f"open_ah_not_effective_in_{scene}"
+            elif (
+                intent == "save_reload"
+                and not uid
+                and self._action_result == "preparing"
+                and complete_facts
+                and scanner_idle is True
+            ):
+                # A save/reload that never crossed its dispatch boundary and
+                # carries no cycle UID has no scan to account for; the stable
+                # files already hold whatever the companion uploads.  Clear it
+                # so the next cycle starts on cadence instead of waiting
+                # forever for proof of a save that was never requested.
+                self._restart_uncertain = False
+                self._reconciliation_required = True
+                self._pending = False
+                self._resume_state = ControllerState.WAIT_DUE
+                self._state = self._calibration_gate_state()
+                self._clear_intent("save_reload_without_cycle_uid")
+                outcome = "save_reload_without_cycle_uid_cleared"
             elif intent == "stop" and self._stop_requested:
                 self._restart_uncertain = False
                 self._reconciliation_required = False

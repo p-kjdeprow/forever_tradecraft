@@ -9,6 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from crowley.session.calibration import XTestInputProfile
 from crowley.session.driver import DesktopDriver, WindowIdentity, X11Backend
 from crowley.session.driver_runner import GuardedActionRunner
 from crowley.session.executor import (
@@ -714,6 +715,19 @@ def test_real_driver_takeover_hover_uses_guarded_sequence(monkeypatch: pytest.Mo
     backend.pointer_position = lambda **_kwargs: (20, 20, identity.child_xid)
     backend._run = lambda _argv, **_kwargs: calls.append("backend._run")
     driver.backend = backend
+    xtest_profile = XTestInputProfile(
+        source_device=4,
+        parent_device=2,
+        name="pointer:xtest",
+        classes=3,
+        axes=((0, "Rel X", "relative", -1.0, -1.0, 0), (1, "Rel Y", "relative", -1.0, -1.0, 0)),
+        enabled=1,
+        xtest_device=1,
+        ctm=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+        root_xid=1,
+        root_geometry=(0, 0, 1920, 1080),
+        hierarchy=((4, 2, "slave", "pointer:xtest"),),
+    )
     environment = SimpleNamespace(
         fingerprint="environment",
         hierarchy=(),
@@ -722,7 +736,7 @@ def test_real_driver_takeover_hover_uses_guarded_sequence(monkeypatch: pytest.Mo
         pointer_source=4,
         pointer_master=2,
         forwarded_echo_sources=(),
-        xtest_profile=SimpleNamespace(root_xid=1, verify=lambda: None),
+        xtest_profile=xtest_profile,
         display=":test",
     )
     evidence = RuntimeInputEvidence(

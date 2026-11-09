@@ -39,6 +39,7 @@ Cadence remains the explicit 900-second policy.
 
 | Assumption | Where | If wrong |
 |---|---|---|
+| Mutter IdleMonitor GetIdletime counts only physical input; XTEST key and pointer events do not reset it (verified 2026-11-09) | `src/crowley/scan/presence.py` | Presence would read as idle while a human types; the policy would send keys into their session |
 | Commodity rows always carry an exact `timeLeft` (verified live on builds 70374, 70450, 70862) | `analysis/books.py`, `core/volume.py` | `ValueError`; the volume route returns a 5xx and the analysis loader raises |
 | Interface 16001; a plain `Crowley.toc` loads | `addon/*/*.toc` | Addon missing from the list |
 | Commodities and non-equipment use native `MakeItemKey` + `SendSearchQuery`; equipment uses an explicitly zeroed comparison key + `SendSellSearchQuery` | `Scanner.lua` | Native full-sweep verification includes recipe 2555, containers 4238/4240/4241/4245/5765, and equipment 873 |

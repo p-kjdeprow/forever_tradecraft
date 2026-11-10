@@ -876,8 +876,12 @@ def validate_snapshot(
         if finished or any(last[key] for key in ("planned", "attempted", "failures", "rows")):
             raise _error("lastSaved", "empty UID requires zero counters")
     elif (
+        # The last saved sweep may predate a scan-plan change (live 2026-11-09: a 428-item
+        # sweep saved before plan revision 3 made every frame invalid, so the loop could
+        # never run the 427-item sweep that would replace it).  Its counters must be
+        # consistent with its own plan size, not with the current plan's.
         finished == 0
-        or last_planned != rules.plan_count
+        or last_planned <= 0
         or attempted > last_planned
         or failures < last_planned - attempted
         or failures > last_planned

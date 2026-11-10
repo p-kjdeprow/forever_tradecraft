@@ -37,10 +37,7 @@ crowley-ops install
 
 # 2. Review the tunable templates. Identity and paths stay in host.toml.
 $EDITOR "$XDG_CONFIG_HOME/crowley/companion.toml"
-$EDITOR "$XDG_CONFIG_HOME/crowley/session.toml"
 $EDITOR "$XDG_CONFIG_HOME/crowley/secrets.env"
-# The session service also needs CROWLEY_CODEX_PATH set to the reviewed,
-# absolute Codex CLI executable in its runtime environment.
 # Put CROWLEY_API_TOKEN, CROWLEY_DB_PASSWORD, CROWLEY_IMAGE_VERSION,
 # CROWLEY_DATABASE_URL, CROWLEY_BIND and CROWLEY_PAPER_RUN only in secrets.env.
 chmod 600 "$XDG_CONFIG_HOME/crowley/secrets.env"

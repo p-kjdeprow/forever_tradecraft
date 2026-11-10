@@ -1,8 +1,0 @@
-# Copy deploy/config/session.toml to $XDG_CONFIG_HOME/crowley/session.toml.
-# Identity, installation paths, character facts, and measured geometry belong
-# in $XDG_CONFIG_HOME/crowley/host.toml.
-[session]
-quiet_margin_seconds = 15
-upload_deadline_seconds = 60
-reload_deadline_seconds = 45
-ack_deadline_seconds = 60

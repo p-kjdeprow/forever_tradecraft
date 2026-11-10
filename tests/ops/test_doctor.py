@@ -1,76 +1,19 @@
 from __future__ import annotations
 
-import hashlib
-import json
 import os
 import subprocess
-import tomllib
 from pathlib import Path
 
 import pytest
 
-from crowley.config import PinnedBinaries, PinnedObserver
 from crowley.core.game_target import load_game_target
 from crowley.core.luawriter import render_assignment
 from crowley.core.queue import render_queue_lua
-from crowley.native import pins
 from crowley.ops import doctor, install
 from crowley.server.db import MigrationStatus
 
 TARGET_FIXTURE = Path(__file__).parents[1] / "fixtures" / "targets" / "verified-beta.json"
 REVIEWED_CODEX_DIGEST = "628e35487d888a28f0427fc37501da529dd3d81fcbad7a2c3421c1e8670d92e1"
-
-
-def test_production_codex_pin_matches_reviewed_install_receipt() -> None:
-    assert pins.CODEX_ARTIFACT_SHA256 == REVIEWED_CODEX_DIGEST
-
-
-def test_pinned_binary_digest_accepts_a_large_sparse_fixture(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = tmp_path / "large-codex"
-    path.write_bytes(b"fixture")
-    path.chmod(0o700)
-    with path.open("r+b") as stream:
-        stream.truncate(32 * 1024 * 1024 + 1)
-    with path.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    monkeypatch.setattr(
-        doctor.subprocess,
-        "run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(
-            command, 0, stdout="codex-cli test\n", stderr=""
-        ),
-    )
-    problems: list[str] = []
-    doctor._check_binary(
-        path,
-        label="large pinned Codex executable",
-        expected_digest=digest,
-        expected_version="codex-cli test",
-        problems=problems,
-    )
-    assert problems == []
-
-
-def test_real_reviewed_codex_binary_hashes_when_installed() -> None:
-    receipt_path = Path.home() / ".cache" / "crowley" / "codex" / "0.162.1" / "INSTALL-RECEIPT.json"
-    if not receipt_path.is_file():
-        pytest.skip(f"reviewed Codex install receipt is absent: {receipt_path}")
-    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
-    native_binary = receipt["native_binary"]
-    path = Path(native_binary["path"])
-    if not path.is_file():
-        pytest.skip(f"reviewed Codex executable is absent: {path}")
-    problems: list[str] = []
-    doctor._check_binary(
-        path,
-        label="reviewed pinned Codex executable",
-        expected_digest=native_binary["sha256"],
-        expected_version=receipt["verification"]["cli_version_output"],
-        problems=problems,
-    )
-    assert problems == []
 
 
 def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, str], Path]:
@@ -119,10 +62,6 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
         "[companion]\npoll_seconds = 3.0\nrefresh_minutes = 5.0\n",
         encoding="utf-8",
     )
-    session_template = Path("deploy/config/session.toml").read_bytes()
-    session_values = tomllib.loads(session_template.decode("utf-8"))
-    assert set(session_values) == {"session"}
-    (config / "session.toml").write_bytes(session_template)
     secrets = config / "secrets.env"
     secrets.write_text(
         "CROWLEY_DATABASE_URL=postgresql://test\nCROWLEY_API_TOKEN=test\nCROWLEY_WINE=/opt/wine/bin/wine\n",
@@ -137,79 +76,17 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
         XDG_RUNTIME_DIR=str(runtime),
         CROWLEY_API_TOKEN="test",
     )
-    codex = tmp_path / "codex"
-    codex.write_text("#!/bin/sh\nprintf 'codex-cli 0.162.1\\n'\n", encoding="ascii")
-    codex.chmod(0o700)
-    codex_digest = hashlib.sha256(codex.read_bytes()).hexdigest()
-    environment["CROWLEY_CODEX_PATH"] = str(codex)
-    observer = tmp_path / "observer"
-    observer.write_bytes(b"reviewed observer fixture")
-    observer.chmod(0o700)
-    observer_digest = hashlib.sha256(observer.read_bytes()).hexdigest()
-    observer_manifest = observer.with_suffix(".manifest.json")
-    observer_manifest.write_text(
-        json.dumps(
-            {
-                "schema": pins.OBSERVER_MANIFEST_SCHEMA,
-                "target": pins.TARGET_TRIPLE,
-                "binary": pins.OBSERVER_ARTIFACT_NAME,
-                "binary_sha256": observer_digest,
-                "source_sha256": pins.OBSERVER_SOURCE_HASHES,
-                "workspace_sha256": pins.OBSERVER_WORKSPACE_SHA256,
-                "static_library_resolution": {
-                    "mechanism": "pkg-config",
-                    "package": "x11",
-                    "mode": "static",
-                    "libraries": [f"lib{name}.a" for name in pins.OBSERVER_STATIC_LIBRARY_NAMES],
-                },
-                "static_inputs": {f"lib{name}.a": "a" * 64 for name in pins.OBSERVER_STATIC_LIBRARY_NAMES},
-                "toolchain": {
-                    "rustc": pins.EXPECTED_RUSTC,
-                    "cargo": pins.EXPECTED_CARGO,
-                    "rustfmt": pins.EXPECTED_RUSTFMT,
-                },
-                "linker": {
-                    "driver": {"name": "cc", "sha256": "b" * 64, "version": "cc test"},
-                    "ld": {"name": "ld", "sha256": "c" * 64, "version": "ld test"},
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    observer_manifest.chmod(0o600)
-    monkeypatch.setattr(
-        doctor,
-        "resolve_pinned_observer",
-        lambda _xdg: PinnedObserver(
-            observer,
-            observer_digest,
-            str(pins.OBSERVER_PROTOCOL_VERSION),
-            pins.OBSERVER_PROVENANCE,
-            observer_manifest,
-        ),
-    )
-    monkeypatch.setattr(
-        doctor,
-        "load_pinned_binaries",
-        lambda _environment: PinnedBinaries(
-            codex,
-            "gpt-6-luna",
-            "codex-cli 0.162.1",
-            codex_digest,
-        ),
-    )
+    monkeypatch.setattr(doctor.input_tool, "verify_artifact", lambda *_args, **_kwargs: None)
     entrypoints = tmp_path / "home" / ".local" / "bin"
     entrypoints.mkdir(parents=True)
-    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan", "crowley-session"):
+    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan"):
         path = entrypoints / name
         path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         path.chmod(0o700)
     monkeypatch.setattr(
         install.subprocess,
         "run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(
-            command, 0, stdout="codex-cli 0.162.1\n", stderr=""
-        ),
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, stdout="", stderr=""),
     )
     install.install(install.InstallRequest(game_root=game_root), environment)
     return environment, game_root
@@ -226,54 +103,17 @@ def test_doctor_passes_after_install(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert report.problems == ()
 
 
-def test_doctor_rejects_a_codex_digest_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    environment, _game_root = _setup(tmp_path, monkeypatch)
-    codex = Path(environment["CROWLEY_CODEX_PATH"])
-    codex.write_text(codex.read_text(encoding="ascii") + "# changed\n", encoding="ascii")
-    report = doctor.doctor(environment, database_status=_current)
-    assert "pinned Codex executable digest mismatch" in "\n".join(report.problems)
-
-
-@pytest.mark.parametrize(
-    ("version", "provenance", "message"),
-    [
-        ("2", "crowley.x11-identity-observer.v1", "version does not match"),
-        ("1", "wrong-provenance", "provenance does not match"),
-    ],
-)
-def test_doctor_rejects_observer_version_and_provenance_mismatch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    version: str,
-    provenance: str,
-    message: str,
+def test_doctor_reports_an_unpublished_or_invalid_input_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     environment, _game_root = _setup(tmp_path, monkeypatch)
-    observer = tmp_path / "observer"
-    observer_digest = hashlib.sha256(observer.read_bytes()).hexdigest()
-    monkeypatch.setattr(
-        doctor,
-        "resolve_pinned_observer",
-        lambda _xdg: PinnedObserver(
-            observer,
-            observer_digest,
-            version,
-            provenance,
-            observer.with_suffix(".manifest.json"),
-        ),
-    )
-    report = doctor.doctor(environment, database_status=_current)
-    assert message in "\n".join(report.problems)
 
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise doctor.input_tool.InputToolError("private XTEST tool is not published")
 
-def test_doctor_rejects_malformed_observer_manifest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    environment, _game_root = _setup(tmp_path, monkeypatch)
-    manifest = tmp_path / "observer.manifest.json"
-    value = json.loads(manifest.read_text(encoding="utf-8"))
-    del value["toolchain"]
-    manifest.write_text(json.dumps(value), encoding="utf-8")
+    monkeypatch.setattr(doctor.input_tool, "verify_artifact", refuse)
     report = doctor.doctor(environment, database_status=_current)
-    assert "provenance manifest keys are invalid" in "\n".join(report.problems)
+    assert "pinned input tool is invalid: private XTEST tool is not published" in report.problems
 
 
 def test_doctor_reuses_validated_host_for_install_plan(
@@ -297,10 +137,8 @@ def test_doctor_aggregates_unit_addon_secret_database_and_account_problems(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     environment, game_root = _setup(tmp_path, monkeypatch)
-    unit = tmp_path / "config/systemd/user/crowley-session.service"
-    unit.write_text(
-        unit.read_text(encoding="utf-8").replace("%h/.local/bin/crowley-session", "/checkout/session")
-    )
+    unit = tmp_path / "config/systemd/user/crowley-scan.service"
+    unit.write_text(unit.read_text(encoding="utf-8").replace("%h/.local/bin/crowley-scan", "/checkout/scan"))
     addon = game_root / "_classic_beta_/Interface/AddOns/Crowley/Crowley.toc"
     addon.write_text("## Interface: 99999\n", encoding="utf-8")
     secrets = tmp_path / "config/crowley/secrets.env"
@@ -393,7 +231,7 @@ def test_doctor_accepts_uv_tool_symlinked_entrypoints(
     entrypoints = tmp_path / "home" / ".local" / "bin"
     tool_bin = tmp_path / "home" / ".local" / "share" / "uv" / "tools" / "crowley" / "bin"
     tool_bin.mkdir(parents=True)
-    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan", "crowley-session"):
+    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan"):
         target = tool_bin / name
         (entrypoints / name).rename(target)
         (entrypoints / name).symlink_to(target)
@@ -408,10 +246,10 @@ def test_doctor_rejects_dangling_or_non_executable_entrypoints(
     entrypoints = tmp_path / "home" / ".local" / "bin"
     (entrypoints / "crowley-companion").unlink()
     (entrypoints / "crowley-companion").symlink_to(tmp_path / "missing")
-    (entrypoints / "crowley-session").chmod(0o600)
+    (entrypoints / "crowley-scan").chmod(0o600)
     problems = "\n".join(doctor.doctor(environment, database_status=_current).problems)
     assert f"unit entrypoint is unavailable: {entrypoints / 'crowley-companion'}" in problems
-    assert f"unit entrypoint is not executable: {entrypoints / 'crowley-session'}" in problems
+    assert f"unit entrypoint is not executable: {entrypoints / 'crowley-scan'}" in problems
 
 
 @pytest.mark.parametrize(

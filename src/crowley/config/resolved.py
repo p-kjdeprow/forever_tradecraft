@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from importlib import resources
 from pathlib import Path
 from typing import cast
 
-from crowley import data as crowley_data
 from crowley.core.game_target import CatalogLike, GameTarget, target_scan_plan
 from crowley.core.watchlist import Catalog, load_catalog
 from crowley.platform.paths import XdgDirs
 
-from .binaries import resolve_pinned_observer
 from .host import HostConfig
-from .tunables import CompanionTunables, OpsTunables, SessionTunables
+from .tunables import CompanionTunables, OpsTunables
 
 
 class ResolutionError(ValueError):
@@ -39,65 +36,11 @@ def _flavor_dir(target: GameTarget, host: HostConfig) -> Path:
     return host.game_root_path / target.product_dir
 
 
-def _route_file(target: GameTarget, route_name: str) -> Path | None:
-    """Return the target's packaged route, or None when no route was measured.
-
-    A target owns a route only through ``routes/<targetId>/``.  A target without
-    that directory has no mailbox route, and route consumers stay unavailable;
-    a route directory missing the named route is a packaging error.
-    """
-
-    if not route_name or Path(route_name).name != route_name or Path(route_name).suffix != ".json":
-        raise ResolutionError("route name must be one JSON file name")
-    directory = resources.files(crowley_data).joinpath("routes", target.target_id)
-    if not isinstance(directory, Path):
-        raise ResolutionError("packaged route resources must be available as filesystem files")
-    if not directory.exists():
-        return None
-    resource = directory / route_name
-    if not resource.is_file():
-        raise ResolutionError(f"packaged route does not exist: {target.target_id}/{route_name}")
-    return resource
-
-
 def _composition(target: GameTarget, catalog: Catalog | None) -> tuple[Catalog, dict[str, object]]:
     selected_catalog = load_catalog(enforce_target=False) if catalog is None else catalog
     target.validate_catalog(cast(CatalogLike, selected_catalog))
     plan = target_scan_plan(cast(CatalogLike, selected_catalog), target)
     return selected_catalog, plan
-
-
-@dataclass(frozen=True, slots=True)
-class SessionResolvedConfig:
-    target: GameTarget
-    catalog: Catalog
-    canonical_plan: dict[str, object]
-    route_provenance: str
-    host: HostConfig
-    tunables: SessionTunables
-    flavor_dir: Path
-    account_dir: Path
-    journal: Path
-    socket: Path
-    capture_dir: Path
-    saved_variables: Path
-    companion_state: Path
-    data_lua: Path
-    queue_lua: Path
-    route_file: Path | None
-    state_dir: Path
-    runtime_dir: Path
-    model_neutral_dir: Path
-    client_build: str
-    interface: int
-    player_faction: str
-    locale: str
-    client_version: str
-    cadence_seconds: int
-    sweep_cap_seconds: int
-    identity_observer_executable: Path
-    identity_observer_executable_sha256: str
-    identity_observer_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,59 +82,6 @@ class OpsResolvedConfig:
     state_dir: Path
     runtime_dir: Path
     config_dir: Path
-
-
-def resolve_session(
-    target: GameTarget,
-    host: HostConfig,
-    tunables: SessionTunables,
-    *,
-    xdg: XdgDirs | None = None,
-    catalog: Catalog | None = None,
-) -> SessionResolvedConfig:
-    """Derive every session path from target, host, and session tunables."""
-
-    dirs = _xdg_dirs(xdg)
-    flavor = _flavor_dir(target, host)
-    state = _state_dir(target, host, dirs)
-    runtime = dirs.crowley_runtime
-    account = host.wtf_account
-    addon = flavor / "Interface" / "AddOns" / "Crowley_Data"
-    account_dir = flavor / "WTF" / "Account" / account
-    selected_catalog, plan = _composition(target, catalog)
-    observer = resolve_pinned_observer(dirs)
-    saved = account_dir / "SavedVariables" / "Crowley.lua"
-    return SessionResolvedConfig(
-        target=target,
-        catalog=selected_catalog,
-        canonical_plan=plan,
-        route_provenance=target.route_provenance,
-        host=host,
-        tunables=tunables,
-        flavor_dir=flavor,
-        account_dir=account_dir,
-        journal=state / "journal.json",
-        socket=runtime / "session.sock",
-        capture_dir=runtime / "captures",
-        saved_variables=saved,
-        companion_state=state / "companion.json",
-        data_lua=addon / "Data.lua",
-        queue_lua=addon / "Queue.lua",
-        route_file=_route_file(target, "stormwind.json"),
-        state_dir=state,
-        runtime_dir=runtime,
-        model_neutral_dir=runtime / "model-neutral",
-        client_build=target.native_build,
-        interface=target.interface,
-        player_faction=target.faction,
-        locale=target.locale,
-        client_version=target.client_version,
-        cadence_seconds=target.cadence_seconds,
-        sweep_cap_seconds=target.sweep_cap_seconds,
-        identity_observer_executable=observer.path,
-        identity_observer_executable_sha256=observer.sha256,
-        identity_observer_version=observer.version,
-    )
 
 
 def resolve_companion(
@@ -273,8 +163,6 @@ __all__ = [
     "CompanionResolvedConfig",
     "OpsResolvedConfig",
     "ResolutionError",
-    "SessionResolvedConfig",
     "resolve_companion",
     "resolve_ops",
-    "resolve_session",
 ]

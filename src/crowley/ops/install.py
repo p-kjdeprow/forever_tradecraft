@@ -35,7 +35,7 @@ PACKAGE_DATA = "package_data"
 MANIFEST_SCHEMA = "crowley-install-v2"
 MAX_RESOURCE_BYTES = 32 * 1024 * 1024
 _MUTABLE_ADDON_FILES = frozenset({"addon/Crowley_Data/Data.lua", "addon/Crowley_Data/Queue.lua"})
-_CONFIG_FILES = ("companion.toml", "session.toml")
+_CONFIG_FILES = ("companion.toml",)
 _LAUNCHER_NAME = "crowley-world-of-warcraft"
 _DOCKER_TAG_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\Z")
 

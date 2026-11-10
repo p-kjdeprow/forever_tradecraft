@@ -86,8 +86,6 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         "crowley-paper-trading.service",
         "crowley-paper-trading.timer",
         "crowley-scan.service",
-        "crowley-session.service",
-        "crowley-session-supervisor.service",
     }
     for name, raw in units.items():
         text = raw.decode("utf-8")
@@ -99,21 +97,20 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         assert "WorkingDirectory=" not in text
         if name.endswith(".service"):
             assert "EnvironmentFile=%E/crowley/secrets.env" in text
-        if name in {"crowley-scan.service", "crowley-session.service", "crowley-session-supervisor.service"}:
-            # The socket directory is tmpfs; the units recreate it after a reboot.
+        if name == "crowley-scan.service":
+            # The runtime directory is tmpfs; the unit recreates it after a reboot.
             service = parser["Service"]
             assert service["RuntimeDirectory"] == "crowley"
             assert service["RuntimeDirectoryMode"] == "0700"
             assert service["RuntimeDirectoryPreserve"] == "yes"
 
 
-def test_scan_unit_conflicts_with_the_session_units_and_is_not_enabled() -> None:
+def test_scan_unit_is_rendered_and_not_enabled() -> None:
     units = {name: raw.decode("utf-8") for name, raw in install.render_units()}
     scan = units["crowley-scan.service"]
     assert "ExecStart=%h/.local/bin/crowley-scan run" in scan
-    assert "Conflicts=crowley-session.service crowley-session-supervisor.service" in scan
-    for old in ("crowley-session.service", "crowley-session-supervisor.service"):
-        assert "Conflicts=crowley-scan.service" in units[old]
+    assert "Conflicts=" not in scan
+    assert not any("session" in name for name in units)
     for line in (
         "EnvironmentFile=%E/crowley/secrets.env",
         "Environment=DISPLAY=:0",
@@ -147,7 +144,6 @@ def test_dry_run_writes_nothing_and_does_not_reload_systemd(
     assert result.changed
     assert not called
     assert (tmp_path / "config/crowley/host.toml").is_file()
-    assert not (tmp_path / "config/crowley/session.toml").exists()
     assert not (game_root / "_classic_beta_" / "Interface" / "AddOns" / "Crowley").exists()
 
 
@@ -188,15 +184,12 @@ def test_hostile_paths_are_escaped_in_launcher_and_tunables(tmp_path: Path) -> N
     configs = {
         item.relative_name: item.content
         for item in plan.files
-        if item.relative_name in {"config/companion.toml", "config/session.toml"}
+        if item.relative_name in {"config/companion.toml"}
     }
     assert all(content is not None for content in configs.values())
     companion = tomllib.loads(configs["config/companion.toml"].decode("utf-8"))
-    session = tomllib.loads(configs["config/session.toml"].decode("utf-8"))
     assert set(companion) == {"companion"}
-    assert set(session) == {"session"}
     assert str(hostile_root) not in configs["config/companion.toml"].decode("utf-8")
-    assert str(hostile_root) not in configs["config/session.toml"].decode("utf-8")
     launcher = next(
         item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
     )

@@ -1,5 +1,0 @@
-[session]
-quiet_margin_seconds = 15
-upload_deadline_seconds = 60
-reload_deadline_seconds = 45
-ack_deadline_seconds = 60

@@ -34,7 +34,7 @@ class CatalogLike(Protocol):
 
     def model_copy(self, *, update: dict[str, object]) -> CatalogLike: ...
 
-    def scan_plan(self, *, cadence_seconds: int) -> dict[str, object]: ...
+    def scan_plan(self, *, cadence_seconds: int, cold_slices: int) -> dict[str, object]: ...
 
 
 def _object(value: object, expected: set[str], where: str) -> dict[str, object]:
@@ -84,6 +84,7 @@ class GameTarget:
     catalog_revision: int
     cadence_seconds: int
     sweep_cap_seconds: int
+    cold_slices: int
     initial_price_levels: int
     route_provenance: str
 
@@ -155,13 +156,21 @@ class GameTarget:
 
         scan = _object(
             top["scan"],
-            {"catalogId", "catalogRevision", "cadenceSeconds", "sweepCapSeconds", "initialPriceLevels"},
+            {
+                "catalogId",
+                "catalogRevision",
+                "cadenceSeconds",
+                "sweepCapSeconds",
+                "coldSlices",
+                "initialPriceLevels",
+            },
             "target.scan",
         )
         catalog_id = _string(scan["catalogId"], "target.scan.catalogId")
         catalog_revision = _integer(scan["catalogRevision"], "target.scan.catalogRevision")
         cadence_seconds = _integer(scan["cadenceSeconds"], "target.scan.cadenceSeconds")
         sweep_cap_seconds = _integer(scan["sweepCapSeconds"], "target.scan.sweepCapSeconds")
+        cold_slices = _integer(scan["coldSlices"], "target.scan.coldSlices", minimum=0)
         initial_price_levels = _integer(scan["initialPriceLevels"], "target.scan.initialPriceLevels")
         if cadence_seconds != FIXED_COLLECTION_CADENCE_SECONDS:
             raise GameTargetError(
@@ -192,6 +201,7 @@ class GameTarget:
             catalog_revision=catalog_revision,
             cadence_seconds=cadence_seconds,
             sweep_cap_seconds=sweep_cap_seconds,
+            cold_slices=cold_slices,
             initial_price_levels=initial_price_levels,
             route_provenance=_string(top["routeProvenance"], "target.routeProvenance"),
         )
@@ -279,7 +289,9 @@ def target_catalog(catalog: CatalogLike, target: GameTarget | None = None) -> Ca
 
 def target_scan_plan(catalog: CatalogLike, target: GameTarget | None = None) -> dict[str, object]:
     selected = packaged_game_target() if target is None else target
-    return target_catalog(catalog, selected).scan_plan(cadence_seconds=selected.cadence_seconds)
+    return target_catalog(catalog, selected).scan_plan(
+        cadence_seconds=selected.cadence_seconds, cold_slices=selected.cold_slices
+    )
 
 
 @lru_cache(maxsize=1)

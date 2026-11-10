@@ -99,7 +99,9 @@ to the old session stack, reinstall the tag `pre-simplify` (`git show pre-simpli
 
 The plan lives in three places that must agree: the installed package (`first_run.json`, target JSON and the
 addon's `GeneratedTarget.lua`), the server image (it serves the canonical plan that the companion writes into
-`Crowley_Data/Data.lua`), and the client's loaded addon data. Deploy in this order, right after an upload:
+`Crowley_Data/Data.lua`), and the client's loaded addon data. A plan with cold items needs `scan.coldSlices` set in the target JSON (positive exactly when cold items
+exist; the generator and `scan_plan` reject a mismatch), which changes `planHash`. Deploy in this order, right
+after an upload:
 
 1. `uv tool install --force --reinstall --link-mode copy .` and `crowley-ops install --game-root ...`.
 2. `crowley-ops image build --source "$PWD"`, then the compose `up -d` from the README (recreates the server).

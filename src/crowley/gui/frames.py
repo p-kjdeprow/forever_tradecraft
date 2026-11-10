@@ -841,8 +841,10 @@ def validate_snapshot(
             raise _error("plan.itemIDs", "configured item IDs are invalid")
         if cursor_item_id and cursor_item_id not in configured_ids:
             raise _error("scanner.cursorItemID", "cursor is outside the configured plan")
-    if planned != rules.plan_count:
-        raise _error("scanner.planned", f"must be {rules.plan_count}")
+    # plan.count is the whole plan; a sweep attempts the hot items plus one cold slice, so
+    # planned is the size of the current sweep's item set.
+    if not 1 <= planned <= rules.plan_count:
+        raise _error("scanner.planned", f"must be in [1, {rules.plan_count}]")
     if phase in {"ready", "scheduled", "blocked"} and (active_id or started):
         raise _error("scanner", "inactive phase cannot have active ID/start")
     if phase == "scheduled" and due == 0:

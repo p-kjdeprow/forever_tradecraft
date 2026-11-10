@@ -138,6 +138,22 @@ safe, and leave the cutoff unknown otherwise. Unknown links/owners are tagged un
 than guessed. Owned collection remains `unqueried` until its own query is sent; a house change
 before completion makes that batch incomplete and prevents cross-house evidence.
 
+### Cold tier
+
+A catalog item with `pool: "cold"` is swept in rotation instead of every cycle. The plan body carries
+`pools.cold` (ordered item IDs) and the integer `coldSlices` (N); both are part of `planJSON` and so of
+`planHash`. N comes from the target's `scan.coldSlices` and must be positive exactly when the plan has cold
+items (`forever-us-camwow7` stays 0 until the catalog gains cold items; that change sets it to 6). Cold item
+`i` of `pools.cold` belongs to slice `i % N`. A sweep attempts every core/discovery item plus slice
+`k = floor(startedAt / cadenceSeconds) % N`, in plan order. The addon records `coldSlice = {index = k,
+count = N}` as an optional top-level envelope field (absent when N is 0); `validate_envelope` requires it
+when N > 0, checks `count == N` and `index == k` for the envelope's `startedAt`, and requires the
+`observations` keys to equal exactly hot plus slice `k`. The attempted set is that explicit key set, so
+"attempted, zero listings" (an observation with no rows) stays distinct from "not attempted" (no key).
+Ingest stores `coldSlice` in `market_sweeps.context` (jsonb, no schema change). Plans written before the cold
+tier (no `coldSlices`, no `pools.cold`) validate as N = 0. In scan-loop frames `plan.count` is the whole plan
+while `scanner.planned` and `lastSaved.planned` are the size of the current or last sweep's item set.
+
 ## Storage (TimescaleDB)
 
 | Table | Contents |

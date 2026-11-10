@@ -58,7 +58,7 @@ class CatalogItem(CatalogModel):
     professions: list[Profession]
     roles: list[Literal["input", "output", "intermediate", "recipe", "discovery"]] = Field(min_length=1)
     status: Status
-    pool: Literal["core", "discovery"]
+    pool: Literal["core", "discovery", "cold"]
     reason: str = Field(min_length=1)
     evidence: Literal["client_data", "live_client"]
     auction_eligibility: Literal["unverified", "client_tradeable", "live_verified", "not_tradeable"]
@@ -103,8 +103,16 @@ class Catalog(CatalogModel):
         canonical = json.dumps(self.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).hexdigest()
 
-    def scan_plan(self, *, cadence_seconds: int = FIXED_COLLECTION_CADENCE_SECONDS) -> dict:
-        """Only active IDs enter the plan; research/excluded entries remain reviewable."""
+    def scan_plan(
+        self, *, cadence_seconds: int = FIXED_COLLECTION_CADENCE_SECONDS, cold_slices: int = 0
+    ) -> dict:
+        """Only active IDs enter the plan; research/excluded entries remain reviewable.
+
+        ``cold_slices`` (N) comes from the target.  Cold items rotate: cold item i of
+        ``pools.cold`` belongs to slice ``i % N``.  N > 0 exactly when cold items exist.
+        """
+        if isinstance(cold_slices, bool) or not isinstance(cold_slices, int) or cold_slices < 0:
+            raise ValueError("cold_slices must be an integer >= 0")
         if (
             isinstance(cadence_seconds, bool)
             or not isinstance(cadence_seconds, int)
@@ -114,6 +122,12 @@ class Catalog(CatalogModel):
                 f"cadence_seconds must use the fixed collection policy {FIXED_COLLECTION_CADENCE_SECONDS}"
             )
         active = [item for item in self.items if item.status == "active"]
+        has_cold = any(item.pool == "cold" for item in active)
+        if (cold_slices > 0) != has_cold:
+            raise ValueError(
+                f"cold_slices={cold_slices} requires cold items and cold items require cold_slices > 0 "
+                f"(active cold items: {sum(item.pool == 'cold' for item in active)})"
+            )
         body = {
             "schemaVersion": 2,
             "id": self.id,
@@ -121,10 +135,12 @@ class Catalog(CatalogModel):
             "catalogHash": self.catalog_hash,
             "targetClientBuild": self.client_build,
             "cadenceSeconds": cadence_seconds,
+            "coldSlices": cold_slices,
             "initialPriceLevels": self.initial_price_levels,
             "itemIDs": [item.item_id for item in active],
             "pools": {
-                pool: [item.item_id for item in active if item.pool == pool] for pool in ("core", "discovery")
+                pool: [item.item_id for item in active if item.pool == pool]
+                for pool in ("core", "discovery", "cold")
             },
         }
         plan_json = json.dumps(body, sort_keys=True, separators=(",", ":"))

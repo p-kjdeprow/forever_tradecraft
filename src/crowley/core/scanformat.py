@@ -204,7 +204,8 @@ def _validate_plan(plan_json: Any, plan_hash: Any) -> dict[str, Any]:
             "initialPriceLevels",
             "itemIDs",
             "pools",
-        },
+        }
+        | ({"coldSlices"} if isinstance(plan, dict) and "coldSlices" in plan else set()),
         "planJSON",
     )
     canonical = json.dumps(plan, sort_keys=True, separators=(",", ":"))
@@ -241,9 +242,12 @@ def _validate_plan(plan_json: Any, plan_hash: Any) -> dict[str, Any]:
         raise ScanFormatError("plan.itemIDs must be sorted, unique and nonempty")
     for item_id in ids:
         _int(item_id, "plan.itemIDs[]", minimum=1)
-    _keys(plan["pools"], {"core", "discovery"}, "plan.pools")
+    # Plans from before the cold tier carry neither coldSlices nor pools.cold; they are N == 0.
+    cold_slices = _int(plan["coldSlices"], "plan.coldSlices") if "coldSlices" in plan else 0
+    pool_names = ("core", "discovery", "cold") if "coldSlices" in plan else ("core", "discovery")
+    _keys(plan["pools"], set(pool_names), "plan.pools")
     pool_ids: list[int] = []
-    for pool in ("core", "discovery"):
+    for pool in pool_names:
         values = plan["pools"][pool]
         if (
             not isinstance(values, list)
@@ -256,6 +260,8 @@ def _validate_plan(plan_json: Any, plan_hash: Any) -> dict[str, Any]:
         pool_ids.extend(values)
     if sorted(pool_ids) != ids:
         raise ScanFormatError("plan pools must partition itemIDs")
+    if (cold_slices > 0) != bool(plan["pools"].get("cold")):
+        raise ScanFormatError("plan.coldSlices must be positive exactly when pools.cold is nonempty")
     plan["initialPriceLevels"] = initial_levels
     return plan
 
@@ -636,6 +642,47 @@ def _validate_observation(
     return row_count
 
 
+def cold_slice_index(started_at: int, cadence_seconds: int, cold_slices: int) -> int:
+    """The cold slice k swept by a sweep that started at ``started_at`` (epoch seconds)."""
+    return (started_at // cadence_seconds) % cold_slices
+
+
+def sweep_item_ids(plan: dict[str, Any], cold_slice: int | None) -> list[int]:
+    """Items one sweep attempts, in plan order: every hot item, then cold slice ``cold_slice``.
+
+    Cold item i of ``pools.cold`` belongs to slice ``i % coldSlices``.  Without cold items
+    (``cold_slice is None``) this is the whole plan.
+    """
+    cold_slices = plan.get("coldSlices", 0)
+    if cold_slices == 0:
+        if cold_slice is not None:
+            raise ScanFormatError("a plan without cold items has no cold slice")
+        return list(plan["itemIDs"])
+    if cold_slice is None or not 0 <= cold_slice < cold_slices:
+        raise ScanFormatError("cold slice index is outside the plan's coldSlices")
+    hot = set(plan["pools"]["core"]) | set(plan["pools"]["discovery"])
+    chosen = {item for i, item in enumerate(plan["pools"]["cold"]) if i % cold_slices == cold_slice}
+    return [item_id for item_id in plan["itemIDs"] if item_id in hot or item_id in chosen]
+
+
+def _validate_cold_slice(value: Any, plan: dict[str, Any], started: int) -> int | None:
+    """Return the sweep's cold slice index, or None for a plan without cold items."""
+    cold_slices = plan.get("coldSlices", 0)
+    if cold_slices == 0:
+        if value is not None:
+            raise ScanFormatError("envelope.coldSlice is only valid for a plan with cold slices")
+        return None
+    if value is None:
+        raise ScanFormatError("envelope.coldSlice is required when the plan has cold slices")
+    _keys(value, {"index", "count"}, "envelope.coldSlice")
+    if _int(value["count"], "envelope.coldSlice.count") != cold_slices:
+        raise ScanFormatError("envelope.coldSlice.count does not match plan.coldSlices")
+    index = _int(value["index"], "envelope.coldSlice.index")
+    if index != cold_slice_index(started, plan["cadenceSeconds"], cold_slices):
+        raise ScanFormatError("envelope.coldSlice.index does not match the sweep start time")
+    return index
+
+
 def _validate_owned(value: Any, sweep_start: int, sweep_end: int) -> None:
     _keys(value, {"status", "query", "reasonCode", "rowCount", "rows"}, "owned")
     status = _choice(value["status"], {"full", "incomplete", "unqueried"}, "owned.status")
@@ -707,6 +754,10 @@ def _validate_owned(value: Any, sweep_start: int, sweep_end: int) -> None:
 
 def validate_envelope(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate and return a supported envelope with its decoded payload."""
+    # coldSlice is the one optional envelope key; it is validated against the plan below.
+    cold_slice_raw = raw.get("coldSlice") if isinstance(raw, dict) else None
+    if isinstance(raw, dict):
+        raw = {key: value for key, value in raw.items() if key != "coldSlice"}
     _keys(
         raw,
         {
@@ -769,16 +820,18 @@ def validate_envelope(raw: dict[str, Any]) -> dict[str, Any]:
     decoded = decode_json_payload(raw["payload"])
     _keys(decoded, {"planHash", "planJSON", "observations", "owned"}, "payload")
     plan = _validate_plan(decoded["planJSON"], decoded["planHash"])
+    cold_index = _validate_cold_slice(cold_slice_raw, plan, started)
+    # Attempted items are exactly the observation keys: an attempted item with zero listings
+    # has an observation (coverage full/empty), an unattempted one has no key at all.
+    swept = sweep_item_ids(plan, cold_index)
     observations = decoded["observations"]
-    if not isinstance(observations, dict) or set(observations) != {
-        str(item_id) for item_id in plan["itemIDs"]
-    }:
-        raise ScanFormatError("observations must contain exactly one entry per planned item")
+    if not isinstance(observations, dict) or set(observations) != {str(item_id) for item_id in swept}:
+        raise ScanFormatError("observations must contain exactly one entry per swept item")
     ordinals: list[int] = []
     rows_total = 0
     for key, observation in observations.items():
-        if not isinstance(key, str) or not key.isdecimal() or int(key) not in plan["itemIDs"]:
-            raise ScanFormatError("observation key is not a planned decimal item ID")
+        if not isinstance(key, str) or not key.isdecimal() or int(key) not in swept:
+            raise ScanFormatError("observation key is not a swept decimal item ID")
         rows_total += _validate_observation(
             observation,
             int(key),
@@ -789,12 +842,15 @@ def validate_envelope(raw: dict[str, Any]) -> dict[str, Any]:
             wire_format,
         )
         ordinals.append(observation["ordinal"])
-    if sorted(ordinals) != list(range(1, len(plan["itemIDs"]) + 1)):
-        raise ScanFormatError("observation ordinals must partition the plan")
-    if raw["numRows"] != rows_total or raw["numObservations"] != len(plan["itemIDs"]):
+    if sorted(ordinals) != list(range(1, len(swept) + 1)):
+        raise ScanFormatError("observation ordinals must partition the swept items")
+    if raw["numRows"] != rows_total or raw["numObservations"] != len(swept):
         raise ScanFormatError("envelope counts do not match payload")
     _validate_owned(decoded["owned"], started, finished)
-    return {**raw, "decoded": decoded, "plan": plan}
+    validated = {**raw, "decoded": decoded, "plan": plan}
+    if cold_index is not None:
+        validated["coldSlice"] = cold_slice_raw
+    return validated
 
 
 def normalize_observation(format: int, kind: str, observation: dict[str, Any]) -> dict[str, Any]:

@@ -142,6 +142,9 @@ def _persist_market_sweep(conn: psycopg.Connection, raw: dict[str, Any], data_di
     if house.key != house_raw["key"]:
         raise ScanFormatError("house key does not match its fields")
     context = raw["context"]
+    if "coldSlice" in validated:
+        # The cold slice rides in market_sweeps.context (jsonb); no column is needed.
+        context = {**context, "coldSlice": validated["coldSlice"]}
     # Check both envelope timestamps before the first filesystem operation.
     started_at = _ts(raw["startedAt"])
     finished_at = _ts(raw["finishedAt"])

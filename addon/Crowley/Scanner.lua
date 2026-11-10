@@ -28,12 +28,13 @@ local CANONICAL_BUILD = TARGET.nativeBuild
 local CANONICAL_INTERFACE = TARGET.interface
 local CANONICAL_COUNT = TARGET.count
 local CANONICAL_LEVELS = TARGET.initialPriceLevels
+local CANONICAL_COLD_SLICES = TARGET.coldSlices
 local CANONICAL_SCHEMA = TARGET.schema
 local CANONICAL_ID = TARGET.id
 local CANONICAL_REVISION = TARGET.revision
 local CANONICAL_CATALOG_HASH = TARGET.catalogHash
 -- One compact, source-catalog-derived representation: each entry is the positive
--- delta from the prior item ID and its canonical pool (0=core, 1=discovery).
+-- delta from the prior item ID and its canonical pool (0=core, 1=discovery, 2=cold).
 local CANONICAL_PLAN_ENTRIES = TARGET.planEntries
 local PRE_LOGOUT_FENCE_COMMAND = "/crowley session fence"
 local SCHEDULE_TRACE_VERSION = 1
@@ -271,18 +272,21 @@ local canonicalPlan
 
 local function canonicalPlanDefinition()
   if canonicalPlan then return canonicalPlan end
-  local ids, core, discovery = {}, {}, {}
+  local ids, core, discovery, cold = {}, {}, {}, {}
   local previous = 0
   for token in string.gmatch(CANONICAL_PLAN_ENTRIES, "[^,]+") do
-    local deltaText, pool = string.match(token, "^(%d+):([01])$")
+    local deltaText, pool = string.match(token, "^(%d+):([012])$")
     local delta = tonumber(deltaText)
     if not delta or delta <= 0 then return nil end
     previous = previous + delta
     ids[#ids + 1] = previous
-    if pool == "0" then core[#core + 1] = previous else discovery[#discovery + 1] = previous end
+    if pool == "0" then core[#core + 1] = previous
+    elseif pool == "1" then discovery[#discovery + 1] = previous
+    else cold[#cold + 1] = previous end
   end
   if #ids ~= CANONICAL_COUNT then return nil end
-  canonicalPlan = { itemIDs = ids, pools = { core = core, discovery = discovery } }
+  if (CANONICAL_COLD_SLICES > 0) ~= (#cold > 0) then return nil end
+  canonicalPlan = { itemIDs = ids, pools = { core = core, discovery = discovery, cold = cold } }
   return canonicalPlan
 end
 
@@ -299,8 +303,9 @@ local function canonicalPlanJSON()
   local definition = canonicalPlanDefinition()
   if not definition then return nil end
   canonicalPlanText = '{"cadenceSeconds":' .. CADENCE .. ',"catalogHash":"' .. CANONICAL_CATALOG_HASH ..
-    '","id":"' .. CANONICAL_ID .. '","initialPriceLevels":' .. CANONICAL_LEVELS .. ',"itemIDs":' ..
-    canonicalNumberArray(definition.itemIDs) .. ',"pools":{"core":' ..
+    '","coldSlices":' .. CANONICAL_COLD_SLICES .. ',"id":"' .. CANONICAL_ID .. '","initialPriceLevels":' .. CANONICAL_LEVELS .. ',"itemIDs":' ..
+    canonicalNumberArray(definition.itemIDs) .. ',"pools":{"cold":' ..
+    canonicalNumberArray(definition.pools.cold) .. ',"core":' ..
     canonicalNumberArray(definition.pools.core) .. ',"discovery":' ..
     canonicalNumberArray(definition.pools.discovery) .. '},"revision":' .. CANONICAL_REVISION .. ',"schemaVersion":' .. CANONICAL_SCHEMA .. ',"targetClientBuild":"' ..
     CANONICAL_CLIENT_BUILD .. '"}'
@@ -321,23 +326,25 @@ local function planMatchesCanonical(source, loaded)
   if not ns.Util.ExactKeys(loaded, {
     schemaVersion = true, id = true, revision = true, catalogHash = true,
     targetClientBuild = true, cadenceSeconds = true, initialPriceLevels = true,
-    itemIDs = true, pools = true,
+    itemIDs = true, pools = true, coldSlices = true,
   }) then return false end
   if loaded.schemaVersion ~= CANONICAL_SCHEMA or loaded.id ~= CANONICAL_ID or
       loaded.revision ~= CANONICAL_REVISION or loaded.catalogHash ~= CANONICAL_CATALOG_HASH or
       loaded.targetClientBuild ~= CANONICAL_CLIENT_BUILD or loaded.cadenceSeconds ~= CADENCE or
-      loaded.initialPriceLevels ~= CANONICAL_LEVELS or
+      loaded.initialPriceLevels ~= CANONICAL_LEVELS or loaded.coldSlices ~= CANONICAL_COLD_SLICES or
       not sameArray(loaded.itemIDs, definition.itemIDs) then return false end
-  if not ns.Util.ExactKeys(loaded.pools, { core = true, discovery = true }) or
+  if not ns.Util.ExactKeys(loaded.pools, { core = true, discovery = true, cold = true }) or
       not sameArray(loaded.pools.core, definition.pools.core) or
+      not sameArray(loaded.pools.cold, definition.pools.cold) or
       not sameArray(loaded.pools.discovery, definition.pools.discovery) then return false end
   if source.planHash ~= CANONICAL_PLAN_HASH or source.schemaVersion ~= loaded.schemaVersion or
       source.id ~= loaded.id or source.revision ~= loaded.revision or
       source.catalogHash ~= loaded.catalogHash or source.targetClientBuild ~= loaded.targetClientBuild or
       source.cadenceSeconds ~= loaded.cadenceSeconds or source.initialPriceLevels ~= loaded.initialPriceLevels or
-      not sameArray(source.itemIDs, loaded.itemIDs) then return false end
-  if not ns.Util.ExactKeys(source.pools, { core = true, discovery = true }) or
+      source.coldSlices ~= loaded.coldSlices or not sameArray(source.itemIDs, loaded.itemIDs) then return false end
+  if not ns.Util.ExactKeys(source.pools, { core = true, discovery = true, cold = true }) or
       not sameArray(source.pools.core, loaded.pools.core) or
+      not sameArray(source.pools.cold, loaded.pools.cold) or
       not sameArray(source.pools.discovery, loaded.pools.discovery) then return false end
   if (source.sweepCapSeconds == nil) ~= (loaded.sweepCapSeconds == nil) or
       (source.sweepCapSeconds ~= nil and source.sweepCapSeconds ~= loaded.sweepCapSeconds) or
@@ -1051,7 +1058,17 @@ function Scanner.Start(force, source)
   local sweepPlanJSON = CROWLEY_DATA.scanPlan.planJSON
   local sweepState = ns.ScannerState.NewSweep(plan, ns.Context.House(), ns.Context.Snapshot(), time(), sweepGeneration)
   sweepState.planHash, sweepState.planJSON, sweepState.cursor = sweepPlanHash, sweepPlanJSON, cursor
-  sweepState.order = ns.ScannerState.PlanOrder(plan.itemIDs, cursor)
+  -- This sweep attempts every hot item plus exactly one cold slice, k = floor(startedAt / cadence) % N.
+  local sweepIDs, coldSlice = ns.ScannerState.SweepItems(plan, sweepState.startedAt, CADENCE)
+  sweepState.coldSlice = coldSlice
+  -- The cursor names an item of the whole plan; resume after the last swept item at or before it.
+  local sweepCursor
+  if cursor ~= nil then
+    for _, itemID in ipairs(sweepIDs) do
+      if itemID <= cursor then sweepCursor = itemID else break end
+    end
+  end
+  sweepState.order = ns.ScannerState.PlanOrder(sweepIDs, sweepCursor)
   sweepState.queryTrace = { version = QUERY_TRACE_VERSION, cap = QUERY_TRACE_CAP, sequence = 0, dropped = 0, events = {} }
   state = sweepState
   ns.db.activeQueryTrace = state.queryTrace

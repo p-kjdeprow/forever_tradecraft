@@ -29,7 +29,16 @@ function Encoder.Envelope(sweep, id, finishedAt, rowCount, observationCount, enc
     id = id, format = 3, house = sweep.house, context = sweep.context, startedAt = sweep.startedAt,
     finishedAt = finishedAt, numRows = rowCount, numObservations = observationCount, payload = encodedPayload,
   }
-  if not ns.GeneratedWireSchemas or not exactKeys(envelope, ns.GeneratedWireSchemas.savedScanEnvelope) then
+  -- coldSlice is the one optional envelope key: present exactly when the plan has cold slices.
+  local allowed = ns.GeneratedWireSchemas and ns.GeneratedWireSchemas.savedScanEnvelope
+  if sweep.coldSlice ~= nil then
+    envelope.coldSlice = { index = sweep.coldSlice.index, count = sweep.coldSlice.count }
+  elseif allowed then
+    local required = {}
+    for key in pairs(allowed) do if key ~= "coldSlice" then required[key] = true end end
+    allowed = required
+  end
+  if not allowed or not exactKeys(envelope, allowed) then
     error("scan encoder envelope does not match generated wire schema")
   end
   return envelope

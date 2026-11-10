@@ -131,7 +131,8 @@ def _wire_schema_sets() -> dict[str, object]:
         raise GenerationError("addon-data response has no fields")
     companion_fields = set(companion_state.CompanionState.__dataclass_fields__)
     return {
-        "savedScanEnvelope": scan_sets["raw"],
+        # coldSlice is the one optional envelope key (present only when the plan has cold slices).
+        "savedScanEnvelope": scan_sets["raw"] | {"coldSlice"},
         "scanPayload": scan_sets["decoded"],
         "crowleyData": data_fields,
         "crowleyQueue": set(queue.QUEUE_FIELDS),
@@ -205,8 +206,12 @@ def _compact_entries(plan: Mapping[str, object]) -> str:
     discovery = pools.get("discovery")
     if not isinstance(core, list) or not isinstance(discovery, list):
         raise GenerationError("scan plan pools are malformed")
+    cold = pools.get("cold")
+    if not isinstance(cold, list):
+        raise GenerationError("scan plan pools are malformed")
     pool_by_id = {int(item_id): 0 for item_id in core}
     pool_by_id.update({int(item_id): 1 for item_id in discovery})
+    pool_by_id.update({int(item_id): 2 for item_id in cold})
     previous = 0
     entries: list[str] = []
     for raw_item_id in item_ids_value:
@@ -254,6 +259,7 @@ def render_target_json(target: GameTarget) -> str:
             "catalogRevision": target.catalog_revision,
             "cadenceSeconds": target.cadence_seconds,
             "sweepCapSeconds": target.sweep_cap_seconds,
+            "coldSlices": target.cold_slices,
             "initialPriceLevels": target.initial_price_levels,
         },
         "routeProvenance": target.route_provenance,
@@ -292,6 +298,7 @@ def render_generated_lua(target: GameTarget, plan: Mapping[str, object]) -> str:
         ("count", len(item_ids)),
         ("cadenceSeconds", cast(int, plan["cadenceSeconds"])),
         ("sweepCapSeconds", target.sweep_cap_seconds),
+        ("coldSlices", target.cold_slices),
         ("initialPriceLevels", cast(int, plan["initialPriceLevels"])),
         ("planEntries", entries),
     ]
@@ -362,7 +369,7 @@ def _render(root: Path, target_path: Path, catalog_path: Path) -> dict[Path, str
         bound = target_catalog(catalog, target)
     except (AttributeError, GameTargetError) as exc:
         raise GenerationError(f"catalog identity cannot be bound to target: {exc}") from exc
-    plan = bound.scan_plan(cadence_seconds=target.cadence_seconds)
+    plan = bound.scan_plan(cadence_seconds=target.cadence_seconds, cold_slices=target.cold_slices)
     item_ids = plan.get("itemIDs")
     if not isinstance(item_ids, list) or not item_ids:
         raise GenerationError("target-bound scan plan must contain active items")

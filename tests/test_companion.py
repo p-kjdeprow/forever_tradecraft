@@ -165,7 +165,8 @@ def test_retries_failed_file_without_reuploading_successful_scans(companion, fai
     assert persisted.probes == [probe["at"]]
     data = savedvars.load_file(instance.settings.data_lua)["CROWLEY_DATA"]
     assert data["ackedScans"] == ["s1", "s2"]
-    assert data["scanPlan"] == plan
+    # A Lua table cannot tell an empty array from an empty object, so the empty cold pool loads as {}.
+    assert data["scanPlan"] == {**plan, "pools": {**plan["pools"], "cold": {}}}
     assert "shoppingLists" not in data
 
     instance.tick()

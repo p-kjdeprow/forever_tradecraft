@@ -73,4 +73,8 @@ def test_removing_item_changes_plan_identity_and_roundtrips_through_lua():
     assert plan["catalogHash"] != original.scan_plan()["catalogHash"]
     assert len(plan["itemIDs"]) == len(original.scan_plan()["itemIDs"]) - 1
     text = render_assignment("CROWLEY_DATA", {"scanPlan": plan}, header="test")
-    assert savedvars.loads(text.encode())["CROWLEY_DATA"]["scanPlan"] == plan
+    # A Lua table cannot tell an empty array from an empty object, so the empty cold pool loads as {}.
+    assert savedvars.loads(text.encode())["CROWLEY_DATA"]["scanPlan"] == {
+        **plan,
+        "pools": {**plan["pools"], "cold": {}},
+    }

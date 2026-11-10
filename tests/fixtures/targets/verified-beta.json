@@ -23,6 +23,7 @@
     "catalogRevision": 4,
     "cadenceSeconds": 900,
     "sweepCapSeconds": 600,
+    "coldSlices": 0,
     "initialPriceLevels": 20
   },
   "routeProvenance": "measured live on client build 70450"

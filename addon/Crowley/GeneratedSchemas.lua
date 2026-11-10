@@ -7,7 +7,7 @@ ns.GeneratedWireSchemas = {
   crowleyQueue = {["actions"] = true, ["armed"] = true, ["character"] = true, ["expiresAt"] = true, ["format"] = true, ["generatedAt"] = true, ["house"] = true, ["queueId"] = true},
   execution = {["character"] = true, ["house"] = true, ["queueId"] = true, ["results"] = true},
   result = {["at"] = true, ["detail"] = true, ["kind"] = true, ["seq"] = true, ["status"] = true},
-  savedScanEnvelope = {["context"] = true, ["finishedAt"] = true, ["format"] = true, ["house"] = true, ["id"] = true, ["numObservations"] = true, ["numRows"] = true, ["payload"] = true, ["startedAt"] = true},
+  savedScanEnvelope = {["coldSlice"] = true, ["context"] = true, ["finishedAt"] = true, ["format"] = true, ["house"] = true, ["id"] = true, ["numObservations"] = true, ["numRows"] = true, ["payload"] = true, ["startedAt"] = true},
   scanPayload = {["observations"] = true, ["owned"] = true, ["planHash"] = true, ["planJSON"] = true},
   actionFields = {
     buy_commodity = {["itemID"] = true, ["kind"] = true, ["maxUnitPrice"] = true, ["quantity"] = true, ["seq"] = true},

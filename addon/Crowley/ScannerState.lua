@@ -40,6 +40,28 @@ function State.PlanOrder(itemIDs, cursor)
   return result
 end
 
+-- Items one sweep attempts, in plan order: every core/discovery item plus cold slice k, where cold
+-- item i (0-based, pools.cold order) is in slice i % N and k = floor(startedAt / cadence) % N.
+-- Returns the ids and {index = k, count = N}, or nil for a plan without cold items.
+function State.SweepItems(plan, startedAt, cadence)
+  local slices = plan.coldSlices
+  if type(slices) ~= "number" or slices < 0 or slices ~= math.floor(slices) then
+    error("scanner state plan coldSlices is malformed")
+  end
+  if slices == 0 then return plan.itemIDs, nil end
+  local k = math.floor(startedAt / cadence) % slices
+  local chosen, cold = {}, {}
+  for index, itemID in ipairs(plan.pools.cold) do
+    cold[itemID] = true
+    if (index - 1) % slices == k then chosen[itemID] = true end
+  end
+  local ids = {}
+  for _, itemID in ipairs(plan.itemIDs) do
+    if not cold[itemID] or chosen[itemID] then ids[#ids + 1] = itemID end
+  end
+  return ids, { index = k, count = slices }
+end
+
 function State.PriceLevels(rows)
   if type(rows) ~= "table" then error("scanner state rows must be a table") end
   local result, seen = {}, {}

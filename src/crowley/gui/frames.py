@@ -878,7 +878,7 @@ def validate_snapshot(
     elif (
         # The last saved sweep may predate a scan-plan change (live 2026-11-09: a 428-item
         # sweep saved before plan revision 3 made every frame invalid, so the loop could
-        # never run the 481-item sweep that would replace it).  Its counters must be
+        # never run the 427-item sweep that would replace it).  Its counters must be
         # consistent with its own plan size, not with the current plan's.
         finished == 0
         or last_planned <= 0

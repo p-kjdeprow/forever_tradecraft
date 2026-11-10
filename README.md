@@ -11,6 +11,8 @@ retained observation history per house on a server, and compute gold-making stra
 addon/Crowley        in-game scanner, /crowley commands (Lua)
 addon/Crowley_Data   data file the companion writes; loaded at login or /reload
 src/crowley/core     shared: SavedVariables parser, scan format, stats, Lua writer
+src/crowley/scan     crowley-scan: keeps the game in the world with the AH open (observe, decide, act)
+src/crowley/gui      pointer, click gate, XTEST tool, keyboard, capture, frame decode
 src/crowley/companion  watches the game folder, uploads scans, writes Crowley_Data
 src/crowley/server   FastAPI + TimescaleDB ingest and query API
 deploy/              systemd, launcher and image-build templates
@@ -28,7 +30,7 @@ starts targeted sweeps every 900 seconds while the AH is open, with bounded reta
 
 ```sh
 # 1. Create the untracked host contract, then install the package.
-uv tool install .
+uv tool install --link-mode copy .
 export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 mkdir -p "$XDG_CONFIG_HOME/crowley"
 cp deploy/templates/host.example.toml "$XDG_CONFIG_HOME/crowley/host.toml"
@@ -53,21 +55,28 @@ docker compose --env-file "$XDG_CONFIG_HOME/crowley/secrets.env" \
 
 # 5. Copy units, timers, launcher and packaged addon files, then inspect every check.
 crowley-ops doctor
+crowley-native build xdotool        # the pinned XTEST input tool (once)
 
-# Start the installed companion only after reviewing doctor output.
-crowley-companion run
+# 6. Start the companion and the scan loop only after reviewing doctor output.
+systemctl --user enable --now crowley-companion crowley-scan
+crowley-scan status
 ```
+
+`crowley-scan` relaunches the game when needed (the launcher needs `CROWLEY_WINE` in `secrets.env`), enters the world,
+opens the AH and reloads at the right moments, and holds while you use the keyboard or mouse. See
+[docs/REPEATING_SCANS.md](docs/REPEATING_SCANS.md) and [docs/GAME_SETUP.md](docs/GAME_SETUP.md).
 
 In game:
 
 | Command | What it does |
 |---|---|
-| `/crowley probe` | Records the client's AH API surface. **Run this first on the beta.** |
+| `/crowley probe` | Records the client's AH API surface. **Run this first on a new client build.** |
 | `/crowley status` | Current house, next due time, loaded plan, cursor, stored sweeps and failures |
-| `/crowley scan` | Targeted watchlist sweep (AH must be open; starts are 15 minutes apart) |
+| `/crowley scan` | Manual targeted watchlist sweep (AH must be open); the addon also sweeps every 15 minutes on its own |
 | `/crowley set faction neutral` | Override house detection (`region`/`ruleset`/`faction`, or `auto`) |
 
-Sweeps reach the server after `/reload` or logout, because that is when WoW writes SavedVariables.
+Sweeps reach the server after `/reload` or logout, because that is when WoW writes SavedVariables
+(`crowley-scan` types the `/reload`).
 At six pending sweeps the addon pauses and never evicts unacknowledged evidence. The first
 reload lets the companion upload and write acknowledgements; a second reload loads those
 acknowledgements and resumes collection.
@@ -99,7 +108,4 @@ uv run pytest  # bounded xdist default: 16 workers
 
 Run DB coverage serially against a fresh disposable test database using the
 [documented command](docs/TESTING.md). Its fixtures reset one schema; the default suite refuses a shared database URL with xdist workers.
-Final launch-preparation verification (2026-10-24): **2,455 passed, 25 DB-gated skips
-in 153.78s** externally measured; the separate serial DB matrix passed 178 tests
-with zero skips.
-See [TESTING](docs/TESTING.md) for the full launch-readiness test contract.
+See [TESTING](docs/TESTING.md).

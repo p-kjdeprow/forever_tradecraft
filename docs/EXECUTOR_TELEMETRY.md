@@ -87,7 +87,7 @@ silently converted to `ready`.
 production `CrowleyTradeExecutorButton` `OnClick` callback is the only path that
 increments `clickOrdinal`; it sets `lastClickSource = "button"`. The existing
 test-only `Executor.Click()` path sets `lastClickSource = "directAPI"` and does
-not increment `clickOrdinal`. A daemon causal proof therefore cannot be
+not increment `clickOrdinal`. A driver's causal proof therefore cannot be
 satisfied by a direct Lua API call.
 
 `buttonName` is `CrowleyTradeExecutorButton` only when the actual button object
@@ -115,10 +115,10 @@ postcondition progress.
 
 For `valid`, the queue has valid structure; it need not be authorized for the
 current character/house. Publish its actual identity even when it differs from
-Agent context. The daemon refuses that operation before input; the addon retains
+Agent context. A driver must refuse that operation before input; the addon retains
 its ordinary wrong-house/wrong-character refusal behavior. Do not turn this
 expected refusal into a corrupt collection frame. `publishedArmed` and
-`sessionArmed` remain separate observations; the daemon must never set either
+`sessionArmed` remain separate observations; a driver must never set either
 one or type `/crowley arm`.
 
 `resultCount` is the length of the actual in-memory `execution.results` array;
@@ -128,9 +128,9 @@ record and are not a live click witness.
 
 ## Causal click proof
 
-The daemon records the pre-click CRS tuple `(boot, sequence, crc32, queueId,
+A driver must record the pre-click CRS tuple `(boot, sequence, crc32, queueId,
 currentSeq, clickOrdinal)` and a sealed fresh `MeasuredAnchor`. It may dispatch
-one physical left click only through the existing human-pointer/Guardian path.
+one physical left click only through the human-pointer path (`gui/pointer.py`, `gui/click_gate.py`).
 A click is accepted as delivered only after a fresh CRS frame with the same
 boot, client identity and queueId proves:
 
@@ -160,7 +160,6 @@ include a canonical queue with six native-format pending UIDs (1,375 compressed
 bytes), varied maximum executor metadata (1,955 bytes), and an explicit synthetic
 aggregate rejection (2,554 bytes). These are harness measurements, not live facts.
 
-The guarded daemon click and mailbox scheduler consume this contract. Their
-implementation and acceptance status is tracked in [HANDOFF.md](HANDOFF.md).
-Actual button geometry, UI scale, XTEST callback delivery and protected native API
-behavior require launch-client observation.
+No driver consumes this contract today (the daemon click and mailbox scheduler were deleted on 2026-11-09).
+Actual button geometry, UI scale, XTEST callback delivery and protected native API behavior require launch-client
+observation.

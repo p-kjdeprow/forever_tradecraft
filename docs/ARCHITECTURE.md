@@ -15,9 +15,9 @@
   decided **at scan time** in game (auto-detected, overridable with `/crowley set`) and
   stored with every scan. The server never mixes data across houses.
 - **Human-speed automated clicks.** Buying, posting and cancelling need a hardware event, which
-  the session input driver can supply. Automated clicks are hard-capped at one per second
+  the GUI layer (`crowley.gui`) can supply. Automated clicks are hard-capped at one per second
   (at least 1.0 s between consecutive clicks), enforced in code and not configurable.
-  Every automated button-down, including right-button camera drags, is rate-gated; release-only cleanup is exempt.
+  Every automated button-down is rate-gated (`gui/click_gate.py`); release-only cleanup is exempt.
 - **One assumed path, no fallbacks.** Each unknown about the Forever client has one assumed
   answer, written below. If an assumption is wrong, the code fails loudly and we fix that
   one path rather than carrying alternatives.
@@ -28,7 +28,7 @@
 source for client/build, interface, product/executable, locale, region/realm/house
 and scan policy. `tools/generate_launch_target.py` renders coordinated Python/Lua/TOC
 artifacts and staged configuration; `--check` detects drift without writing.
-Session and companion startup reject stale explicit identity, path or canonical
+Scan-loop and companion startup reject stale explicit identity, path or canonical
 plan values. See [LAUNCH_TARGET.md](LAUNCH_TARGET.md). The selected target is the
 measured WoW Forever target; the packaged beta target is retained for fixtures and
 evidence, and Forever route provenance remains unmeasured. The exporter supports
@@ -70,14 +70,6 @@ Cadence remains the explicit 900-second policy.
 | **Observed:** the addon records a skill line's learned recipes only while that profession's window was open; an empty `account_recipes` does not mean the character knows nothing. Only skill lines present as keys of the capture's `raw->'recipes'` count as captured; recipes of other held professions classify `recipes_not_captured` and the `--account-character` gate fails loudly if a strategy's profession was not captured | `addon/Crowley/Account.lua`, `trading/account_gate.py` | A character would look like it knows no recipes and all crafting would silently vanish |
 | **Observed (export 2):** 14 First Aid manuals (e.g. item 6454 → spell 7935) require skill line 2942 while their recipes and the captured profession use 129; client data does not map one to the other, so a teaching requirement outside the recipe's own skill lines classifies `requirement_unknown` | `trading/account_gate.py` | Those recipes would always read `needs_skill` |
 | **Model contract:** recipe exact tools, tool categories and spell focus must all be explicitly supplied in immutable capabilities; empty sets mean unavailable. Exact tools are pre-held outside the tradable ledger, without inferred cost or travel | `trading/requirements.py`, `strategies/crafting.py`, `execution.py` | Unobserved station/tool access is never granted; launch capabilities need evidence |
-| **Live observed (2026-10-22, 70450):** keyboard turning (Q/E and arrows) is π rad/s; run speed 7 yd/s; `UnitPosition` z is always 0 (jumps show only as `falling`) | `route_walk.py` | Turns overshoot; route walking must stay closed-loop |
-| **Live observed:** XTEST key input reaches the game up to ~1 s after dispatch on the Wayland/Xwayland desktop, and goes to the compositor-focused window even when the X "active window" is the game | `daemon.py` route walk, operators | Settled fixes must wait ≥1.2 s; every input must be verified in telemetry |
-| **Host requirement:** GNOME animations are disabled; the screenshot flash otherwise generates XI2 Leave/Enter/Motion crossing events on the fullscreen game window | `ops/doctor.py`, `GAME_SETUP.md` | `crowley-ops doctor` refuses the host; native capture is unsafe while animations are enabled |
-| **Live observed (2026-11-08):** Xwayland 24.1.6 without EI delivers one RawMotion and one source-4 Motion for Crowley XTEST pointer motion, with no relative-pointer echo | `session/guardian`, takeover evidence | Forwarded relative-pointer echo is optional evidence and is never fabricated or blanket-accepted |
-| **Live observed (2026-11-08):** GNOME/Mutter floats `xwayland-pointer:*`, `xwayland-relative-pointer:*`, `xwayland-pointer-gestures:*` and `xwayland-keyboard:*` while the Bluetooth seat has no pointer, then reattaches them on wake | `session/startup.py` | Durable takeover fingerprints canonicalize only those attachment fields; runtime readiness compares the raw hierarchy and revokes on every attach/float change; a sole floating relative-pointer relay supplies no echo source |
-| **Live observed:** bindings JUMP=SPACE, TURNLEFT=Q, TURNRIGHT=E (arrows are secondary); there is no usable interact key for world objects | `Agent.lua` telemetry | Unbound actions fail telemetry construction |
-| **Live observed:** hovering an NPC sets `UnitName("mouseover")`; hovering a world object shows a `UIParent`-owned `GameTooltip` whose first line is its name ("Mailbox"); a left click on the hovered mailbox or auctioneer opens it | `Agent.lua`, `daemon.py` world click | Hover-confirmed clicks refuse |
-| **Live observed:** `MAIL_SHOW` fires on open but `MAIL_CLOSED` did not fire when the mail frame closed via Escape; `MailFrame:IsShown()` is reliable; `C_PlayerInteractionManager` exists (`MailInfo` = 17) | `Agent.lua` (`mailOpen`) | Mail state would stick open |
 | Executor registers only events listed in the WoW Forever source: `AUCTION_HOUSE_SHOW`, `AUCTION_HOUSE_CLOSED`, `MERCHANT_SHOW`, `MERCHANT_CLOSED`, `MERCHANT_UPDATE`, `MAIL_SHOW`, `MAIL_CLOSED`, `MAIL_INBOX_UPDATE`, `TRADE_SKILL_SHOW`, `TRADE_SKILL_CLOSE`, `COMMODITY_PRICE_UPDATED`, `COMMODITY_PURCHASE_SUCCEEDED`, `COMMODITY_PURCHASE_FAILED`, `AUCTION_HOUSE_AUCTION_CREATED`, `AUCTION_CANCELED`, `UI_ERROR_MESSAGE`, `BAG_UPDATE` and `BAG_UPDATE_DELAYED` | `Executor.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/{AuctionHouseDocumentation,MerchantFrameDocumentation,MailInfoDocumentation,TradeSkillUIDocumentation,ContainerDocumentation,SystemDocumentation}.lua` | Source verification does not yet prove event delivery on the launch client; qualify the pinned set at runtime before arming the executor |
 | `MERCHANT_CLOSE` is not a WoW Forever event; the event catalog names `MERCHANT_CLOSED`, and the merchant implementation uses that spelling | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/MerchantFrameDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_UIPanels_Game/{Mainline,Vanilla}/MerchantFrame.lua` | The removed alias must not be registered |
 | `PROFESSION_SHOW` and `PROFESSION_CLOSE` are not WoW Forever events; the profession API and frame use `TRADE_SKILL_SHOW` and `TRADE_SKILL_CLOSE` | `wow-ui-source@forever/Interface/AddOns/Blizzard_APIDocumentationGenerated/TradeSkillUIDocumentation.lua`; `wow-ui-source@forever/Interface/AddOns/Blizzard_Professions/Blizzard_ProfessionsFrame.lua` | The removed aliases must not be registered |
@@ -89,8 +81,11 @@ Cadence remains the explicit 900-second policy.
 | Battle.net launches `_forever_/Wow.exe -launcherlogin -uid wowf`; direct game startup cannot issue the login ticket | `deploy/launcher/crowley-world-of-warcraft.sh.in` | Direct `Wow.exe -launcherlogin -uid wowf` startup fails with `WOW51900308` |
 | **Live observed 2026-11-09:** after a fresh Battle.net start the embedded Chromium view has no keyboard focus: `focus play` does not move focus and Return does nothing (Tab reaches the logo menu, which contains Log Out), so Play is clicked, not typed; the click also needs the window un-maximized, so the launcher un-maximizes it first. The real window is the visible `battle.net.exe`-class window named `Battle.net` (mutter's frame window shares the name) | `deploy/launcher/crowley-world-of-warcraft.sh.in` | The owned game never starts and the launcher fails |
 | **Live observed 2026-11-09:** Wine can map the game with fixed-size `WM_NORMAL_HINTS` and `_MOTIF_WM_HINTS` limited to move/close, so mutter ignores fullscreen; the launcher clears both hints, then requests and verifies fullscreen with a display-sized child | `deploy/launcher/crowley-world-of-warcraft.sh.in` | The launcher fails on the fullscreen verification |
-| The `-launcherlogin` client reaches character select with the last character selected within a fixed 45 s settle after fullscreen, and one Return there enters the world (no detector in the shell) | `deploy/launcher/crowley-world-of-warcraft.sh.in` | The session stays BLOCKED; the supervisor's next relaunch (30 min limit) retries |
-| A server disconnect (`WOW51900308` "Unable to reconnect") needs a Battle.net relaunch; the supervisor relaunches only from an observed BLOCKED status held for 10 minutes, never PAUSED/STOPPED, never while status is unanswered, and never for blockers that name explicit reconciliation | `src/crowley/session/supervisor.py` | The outage persists until an operator acts; touching the client while BLOCKED requires `crowley-session pause` first |
+| **Host requirement:** GNOME animations are disabled and the session never idles to a blank screen (`idle-delay 0`) | `ops/doctor.py`, `GAME_SETUP.md` | `crowley-ops doctor` refuses the host; a screenshot flash or blank screen corrupts the captured HUD frame |
+| **Live observed:** XTEST key input reaches the game up to about 1 s after dispatch, and goes to the compositor-focused window even when the X "active window" is the game | `scan/policy.py` (readback waits, `STEP_WAIT_S`), `scan/observe.py` | Typed commands are read back from a fresh frame before Return; a window that is not focused is activated first |
+| A server disconnect (`WOW51900308` "Unable to reconnect") needs a Battle.net relaunch | `scan/policy.py` (row 2), launcher | The loop sees no frame for 10 min and relaunches |
+| After `-launcherlogin` the client reaches character select; one Return enters the world; the addon, and so a decodable frame, exists only in the world | launcher (`crowley-scan probe-frame`) | The launcher repeats settle, probe and Return until a frame decodes, and fails after its timeout |
+| `xdotool windowactivate --sync` gives the game window focus on this Xwayland session | `scan/act.py` | Three failed activations in 5 min become `window_activation_failed` |
 
 `/crowley probe` saves the client's API surface for checking these. The scanner uses the
 client's `hooksecurefunc` callbacks to flag an external or user search that overlaps an
@@ -101,7 +96,7 @@ Crowley; this correlation limit remains a live-client beta assumption.
 ## Data flow
 
 ```
-WoW (Wine) ── /crowley scan ──▶ CrowleyDB.scans (SavedVariables, compressed rows)
+WoW (Wine) ── timer sweep ──▶ CrowleyDB.scans (SavedVariables, compressed rows)
      │                                │ /reload or logout
      │                                ▼
      │                     crowley-companion (poll, parse, POST /v1/scans)
@@ -191,177 +186,103 @@ Accepted envelopes are archived as gzip JSON under the retained content-addresse
 trusting a UID path. Legacy archives remain where they were written. New depth and volume
 reports never use legacy whole-market statistics.
 
-## Natural interaction executors
+## The scan loop
 
-The coordinated addon/session source uses strict [schema 6](EXECUTOR_TELEMETRY.md),
-including actual executor queue/arm/readiness/progress facts and a physical-button
-callback ordinal. Schema 5 is refused. The fixed CRS1 frame, CRC and 2,000-byte
-compressed payload cap are unchanged; individual field limits do not override
-that aggregate cap. The beta last ran an older source version; launch deployment
-and native qualification remain pending.
+`crowley-scan run` (unit `crowley-scan.service`, code in `src/crowley/scan/`) is one process with no database,
+no journal and no IPC. Every 2 s (`loop.py`) it **observes**, **decides** and **acts**. The only memory is a small
+rate-limit record (`scan-loop.json`, restored on start, a few hundred bytes), the decoder epoch, the presence
+reader and the active typed-command transaction. A restart takes seconds and needs no reconciliation.
 
-The addon publishes a read-only256x256pixel status surface once per second.
-`session/decoder.py` turns it into strict CRS1 frames with checksum, boot,
-sequence and window-identity checks. Scan state, command-buffer readback and
-movement feedback use this deterministic path. A larger screenshot feeds Luna
-when semantic visual evidence is required. The installed assisted path measures
-its auctioneer with Luna and refreshes that measurement after pointer movement.
-The installed runtime targets Auctioneer Jaxon in Stormwind, verifies
-native target/range/session-binding facts, dispatches CTRL-F12 through the
-guarded keyboard executor, and requires fresh AH-open telemetry. Deployment and
-live acceptance are tracked in [HANDOFF.md](HANDOFF.md).
+### Observe (`observe.py`)
 
-The runtime separates passive startup from a persistent takeover drill.
-Startup checks identity/focus, native held state, keymap, measured input hierarchy,
-the registered observer and three advancing ordinary HUD frames without game
-input. It mints fresh process-local input evidence for Guardian admission. A
-one-time curved hover and genuine human input prove pause/release; that record
-binds the stable input environment and survives ordinary reloads and controller
-restarts. Typed invalidation causes distinguish telemetry loss from an actual
-input-environment change. Durable intents still require reconciliation before
-the driver can re-arm. Native memory and GTK diagnostics remain optional.
+- the owned `Wow.exe` (same uid, Windows argv0 and `WINEPREFIX` rule as the launcher, `gui/process.py`);
+- the game window: exactly one visible `wow.exe`-class window at display size and origin, and whether it is
+  focused (`xprop -root _NET_ACTIVE_WINDOW`);
+- the HUD canvas: `gnome-screenshot`, cropped to `canvas_crop` from `host.toml`, decoded by `gui/frames.py`
+  (schema 6, checksum, boot and sequence). The decoder is replaced when the process or window changes and accepts
+  a boot change only after our own `/reload` (armed explicitly);
+- disk: scan ids in SavedVariables, the companion's uploaded and permanently rejected ids, acked ids in `Data.lua`;
+- presence (below).
 
-The accepted capture path obtains a desktop image before cropping it. The
-default-off region producer under `tools/gnome-telemetry-region/` is native C,
-requests only the status rectangle, and is still undergoing integration review.
-Its diagnostic must use the already leased daemon through IPC, with no second
-desktop owner. Original observation timestamps and absolute deadlines include
-capture and identity work. Compiled isolated tests are not live timing evidence.
-An offline replay measured strict Python decode at about55ms median; the prior
-full-screen path measured1.67s overall. See
-[the conditional runtime performance plan](../.archive/PLAN-deterministic-runtime-performance.md)
-for attribution and the evidence required before a Rust migration plan.
+A frame older than 10 s is not acted on. Character, realm, faction, house, plan hash, build, interface and addon
+version from the frame must equal the selected target and host config (`config.py`).
 
-`session/executor.py` plans deterministic pointer curves, click dwell, key holds,
-camera drags and waits. `driver.py` dispatches finite XTEST command chains under
-the existing Guardian admission fence; the Guardian owns process groups and the
-exact held-input set. Clicks reobserve the target after movement and verify its
-safe interior before pressing. Camera motion occurs while the right button is
-held. Cancellation revokes the generation and releases owned inputs.
+### Decide (`policy.py`, pure, first match wins)
 
-`session/input_tool.py` verifies Crowley's fixed private xdotool publication
-against its vendored upstream source and executable manifest. The backend pins
-the ELF bytes in a sealed Linux memfd before acquiring input ownership. Normal
-dispatch, ordinary release and the independent spawned watchdog use that image;
-the watchdog acknowledges FD readiness before input can be admitted. Disk
-publication drift invalidates input readiness while the pinned image remains
-available for releases. XI2 RawMotion is explicit metadata: shared forward-only
-one-to-one pairing requires a following primary Motion at the same server time;
-raw records alone cannot prove a target or endpoint. Complete raw records reach
-the takeover monitor at the native delimiter even when the stream goes idle.
-Window fingerprints and sealed driver versions include
-the tool digest. The supported default X screen is zero. Build instructions are
-in [REPEATING_SCANS.md](REPEATING_SCANS.md).
+| # | Condition | Action |
+|---|---|---|
+| P | A human was active in the last 5 min, or presence is unreadable | `hold_human`: no input at all |
+| 1 | No owned `Wow.exe` | relaunch |
+| - | Window is not one display-sized game window | fault `window_invalid`; relaunch after 30 min |
+| 2 | Client lived and produced frames, now none for 10 min | relaunch |
+| 3 | Fresh client has no frame within 10 min | relaunch, fault `no_frames_after_launch` |
+| 4 | Pin mismatch, `plan_invalid`, or a non-ordinary construction marker | fault, no input |
+| 6 | `blockingUI` set (checked before chat so no key goes over a popup) | Game Menu: Escape at most every 30 s; otherwise fault `blocking_ui`; relaunch after 30 min |
+| 5 | Chat edit box active or a transaction in flight | continue or abort our own transaction; foreign text is a fault |
+| 7 | `scanner.phase` is `item` or `owned` | wait |
+| 8 | A saved sweep is in memory but not on disk | `/reload` (save flush) if the AH is closed, the queue is blocked, or the next timer sweep is at least 90 s away |
+| 9 | Queue full, and pending ids are uploaded and acked on disk but not loaded | `/reload` (ack load), at most once per 10 min |
+| 10 | Queue full and nothing loadable | fault `queue_full` |
+| 11 | In world, AH closed | open the AH (below) |
+| 12 | AH open, no new saved sweep for 30 min | fault `no_progress`: close and reopen once, relaunch after another 30 min |
+| 13 | Otherwise | wait; the addon's 900 s timer runs the sweep |
 
-Native motion qualification requires completing and reviewing the attached-XTEST
-coordinate contract. The captured slave Motion contains the prior pointer in root/event
-coordinates and the endpoint in delivered valuators. Matching upstream DIX source
-explains that order; the current failed seed remains unqualified. The reviewed
-correction plan is [PLAN-xtest-motion-transition.md](../.archive/PLAN-xtest-motion-transition.md):
-preserve both coordinates, verify an exact origin-to-endpoint transition, seal the
-measured two-axis device mapping, and recheck the actual final pointer. Its source
-and regression implementation is undergoing final verification; no fresh native
-qualification is claimed. Human relative motion keeps its separate interpretation.
+[REPEATING_SCANS](REPEATING_SCANS.md) lists every fault code with what to do.
 
-`session/motion.py` consumes decoded native position, facing, speed, combat/death
-and primary bindings. The installed strict schema4 status body includes auctioneer facts; its
-addon/controller transition used a staged one-shot reload. This
-status-body version is distinct from CRS1 framing and saved scan formats.
-Movement pulses are capped at 0.35 seconds;
-waypoints are local, capped at two world units and a finite 20-second budget.
-Waypoint admission supports one translation pulse whose full 2D endpoint
-uncertainty fits the arrival tolerance, minimum duration, profile ceiling and
-remaining travel budget. It includes speed uncertainty, the named heading
-allowance, and the full position/facing drift allowed at final confirmation.
-Requests outside that supported region are rejected before camera or key input;
-being inside the two-unit outer cap alone does not imply reachability. The
-minimum pulse creates a lower gap above the no-input arrival tolerance. At
-speed7/minimum0.08, examples are roughly0.413–1.292 units straight ahead and
-0.442–0.83 at the0.20-radian translation limit; exact admission is computed.
-Movement calibration supports handedness+1; a reflected basis is refused before
-additional role probes or sealing. Native capture-start uses the driver's clock;
-settling validates each observation at receipt and the latest at decision time.
-Waypoint execution requires measured camera response and a movement basis,
-fresh visual route evidence and current native feedback. Interaction mode leaves
-scan scheduling idle; the runtime uses passive startup and the matching
-takeover drill for input admission. Camera and movement measurements remain
-specific prerequisites for their respective motion actions.
-The engine and interaction producers share one capture/action fence; stop
-revokes without waiting for it. Calibration measures repeated forward movement
-at two headings, backward and both strafe directions within the cumulative
-two-unit bound. Its technical default is 0.03 seconds, independent of human
-preference minimums. Each physical commitment reserves two later 1 Hz native
-publications plus jitter/cleanup time. Server budgets are 30 seconds for key and
-camera intents, 90 seconds for movement calibration and 20 seconds for a waypoint;
-CLI timeouts add 5 seconds for response delivery.
+**Presence** (`presence.py`): `org.gnome.Mutter.IdleMonitor.GetIdletime` over `gdbus` returns milliseconds since the
+last physical input. XTEST input does not reset it, so our own keys and the launcher's Play click never look like a
+human, and no device topology or drill is needed. Under 5 minutes idle, or any error or unparseable reply, counts as
+a human being active. `crowley-scan presence-ok` exposes the same check to the launcher.
 
-The session config selects `pointer_profile`, `camera_profile` and `move_profile`
-as `"baseline"` (also the policy when omitted) or an absolute profile-file path.
-Selected files must validate and match their role. `motion-profile build/show/reset`
-manage bounded summaries from explicitly supplied demonstrations; importing numbers
-does not establish live human calibration. Raw demonstrations are not retained.
-Profile documents use strict schema 2. Pointer/camera duration uses a bounded
-intercept plus slope times `log2(1 + distance / safe_target_width)`; supplied
-summaries fit these coefficients across difficulties. Curvature describes the
-peak lateral deviation. MOVE summaries learn a 0.05–0.35-second pulse ceiling,
-which combines with measured displacement when choosing a movement pulse.
-Older profile schemas require an explicit rebuild.
+**Opening the AH** is a bounded transaction. Preconditions: zone Stormwind City, keyboard interaction mode, the
+Ctrl-F12 binding free or already `INTERACTTARGET`, the auctioneer in range. Steps: `/targetexact Auctioneer Jaxon` if
+the target is absent, the conditional `SetBinding` line if Ctrl-F12 is unbound, then Ctrl-F12, with `ahOpen` required
+within 10 s. At most 3 attempts per 10 min, then `ah_open_failed` and a relaunch after 30 min. Not being in Stormwind
+is a fault, never a walk or relaunch.
 
-Source tests and reviews do not establish native acceptance. Current live proof,
-remaining calibration requirements and the paused deployment are recorded at the
-top of [HANDOFF.md](HANDOFF.md).
+**Command transactions.** Only three commands are ever typed (`allowed_commands`): `/reload`,
+`/targetexact Auctioneer Jaxon` and the Ctrl-F12 `SetBinding` line. A transaction opens chat (Return), waits for an
+empty focused edit box, types the text with exact XTEST press and release transitions (`gui/keyboard.py`), reads
+`chatEdit.text` back from a frame newer than the typing, and presses Return only on an exact match with a fresh
+frame, a focused box and the reload still safe; otherwise it presses Escape. After Return the transaction is never
+escaped: it ends when the box closes, or becomes `submit_unconfirmed` after 60 s. Window focus and presence are
+checked immediately before every key, under the GUI flock.
 
-## Installed deployment status (2026-10-15)
+**Reload timing and ack folding.** The addon re-arms its timer for `dueAt`. The loop reloads only with at least 90 s of
+margin, so a timer-started sweep cannot be aborted. Upload, ack load and persisted cleanup are separate boundaries:
+the sweep uploads about one companion poll after the save reload, the ack loads at the next reload, and the pruned
+`scans={}` reaches disk one reload after that. Steady state holds 1-2 pending sweeps against a cap of 6. Every reload
+closes the AH, and row 11 reopens it.
 
-Game, companion, API and database run on the configured Linux host; the repository is at the
-configured checkout. WoW 1.60.1 build 70374/interface 16001 runs locally through
-Lutris/Wine. `Crowley` is a repo
-symlink and generated `Crowley_Data` has the curated 428-active-ID, 900-second, 20-level plan.
-The house is `beta-normal-alliance`; Sunshine and the fullscreen watcher are disabled. The
-companion is active. Compose uses the package-owned file from
-`crowley-ops compose-file` and `--env-file "$XDG_CONFIG_HOME/crowley/secrets.env"`.
+### Act (`act.py`)
 
-The database contains six accepted sweeps, 2,568 observations and 5,726 captured price rows.
-Full native verification sweep `beta-normal-alliance-1792040351-Arthur-6643` ran from
-2026-10-15 04:59:11 to 05:07:15 UTC (484 seconds), queried all 428 active IDs with zero
-incomplete or unqueried items, and captured 2,889 rows across 271 row-bearing IDs and
-125,395 units. That includes 306 full commodity observations (1,328 rows), 23 bounded
-commodity observations (460 rows), and 99 full item observations (1,101 rows), all under
-`beta-normal-alliance`. Native item examples include equipment 873 (`873:l40`), recipe 2555
-(`2555:l15`), and containers 4238, 4240, 4241, 4245 and 5765.
+Input actions take the exclusive GUI flock (`gui.lock` in the runtime directory), re-check presence under it and send
+keys through the pinned XTEST tool (`gui/input_tool.py`, built by `crowley-native build`). The loop never moves the
+pointer. Window activation is `xdotool windowactivate --sync`.
 
-A later scheduled sweep, `beta-normal-alliance-1792041251-Arthur-0169`, ran 05:14:11–05:19:36
-UTC and stored 1,599 rows. It attempted 293 items (292 successful; one active query was
-interrupted by AH closure) and left 135 unqueried when the AH closed after 325 seconds. It is
-the latest scan by time; the preceding 428-active-ID sweep is the full verification result.
-After the second reload,
-the addon reported two uploaded scans cleared and loaded plan `0712de248d42` with 428 active
-IDs. A further normal reload persisted the cleared queue; the parent independently verified
-zero pending scans on disk. Arthur is parked at Buckler with the AH closed. The malformed
-961-row sweep remains intact in private quarantine and was never ingested. The class-aware
-query correction is now verified natively. Sol approved the change; 118 addon/core tests and
-the 149-pass/15-DB-skip normal suite passed. Full DB testing used a disposable
-TimescaleDB container. See the [live validation record](../.archive/live-client/real-validation.md)
-for query traces, exact coverage, chronology and preserved payload hashes. The 544-entry
-catalog has 428 active IDs in the scan plan; this curated watchlist is not a full-market
-claim. Each sweep has a 600-second cap and may leave tail items unqueried. A scan begins every
-900 seconds while AH-open. SavedVariables upload after `/reload` or logout, and a subsequent
-reload loads the companion acknowledgement.
+**Relaunch and backoff.** The client is ended (SIGTERM, then SIGKILL) and `crowley-world-of-warcraft` runs as a
+polled child, killed after 10 min. Attempts are spaced 15 min for the first 3, then 60 min, with no cap; the count
+resets when a new sweep is saved. The launcher takes the same flock and presence gate around each of its own input
+steps: window activation, the Battle.net Play click (`crowley-ops battle-net-play`) and Enter World.
+
+### Faults and status
+
+Each change of decision is logged as a JSON line to journald. `scan-status.json` (runtime directory, atomic, 0600) is
+written on change and as a 60 s heartbeat: `action`, `fault_code`, `detail`, an observation summary (never chat
+text or frame contents), `pid`, `started_at`, `updated_at`. `crowley-ops health` reads it (stale after 5 minutes; any
+fault code is an issue) together with companion upload freshness. Operational errors (capture, X11, input tool)
+become `observe_failed` or `action_failed` for that tick; any other exception ends the process and systemd restarts it.
+
+### GUI layer (`src/crowley/gui/`)
+
+`pointer.py` (seeded, curved, Fitts-timed pointer plans and the motion chain), `click_gate.py` (the
+one-click-per-second permit: at least 1.0 s between button-downs), `input_tool.py` (pinned XTEST tool and its
+publication), `keyboard.py` (keysym map, exact transitions), `capture.py` (screenshot lock, complete-PNG wait),
+`process.py` (owned-process matcher), `frames.py` (frame and snapshot decode). The only automated pointer click
+is the launcher's Play click.
 
 ## Roadmap
 
-The [first-run item catalog](WATCHLIST.md) defines the selective-scanning universe. It is
-packaged on the server and delivered as `scanPlan` through addon data. The scanner uses
-targeted queries, bounded depth, plan identity and per-item coverage. Partial depth is not
-ingested as legacy whole-market statistics.
-
-1. **Beta (until Oct 21):** continue targeted real scans, verify the remaining native
-   recipe/container/equipment query paths, confirm event ordering and field layout, and
-   keep real scans as test fixtures. Commodity retained-price ingestion is verified.
-2. **Pre-launch:** inferred sales (listings that disappear before expiring), the strategy
-   engine (vendor flips, deals below market, faction-vs-neutral arbitrage, crafting
-   margins), and strategy output in Data.lua.
-3. **Launch week:** continuous scanning, an automated trade executor (within strategy limits
-   and the one-click-per-second cap), and a dashboard.
-4. **Weeks 2–4:** demand ranking, anomaly detection, price forecasting once there is
-   history, alerts.
+The [first-run item catalog](WATCHLIST.md) defines the scanned universe; it is packaged on the server and delivered as
+`scanPlan` through addon data. The scanner uses targeted queries, bounded depth, plan identity and per-item coverage.
+Open work (tiered scanning, addon trim, timers) is tracked in [HANDOFF](HANDOFF.md).

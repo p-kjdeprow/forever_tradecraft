@@ -43,7 +43,7 @@ it fails loudly otherwise) and clicks inside its inner 60% as a full simulated h
 seeded, curved, Fitts-timed pointer path through the pinned XTEST emitter, a real
 press and release, held under the canonical click-rate gate (at least 1 s between
 automated clicks). Motion, an endpoint and target-window check, and the press are
-separate emissions, as in the session driver. The seed and plan are recorded under
+separate emissions. The seed and plan are recorded under
 `$XDG_STATE_HOME/crowley/executor-evidence/`. Keyboard activation is not used:
 after a fresh Battle.net start the embedded Chromium view has no keyboard focus,
 `focus play` does not move it, Return does nothing, and Tab reaches the logo menu
@@ -56,24 +56,25 @@ the saved login token. Battle.net is the only component that can issue the game
 login ticket; starting `_forever_/Wow.exe` directly with
 `-launcherlogin -uid wowf` fails with `WOW51900308`.
 
-Disable GNOME animations before using native screenshots or the takeover hover:
+Host requirements for HUD capture and unattended operation:
 
 ```sh
 gsettings set org.gnome.desktop.interface enable-animations false
+gsettings set org.gnome.desktop.session idle-delay 0
 crowley-ops doctor
 ```
 
-The doctor refuses the host unless `gsettings get
-org.gnome.desktop.interface enable-animations` prints `false`. The screenshot
-flash otherwise generates XI2 crossing and motion events on the fullscreen game
-window, which the Guardian correctly treats as unattributed input.
+The doctor refuses the host unless animations are off (the screenshot flash would corrupt the captured frame) and
+`idle-delay` is 0 (a blanked screen cannot be captured). Human presence is read from Mutter's IdleMonitor, which
+GNOME provides; there is nothing to set up for it.
 
 Required client settings (stored by the client per account):
 
 - `SoftTargetInteract` must be `2` (keyboard) or `3` (any). The WoW Forever
-  default is `1` (gamepad only), and the session refuses to open the auction
-  house with "native keyboard interaction is disabled (mode='gamepad')". Set it
-  once in game with `/console SoftTargetInteract 2`.
+  default is `1` (gamepad only), and `crowley-scan` reports the fault
+  `interaction_mode_unavailable` instead of opening the auction house. Set it
+  once in game with `/console SoftTargetInteract 2`. The character must stand
+  in Stormwind City near Auctioneer Jaxon.
 - The display is 1920x1080 and the client runs windowed-fullscreen
   (`gxMaximize 1` in `_forever_/WTF/Config.wtf`); the launcher then makes the
   window fullscreen at the origin. Wine maps the window with fixed-size
@@ -82,8 +83,10 @@ Required client settings (stored by the client per account):
   `WM_NORMAL_HINTS` and resets `_MOTIF_WM_HINTS` with `xprop` first, then
   verifies `_NET_WM_STATE_FULLSCREEN`, display-sized outer geometry and a single
   display-sized child, failing loudly after 30 s. Once verified, it waits a
-  fixed 45 s for character select (the shell has no detector for it) and sends
-  one `Return` (Enter World). The launcher's only automated click is the Battle.net Play click above; this step is keyboard-only. The telemetry canvas is pinned to a
+  settle time for character select and sends `Return` (Enter World), repeating
+  until `crowley-scan probe-frame` decodes a frame (the addon exists only in the
+  world). The launcher's only automated click is the Battle.net Play click above;
+  this step is keyboard-only. The telemetry canvas is pinned to a
   1920x1080 client.
 
 The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).
@@ -113,12 +116,16 @@ The prefix also references these directories under `~/.local/share/lutris/runtim
 
 ## Install the addon and units
 
-Install a non-editable package. The installer renders `companion.toml`,
-`session.toml`, and `secrets.env` into the XDG config directory; edit the
-account and secrets before starting services:
+Install a non-editable package. The installer renders `companion.toml` and
+`secrets.env` into the XDG config directory (create `host.toml` from
+`deploy/templates/host.example.toml` first). Edit the account and secrets, and
+add `CROWLEY_WINE` to `secrets.env` (the scan unit's relaunch needs it), before
+starting services. The pinned XTEST input
+tool is built once into the private cache:
 
 ```sh
-uv tool install .
+uv tool install --link-mode copy .
+crowley-native build xdotool
 crowley-ops install --game-root "/path/to/World of Warcraft" --dry-run
 crowley-ops install --game-root "/path/to/World of Warcraft"
 # Set wtf_account in companion.toml and secrets in secrets.env.
@@ -137,7 +144,16 @@ existing prefix. Check both `windows/system32` and `windows/syswow64` after a re
 
 Keep runtime checksums, resolved DLL links, duplicate-process receipts, registry,
 addon and SavedVariables backups private under Crowley's executor-evidence
-directory in the XDG state directory.
+directory in the XDG state directory. A new game process needs nothing else:
+`crowley-scan` re-observes it and carries no per-process calibration.
 
-A new game process invalidates Crowley's old native/input calibration bindings.
-Keep scans paused until fresh native and deliberate human input calibration pass.
+## Start the scan loop
+
+After `crowley-ops doctor` is clean and the companion runs:
+
+```sh
+systemctl --user enable --now crowley-scan
+crowley-scan status
+```
+
+See [REPEATING_SCANS](REPEATING_SCANS.md).

@@ -9,7 +9,7 @@ changes it alone. Money is integer copper; items are numeric item IDs (never nam
   every click is a **dry run**: the executor resolves and validates the action, shows "dry run: would …", records a
   `dry_run` result and makes no protected call.
 - One protected API call per hardware click on the executor button. The button never chains protected calls.
-- Automated clicking (when it exists) is capped at one click per second by the session driver (CLAUDE.md); the addon
+- Automated clicking (when it exists) is capped at one click per second (CLAUDE.md, enforced in `gui/click_gate.py`); the addon
   additionally refuses a click that arrives less than 1.0 s after the previous executor click (`too_fast`).
 - Any mismatch fails closed: the action is refused with a reason code and the executor stops at it until skipped or
   the queue is replaced. A `too_fast` click is a refusal like any other (it stops the action).
@@ -31,7 +31,7 @@ changes it alone. Money is integer copper; items are numeric item IDs (never nam
 
 ## Queue file
 The companion writes `Interface/AddOns/Crowley_Data/Queue.lua`, loaded by `Crowley_Data.toc` after `Data.lua`,
-assigning one global (never a key inside `CROWLEY_DATA`, whose keys the session daemon reads strictly):
+assigning one global (never a key inside `CROWLEY_DATA`, whose keys the decoder and companion read strictly):
 
 ```lua
 CROWLEY_QUEUE = {
@@ -83,42 +83,14 @@ the server stores it and reconciles it against the queue.
 
 ## Live telemetry
 
-The coordinated addon/session source uses strict [telemetry schema 6](EXECUTOR_TELEMETRY.md).
+The addon and the frame decoder (`gui/frames.py`) use strict [telemetry schema 6](EXECUTOR_TELEMETRY.md).
 The executor publishes actual queue identity, separate published/session arm bits,
 button visibility/readiness, per-message progress, latest result and a button-only
 click ordinal. A direct Lua API call cannot establish hardware callback delivery.
 Wrong queue identity stays visible as a refusal fact; operation admission rejects
 it before input. Schema 5 frames are refused by the schema 6 consumer.
 
-The daemon's guarded click and mailbox-cycle status, including launch-only native
-qualification, is tracked in [HANDOFF.md](HANDOFF.md). No telemetry projection
-alone authorizes arming, a protected call, or retry after an uncertain effect.
-
-## Guarded daemon button click
-
-The offline-reviewed `executor-click` command operates only the current
-`mail_collect` sequence from interaction `READY` with the current input lease.
-Its exact IPC request is:
-
-```json
-{"command":"executor_click","generation":12,"queueId":"<full queue ID>","seq":1,"confirmQueueId":"","cycleId":""}
-```
-
-Empty confirmation selects dry-run-only admission. If both addon arms are observed,
-each physical click requires a new request with `confirmQueueId` equal to the full
-queue ID. An in-flight `mail_items` continuation also requires the same process's
-private owner bound to queue, sequence, cycle, generation and lease. The request's
-IDs identify work; they do not create that owner.
-
-Before motion, the private journal retains the exact decoded pre-frame bytes and
-executor state. Admission repeats after human pointer motion and refreshed anchor
-measurement, immediately before rate precommit and press. The immutable per-call
-receipt binds the actual refreshed anchor, endpoint, physical release, rate record
-and Guardian completion. A fresh matching post-frame must prove one new button
-ordinal and the exact result transition. Direct Lua calls cannot satisfy it.
-
-The physical attempt and the overall mail action have separate durable states:
-`started/mail_wait` can finish the witnessed click while retaining action ownership.
-Unknown input or lost results block across restart. Staged outcomes recover from
-disk without redispatch. These offline proofs do not qualify rendered bounds,
-native callback delivery or protected APIs on the launch client.
+No program drives the executor button today (the session daemon's guarded click and mail loop were deleted on
+2026-11-09; see [HANDOFF.md](HANDOFF.md)). No telemetry projection alone authorizes arming, a protected call, or
+retry after an uncertain effect. A future driver must follow the causal click proof in
+[EXECUTOR_TELEMETRY.md](EXECUTOR_TELEMETRY.md) and the click rules in `CLAUDE.md`.

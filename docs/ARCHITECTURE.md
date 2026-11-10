@@ -40,6 +40,9 @@ Cadence remains the explicit 900-second policy.
 | Assumption | Where | If wrong |
 |---|---|---|
 | Mutter IdleMonitor GetIdletime counts only physical input; XTEST key and pointer events do not reset it (verified 2026-11-09) | `src/crowley/scan/presence.py` | Presence would read as idle while a human types; the policy would send keys into their session |
+| The AH opener's auctioneer is the NPC named `Auctioneer Jaxon` in Stormwind City; the addon reports its name in `auctioneer.targetName` | `src/crowley/scan/config.py` | `/targetexact` finds nothing or the pin never matches; the loop reports `not_in_stormwind` or `ah_open_failed` and sends no further input |
+| The addon version the canvas reports (`context.addonVersion`) equals `## Version:` in the installed `Crowley.toc` | `src/crowley/scan/config.py` | Every frame fails the `pin_mismatch` check (`addon_version`); the loop holds and reports it |
+| `xprop -root _NET_ACTIVE_WINDOW` prints `# 0x<id>`; focus is the game window or one of its X children | `src/crowley/scan/observe.py` | The loop reads the game as unfocused and activates it before each key; repeated failures become `window_activation_failed` |
 | Commodity rows always carry an exact `timeLeft` (verified live on builds 70374, 70450, 70862) | `analysis/books.py`, `core/volume.py` | `ValueError`; the volume route returns a 5xx and the analysis loader raises |
 | Interface 16001; a plain `Crowley.toc` loads | `addon/*/*.toc` | Addon missing from the list |
 | Commodities and non-equipment use native `MakeItemKey` + `SendSearchQuery`; equipment uses an explicitly zeroed comparison key + `SendSellSearchQuery` | `Scanner.lua` | Native full-sweep verification includes recipe 2555, containers 4238/4240/4241/4245/5765, and equipment 873 |

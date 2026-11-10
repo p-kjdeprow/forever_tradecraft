@@ -12,12 +12,14 @@ from pathlib import Path
 import pytest
 
 import crowley.gui
+import crowley.scan
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS: dict[str, str] = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
     "scripts"
 ]
 GUI_MODULES = sorted(f"crowley.gui.{info.name}" for info in pkgutil.iter_modules(crowley.gui.__path__))
+SCAN_MODULES = sorted(f"crowley.scan.{info.name}" for info in pkgutil.iter_modules(crowley.scan.__path__))
 
 
 def test_scripts_are_declared() -> None:
@@ -31,9 +33,24 @@ def test_console_script_entry_point_imports(script: str) -> None:
     assert callable(getattr(module, attribute))
 
 
-@pytest.mark.parametrize("module_name", ["crowley.ops.battle_net", "crowley.gui", *GUI_MODULES])
+@pytest.mark.parametrize(
+    "module_name", ["crowley.ops.battle_net", "crowley.gui", "crowley.scan", *GUI_MODULES, *SCAN_MODULES]
+)
 def test_module_imports(module_name: str) -> None:
     importlib.import_module(module_name)
+
+
+def test_scan_entry_point_and_modules_are_listed() -> None:
+    assert SCRIPTS["crowley-scan"] == "crowley.scan.cli:main"
+    assert {
+        "crowley.scan.act",
+        "crowley.scan.cli",
+        "crowley.scan.config",
+        "crowley.scan.loop",
+        "crowley.scan.observe",
+        "crowley.scan.policy",
+        "crowley.scan.presence",
+    } <= set(SCAN_MODULES)
 
 
 def test_gui_modules_are_listed() -> None:

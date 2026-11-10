@@ -85,6 +85,7 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         "crowley-market-backup.timer",
         "crowley-paper-trading.service",
         "crowley-paper-trading.timer",
+        "crowley-scan.service",
         "crowley-session.service",
         "crowley-session-supervisor.service",
     }
@@ -98,12 +99,35 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         assert "WorkingDirectory=" not in text
         if name.endswith(".service"):
             assert "EnvironmentFile=%E/crowley/secrets.env" in text
-        if name in {"crowley-session.service", "crowley-session-supervisor.service"}:
+        if name in {"crowley-scan.service", "crowley-session.service", "crowley-session-supervisor.service"}:
             # The socket directory is tmpfs; the units recreate it after a reboot.
             service = parser["Service"]
             assert service["RuntimeDirectory"] == "crowley"
             assert service["RuntimeDirectoryMode"] == "0700"
             assert service["RuntimeDirectoryPreserve"] == "yes"
+
+
+def test_scan_unit_conflicts_with_the_session_units_and_is_not_enabled() -> None:
+    units = {name: raw.decode("utf-8") for name, raw in install.render_units()}
+    scan = units["crowley-scan.service"]
+    assert "ExecStart=%h/.local/bin/crowley-scan run" in scan
+    assert "Conflicts=crowley-session.service crowley-session-supervisor.service" in scan
+    for old in ("crowley-session.service", "crowley-session-supervisor.service"):
+        assert "Conflicts=crowley-scan.service" in units[old]
+    for line in (
+        "EnvironmentFile=%E/crowley/secrets.env",
+        "Environment=DISPLAY=:0",
+        "Environment=WAYLAND_DISPLAY=wayland-0",
+        "Environment=XDG_RUNTIME_DIR=%t",
+        "Environment=XDG_STATE_HOME=%S",
+        "PassEnvironment=XAUTHORITY",
+        "KillMode=process",
+        "Restart=always",
+        "RestartSec=5s",
+    ):
+        assert line in scan
+    source = Path(install.__file__).read_text(encoding="utf-8")
+    assert "enable" not in source  # the installer never enables or starts a unit
 
 
 def test_dry_run_writes_nothing_and_does_not_reload_systemd(
@@ -242,6 +266,19 @@ def test_launcher_selects_the_target_product_without_repeated_exec(tmp_path: Pat
     assert rendered.count("xdotool key") == 1
     assert "x11 xdotool key --clearmodifiers Return" in rendered
     assert rendered.index("battle-net-play") < rendered.index("xdotool key --clearmodifiers Return")
+    # Enter World repeats until a canvas frame decodes (no blind fixed settle).
+    assert "CHARACTER_SELECT_SETTLE_SECONDS" not in rendered
+    assert "ENTER_WORLD_SETTLE_SECONDS=15" in rendered
+    assert "ENTER_WORLD_ATTEMPTS=6" in rendered
+    assert 'x11 "$CROWLEY_SCAN" probe-frame' in rendered
+    assert rendered.index("probe-frame") < rendered.index("gui_step enter_world")
+    # Every input step holds the shared GUI lease and passes the presence gate.
+    assert '"$CROWLEY_SCAN" presence-ok' in rendered
+    assert '9>"$GUI_LOCK"' in rendered and 'flock -w "$GUI_LEASE_WAIT_SECONDS" 9' in rendered
+    assert 'GUI_LOCK="$GUI_LOCK_DIR/gui.lock"' in rendered
+    assert rendered.count("gui_step x11 xdotool windowactivate --sync") == 2
+    assert 'gui_step x11 "$CROWLEY_OPS" battle-net-play --window "$window"' in rendered
+    assert "gui_step enter_world" in rendered
     assert rendered.index("xdotool key --clearmodifiers Return") > rendered.index(
         'xdotool windowactivate --sync "$game_window"'
     )

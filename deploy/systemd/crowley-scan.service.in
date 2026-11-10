@@ -1,0 +1,31 @@
+[Unit]
+Description=Crowley scan loop
+After=graphical-session.target
+Conflicts=crowley-session.service crowley-session-supervisor.service
+
+[Service]
+Type=simple
+# Observes the owned game client and keeps the auction house scanned; relaunches the game
+# with crowley-world-of-warcraft, which needs CROWLEY_WINE (secrets.env), XAUTHORITY,
+# XDG_STATE_HOME and the display below.  %t is XDG_RUNTIME_DIR, %S the user state directory.
+ExecStart=%h/.local/bin/crowley-scan run
+EnvironmentFile=%E/crowley/secrets.env
+Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_RUNTIME_DIR=%t
+Environment=XDG_STATE_HOME=%S
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+PassEnvironment=XAUTHORITY
+# A relaunch starts Battle.net, which parents the game client.  Stopping or restarting
+# this unit must not take that process tree down with it.
+KillMode=process
+# The GUI lease and status file live in %t/crowley, which is tmpfs (private, kept across
+# unit restarts).
+RuntimeDirectory=crowley
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

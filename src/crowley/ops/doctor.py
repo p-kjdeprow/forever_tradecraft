@@ -104,6 +104,7 @@ def _check_units(xdg: XdgDirs, environ: Mapping[str, str], problems: list[str]) 
         "crowley-health.service": "%h/.local/bin/crowley-ops",
         "crowley-market-backup.service": "%h/.local/bin/crowley-ops",
         "crowley-paper-trading.service": "%h/.local/bin/crowley-paper-step",
+        "crowley-scan.service": "%h/.local/bin/crowley-scan",
         "crowley-session.service": "%h/.local/bin/crowley-session",
         "crowley-session-supervisor.service": "%h/.local/bin/crowley-session",
     }

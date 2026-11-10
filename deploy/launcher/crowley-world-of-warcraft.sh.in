@@ -21,8 +21,13 @@ umask 077
 #      click-rate gate), never a bare click command.  If the game has not started
 #      after GAME_START_ATTEMPT_SECONDS the click is retried, at most
 #      PLAY_ATTEMPTS clicks in all;
-#   4. make the game window real fullscreen and press Return once (keyboard, to
-#      the game window) at character select to enter the world.
+#   4. make the game window real fullscreen and press Return (keyboard, to the game
+#      window) at character select to enter the world, repeating until a canvas frame
+#      decodes (the addon is only loaded in the world).
+#
+# Every input step (window activation, the Play click, the Enter World Return) first
+# takes the exclusive GUI lease shared with `crowley-scan` and then asks
+# `crowley-scan presence-ok`; it aborts when a human has been active in the last 5 min.
 GAME_ROOT={{GAME_ROOT}}
 PRODUCT_DIR={{PRODUCT_DIR}}
 EXECUTABLE={{EXECUTABLE}}
@@ -98,6 +103,13 @@ grep -Eq '"SingleInstance"[[:space:]]*:[[:space:]]*"true"' "$BATTLE_NET_CONFIG" 
 # supervisor unit sets PATH to the user's bin directory).
 CROWLEY_OPS=$(command -v crowley-ops) || fail 'crowley-ops is not on PATH; install Crowley first.'
 
+CROWLEY_SCAN=$(command -v crowley-scan) || fail 'crowley-scan is not on PATH; install Crowley first.'
+GUI_LOCK_DIR="${XDG_RUNTIME_DIR:?XDG_RUNTIME_DIR is not set; run the launcher from the authenticated graphical session}/crowley"
+mkdir -p -m 0700 "$GUI_LOCK_DIR"
+chmod 700 "$GUI_LOCK_DIR"
+GUI_LOCK="$GUI_LOCK_DIR/gui.lock"
+GUI_LEASE_WAIT_SECONDS=60
+
 LOGDIR="${XDG_STATE_HOME:?XDG_STATE_HOME is not set; run the launcher from the authenticated graphical session, which provides it}/crowley/executor-evidence"
 mkdir -p -m 0700 "$LOGDIR"
 chmod 700 "$LOGDIR"
@@ -113,6 +125,16 @@ game_env() {
 
 x11() {
     DISPLAY="$DISPLAY_VALUE" XAUTHORITY="$XAUTHORITY_VALUE" "$@"
+}
+
+# One input step: hold the GUI lease (flock on fd 9), then require that no human has
+# been active.  A busy lease or an active human aborts the launch.
+gui_step() {
+    (
+        flock -w "$GUI_LEASE_WAIT_SECONDS" 9 || fail 'The GUI lease is held elsewhere; launcher input aborted.'
+        "$CROWLEY_SCAN" presence-ok || fail 'A human is active (input within the last 5 minutes); launcher input aborted.'
+        "$@"
+    ) 9>"$GUI_LOCK"
 }
 
 battle_net_exec() {
@@ -172,7 +194,7 @@ done
 [ "$window_count" -eq 1 ] || fail "Expected exactly one visible Battle.net window, found $window_count."
 x11 wmctrl -i -r "$window" -b remove,maximized_vert,maximized_horz
 sleep 1
-x11 xdotool windowactivate --sync "$window"
+gui_step x11 xdotool windowactivate --sync "$window"
 
 # Each attempt captures the screen afresh, locates the blue Play button and
 # clicks it; the click gate guarantees at least 1 s between automated clicks.
@@ -180,7 +202,7 @@ attempt=1
 while :; do
     # Never click again once the game process exists.
     ! owned_game_running || break
-    x11 "$CROWLEY_OPS" battle-net-play --window "$window" >>"$LOGDIR/launcher.log" 2>&1 \
+    gui_step x11 "$CROWLEY_OPS" battle-net-play --window "$window" >>"$LOGDIR/launcher.log" 2>&1 \
         || fail 'Clicking the Battle.net Play button failed; see launcher.log.'
     waited=0
     while [ "$waited" -lt "$GAME_START_ATTEMPT_SECONDS" ] && ! owned_game_running; do
@@ -190,7 +212,7 @@ while :; do
     ! owned_game_running || break
     [ "$attempt" -lt "$PLAY_ATTEMPTS" ] || fail 'Battle.net did not start the game after clicking Play.'
     attempt=$((attempt + 1))
-    x11 xdotool windowactivate --sync "$window"
+    gui_step x11 xdotool windowactivate --sync "$window"
 done
 
 # The client's windowed-fullscreen mode is mapped by Wine as a window maximized
@@ -235,12 +257,24 @@ while :; do
     waited=$((waited + 1))
 done
 
-# Enter World.  The -launcherlogin flow logs in with the last character
-# selected, so the client sits at character select.  The shell has no cheap
-# detector for that screen, so wait a fixed settle period, then send one Return
-# (Return at character select is Enter World).  No click is involved.
-CHARACTER_SELECT_SETTLE_SECONDS=45
-sleep "$CHARACTER_SELECT_SETTLE_SECONDS"
-x11 xdotool windowactivate --sync "$game_window"
-x11 xdotool key --clearmodifiers Return
+# Enter World.  The -launcherlogin flow logs in with the last character selected, so
+# the client sits at character select (after maintenance this can take minutes).  The
+# shell has no cheap detector for that screen, but the addon's canvas frame only exists in
+# the world.  So: settle, and while the game window still exists and no frame decodes
+# (`crowley-scan probe-frame`), press Return (Return at character select is Enter World),
+# up to ENTER_WORLD_ATTEMPTS times.  No click is involved.
+ENTER_WORLD_SETTLE_SECONDS=15
+ENTER_WORLD_ATTEMPTS=6
+enter_world() {
+    x11 xdotool windowactivate --sync "$game_window" \
+        && x11 xdotool key --clearmodifiers Return
+}
+attempt=1
+while [ "$attempt" -le "$ENTER_WORLD_ATTEMPTS" ]; do
+    sleep "$ENTER_WORLD_SETTLE_SECONDS"
+    x11 xdotool getwindowname "$game_window" >/dev/null 2>&1 || break
+    ! x11 "$CROWLEY_SCAN" probe-frame || break
+    gui_step enter_world
+    attempt=$((attempt + 1))
+done
 printf '%s\n' 'WoW client started by Battle.net.'

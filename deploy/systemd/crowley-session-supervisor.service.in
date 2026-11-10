@@ -1,6 +1,7 @@
 [Unit]
 Description=Crowley session transient-blocker supervisor
 After=crowley-session.service
+Conflicts=crowley-scan.service
 
 [Service]
 Type=simple

@@ -199,7 +199,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
     )
     entrypoints = tmp_path / "home" / ".local" / "bin"
     entrypoints.mkdir(parents=True)
-    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-session"):
+    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan", "crowley-session"):
         path = entrypoints / name
         path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         path.chmod(0o700)
@@ -392,7 +392,7 @@ def test_doctor_accepts_uv_tool_symlinked_entrypoints(
     entrypoints = tmp_path / "home" / ".local" / "bin"
     tool_bin = tmp_path / "home" / ".local" / "share" / "uv" / "tools" / "crowley" / "bin"
     tool_bin.mkdir(parents=True)
-    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-session"):
+    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan", "crowley-session"):
         target = tool_bin / name
         (entrypoints / name).rename(target)
         (entrypoints / name).symlink_to(target)

@@ -1,6 +1,7 @@
 [Unit]
 Description=Crowley repeating scan session controller
 After=graphical-session.target
+Conflicts=crowley-scan.service
 
 [Service]
 Type=simple

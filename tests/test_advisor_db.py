@@ -13,6 +13,8 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from crowley.advisor import AdviceConfig, advise, load_market_state
+from crowley.advisor.model import OptionError
+from crowley.core.errors import MarketDataNotFound
 from crowley.server.db import migrate
 from tests.test_analysis_candidates_db import _observe
 
@@ -204,10 +206,20 @@ def test_market_state_is_scoped_to_house_build_and_as_of() -> None:
             assert other.cold_pool is not None and set(other.cold_pool.by_sweep) == {h_sweep}
 
             # nothing before the first sweep, and no such build, fail loudly
-            with pytest.raises(RuntimeError, match="no market sweep"):
+            with pytest.raises(MarketDataNotFound, match="no market sweep"):
                 load(ALLIANCE, as_of=BASE - timedelta(days=30))
-            with pytest.raises(RuntimeError, match="no market sweep"):
+            with pytest.raises(MarketDataNotFound, match="no market sweep"):
                 load(ALLIANCE, build="1.60.1.99999")
+
+            # a profession the client export has no recipes for is a bad option, not a bug
+            with pytest.raises(OptionError, match="jewelcrafting"):
+                load_market_state(
+                    conn,
+                    ALLIANCE,
+                    client_build=NEW,
+                    professions=frozenset({"jewelcrafting"}),
+                    lookback_hours=24.0,
+                )
 
             # the loaded state feeds every evaluator, and loading wrote nothing
             advice = advise(state, AdviceConfig(professions=PROFESSIONS, batch_crafts=2))

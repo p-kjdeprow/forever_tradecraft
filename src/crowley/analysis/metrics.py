@@ -89,7 +89,7 @@ def _find_group(book: Book, result_id: int | str, ceiling: Fraction | None = Non
     return None
 
 
-def _percentile(values: Sequence[Fraction], probability: Fraction) -> Fraction:
+def percentile(values: Sequence[Fraction], probability: Fraction) -> Fraction:
     if not values:
         raise ValueError("cannot calculate a percentile of an empty sequence")
     ordered = sorted(values)
@@ -131,10 +131,10 @@ def _fair_at(
                 if dt_days != 0:
                     slopes.append((math.log(float(right_ref)) - math.log(float(left_ref))) / dt_days)
         trend = float(median(slopes)) if slopes else None
-    p25 = _percentile(refs, Fraction(1, 4))
-    p75 = _percentile(refs, Fraction(3, 4))
+    p25 = percentile(refs, Fraction(1, 4))
+    p75 = percentile(refs, Fraction(3, 4))
     return {
-        "value": _percentile(refs, Fraction(1, 2)),
+        "value": percentile(refs, Fraction(1, 2)),
         "band": {"p25": p25, "p75": p75},
         "trend_per_day": trend,
         "n": len(refs),
@@ -366,7 +366,7 @@ def competition_metrics(
         ),
         "undercut_events_per_hour_covered_seconds": covered_seconds,
         "median_relative_depth": median(relative_depths) if relative_depths else None,
-        "p75_relative_depth": _percentile(relative_depths, Fraction(3, 4)) if relative_depths else None,
+        "p75_relative_depth": percentile(relative_depths, Fraction(3, 4)) if relative_depths else None,
         "tenure": {
             "starts": len(tenure_samples),
             "events": tenure_km["events"],

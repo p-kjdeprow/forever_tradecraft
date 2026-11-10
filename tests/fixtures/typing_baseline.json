@@ -1,6 +1,5 @@
 {
   "basic": {
-    "advisor": 0,
     "analysis": 5,
     "companion": 0,
     "core": 0,
@@ -14,6 +13,7 @@
     "trading": 0
   },
   "strict": {
+    "advisor": 0,
     "config": 0,
     "core/auction_rules.py": 0,
     "domain": 0,

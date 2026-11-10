@@ -6,7 +6,7 @@ It needs a character (``--character``): without a capture nothing says which rec
 so every row is excluded as ``no_character``.
 
 Payback is the recipe's cheapest current teaching-item listing divided by the headline margin per
-craft (in crafts) and by the crafts per hour at the configured share (in hours).  Rank's own
+craft (in crafts) and by the P(sale)-weighted crafts per hour at the configured share (in hours).  Rank's own
 payback at its target price is kept in the details.  ``profit_per_hour`` is the income the recipe
 unlocks, so the row sorts next to the crafting row it would become.
 """
@@ -26,8 +26,10 @@ from crowley.analysis.rank import TradeRow
 
 
 def _payback(price: int, margin: Fraction, row: TradeRow) -> tuple[Fraction, Fraction]:
+    """Crafts and hours to earn the recipe back; hours use the P(sale)-weighted crafts per hour."""
+
     crafts = Fraction(price) / margin
-    return crafts, crafts / row.crafts_per_hour
+    return crafts, crafts / (row.crafts_per_hour * Fraction(row.sale_probability))
 
 
 class RecipePurchaseEvaluator:
@@ -63,11 +65,11 @@ class RecipePurchaseEvaluator:
                 continue
             if row.recipe_price is None or row.recipe_item_id is None:
                 raise RuntimeError(f"spell {row.spell_id}: learnable and listed but no recipe price")
-            margin = headline_margin(ctx, craft)
+            margin = headline_margin(craft)
             if margin is None:
                 out.exclude(key, "no_current_listing", "an output has no current listing to undercut")
                 continue
-            if row.sale_probability < ctx.config.min_sale_prob:
+            if row.sale_probability <= 0 or row.sale_probability < ctx.config.min_sale_prob:
                 out.exclude(key, "low_sale_probability", f"P(sale) {row.sale_probability:.2f}")
                 continue
             if margin <= 0:
@@ -89,6 +91,7 @@ class RecipePurchaseEvaluator:
             out.keep(
                 Pathway(
                     strategy=self.name,
+                    section="ranked",
                     key=key,
                     title=f"learn + {base.title}",
                     steps=steps,
@@ -96,11 +99,14 @@ class RecipePurchaseEvaluator:
                     profit_per_craft=base.profit_per_craft,
                     volume_per_hour=base.volume_per_hour,
                     sale_probability=base.sale_probability,
+                    fill_rate=None,
                     evidence=base.evidence,
                     demand_evidence=base.demand_evidence,
                     listed_units=base.listed_units,
                     capital=base.capital + row.recipe_price,
                     profit_per_hour=base.profit_per_hour,
+                    one_off_profit=None,
+                    sort_value=base.sort_value,
                     confidence=base.confidence,
                     details={
                         **base.details,

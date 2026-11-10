@@ -87,6 +87,7 @@ exclude = ["tests", ".archive"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 strict = [
+    "src/crowley/advisor",
     "src/crowley/config",
     "src/crowley/platform",
     "src/crowley/domain",

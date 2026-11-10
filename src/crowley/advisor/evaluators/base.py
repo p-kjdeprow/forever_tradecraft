@@ -23,7 +23,7 @@ class Context:
     state: MarketState
     estimates: EstimateProvider
     config: AdviceConfig
-    memo: dict[str, Any] = field(default_factory=dict)
+    memo: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def cached[T](self, key: str, build: Callable[[], T]) -> T:
         if key not in self.memo:

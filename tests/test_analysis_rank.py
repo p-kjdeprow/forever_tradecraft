@@ -12,10 +12,10 @@ from crowley.analysis.common import jsonable, reference
 from crowley.analysis.rank import (
     RankConfig,
     RankInputs,
-    _horizon_observable,
     build_parser,
     config_from_args,
     evaluate_trades,
+    horizon_observable,
     levels_snapshot,
     parse_as_of,
     rank_trades,
@@ -315,11 +315,11 @@ def test_gap_inside_the_horizon_excludes_sold_and_unsold_starts_alike():
     horizon = 7200
     # k=28 would sell within 10 min and k=18 is unsold when the break arrives: both are ineligible,
     # because eligibility ignores the outcome; k=10 sees the whole horizon.
-    assert not _horizon_observable(gapped, intervals, 28, 94, horizon)
-    assert not _horizon_observable(gapped, intervals, 18, 94, horizon)
-    assert _horizon_observable(gapped, intervals, 17, 94, horizon)
-    assert _horizon_observable(gapped, intervals, 30, 94, horizon)
-    assert not _horizon_observable(gapped, intervals, 55, 94, horizon)  # horizon past the data
+    assert not horizon_observable(gapped, intervals, 28, 94, horizon)
+    assert not horizon_observable(gapped, intervals, 18, 94, horizon)
+    assert horizon_observable(gapped, intervals, 17, 94, horizon)
+    assert horizon_observable(gapped, intervals, 30, 94, horizon)
+    assert not horizon_observable(gapped, intervals, 55, 94, horizon)  # horizon past the data
 
     data = make_inputs(
         [SELLER], books={1001: gapped, 2001: static_book(2001, 10)}, as_of_t=float(LAST_T + 2400)

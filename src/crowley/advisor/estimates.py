@@ -19,8 +19,9 @@ from typing import Protocol
 
 from crowley.analysis.books import Book, valid_intervals
 from crowley.analysis.metrics import FAIR_MIN_BOOKS, demand_metrics, fair_value
+from crowley.trading.strategies.common import SECONDS_PER_HOUR
 
-from .state import SECONDS_PER_HOUR, MarketState
+from .state import MarketState
 
 
 @dataclass(frozen=True)

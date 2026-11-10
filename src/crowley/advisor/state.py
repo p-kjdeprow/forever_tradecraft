@@ -17,17 +17,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from crowley.advisor.model import OptionError
 from crowley.analysis.books import Book
 from crowley.analysis.candidates import ColdPool, load_candidate_inputs
 from crowley.analysis.item_books import ItemBook
-from crowley.analysis.rank import RankConfig, RankInputs, _names
+from crowley.analysis.rank import RankConfig, RankInputs, item_names
 from crowley.core.auction_rules import AuctionHouseRules
 from crowley.core.watchlist import load_catalog
 from crowley.trading.account_gate import AccountSnapshot
 from crowley.trading.api import ItemFacts, Recipe
 
 # Catalog tags of trade goods a character can gather or farm (leather, hides, herbs, cloth,
-# ore and bars, stone, scales and similar).  The catalog is the plan's own classification.
+# ore, stone, scales and similar; bars are smelted, so they are not here).  The catalog is the
+# plan's own classification.
 GATHERABLE_TAGS = frozenset(
     {
         "herb",
@@ -36,7 +38,6 @@ GATHERABLE_TAGS = frozenset(
         "cloth",
         "silk",
         "ore",
-        "metal",
         "stone",
         "scale",
         "pearl",
@@ -46,7 +47,6 @@ GATHERABLE_TAGS = frozenset(
         "venom",
     }
 )
-SECONDS_PER_HOUR = 3600
 FAIR_LOOKBACK_HOURS = 72.0  # candidates' fair-value history; the books are loaded this far back
 
 
@@ -147,8 +147,14 @@ def load_market_state(
             fair_lookback_hours=FAIR_LOOKBACK_HOURS,
         )
         inputs = loaded.loaded.inputs
+        known = {profession for recipe in inputs.recipes for profession in recipe.professions}
+        if professions - known:
+            raise OptionError(
+                f"no client recipes for profession(s) {sorted(professions - known)}; "
+                f"known here: {sorted(known)}"
+            )
         scanned: set[int] = set(inputs.books) | set(inputs.item_books or {})
-        names = {**_names(conn, loaded.loaded.client_build, sorted(scanned)), **loaded.loaded.names}
+        names = {**item_names(conn, loaded.loaded.client_build, sorted(scanned)), **loaded.loaded.names}
     return MarketState(
         inputs=loaded.loaded.inputs,
         client_build=loaded.loaded.client_build,

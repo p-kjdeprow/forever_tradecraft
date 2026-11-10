@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
         default="lowest",
         help="crafting headline price: 1c under the current lowest listing, or rank's target",
     )
+    parser.add_argument(
+        "--max-cold-age-hours", type=float, default=3.0, help="exclude cold-tier rows with older prices"
+    )
     parser.add_argument("--flip-x", type=float, default=0.7, help="buy units at or below this x fair value")
     parser.add_argument("--flip-undercut", type=float, default=0.12, help="relist at fair x (1 - this)")
     parser.add_argument("--character", help="classify recipes against this character's latest capture")
@@ -61,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             horizon_hours=args.horizon_hours,
             min_sale_prob=args.min_sale_prob,
             price_basis=args.price_basis,
+            max_cold_age_hours=args.max_cold_age_hours,
             flip_x=args.flip_x,
             flip_undercut=args.flip_undercut,
         )

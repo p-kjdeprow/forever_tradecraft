@@ -1,8 +1,20 @@
-"""Typed advisor output: pathways, exclusions, configuration and the confidence label.
+"""Typed advisor output: pathways, exclusions, configuration and the confidence rules.
 
 Every evaluator returns a ``StrategyResult``.  Its invariant, ``considered == len(pathways) +
 len(exclusions)``, is the "no silent drops" rule: a candidate either becomes a pathway or an
 exclusion with a registered reason.
+
+Sections (a pathway is ranked only against pathways whose value means the same thing):
+
+* ``ranked``: a recurring flow with a measured P(sale).  ``sort_value`` is expected profit per
+  hour, ``margin x crafts/h x P(sale)`` (a pathway that sells with probability P earns P of its
+  margin per attempt).  Crafting and recipe purchases.
+* ``unmeasured``: a recurring flow whose P(sale) cannot be measured (cold-tier crafts, vendor to
+  AH).  ``sort_value`` is the same formula taken at P = 1, so it is an upper bound.
+* ``one_off``: an opportunity listed right now (flips, vendor-sell arbitrage).  ``sort_value`` is
+  its expected profit once; there is no per-hour figure.
+* ``farming``: gatherable goods.  ``sort_value`` is the market's value flowing per hour, a
+  capacity figure and not the character's income.
 """
 
 from __future__ import annotations
@@ -14,13 +26,28 @@ from fractions import Fraction
 from typing import Any
 
 from crowley.analysis.time_to_sale import CHECKPOINTS
+from crowley.trading.strategies.common import SECONDS_PER_HOUR
 
 STRATEGIES = ("crafting", "recipe_purchase", "flip", "raw_materials", "vendor_arbitrage")
+SECTIONS = ("ranked", "unmeasured", "one_off", "farming")
 DEFAULT_PROFESSIONS = frozenset({"alchemy", "tailoring", "engineering"})
-SECONDS_PER_HOUR = 3600
 
 # Step actions: what a human (or later the executor) would do, in order.
-ACTIONS = ("buy_ah", "buy_vendor", "learn_recipe", "craft", "list_ah", "sell_vendor", "gather")
+ACTIONS = (
+    "verify_price",
+    "buy_ah",
+    "buy_vendor",
+    "learn_recipe",
+    "craft",
+    "list_ah",
+    "sell_vendor",
+    "gather",
+)
+
+
+class OptionError(ValueError):
+    """A request option is invalid (an HTTP 400).  Other ValueErrors are bugs and stay 500s."""
+
 
 # Reasons an evaluator may exclude a candidate for, by strategy.  ``Exclusion`` rejects others.
 # Crafting passes through the reasons of ``analysis.rank`` / ``analysis.candidates`` with a
@@ -31,8 +58,10 @@ EXCLUSION_REASONS: dict[str, tuple[str, ...]] = {
     "crafting": (
         "recipe_not_known",
         "low_sale_probability",
-        "candidate_not_flagged",
         "no_current_listing",
+        "no_target_price",
+        "no_observed_demand",
+        "stale_observation",
     ),
     "recipe_purchase": (
         "no_character",
@@ -109,6 +138,7 @@ CONFIDENCE_THRESHOLDS = {
     "arrival_groups": (12, 6),
     "demand_intervals": (48, 24),
 }
+CONFIDENCE_ORDER = ("none", "low", "medium", "high")
 
 
 def confidence_label(evidence: Evidence | None) -> str:
@@ -125,43 +155,64 @@ def confidence_label(evidence: Evidence | None) -> str:
     return "low"
 
 
-CONFIDENCE_ORDER = ("none", "low", "medium", "high")
+def _weaker(*labels: str) -> str:
+    return min(labels, key=CONFIDENCE_ORDER.index)
 
 
-def combined_confidence(*evidence: Evidence | None, cap: str = "high") -> str:
-    """The weakest label among the given evidence, never above ``cap``.
+def pathway_confidence(sale: Evidence | None, demand: Evidence | None) -> str:
+    """The one confidence rule, for every strategy.
 
-    A pathway is as sure as its weakest count.  Pathways whose P(sale) is not measured pass
-    ``cap="medium"`` (volume alone cannot make them high); stale cold-tier prices pass ``"low"``.
+    * With sale evidence (a measured P or fill from independent starts of the pathway's own item or
+      recipe), the label comes from that count, never below "low", and is capped by the demand
+      evidence when there is some.  An item with no starts of its own is "low".
+    * Without sale evidence the pathway's sale is unmeasured: at best "low", and "none" when even the
+      demand evidence is empty.
     """
 
-    labels = [confidence_label(item) for item in evidence] + [cap]
-    return min(labels, key=CONFIDENCE_ORDER.index)
+    demand_label = confidence_label(demand)
+    if sale is None:
+        return _weaker(demand_label, "low")
+    label = _atleast(confidence_label(sale), "low")
+    return label if demand is None else _weaker(label, demand_label)
+
+
+def _atleast(label: str, floor: str) -> str:
+    return label if CONFIDENCE_ORDER.index(label) >= CONFIDENCE_ORDER.index(floor) else floor
 
 
 @dataclass(frozen=True)
 class Pathway:
     strategy: str
-    key: str  # stable identity, e.g. "crafting:spell:123" (item ids and spell ids, never names)
+    section: str
+    key: str  # stable identity, e.g. "crafting:123" (item ids and spell ids, never names)
     title: str  # display only
     steps: tuple[Step, ...]
     profit_per_unit: Fraction  # copper per unit sold/handled
     profit_per_craft: Fraction | None  # crafting only
     volume_per_hour: Fraction  # market units/h behind the pathway
-    sale_probability: float | None  # P(sale within horizon) when measurable
-    evidence: Evidence | None  # the sale-probability evidence (None: P not measured)
+    sale_probability: float | None  # P(sale within horizon) of crafting, when measured
+    fill_rate: float | None  # flips only: shrunk per-trade unit fill within the horizon (not a P)
+    evidence: Evidence | None  # the sale evidence (None: sale not measured)
     demand_evidence: Evidence | None
     listed_units: int | None  # units currently listed on the AH for the product
     capital: Fraction  # copper tied up for one batch / one execution of the steps
-    profit_per_hour: Fraction  # at ``share`` of the market flow
+    profit_per_hour: Fraction | None  # expected, at ``share``, P-weighted when P is measured
+    one_off_profit: Fraction | None  # expected profit of doing it once now (one_off section)
+    sort_value: Fraction  # what the section is ordered by, see the module docstring
     confidence: str
-    details: Mapping[str, Any] = field(default_factory=dict)
+    details: Mapping[str, Any] = field(default_factory=dict[str, Any])
 
     def __post_init__(self) -> None:
         if self.strategy not in STRATEGIES:
             raise ValueError(f"unknown strategy {self.strategy!r}")
+        if self.section not in SECTIONS:
+            raise ValueError(f"unknown section {self.section!r}")
         if not self.steps:
             raise ValueError("a pathway needs at least one step")
+        if self.section in ("ranked", "unmeasured") and self.profit_per_hour is None:
+            raise ValueError(f"{self.section} pathway {self.key} needs a profit per hour")
+        if self.section == "one_off" and self.one_off_profit is None:
+            raise ValueError(f"one-off pathway {self.key} needs a one-off profit")
 
     @property
     def threshold_profit(self) -> Fraction:
@@ -216,44 +267,47 @@ class AdviceConfig:
     lookback_hours: float = 24.0  # crafting / demand window
     batch_crafts: int = 10
     min_independent_starts: int = 4
-    crafting_price: str = "lowest"  # headline basis: "lowest" (1c under the lowest listing) | "target"
+    crafting_price: str = "lowest"  # headline basis: min(lowest - 1, rank target) | "target"
+    listing_hours: int = 12  # one listing duration for every evaluator's deposit
+    max_cold_age_hours: float = 3.0  # cold-tier rows older than this are excluded as stale
     # flip (defaults won on the beta calibration split)
     flip_x: Fraction = Fraction(7, 10)
     flip_undercut: Fraction = Fraction(12, 100)
     flip_lookback_hours: float = 72.0  # evidence window of replayed flips
     flip_min_trades: int = 10  # pooled independent past flips
-    flip_duration_hours: int = 12
     flip_unsold_value: str = "cost"  # "cost" (carry the leftovers) | "vendor" (dump them)
 
     def __post_init__(self) -> None:
         unknown = sorted(self.strategies - set(STRATEGIES))
         if unknown:
-            raise ValueError(f"unknown strategies {unknown}; known: {list(STRATEGIES)}")
+            raise OptionError(f"unknown strategies {unknown}; known: {list(STRATEGIES)}")
         if not self.strategies:
-            raise ValueError("at least one strategy is required")
+            raise OptionError("at least one strategy is required")
         if not self.professions:
-            raise ValueError("at least one profession is required")
+            raise OptionError("at least one profession is required")
         if not 0 < self.share <= 1:
-            raise ValueError("share must be in (0, 1]")
+            raise OptionError("share must be in (0, 1]")
         if round(self.horizon_hours * SECONDS_PER_HOUR) not in CHECKPOINTS:
-            raise ValueError(
+            raise OptionError(
                 f"horizon_hours must be one of {[c / SECONDS_PER_HOUR for c in CHECKPOINTS]} "
                 "(the replay checkpoints)"
             )
         if self.min_profit < 0 or self.min_volume < 0:
-            raise ValueError("min_profit and min_volume must be non-negative")
+            raise OptionError("min_profit and min_volume must be non-negative")
         if not 0 <= self.min_sale_prob <= 1:
-            raise ValueError("min_sale_prob must be in [0, 1]")
+            raise OptionError("min_sale_prob must be in [0, 1]")
         if self.crafting_price not in ("lowest", "target"):
-            raise ValueError("crafting_price must be 'lowest' or 'target'")
+            raise OptionError("crafting_price must be 'lowest' or 'target'")
         if self.flip_unsold_value not in ("cost", "vendor"):
-            raise ValueError("flip_unsold_value must be 'cost' or 'vendor'")
+            raise OptionError("flip_unsold_value must be 'cost' or 'vendor'")
         if not 0 < self.flip_x <= 1 or not 0 <= self.flip_undercut < 1:
-            raise ValueError("flip_x must be in (0, 1] and flip_undercut in [0, 1)")
+            raise OptionError("flip_x must be in (0, 1] and flip_undercut in [0, 1)")
         if self.flip_min_trades < 1 or self.min_independent_starts < 1 or self.batch_crafts < 1:
-            raise ValueError("flip_min_trades, min_independent_starts and batch_crafts must be positive")
-        if self.lookback_hours <= 0 or self.flip_lookback_hours <= 0:
-            raise ValueError("lookback hours must be positive")
+            raise OptionError("flip_min_trades, min_independent_starts and batch_crafts must be positive")
+        if self.lookback_hours <= 0 or self.flip_lookback_hours <= 0 or self.max_cold_age_hours <= 0:
+            raise OptionError("lookback hours and max_cold_age_hours must be positive")
+        if self.listing_hours <= 0:
+            raise OptionError("listing_hours must be positive")
 
     @property
     def horizon_seconds(self) -> int:
@@ -262,7 +316,7 @@ class AdviceConfig:
 
 @dataclass(frozen=True)
 class Advice:
-    """The whole run: per-strategy results plus the filtered, sorted pathway list."""
+    """The whole run: per-strategy results plus the filtered pathways ordered within sections."""
 
     house_key: str
     client_build: str
@@ -270,7 +324,10 @@ class Advice:
     sweep_id: int | str
     config: AdviceConfig
     results: tuple[StrategyResult, ...]  # after the min-profit / min-volume filters
-    pathways: tuple[Pathway, ...]  # all strategies, sorted by profit per hour
+    pathways: tuple[Pathway, ...]  # grouped by section order, each by descending sort_value
+
+    def section(self, name: str) -> tuple[Pathway, ...]:
+        return tuple(pathway for pathway in self.pathways if pathway.section == name)
 
     def exclusion_counts(self) -> dict[str, dict[str, int]]:
         return {result.strategy: result.exclusion_counts() for result in self.results}

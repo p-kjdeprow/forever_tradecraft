@@ -4,14 +4,22 @@ from __future__ import annotations
 
 from crowley.advisor.estimates import EstimateProvider, SnapshotEstimates
 from crowley.advisor.evaluators import EVALUATORS, Context
-from crowley.advisor.model import STRATEGIES, Advice, AdviceConfig, Exclusion, StrategyResult
+from crowley.advisor.model import (
+    SECTIONS,
+    STRATEGIES,
+    Advice,
+    AdviceConfig,
+    Exclusion,
+    Pathway,
+    StrategyResult,
+)
 from crowley.advisor.state import MarketState
 
 
 def apply_filters(result: StrategyResult, config: AdviceConfig) -> StrategyResult:
     """Move pathways under ``--min-profit`` / ``--min-volume`` into the exclusions, so they stay counted."""
 
-    kept = []
+    kept: list[Pathway] = []
     excluded = list(result.exclusions)
     for pathway in result.pathways:
         if pathway.threshold_profit < config.min_profit:
@@ -37,7 +45,7 @@ def advise(state: MarketState, config: AdviceConfig, estimates: EstimateProvider
     pathways = tuple(
         sorted(
             (pathway for result in results for pathway in result.pathways),
-            key=lambda pathway: (-pathway.profit_per_hour, pathway.key),
+            key=lambda pathway: (SECTIONS.index(pathway.section), -pathway.sort_value, pathway.key),
         )
     )
     return Advice(

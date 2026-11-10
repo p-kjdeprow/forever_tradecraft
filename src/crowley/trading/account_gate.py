@@ -19,6 +19,8 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Literal
 
+from crowley.core.errors import MarketDataNotFound
+
 from .api import Recipe
 
 RecipeStatus = Literal[
@@ -95,7 +97,9 @@ def load_account_snapshot(
     if row is None:
         which = f"capture {capture_uid!r}" if capture_uid else "capture"
         when = f" at or before {as_of.isoformat()}" if as_of is not None else ""
-        raise RuntimeError(f"no account {which} for character {character!r} in house {house_key!r}{when}")
+        raise MarketDataNotFound(
+            f"no account {which} for character {character!r} in house {house_key!r}{when}"
+        )
     capture_id, uid, captured_at, digest, recipes, professions = row
     raw = {"recipes": recipes, "professions": professions}
     recipes = _section(raw, "recipes")

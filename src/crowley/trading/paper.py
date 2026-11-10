@@ -78,6 +78,7 @@ REPLAY_MODULES: tuple[str, ...] = (
     "crowley/analysis/time_to_sale.py",
     "crowley/core/__init__.py",
     "crowley/core/auction_rules.py",
+    "crowley/core/errors.py",
     "crowley/core/game_target.py",
     "crowley/core/house.py",
     "crowley/core/watchlist.py",

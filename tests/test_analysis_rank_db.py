@@ -11,7 +11,7 @@ import psycopg
 import pytest
 from psycopg.types.json import Jsonb
 
-from crowley.analysis.rank import _latest_sweep, _observed_kinds, _teaching_prices
+from crowley.analysis.rank import _observed_kinds, _teaching_prices, latest_sweep
 from crowley.server.db import migrate
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
@@ -125,13 +125,13 @@ def test_loaders_are_scoped_to_house_build_and_sweep() -> None:
             _observe(conn, house_b, newest_b, 5001, "item", (1,))
             _observe(conn, house_b, newest_b, 5003, "item", (3,))
 
-            assert _latest_sweep(conn, key_a, None, None)[0] == new_a
-            assert _latest_sweep(conn, key_a, "1.60.1.70450", None)[0] == old_a
-            assert _latest_sweep(conn, key_b, None, None)[0] == newest_b
-            assert _latest_sweep(conn, key_a, None, BASE + timedelta(minutes=30))[0] == old_a
-            assert _latest_sweep(conn, key_a, None, None)[2] == "1.60.1.70862"
+            assert latest_sweep(conn, key_a, None, None)[0] == new_a
+            assert latest_sweep(conn, key_a, "1.60.1.70450", None)[0] == old_a
+            assert latest_sweep(conn, key_b, None, None)[0] == newest_b
+            assert latest_sweep(conn, key_a, None, BASE + timedelta(minutes=30))[0] == old_a
+            assert latest_sweep(conn, key_a, None, None)[2] == "1.60.1.70862"
             with pytest.raises(RuntimeError, match="no market sweep"):
-                _latest_sweep(conn, key_a, "1.60.1.99999", None)
+                latest_sweep(conn, key_a, "1.60.1.99999", None)
 
             # cheapest buyout in that sweep only; observed-with-no-rows is None; unobserved is absent
             assert _teaching_prices(conn, new_a, [5001, 5002, 5003, 9001]) == {5001: 500, 5002: None}

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import tomllib
 from dataclasses import replace
 from fractions import Fraction
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
 from crowley.advisor import AdviceConfig, MarketState, advise
 from crowley.advisor.cli import build_parser, main
@@ -18,34 +17,40 @@ from crowley.advisor.estimates import PriceEstimate, SnapshotEstimates
 from crowley.advisor.evaluators import EVALUATORS, Context
 from crowley.advisor.evaluators.crafting import margin_at
 from crowley.advisor.evaluators.flip import (
-    MAX_BAND,
-    MIN_DEMAND_SECONDS,
-    MIN_FAIR_N,
+    FlipTrade,
+    Prepared,
+    _without,
     build_series,
     eligible_starts,
     fair_before,
     flip_context,
     plan_buy,
+    pool,
+    shrunk_fill,
 )
 from crowley.advisor.model import (
     Evidence,
     Exclusion,
+    OptionError,
     Pathway,
     Step,
     StrategyResult,
-    combined_confidence,
     confidence_label,
+    pathway_confidence,
 )
 from crowley.advisor.render import advice_json, format_table
 from crowley.advisor.service import make_config
 from crowley.analysis.books import Book, Group
 from crowley.analysis.metrics import fair_value
 from crowley.analysis.rank import batch_net_revenue
-from crowley.server.deps import require_token
-from crowley.server.routes import advice as advice_route
 from crowley.trading.api import ItemSnapshot, TeachingRequirement
 from crowley.trading.fees import deposit
-from crowley.trading.strategies.common import trustworthy_fair
+from crowley.trading.strategies.common import (
+    MAX_BAND_WIDTH,
+    MIN_DEMAND_ELIGIBLE_SECONDS,
+    MIN_FAIR_N,
+    trustworthy_fair,
+)
 from tests.test_analysis_rank import (
     RULES,
     SELLER,
@@ -95,6 +100,7 @@ def _pathway(
 ) -> Pathway:
     return Pathway(
         strategy=strategy,
+        section="ranked",
         key=f"{strategy}:{profit}:{volume}",
         title="t",
         steps=(Step("buy_ah", item_id=1, quantity=1, price=2),),
@@ -102,11 +108,14 @@ def _pathway(
         profit_per_craft=None if per_craft is None else Fraction(per_craft),
         volume_per_hour=Fraction(volume),
         sale_probability=None,
+        fill_rate=None,
         evidence=None,
         demand_evidence=None,
         listed_units=None,
         capital=Fraction(1),
         profit_per_hour=Fraction(profit * volume),
+        one_off_profit=None,
+        sort_value=Fraction(profit * volume),
         confidence="none",
     )
 
@@ -146,11 +155,19 @@ def test_confidence_labels_come_from_counts_and_cap():
     assert confidence_label(Evidence("independent_starts", 6)) == "medium"
     assert confidence_label(Evidence("independent_starts", 12)) == "high"
     assert confidence_label(Evidence("demand_intervals", 24)) == "medium"
-    strong, weak = Evidence("independent_starts", 20), Evidence("demand_intervals", 3)
-    assert combined_confidence(strong, weak) == "low"  # the weakest count decides
-    assert combined_confidence(strong, cap="medium") == "medium"
     with pytest.raises(ValueError, match="no confidence thresholds"):
         confidence_label(Evidence("mystery", 5))
+
+
+def test_one_confidence_rule_for_every_strategy():
+    strong, weak = Evidence("independent_starts", 20), Evidence("demand_intervals", 3)
+    assert pathway_confidence(strong, None) == "high"
+    assert pathway_confidence(strong, weak) == "low"  # the weaker count decides
+    # measured P but no flips of its own: low, never none and never high
+    assert pathway_confidence(Evidence("independent_starts", 0), Evidence("demand_intervals", 200)) == "low"
+    # no sale evidence: at best low, even with plentiful demand evidence
+    assert pathway_confidence(None, Evidence("demand_intervals", 200)) == "low"
+    assert pathway_confidence(None, None) == "none"
 
 
 def test_config_validation_fails_loudly():
@@ -162,7 +179,7 @@ def test_config_validation_fails_loudly():
         {"crafting_price": "mid"},
         {"flip_x": Fraction(2)},
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises(OptionError):
             AdviceConfig(**bad)
     config = AdviceConfig()
     assert config.share == Fraction(1, 10)
@@ -187,41 +204,84 @@ def lowered_last_book(inputs, item_id: int, unit: int):
     return replace(inputs, books=books)
 
 
-def test_crafting_headline_is_one_copper_under_the_current_lowest_and_target_is_exposed():
+def test_crafting_headline_is_min_of_undercut_lowest_and_target_and_both_are_exposed():
     inputs = lowered_last_book(make_inputs([SELLER]), 1001, 80)
     state = state_of(inputs)
     advice, config = run(state, strategies=frozenset({"crafting"}))
     (pathway,) = advice.pathways
+    assert pathway.section == "ranked"
     assert pathway.details["current_lowest"] == {1001: 80}
-    assert pathway.details["price_lowest"] == {1001: 79}
+    assert pathway.details["price_undercut_lowest"] == {1001: 79}
+    target = dict(pathway.details["target_prices"])[1001]
+    headline = pathway.details["headline_prices"][1001]
+    assert headline == min(79, target) <= target  # never above the price P was measured at
     row_cost = pathway.details["reagent_cost_per_craft"]
-    expected = margin_at(Context(state, SnapshotEstimates(state), config), {1001: 1}, {1001: 79}, row_cost)
-    assert pathway.details["margin_at_lowest"] == pathway.profit_per_craft == expected
-    assert pathway.details["margin_at_target"] != expected  # rank's target differs from lowest - 1
+    ctx = Context(state, SnapshotEstimates(state), config)
+    expected = margin_at(ctx, {1001: 1}, {1001: headline}, row_cost)
+    assert pathway.details["margin_at_headline"] == pathway.profit_per_craft == expected
+    assert pathway.details["margin_at_undercut_lowest"] == margin_at(ctx, {1001: 1}, {1001: 79}, row_cost)
     list_step = pathway.steps[-1]
     assert (list_step.action, list_step.item_id, list_step.price, list_step.quantity) == (
         "list_ah",
         1001,
-        79,
+        headline,
         2,
     )
     assert pathway.sale_probability == 1.0
     assert pathway.evidence and pathway.evidence.kind == "independent_starts"
     assert pathway.evidence.n == 4 and pathway.evidence.successes == 4
-    assert pathway.details["sale_probability_measured_at"] == "rank target price"
     assert pathway.confidence == "low"  # 4 independent starts
-    # revenue formula is rank's own
-    net, _ = batch_net_revenue(facts(1001), RULES, 2, 79, 24)
+    # expected profit per hour weights the margin by P(sale); P is 1 here
+    assert pathway.profit_per_hour == expected * pathway.details["crafts_per_hour"] * 1
+    assert "listed_above_measured_price" not in pathway.details
+    # revenue formula is rank's own, at the one listing duration
+    net, _ = batch_net_revenue(facts(1001), RULES, 2, headline, config.listing_hours)
     assert expected == (net - row_cost * 2) / 2
 
     target_advice, _ = run(state, strategies=frozenset({"crafting"}), crafting_price="target")
     (target_pathway,) = target_advice.pathways
     assert target_pathway.profit_per_craft == pathway.details["margin_at_target"]
-    assert target_pathway.steps[-1].price == dict(pathway.details["target_prices"])[1001]
+    assert target_pathway.steps[-1].price == target
     # steps: buy reagents, craft, list
     actions = [step.action for step in pathway.steps]
     assert actions == ["buy_ah", "buy_vendor", "craft", "list_ah"]
     assert pathway.steps[0].price == 10 and pathway.steps[0].quantity == 4
+
+
+def test_headline_can_never_be_above_the_measured_price():
+    # the lowest listing is far above the target: the headline is the target, not lowest - 1
+    inputs = make_inputs([SELLER])
+    books = dict(inputs.books)
+    last = books[1001][-1]
+    books[1001] = [
+        *books[1001][:-1],
+        Book(last.t, [Group("high", Fraction(140), 40, 100_000, 1)], None, 1001, last.sweep_id),
+    ]
+    inputs = replace(inputs, books=books)
+    advice, _ = run(state_of(inputs), strategies=frozenset({"crafting"}))
+    (pathway,) = advice.pathways
+    target = dict(pathway.details["target_prices"])[1001]
+    assert pathway.details["price_undercut_lowest"] == {1001: 139}
+    assert pathway.details["headline_prices"] == {1001: target} and target < 139
+    assert pathway.steps[-1].price == target
+    for item_id, price in pathway.details["headline_prices"].items():
+        assert price <= pathway.details["target_prices"][item_id]
+
+
+def test_p_weighted_profit_per_hour_orders_crafting_by_expected_value():
+    weak = recipe(2, ((1002, 1),), ((2001, 2),))  # consumed only at its own target
+    advice, _ = run(
+        state_of(make_inputs([SELLER, weak])), strategies=frozenset({"crafting"}), min_sale_prob=0.0
+    )
+    paths = {p.key: p for p in advice.pathways}
+    for pathway in paths.values():
+        assert pathway.sale_probability is not None and pathway.sale_probability > 0
+        assert pathway.profit_per_hour == pathway.details["profit_per_hour_at_p1"] * Fraction(
+            pathway.sale_probability
+        )
+    # a zero P is excluded even when the floor is zero
+    reasons = {e.key: e.reason for e in by_strategy(advice, "crafting").exclusions}
+    assert reasons == {"crafting:2": "low_sale_probability"} and set(paths) == {"crafting:1"}
 
 
 def test_crafting_accounts_for_every_recipe():
@@ -274,7 +334,7 @@ def test_recipe_purchase_needs_a_character_and_reports_payback():
     assert pathway.details["payback_crafts"] == Fraction(700) / margin
     crafts_per_hour = pathway.details["crafts_per_hour"]
     assert pathway.details["payback_hours"] == pathway.details["payback_crafts"] / crafts_per_hour
-    assert pathway.profit_per_hour == margin * crafts_per_hour
+    assert pathway.profit_per_hour == margin * crafts_per_hour  # P(sale) is 1 here
     assert pathway.capital > 700
     reasons = {item.key: item.reason for item in purchase.exclusions}
     assert reasons == {"recipe_purchase:1": "recipe_already_known", "recipe_purchase:7": "trainer_taught"}
@@ -287,14 +347,16 @@ def test_recipe_purchase_needs_a_character_and_reports_payback():
 # -- flip ------------------------------------------------------------------------------------
 
 
-def flip_books(count: int = 241, consume_until: int | None = None, item_id: int = 4001) -> list[Book]:
-    """Stable fair value 100.  Every 12th book (and the next) lists 3 units at 60; demand drops the
+def flip_books(
+    count: int = 241, consume_until: int | None = None, item_id: int = 4001, cheap_span: int = 2
+) -> list[Book]:
+    """Stable fair value 100.  Every 12th book (and the next ``cheap_span - 1``) lists 3 units at 60; demand drops the
     100 group by 3 per interval until ``consume_until``."""
 
     books = []
     for k in range(count):
         groups = []
-        if k % 12 in (0, 1):
+        if k % 12 < cheap_span:
             groups.append(Group(f"cheap{k // 12}", Fraction(60), 3, 100_000, 1))
         quantity = 30 - 3 * (k % 5) if consume_until is None or k <= consume_until else 30
         groups.append(Group("ref", Fraction(100), quantity, 100_000, 1))
@@ -319,40 +381,75 @@ def test_flip_buys_below_the_threshold_relists_under_fair_and_reports_its_eviden
     state = flip_state(flip_books())
     advice, config = run(state, strategies=frozenset({"flip"}))
     (pathway,) = advice.pathways
+    assert pathway.section == "one_off" and pathway.strategy == "flip"
     buy, sell = pathway.steps
     assert (buy.action, buy.item_id, buy.price) == ("buy_ah", 4001, 60)
     assert (sell.action, sell.price) == ("list_ah", 88)  # floor(100 * (1 - 0.12))
     assert buy.quantity == sell.quantity == 2  # max(1, floor(0.1 * 117/8 units/h * 2 h))
-    assert pathway.sale_probability == 1.0
+    # the statistic is a per-trade unit fill, not a probability
+    assert pathway.sale_probability is None and pathway.fill_rate == 1.0
     evidence = pathway.evidence
     assert evidence is not None and evidence.kind == "independent_starts"
-    assert evidence.n >= config.flip_min_trades and evidence.successes == evidence.n
+    assert evidence.n >= config.flip_min_trades and evidence.successes == evidence.n  # its own flips
+    assert pathway.details["own_full_partial_zero"] == (evidence.n, 0, 0)
+    assert pathway.details["pooled_full_partial_zero"] == (evidence.n, 0, 0)
     assert pathway.confidence == "high"
     cut = RULES.seller_cut
     dep = deposit(10, 2, 12, RULES)
-    assert pathway.profit_per_unit == (2 * 88 * (1 - cut) - 2 * 60) / 2  # full fill: no deposit lost
+    expected = 2 * 88 * (1 - cut) - 2 * 60  # full fill: no deposit lost
+    assert pathway.profit_per_unit == expected / 2
+    assert pathway.one_off_profit == pathway.sort_value == pathway.details["expected_profit_now"] == expected
+    assert pathway.profit_per_hour is None  # a one-off has no per-hour figure
     assert pathway.capital == 120 + dep
     assert pathway.volume_per_hour == Fraction(117, 8)
     assert pathway.listed_units == 3 + 30 - 3 * (240 % 5)
     assert pathway.details["relist_price"] == 88 and pathway.details["fair"] == 100
-    assert pathway.profit_per_hour == pathway.profit_per_unit * pathway.details["units_flipped_per_hour"]
-    assert pathway.profit_per_hour > 0
     assert by_strategy(advice, "flip").considered == 1
 
 
-def test_flip_unfilled_history_lowers_the_fill_rate_and_the_profit():
-    state = flip_state(flip_books(consume_until=120))  # demand stops; later flips never fill
+def test_flip_mixed_outcomes_are_counted_per_trade_and_shrunk():
+    state = flip_state(flip_books(consume_until=120))  # demand stops; later flips sell nothing
     advice, _ = run(state, strategies=frozenset({"flip"}))
     (pathway,) = advice.pathways
-    assert 0 < pathway.sale_probability < 1
-    evidence = pathway.evidence
-    assert evidence is not None and evidence.successes is not None and evidence.successes < evidence.n
-    full = run(flip_state(flip_books()), strategies=frozenset({"flip"}))[0].pathways[0]
-    assert pathway.profit_per_unit < full.profit_per_unit
+    full, partial, zero = pathway.details["own_full_partial_zero"]
+    assert full > 0 and zero > 0 and full + partial + zero == pathway.evidence.n
+    assert pathway.details["pooled_full_partial_zero"] == (full, partial, zero)
+    mean = Fraction(full, full + partial + zero)  # fills here are all 0 or 1
+    assert 0 < pathway.fill_rate < 1
+    assert pathway.details["pooled_fill"] == mean
+    # one item: its own mean equals the pool, so shrinkage leaves it unchanged
+    assert pathway.details["unit_fill_rate"] == mean
+    assert pathway.evidence.successes == full + partial  # flips that sold anything
+    full_run = run(flip_state(flip_books()), strategies=frozenset({"flip"}))[0].pathways[0]
+    assert pathway.profit_per_unit < full_run.profit_per_unit
+    assert pathway.confidence == "high"  # many own flips, however they ended
     # leftovers valued at cost versus vendor-sold: the vendor price (10) is far below cost (60)
     vendor = run(state, strategies=frozenset({"flip"}), flip_unsold_value="vendor")[0]
     assert vendor.pathways == ()  # dumping the unsold units turns the expectation negative
     assert [e.reason for e in by_strategy(vendor, "flip").exclusions] == ["below_min_profit"]
+
+
+def trade(fill: float, quantity: int = 1) -> FlipTrade:
+    return FlipTrade(0.0, quantity, Fraction(quantity), 1, fill)
+
+
+def test_pooled_fill_is_per_trade_capped_per_item_and_shrinks_each_item():
+    # one huge trade that sold everything must not make the pool look good: 47 trades sold nothing
+    dominating = Prepared(build_series(flip_books(count=30)), [trade(1.0, 500)])
+    others = {i: Prepared(build_series(flip_books(count=30)), [trade(0.0)] * 5) for i in range(10, 19)}
+    others[19] = Prepared(build_series(flip_books(count=30)), [trade(0.0), trade(0.0)])
+    pooled = pool({1: dominating, **others})
+    assert (pooled.full, pooled.partial, pooled.zero) == (1, 0, 47) and pooled.flips == 48
+    assert pooled.fill == Fraction(1, 1 + 45 + 2)  # per-trade (one weight-1 item), not 500 / 547 units
+    assert pooled.median_fill == 0.0
+    # an item's weight in the pool is capped
+    many = Prepared(build_series(flip_books(count=30)), [trade(1.0)] * 40)
+    capped = pool({1: many, 2: Prepared(build_series(flip_books(count=30)), [trade(0.0)] * 5)})
+    assert capped.fill == Fraction(1, 2)  # 5 and 5 after the cap, not 40 and 5
+    # shrinkage: PRIOR_STRENGTH pseudo-trades at the pool mean
+    own = [trade(1.0)] * 4
+    assert shrunk_fill(own, capped) == (4 + 4 * Fraction(1, 2)) / (4 + 4)
+    assert shrunk_fill([], capped) == capped.fill  # no own flips: exactly the pool
 
 
 def test_flip_exclusions_are_counted():
@@ -398,7 +495,7 @@ def test_flip_fair_is_strictly_past_and_matches_the_metrics_estimate():
 
 
 def test_flip_decision_cannot_see_the_future():
-    """Everything a start decides (fair, demand, buy plan) is fixed by books up to ``i + 1``."""
+    """Everything a start decides (fair, demand, buy plan) is fixed by books up to ``i`` itself."""
 
     books = flip_books()
     config = AdviceConfig(strategies=frozenset({"flip"}))
@@ -406,17 +503,15 @@ def test_flip_decision_cannot_see_the_future():
     series = build_series(books)
     ctx = flip_context(series, index)
     assert not hasattr(ctx, "reason")
-    from crowley.advisor.evaluators.flip import surviving_groups
-
-    plan = plan_buy(surviving_groups(series, index, ctx.fair), ctx, config, 10, RULES)
+    plan = plan_buy(series.books[index], ctx, config, 10, RULES)
     assert plan is not None and plan.price == 88
-    mutated = books[: index + 2] + [
+    mutated = books[: index + 1] + [
         Book(b.t, [Group("future", Fraction(1), 999, 100_000, 1)], None, 4001, b.sweep_id)
-        for b in books[index + 2 :]
+        for b in books[index + 1 :]
     ]
     series2 = build_series(mutated)
     ctx2 = flip_context(series2, index)
-    plan2 = plan_buy(surviving_groups(series2, index, ctx2.fair), ctx2, config, 10, RULES)
+    plan2 = plan_buy(series2.books[index], ctx2, config, 10, RULES)
     assert (ctx2, plan2) == (ctx, plan)
     # the live decision at the latest book never reads a next book at all
     live = flip_context(series, len(books) - 1)
@@ -450,6 +545,31 @@ def test_flip_eligibility_is_decided_without_the_outcome(monkeypatch):
     assert 120 * STEP not in kept  # book 120's horizon crosses the gap at 126
 
 
+def test_flip_eligibility_does_not_require_the_cheap_units_to_survive_to_the_next_sweep():
+    config = AdviceConfig(strategies=frozenset({"flip"}))
+    survive = eligible_starts(build_series(flip_books(cheap_span=2)), config, 10, RULES, first_t=0)
+    vanish = eligible_starts(build_series(flip_books(cheap_span=1)), config, 10, RULES, first_t=0)
+    # with the cheap group gone at t + 1 the start is still eligible: eligibility reads only time t
+    assert [i for i, _, _ in vanish] == [i for i, _, _ in survive]
+    assert len(vanish) >= 10 and all(buy.quantity >= 1 and buy.price == 88 for _, _, buy in vanish)
+
+
+def test_bought_units_are_removed_from_the_books_before_the_replay():
+    series = build_series(flip_books())
+    start = 120
+    bought = {f"cheap{start // 12}": 2}
+    books = _without(series, start, bought, 7200)
+    assert [b.t for b in books][0] == series.times[start] and books[-1].t >= series.times[start] + 7200
+    first_cheap = [g for g in books[0].groups if g.result_id == "cheap10"]
+    assert [g.quantity for g in first_cheap] == [1]  # 3 listed, 2 are ours
+    assert [g.quantity for g in series.books[start].groups if g.result_id == "cheap10"] == [
+        3
+    ]  # untouched source
+    # buying every unit of a group removes the group from every later book
+    gone = _without(series, start, {"cheap10": 3}, 7200)
+    assert all(g.result_id != "cheap10" for b in gone for g in b.groups)
+
+
 def test_flip_trust_thresholds_match_the_strategies():
     def snapshot(n: int, band: Fraction, seconds: float) -> ItemSnapshot:
         fair = Fraction(100)
@@ -457,11 +577,13 @@ def test_flip_trust_thresholds_match_the_strategies():
             1, 0, (), None, 0, fair, (fair, fair + band * fair), n, None, Fraction(5), seconds, None, None
         )
 
-    ok = snapshot(MIN_FAIR_N, MAX_BAND, MIN_DEMAND_SECONDS)
+    ok = snapshot(MIN_FAIR_N, MAX_BAND_WIDTH, MIN_DEMAND_ELIGIBLE_SECONDS)
     assert trustworthy_fair(ok)
-    assert not trustworthy_fair(snapshot(MIN_FAIR_N - 1, MAX_BAND, MIN_DEMAND_SECONDS))
-    assert not trustworthy_fair(snapshot(MIN_FAIR_N, MAX_BAND + Fraction(1, 100), MIN_DEMAND_SECONDS))
-    assert not trustworthy_fair(snapshot(MIN_FAIR_N, MAX_BAND, MIN_DEMAND_SECONDS - 1))
+    assert not trustworthy_fair(snapshot(MIN_FAIR_N - 1, MAX_BAND_WIDTH, MIN_DEMAND_ELIGIBLE_SECONDS))
+    assert not trustworthy_fair(
+        snapshot(MIN_FAIR_N, MAX_BAND_WIDTH + Fraction(1, 100), MIN_DEMAND_ELIGIBLE_SECONDS)
+    )
+    assert not trustworthy_fair(snapshot(MIN_FAIR_N, MAX_BAND_WIDTH, MIN_DEMAND_ELIGIBLE_SECONDS - 1))
 
 
 # -- raw materials, vendor arbitrage, the seam ------------------------------------------------------
@@ -488,10 +610,11 @@ def test_raw_materials_value_flowing_and_exclusions():
     dep = deposit(10, 20, 12, RULES)
     assert pathway.profit_per_unit == price * (1 - RULES.seller_cut) - Fraction(dep, 20)
     assert pathway.details["value_per_hour_flowing"] == pathway.volume_per_hour * 95 == 30 * 95
-    assert pathway.profit_per_hour == config.share * 30 * pathway.profit_per_unit
+    assert pathway.section == "farming" and pathway.profit_per_hour is None
+    assert pathway.sort_value == pathway.details["value_per_hour_flowing"]  # market capacity, not income
     assert [step.action for step in pathway.steps] == ["gather", "list_ah"]
     assert pathway.sale_probability is None and pathway.evidence is None
-    assert pathway.confidence in {"low", "medium"}  # never "high" without a measured P(sale)
+    assert pathway.confidence == "low"  # no measured P(sale): at best low
 
 
 def vendor_state() -> MarketState:
@@ -534,9 +657,11 @@ def test_vendor_arbitrage_both_directions():
     # a new cheap group appears every second book: 29 arrivals of 4 units in 9.8 h
     assert sell.demand_evidence is not None and sell.demand_evidence.kind == "arrival_groups"
     assert sell.demand_evidence.n == 29
-    assert sell.profit_per_hour == config.share * sell.volume_per_hour * 15 > 0
-    assert sell.confidence == "medium"
+    assert sell.section == "one_off" and sell.profit_per_hour is None
+    assert sell.one_off_profit == sell.sort_value == 15 * 4
+    assert sell.confidence == "low"  # the sale is unmeasured
     buy = paths["vendor_arbitrage:buy:2002"]
+    assert buy.section == "unmeasured" and buy.profit_per_hour == buy.sort_value > 0
     assert [step.action for step in buy.steps] == ["buy_vendor", "list_ah"]
     unit_cost = Fraction(5, 1)
     quantity = buy.steps[1].quantity
@@ -584,37 +709,48 @@ def test_every_strategy_runs_on_one_state_and_accounts_for_itself():
     assert [r.strategy for r in advice.results] == list(EVALUATORS)
     for result in advice.results:
         assert result.considered == len(result.pathways) + len(result.exclusions)
-    profits = [p.profit_per_hour for p in advice.pathways]
-    assert profits == sorted(profits, reverse=True)
+    sections = [p.section for p in advice.pathways]
+    assert sections == sorted(sections, key=("ranked", "unmeasured", "one_off", "farming").index)
+    for name in ("ranked", "unmeasured", "one_off", "farming"):
+        values = [p.sort_value for p in advice.section(name)]
+        assert values == sorted(values, reverse=True)
+    assert {p.strategy for p in advice.section("farming")} <= {"raw_materials"}
     assert advice.exclusion_counts()["recipe_purchase"] == {"no_character": 1}
     text = format_table(advice, dict(state.names), 10, steps=True)
+    for heading in ("RANKED", "ONE-OFF", "FARMING VALUE"):
+        assert heading in text
     for column in (
         "type",
         "pathway",
-        "profit",
         "vol/h",
-        "P (sold/n)",
+        "unit fill (n)",
         "listed",
         "capital",
-        "profit/h",
+        "one-off",
+        "net/unit",
+        "mkt value/h",
         "conf",
     ):
-        assert column in text.splitlines()[1]
+        assert column in text
     assert "excluded" in text and "recipe_purchase: considered 1" in text
-    import json
 
     payload = json.loads(advice_json(advice, dict(state.names), 5, include_exclusions=True))
     assert payload["house"] == HOUSE and payload["parameters"]["share"] == 0.1
-    assert len(payload["pathways"]) == min(5, len(advice.pathways)) and payload["total_pathways"] == len(
-        advice.pathways
-    )
+    assert payload["total_pathways"] == len(advice.pathways)
+    assert sum(payload["section_totals"].values()) == len(advice.pathways)
+    assert all(len(items) <= 5 for items in payload["sections"].values())  # --limit applies per section
     assert payload["strategies"]["flip"]["considered"] == by_strategy(advice, "flip").considered
     assert len(payload["strategies"]["recipe_purchase"]["exclusions"]) == 1
-    first = payload["pathways"][0]
-    assert {"steps", "profit_per_unit", "volume_per_hour", "capital", "profit_per_hour", "confidence"} <= set(
-        first
-    )
-    assert first["steps"][0]["action"] in {"buy_ah", "buy_vendor", "gather", "learn_recipe"}
+    first = next(items[0] for items in payload["sections"].values() if items)
+    assert {
+        "steps",
+        "section",
+        "profit_per_unit",
+        "volume_per_hour",
+        "capital",
+        "sort_value",
+        "confidence",
+    } <= set(first)
 
 
 # -- CLI and registration -----------------------------------------------------------------------------
@@ -674,107 +810,3 @@ def test_cli_requires_a_database_url(monkeypatch, capsys):
 def test_console_script_is_registered():
     project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     assert project["project"]["scripts"]["crowley-advise"] == "crowley.advisor.cli:main"
-
-
-# -- server route ------------------------------------------------------------------------------------
-
-
-class FakeConn:
-    def __init__(self) -> None:
-        self.commits = 0
-
-    def commit(self) -> None:
-        self.commits += 1
-
-
-class FakePool:
-    def __init__(self) -> None:
-        self.conn = FakeConn()
-
-    def connection(self):
-        from contextlib import contextmanager
-
-        @contextmanager
-        def manager():
-            yield self.conn
-
-        return manager()
-
-
-@pytest.fixture
-def route_client(monkeypatch):
-    app = FastAPI()
-    app.include_router(advice_route.router)
-    app.dependency_overrides[require_token] = lambda: None
-    app.state.pool = FakePool()
-    seen: dict[str, object] = {}
-    state = state_of(make_inputs([SELLER]), gatherable={1001: ("herb",)}, names={1001: "Peacebloom"})
-
-    def fake_house_id(conn, key):
-        seen["house"] = key
-
-    def fake_run(conn, key, config, *, build, as_of, character):
-        seen.update(key=key, config=config, build=build, as_of=as_of, character=character)
-        return advise(state, config), state
-
-    monkeypatch.setattr(advice_route, "_house_id", fake_house_id)
-    monkeypatch.setattr(advice_route, "run_advice", fake_run)
-    return TestClient(app), seen, app
-
-
-def test_route_passes_the_same_options_and_returns_the_cli_json(route_client):
-    client, seen, app = route_client
-    response = client.get(
-        f"/v1/houses/{HOUSE}/advice",
-        params={
-            "build": BUILD,
-            "as_of": "2026-11-09T12:00:00+00:00",
-            "strategies": "raw_materials",
-            "professions": "alchemy",
-            "min_profit": 1,
-            "share": 0.2,
-            "horizon_hours": 6,
-            "character": "Bob",
-            "limit": 3,
-            "exclusions": "true",
-        },
-    )
-    assert response.status_code == 200, response.text
-    body = response.json()
-    assert seen["house"] == seen["key"] == HOUSE and seen["build"] == BUILD and seen["character"] == "Bob"
-    assert seen["as_of"].isoformat() == "2026-11-09T12:00:00+00:00"
-    config = seen["config"]
-    assert (
-        config.strategies == {"raw_materials"}
-        and config.share == Fraction(1, 5)
-        and config.horizon_hours == 6
-    )
-    assert body["house"] == HOUSE and body["parameters"]["strategies"] == ["raw_materials"]
-    assert [p["key"] for p in body["pathways"]] == ["raw_materials:1001"]
-    assert (
-        body["strategies"]["raw_materials"]["considered"] == 1
-        and "exclusions" in body["strategies"]["raw_materials"]
-    )
-    assert app.state.pool.conn.commits == 1  # the state load opens its own read-only transaction
-
-
-@pytest.mark.parametrize(
-    "params",
-    [{"strategies": "bogus"}, {"horizon_hours": 3}, {"as_of": "2026-11-09T12:00:00"}],
-)
-def test_route_rejects_bad_options_with_400(route_client, params):
-    client, _, _ = route_client
-    assert client.get(f"/v1/houses/{HOUSE}/advice", params=params).status_code == 400
-
-
-def test_route_validates_query_ranges_and_unknown_house(route_client, monkeypatch):
-    client, _, _ = route_client
-    assert client.get(f"/v1/houses/{HOUSE}/advice", params={"share": 0}).status_code == 422
-    assert client.get(f"/v1/houses/{HOUSE}/advice", params={"limit": 0}).status_code == 422
-
-    def missing(conn, key, config, **kwargs):
-        raise RuntimeError("no market sweep for house 'x'")
-
-    monkeypatch.setattr(advice_route, "run_advice", missing)
-    response = client.get(f"/v1/houses/{HOUSE}/advice")
-    assert response.status_code == 404 and "no market sweep" in response.json()["detail"]

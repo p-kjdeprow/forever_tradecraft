@@ -98,6 +98,7 @@ from crowley.analysis.item_books import (
 from crowley.analysis.metrics import FAIR_MIN_BOOKS, demand_metrics, fair_value
 from crowley.analysis.time_to_sale import HORIZON, replay_many
 from crowley.core.auction_rules import AuctionHouseRules, rules_for_house
+from crowley.core.errors import MarketDataNotFound
 from crowley.core.house import House
 from crowley.trading.account_gate import AccountSnapshot, classify_recipe, load_account_snapshot
 from crowley.trading.api import ItemFacts, ItemSnapshot, Level, Recipe
@@ -343,7 +344,7 @@ def snapshot_from_books(item_id: int, books: Sequence[Book]) -> ItemSnapshot:
     )
 
 
-def _horizon_observable(
+def horizon_observable(
     books: Sequence[Book], intervals: Sequence[Interval | None], start: int, price: int, horizon: float
 ) -> bool:
     """Whether ``[t, t + horizon]`` from book ``start`` has no chain break or unobservable interval."""
@@ -453,7 +454,7 @@ def batch_net_revenue(
     return quantity * unit_price * (1 - rules.seller_cut) - batch_deposit, batch_deposit
 
 
-class _Evaluator:
+class RankEvaluator:
     def __init__(self, inputs: RankInputs, config: RankConfig) -> None:
         self.inputs = inputs
         self.config = config
@@ -671,7 +672,7 @@ class _Evaluator:
         for (index, price), result in zip(starts, results, strict=True):
             # Eligibility is decided before, and independently of, the outcome: the whole
             # [t, t + horizon] must lie in one unbroken, fully observable run of books.
-            if not _horizon_observable(history, intervals, index, price, horizon):
+            if not horizon_observable(history, intervals, index, price, horizon):
                 continue
             sold_in_time = result.event_time is not None and result.event_time <= horizon
             determined.append((history[index].t, sold_in_time))
@@ -796,7 +797,7 @@ def evaluate_trades(inputs: RankInputs, config: RankConfig) -> Evaluation:
     missing = sorted(config.professions - known_professions)
     if missing:
         raise ValueError(f"no client recipes for profession(s) {missing}; known: {sorted(known_professions)}")
-    evaluator = _Evaluator(inputs, config)
+    evaluator = RankEvaluator(inputs, config)
     rows: list[TradeRow] = []
     excluded: list[Exclusion] = []
     considered = len(inputs.random_yield_spells) + len(inputs.no_output_spells)
@@ -862,7 +863,7 @@ class LoadedInputs:
     names: Mapping[int, str]  # display only
 
 
-def _latest_sweep(
+def latest_sweep(
     conn: Any, house_key: str, client_build: str | None, as_of: datetime | None
 ) -> tuple[int, float, str]:
     row = conn.execute(
@@ -879,7 +880,9 @@ def _latest_sweep(
         (house_key, client_build, client_build, as_of, as_of),
     ).fetchone()
     if row is None:
-        raise RuntimeError(f"no market sweep for house {house_key!r} build {client_build!r} as of {as_of}")
+        raise MarketDataNotFound(
+            f"no market sweep for house {house_key!r} build {client_build!r} as of {as_of}"
+        )
     return int(row[0]), float(row[1]), str(row[2])
 
 
@@ -985,7 +988,7 @@ def _excluded_spells(
     return tuple(random_yield), tuple(no_output), attribution
 
 
-def _names(conn: Any, client_build: str, item_ids: Sequence[int]) -> dict[int, str]:
+def item_names(conn: Any, client_build: str, item_ids: Sequence[int]) -> dict[int, str]:
     rows = conn.execute(
         """
         SELECT i.item_id, i.name
@@ -1010,7 +1013,7 @@ def load_rank_inputs(
     """Read everything ``evaluate_trades`` needs for one house and build (read-only)."""
 
     house = House.parse(house_key)
-    sweep_id, finished_t, build = _latest_sweep(conn, house_key, client_build, as_of)
+    sweep_id, finished_t, build = latest_sweep(conn, house_key, client_build, as_of)
     facts = load_facts(conn, house_key, build)  # raises when there is no export for the build
     recipes = tuple(
         recipe for recipe in load_recipes(conn, house_key, build) if recipe.professions & config.professions
@@ -1040,7 +1043,7 @@ def load_rank_inputs(
             )
         }
     )
-    names = _names(conn, build, display_ids)
+    names = item_names(conn, build, display_ids)
     output_ids = sorted({item_id for recipe in recipes for item_id, _ in recipe.outputs})
     reagent_ids = sorted({item_id for recipe in recipes for item_id, _ in recipe.reagents})
     observed_kinds = _observed_kinds(conn, house_key, build, sorted({*output_ids, *reagent_ids}))
@@ -1085,7 +1088,7 @@ def load_rank_inputs(
 # -- presentation ----------------------------------------------------------------------
 
 
-def _gold(copper: Fraction | int | None) -> str:
+def gold(copper: Fraction | int | None) -> str:
     """Compact g/s/c rendering; fractions of a copper are rounded for display only."""
 
     if copper is None:
@@ -1112,13 +1115,13 @@ def format_table(
         payback = "-" if row.payback_crafts is None else f"{float(row.payback_crafts):.1f}"
         recipe = row.recipe_price_state or "-"
         if row.recipe_price is not None:
-            recipe = _gold(row.recipe_price)
+            recipe = gold(row.recipe_price)
         lines.append(
-            f"{row.spell_id:>7} {row.kind[:4]:<4} {label[:38]:<38} {_gold(row.reagent_cost_per_craft):>9} "
-            f"{_gold(row.margin_per_craft):>9} {row.sale_probability:>7.2f} "
+            f"{row.spell_id:>7} {row.kind[:4]:<4} {label[:38]:<38} {gold(row.reagent_cost_per_craft):>9} "
+            f"{gold(row.margin_per_craft):>9} {row.sale_probability:>7.2f} "
             f"{f'{row.sold_starts}/{row.independent_starts}':>8}{'*' if row.target_above_lowest else ' '}"
-            f"{float(row.market_units_per_hour):>8.2f} {_gold(row.profit_per_hour):>10} "
-            f"{_gold(row.capital_per_batch):>10} {(row.status or '-'):<20} {recipe:>10} {payback:>8}"
+            f"{float(row.market_units_per_hour):>8.2f} {gold(row.profit_per_hour):>10} "
+            f"{gold(row.capital_per_batch):>10} {(row.status or '-'):<20} {recipe:>10} {payback:>8}"
         )
     counts = evaluation.exclusion_counts()
     lines.append(

@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
 
-from crowley.analysis.metrics import FAIR_WINDOW_SECONDS, _percentile
+from crowley.analysis.metrics import FAIR_WINDOW_SECONDS, percentile
 from crowley.core.volume import MAX_INTERVAL_SECONDS, compare_observations_detailed
 
 
@@ -186,8 +186,8 @@ def item_fair(
     if len(refs) < min_books:
         return {"value": None, "band": {"p25": None, "p75": None}, "n": len(refs)}
     return {
-        "value": _percentile(refs, Fraction(1, 2)),
-        "band": {"p25": _percentile(refs, Fraction(1, 4)), "p75": _percentile(refs, Fraction(3, 4))},
+        "value": percentile(refs, Fraction(1, 2)),
+        "band": {"p25": percentile(refs, Fraction(1, 4)), "p75": percentile(refs, Fraction(3, 4))},
         "n": len(refs),
     }
 

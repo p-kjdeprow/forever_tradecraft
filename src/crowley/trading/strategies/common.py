@@ -13,6 +13,8 @@ from crowley.trading.numbers import FractionInput, as_fraction
 
 SECONDS_PER_HOUR = 3_600
 MIN_DEMAND_ELIGIBLE_SECONDS = 6 * SECONDS_PER_HOUR
+MIN_FAIR_N = 16
+MAX_BAND_WIDTH = Fraction(35, 100)
 
 
 def floor_fraction(value: FractionInput) -> int:
@@ -35,8 +37,8 @@ def fraction_parameter(params: Mapping[str, object], name: str) -> Fraction:
 def trustworthy_fair(
     snapshot: ItemSnapshot,
     *,
-    min_fair_n: int = 16,
-    max_band_width: FractionInput = 0.35,
+    min_fair_n: int = MIN_FAIR_N,
+    max_band_width: FractionInput = MAX_BAND_WIDTH,
     min_demand_eligible_seconds: float = MIN_DEMAND_ELIGIBLE_SECONDS,
 ) -> bool:
     """Return whether the snapshot has enough history for a price decision."""
@@ -244,7 +246,9 @@ def output_value(
 
 
 __all__ = [
+    "MAX_BAND_WIDTH",
     "MIN_DEMAND_ELIGIBLE_SECONDS",
+    "MIN_FAIR_N",
     "SECONDS_PER_HOUR",
     "as_fraction",
     "capacity_limit",

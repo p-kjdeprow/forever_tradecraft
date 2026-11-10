@@ -1,15 +1,17 @@
 """Raw materials: what gatherable trade goods sell for and how much value flows through them.
 
 Population: the active ``trade_goods`` items of the scan plan whose catalog tags mark them as
-gatherable (``state.GATHERABLE_TAGS``: herbs, leather and hides, cloth, ore and bars, stone, ...).
+gatherable (``state.GATHERABLE_TAGS``: herbs, leather and hides, cloth, ore, stone, fish, ...; bars are
+smelted, not gathered, so they are not in it).
 For each one the pathway is "gather it, list it at 1c under the current lowest listing":
 
 * profit per unit is that price net of the AH cut and the deposit (a stack of up to 20), with no
   material cost; the character's time is the real cost and is not priced.
 * volume is the observed bottom-walk units/h; ``value_per_hour_flowing`` (units/h at the current
-  lowest price) is the whole market's money flow through the item, the number that says how much
-  farming it can absorb.  Profit per hour takes the configured share of the flow.
-* P(sale) is not measured, so confidence rests on the number of usable demand intervals.
+  lowest price) is the whole market's money flow through the item.  It is market capacity, not the
+  character's income: it says how much farming the item can absorb.  The pathway sits in the
+  ``farming`` section, ordered by it, and has no per-hour profit.
+* P(sale) is not measured, so confidence is at most "low" (the common rule).
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from __future__ import annotations
 from fractions import Fraction
 
 from crowley.advisor.evaluators.base import Collector, Context
-from crowley.advisor.model import Evidence, Pathway, Step, StrategyResult, combined_confidence
+from crowley.advisor.model import Evidence, Pathway, Step, StrategyResult, pathway_confidence
 from crowley.trading.fees import deposit
 
 STACK = 20
@@ -54,28 +56,38 @@ class RawMaterialsEvaluator:
                 continue
             quantity = min(STACK, fact.max_stack)
             price = est.lowest - 1
-            deposit_total = deposit(fact.sell_price, quantity, 12, state.rules)
+            deposit_total = deposit(fact.sell_price, quantity, config.listing_hours, state.rules)
             per_unit = price * (1 - state.rules.seller_cut) - Fraction(deposit_total, quantity)
             demand = Evidence("demand_intervals", est.demand_intervals, detail="usable book intervals")
             out.keep(
                 Pathway(
                     strategy=self.name,
+                    section="farming",
                     key=key,
                     title=f"farm {state.name(item_id)} ({'/'.join(state.gatherable[item_id])})",
                     steps=(
                         Step("gather", item_id=item_id, quantity=quantity, note="farm it"),
-                        Step("list_ah", item_id=item_id, quantity=quantity, price=price, note="12 h listing"),
+                        Step(
+                            "list_ah",
+                            item_id=item_id,
+                            quantity=quantity,
+                            price=price,
+                            note=f"{config.listing_hours} h listing",
+                        ),
                     ),
                     profit_per_unit=per_unit,
                     profit_per_craft=None,
                     volume_per_hour=est.units_per_hour,
                     sale_probability=None,
+                    fill_rate=None,
                     evidence=None,
                     demand_evidence=demand,
                     listed_units=est.listed_units,
                     capital=Fraction(deposit_total),
-                    profit_per_hour=config.share * est.units_per_hour * per_unit,
-                    confidence=combined_confidence(demand, cap="medium"),
+                    profit_per_hour=None,
+                    one_off_profit=None,
+                    sort_value=est.units_per_hour * est.lowest,
+                    confidence=pathway_confidence(None, demand),
                     details={
                         "current_lowest": est.lowest,
                         "fair": est.fair,

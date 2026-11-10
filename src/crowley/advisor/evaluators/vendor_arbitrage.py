@@ -3,8 +3,8 @@
 * ``sell``: listings priced below the item's vendor sell price.  Buy them, vendor-sell them.  This is
   ``VendorArbStrategy``'s rule (a level strictly below the vendor price is a buy); a vendor sale
   carries no AH cut, so the margin is ``sell_price - unit_price``.  The units listed now are a
-  one-off; the rate is the history's arrival of such listings (new groups below the vendor price,
-  summed over valid intervals), taken at the configured share.
+  one-off (section ``one_off``, no per-hour figure); the history's arrival rate of such listings
+  (new groups below the vendor price, summed over valid intervals) is shown as its volume.
 * ``buy``: items a vendor sells (client facts: bundle size and price) that list on the AH above the
   vendor price.  Buy bundles, list 1c under the lowest listing; the AH cut and the deposit come off,
   and the rate is the observed bottom-walk units/h at the configured share.
@@ -16,12 +16,10 @@ from fractions import Fraction
 from math import floor
 
 from crowley.advisor.evaluators.base import Collector, Context
-from crowley.advisor.model import Evidence, Pathway, Step, StrategyResult, combined_confidence
+from crowley.advisor.model import Evidence, Pathway, Step, StrategyResult, pathway_confidence
 from crowley.analysis.books import MAX_GAP, Book
 from crowley.trading.fees import deposit
-
-SECONDS_PER_HOUR = 3600
-LIST_HOURS = 12
+from crowley.trading.strategies.common import SECONDS_PER_HOUR
 
 
 def arrivals_below(books: list[Book], limit: int, first_t: float) -> tuple[int, int, float]:
@@ -87,6 +85,7 @@ class VendorArbitrageEvaluator:
             out.keep(
                 Pathway(
                     strategy=self.name,
+                    section="one_off",
                     key=key,
                     title=f"buy {state.name(item_id)} below vendor price, vendor-sell",
                     steps=(
@@ -97,12 +96,15 @@ class VendorArbitrageEvaluator:
                     profit_per_craft=None,
                     volume_per_hour=rate,
                     sale_probability=None,
+                    fill_rate=None,
                     evidence=None,
                     demand_evidence=evidence,
                     listed_units=quantity,
                     capital=cost,
-                    profit_per_hour=config.share * rate * per_unit,
-                    confidence=combined_confidence(evidence, cap="medium"),
+                    profit_per_hour=None,
+                    one_off_profit=per_unit * quantity,
+                    sort_value=per_unit * quantity,
+                    confidence=pathway_confidence(None, evidence),
                     details={
                         "direction": "ah_to_vendor",
                         "vendor_sell_price": fact.sell_price,
@@ -132,7 +134,8 @@ class VendorArbitrageEvaluator:
                     key, "no_observed_demand", f"{est.covered_hours:.1f} h covered, no bottom-walk demand"
                 )
                 continue
-            assert fact.vendor_bundle_size is not None and fact.vendor_bundle_price is not None
+            if fact.vendor_bundle_size is None or fact.vendor_bundle_price is None:
+                raise RuntimeError(f"vendor supply {item_id} has no bundle size or price")
             unit_cost = Fraction(fact.vendor_bundle_price, fact.vendor_bundle_size)
             price = est.lowest - 1
             quantity = max(
@@ -141,7 +144,7 @@ class VendorArbitrageEvaluator:
                     config.share * est.units_per_hour * Fraction(config.horizon_hours).limit_denominator(1000)
                 ),
             )
-            deposit_total = deposit(fact.sell_price, quantity, LIST_HOURS, state.rules)
+            deposit_total = deposit(fact.sell_price, quantity, config.listing_hours, state.rules)
             per_unit = price * (1 - state.rules.seller_cut) - Fraction(deposit_total, quantity) - unit_cost
             if per_unit <= 0:
                 out.exclude(key, "non_positive_profit", f"vendor {float(unit_cost):.0f}c vs AH net {price}c")
@@ -150,6 +153,7 @@ class VendorArbitrageEvaluator:
             out.keep(
                 Pathway(
                     strategy=self.name,
+                    section="unmeasured",
                     key=key,
                     title=f"buy {state.name(item_id)} from vendor, list on the AH",
                     steps=(
@@ -165,19 +169,22 @@ class VendorArbitrageEvaluator:
                             item_id=item_id,
                             quantity=quantity,
                             price=price,
-                            note=f"{LIST_HOURS} h listing",
+                            note=f"{config.listing_hours} h listing",
                         ),
                     ),
                     profit_per_unit=per_unit,
                     profit_per_craft=None,
                     volume_per_hour=est.units_per_hour,
                     sale_probability=None,
+                    fill_rate=None,
                     evidence=None,
                     demand_evidence=demand,
                     listed_units=est.listed_units,
                     capital=unit_cost * quantity + deposit_total,
                     profit_per_hour=config.share * est.units_per_hour * per_unit,
-                    confidence=combined_confidence(demand, cap="medium"),
+                    one_off_profit=None,
+                    sort_value=config.share * est.units_per_hour * per_unit,
+                    confidence=pathway_confidence(None, demand),
                     details={
                         "direction": "vendor_to_ah",
                         "vendor_unit_cost": unit_cost,

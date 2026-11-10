@@ -66,20 +66,20 @@ from crowley.analysis.item_books import (
     item_intervals,
     load_item_books,
 )
-from crowley.analysis.metrics import _percentile
+from crowley.analysis.metrics import percentile
 from crowley.analysis.rank import (
     SECONDS_PER_HOUR,
     Evaluation,
     LoadedInputs,
     RankConfig,
+    RankEvaluator,
     RankInputs,
-    _Evaluator,
     _Excluded,
-    _gold,
     _Timed,
     _window,
     batch_net_revenue,
     evaluate_trades,
+    gold,
     item_levels_snapshot,
     levels_snapshot,
     load_rank_inputs,
@@ -283,7 +283,7 @@ class _Evidence:
         self.inputs = inputs
         self.config = config
         self.fair_seconds = fair_lookback_hours * SECONDS_PER_HOUR
-        self.rank = _Evaluator(inputs, config)
+        self.rank = RankEvaluator(inputs, config)
         self._item: dict[int, tuple[list[ItemBook], str | None]] = {}
 
     def _history[B: _Timed](self, books: Sequence[B]) -> list[B]:
@@ -319,7 +319,7 @@ class _Evidence:
         refs = [ref for t, ref in points if at - self.fair_seconds <= t < at and ref is not None]
         if len(refs) < self.config.min_fair_books:
             return None, len(refs)
-        return _percentile(refs, Fraction(1, 2)), len(refs)
+        return percentile(refs, Fraction(1, 2)), len(refs)
 
     def output(self, item_id: int, quantity: int) -> OutputStats:
         kind = self.kind(item_id)
@@ -661,7 +661,7 @@ def load_candidate_inputs(
 
 
 def _price(value: Fraction | int | None) -> str:
-    return "-" if value is None else _gold(value)
+    return "-" if value is None else gold(value)
 
 
 def format_candidates(report: CandidateReport, names: Mapping[int, str], limit: int | None = None) -> str:
@@ -687,7 +687,7 @@ def format_candidates(report: CandidateReport, names: Mapping[int, str], limit: 
             f"{f'{out.observations_with_listings}/{out.observations}':>7} "
             f"{_price(out.lowest_min):>9} {_price(out.lowest_median):>9} {_price(out.lowest_max):>9} "
             f"{supply:>7} {sellers:>4} {row.depletion_units:>6} "
-            f"{_gold(row.reagent_cost_per_craft):>9} {_price(row.margin_per_craft):>9} "
+            f"{gold(row.reagent_cost_per_craft):>9} {_price(row.margin_per_craft):>9} "
             f"{_price(row.margin_at_median):>9} {out.latest_age_hours:>5.1f} {reagent_age:>5} "
             f"{(row.status or '-'):<18}"
         )

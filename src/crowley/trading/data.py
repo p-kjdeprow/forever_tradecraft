@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any, NamedTuple
 
 from crowley.analysis.books import load_commodity_books
+from crowley.core.errors import MarketDataNotFound
 from crowley.core.watchlist import Catalog, load_catalog
 
 from .api import ItemFacts, Recipe, RecipeAcquisition, SkillRequirement, TeachingRequirement
@@ -142,7 +143,7 @@ def _latest_export(conn: Any, client_build: str) -> tuple[int, str]:
         (client_build,),
     ).fetchone()
     if row is None:
-        raise RuntimeError(f"no latest client export for client build {client_build!r}")
+        raise MarketDataNotFound(f"no latest client export for client build {client_build!r}")
     parsed = _ExportRow(*row)
     return parsed.id, str(parsed.client_build)
 

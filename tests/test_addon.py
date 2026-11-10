@@ -2313,7 +2313,7 @@ def test_representative_full_watchlist_payload_size_is_measured():
         ]
     )
     # A one-second response cadence keeps the real rolling 100/60s transport
-    # window active while allowing all 427 initial queries to finish within the
+    # window active while allowing all 481 initial queries to finish within the
     # 600-second sweep budget.
     client.set_event_behavior(delay=1)
     client.fire("AUCTION_HOUSE_SHOW")
@@ -2325,8 +2325,8 @@ def test_representative_full_watchlist_payload_size_is_measured():
         client.advance_with_timers(1)
     raw = next(iter(savedvars.loads(client.saved_variables())["CrowleyDB"]["scans"].values()))
     payload = decoded_payload(client)
-    assert raw["numObservations"] == 427
-    assert raw["numRows"] == 427
+    assert raw["numObservations"] == 481
+    assert raw["numRows"] == 481
     assert all(observation["coverage"] == "full" for observation in payload["observations"].values())
     # This is a measured representative fixture, not a wire-size promise.  Keep a
     # generous budget so a harmless encoder change cannot turn the test brittle.
@@ -4239,7 +4239,7 @@ def test_canonical_gate_accepts_shipped_plan_and_rejects_short_plan_before_start
     client.set_canonical_plan()
     assert client.publish_agent()["plan"] == {
         "hash": load_catalog().scan_plan()["planHash"],
-        "count": 427,
+        "count": 481,
         "cadenceSeconds": 900,
         "sweepCapSeconds": 600,
         "initialPriceLevels": 20,

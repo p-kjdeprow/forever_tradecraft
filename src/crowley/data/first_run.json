@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "id": "first-run",
-  "revision": 3,
+  "revision": 4,
   "client_build": "1.60.1.70862",
-  "reviewed_on": "2026-11-09",
+  "reviewed_on": "2026-11-10",
   "initial_price_levels": 20,
   "items": [
     {
@@ -1027,6 +1027,78 @@
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 2456,
+      "name": "Minor Rejuvenation Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/2456",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 2457,
+      "name": "Elixir of Minor Agility",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/2457",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 2458,
+      "name": "Elixir of Minor Fortitude",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/2458",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -2143,6 +2215,30 @@
       ]
     },
     {
+      "item_id": 3382,
+      "name": "Minor Troll's Blood Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3382",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 3383,
       "name": "Elixir of Wisdom",
       "category": "consumables",
@@ -2169,6 +2265,30 @@
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+      ]
+    },
+    {
+      "item_id": 3384,
+      "name": "Minor Magic Resistance Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3384",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -2202,6 +2322,30 @@
       ]
     },
     {
+      "item_id": 3386,
+      "name": "Potion of Poison Cleansing",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3386",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 3387,
       "name": "Limited Invulnerability Potion",
       "category": "consumables",
@@ -2222,6 +2366,78 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/3387",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 3388,
+      "name": "Lesser Troll's Blood Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3388",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 3389,
+      "name": "Elixir of Lesser Defense",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3389",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 3390,
+      "name": "Elixir of Lesser Agility",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3390",
         "https://bindonforever.com/professions/alchemy"
       ]
     },
@@ -2799,6 +3015,30 @@
       ]
     },
     {
+      "item_id": 3826,
+      "name": "Troll's Blood Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3826",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 3827,
       "name": "Mana Potion",
       "category": "consumables",
@@ -2826,6 +3066,54 @@
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 3828,
+      "name": "Draught of Detect Lesser Invisibility",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3828",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 3829,
+      "name": "Frost Oil",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/3829",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -4857,6 +5145,54 @@
       ]
     },
     {
+      "item_id": 5631,
+      "name": "Rage Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/5631",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 5633,
+      "name": "Great Rage Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/5633",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 5634,
       "name": "Free Action Potion",
       "category": "consumables",
@@ -5397,6 +5733,30 @@
       ]
     },
     {
+      "item_id": 6051,
+      "name": "Holy Protection Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6051",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 6052,
       "name": "Nature Protection Potion",
       "category": "consumables",
@@ -5891,6 +6251,30 @@
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+      ]
+    },
+    {
+      "item_id": 6372,
+      "name": "Swim Speed Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6372",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -7642,6 +8026,30 @@
       ]
     },
     {
+      "item_id": 8827,
+      "name": "Draught of Water Walking",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/8827",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 8831,
       "name": "Purple Lotus",
       "category": "trade_goods",
@@ -7845,6 +8253,30 @@
       ]
     },
     {
+      "item_id": 8949,
+      "name": "Elixir of Agility",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/8949",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 8951,
       "name": "Elixir of Defense",
       "category": "consumables",
@@ -7869,6 +8301,78 @@
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/leatherworking",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+      ]
+    },
+    {
+      "item_id": 8956,
+      "name": "Oil of Immolation",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/8956",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 9030,
+      "name": "Restorative Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/9030",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 9036,
+      "name": "Magic Resistance Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/9036",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -7897,6 +8401,30 @@
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/cooking",
         "https://bindonforever.com/professions/engineering"
+      ]
+    },
+    {
+      "item_id": 9144,
+      "name": "Wildvine Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/9144",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -8529,6 +9057,30 @@
         "https://bindonforever.com/item/10561",
         "https://bindonforever.com/professions/engineering",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+      ]
+    },
+    {
+      "item_id": 10592,
+      "name": "Catseye Draught",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/10592",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -12492,6 +13044,30 @@
       ]
     },
     {
+      "item_id": 17708,
+      "name": "Elixir of Frost Power",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/17708",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 18160,
       "name": "Recipe: Thistle Tea",
       "category": "recipes",
@@ -13597,6 +14173,30 @@
       ]
     },
     {
+      "item_id": 210708,
+      "name": "Elixir of Coalesced Regret",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/210708",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 213369,
       "name": "Faintly Glowing Leather",
       "category": "trade_goods",
@@ -13666,6 +14266,30 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/215430",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 217398,
+      "name": "Lesser Arcane Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/217398",
         "https://bindonforever.com/professions/alchemy"
       ]
     },
@@ -13837,6 +14461,54 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/247242",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 247754,
+      "name": "Minor Arcane Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/247754",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 247755,
+      "name": "Elixir of Minor Force",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/247755",
         "https://bindonforever.com/professions/alchemy"
       ]
     },
@@ -14398,6 +15070,270 @@
       ]
     },
     {
+      "item_id": 250327,
+      "name": "Potion of Predatory Senses",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250327",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250330,
+      "name": "Minor Cleric's Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250330",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250331,
+      "name": "Lesser Cleric's Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250331",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250332,
+      "name": "Cleric's Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250332",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250333,
+      "name": "Greater Cleric's Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250333",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250334,
+      "name": "Elixir of Fortitude",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250334",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250335,
+      "name": "Elixir of Greater Fortitude",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250335",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250339,
+      "name": "Minor Mageblood Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250339",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250340,
+      "name": "Lesser Mageblood Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250340",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250341,
+      "name": "Greater Mageblood Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250341",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250342,
+      "name": "Lesser Arcane Elixir",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250342",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 250344,
       "name": "Elixir of Minor Spirit",
       "category": "consumables",
@@ -14423,6 +15359,30 @@
       ]
     },
     {
+      "item_id": 250345,
+      "name": "Elixir of Lesser Spirit",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250345",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 250346,
       "name": "Elixir of Spirit",
       "category": "consumables",
@@ -14445,6 +15405,102 @@
         "https://bindonforever.com/item/250346",
         "https://bindonforever.com/professions/alchemy",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+      ]
+    },
+    {
+      "item_id": 250347,
+      "name": "Elixir of Greater Spirit",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250347",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250349,
+      "name": "Elixir of Strength",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250349",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250353,
+      "name": "Elixir of Lesser Intellect",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250353",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250354,
+      "name": "Elixir of Intellect",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250354",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -14500,6 +15556,30 @@
       ]
     },
     {
+      "item_id": 250932,
+      "name": "Minor Spellblasting Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250932",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 250933,
       "name": "Lesser Spellblasting Potion",
       "category": "consumables",
@@ -14522,6 +15602,54 @@
         "https://bindonforever.com/item/250933",
         "https://bindonforever.com/professions/alchemy",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+      ]
+    },
+    {
+      "item_id": 250934,
+      "name": "Spellblasting Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250934",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250935,
+      "name": "Greater Spellblasting Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250935",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -14575,6 +15703,78 @@
       ]
     },
     {
+      "item_id": 250940,
+      "name": "Frenzy Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250940",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250941,
+      "name": "Greater Frenzy Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250941",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250944,
+      "name": "Minor Mender's Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250944",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
       "item_id": 250945,
       "name": "Lesser Mender's Potion",
       "category": "consumables",
@@ -14597,6 +15797,54 @@
         "https://bindonforever.com/item/250945",
         "https://bindonforever.com/professions/alchemy",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+      ]
+    },
+    {
+      "item_id": 250946,
+      "name": "Mender's Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250946",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 250947,
+      "name": "Greater Mender's Potion",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/250947",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {
@@ -15923,6 +17171,54 @@
         "https://bindonforever.com/item/279950",
         "https://bindonforever.com/professions/engineering",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+      ]
+    },
+    {
+      "item_id": 279956,
+      "name": "Mana Well",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/279956",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 279970,
+      "name": "Fermenter",
+      "category": "consumables",
+      "tags": [
+        "potion"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe input-to-output margins and repeat-use demand for a selected consumable; turnover is not yet measured. Added in revision 4 to focus the scan on Alchemy markets (client build 1.60.1.70862 export).",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/279970",
+        "https://bindonforever.com/professions/alchemy"
       ]
     },
     {

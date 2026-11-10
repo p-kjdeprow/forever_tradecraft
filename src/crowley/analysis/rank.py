@@ -443,6 +443,16 @@ def _independent_estimate(determined: Sequence[tuple[float, bool]], horizon: flo
     return SaleEstimate(sold / independent if independent else 0.0, len(determined), independent, sold)
 
 
+def batch_net_revenue(
+    facts: ItemFacts, rules: AuctionHouseRules, quantity: int, unit_price: Fraction | int, duration_hours: int
+) -> tuple[Fraction, int]:
+    """Net proceeds of listing ``quantity`` units at ``unit_price`` (after the AH cut and the
+    deposit, charged in full) and the deposit itself.  The one revenue formula of the rank views."""
+
+    batch_deposit = deposit(facts.sell_price, quantity, duration_hours, rules)
+    return quantity * unit_price * (1 - rules.seller_cut) - batch_deposit, batch_deposit
+
+
 class _Evaluator:
     def __init__(self, inputs: RankInputs, config: RankConfig) -> None:
         self.inputs = inputs
@@ -702,10 +712,10 @@ class _Evaluator:
             target = output_target_price(snapshot, config.pricing)
             targets[item_id] = target
             quantity = outputs[item_id] * batch
-            batch_deposit = deposit(
-                self.inputs.facts[item_id].sell_price, quantity, config.listing_duration_hours, rules
+            net, batch_deposit = batch_net_revenue(
+                self.inputs.facts[item_id], rules, quantity, target, config.listing_duration_hours
             )
-            revenue += quantity * target * (1 - rules.seller_cut) - batch_deposit
+            revenue += net
             deposits += batch_deposit
             estimate = self.sale_estimate(item_id, quantity)
             if estimate.independent_starts < config.min_independent_starts:
@@ -1164,6 +1174,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--all", action="store_true", help="keep rows below the sale-probability threshold")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--candidates",
+        action="store_true",
+        help="cold-tier promotion candidates (analysis/candidates.py) instead of the ranking",
+    )
+    parser.add_argument(
+        "--min-observations",
+        type=int,
+        help="with --candidates: observations a recipe's outputs need to be flagged (default 4)",
+    )
     return parser
 
 
@@ -1200,6 +1220,15 @@ def main(argv: list[str] | None = None) -> int:
         as_of = None if args.as_of is None else parse_as_of(args.as_of)
     except ValueError as exc:
         parser.error(str(exc))
+    if args.min_observations is not None and not args.candidates:
+        parser.error("--min-observations requires --candidates")
+    if args.candidates:
+        from crowley.analysis.candidates import DEFAULT_MIN_OBSERVATIONS, run
+
+        minimum = DEFAULT_MIN_OBSERVATIONS if args.min_observations is None else args.min_observations
+        if minimum < 1:
+            parser.error("--min-observations must be at least 1")
+        return run(args, config, as_of, minimum)
     url = args.database_url or os.environ.get("CROWLEY_DATABASE_URL")
     if not url:
         parser.error("--database-url or CROWLEY_DATABASE_URL is required")
@@ -1252,6 +1281,7 @@ __all__ = [
     "LoadedInputs",
     "RankConfig",
     "RankInputs",
+    "batch_net_revenue",
     "TradeRow",
     "build_parser",
     "evaluate_trades",

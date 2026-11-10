@@ -255,6 +255,7 @@ def compare_observations_detailed(
     *,
     item_key: str | None = None,
     raw_identity: dict[str, Any] | None = None,
+    max_interval_seconds: int = MAX_INTERVAL_SECONDS,
 ) -> dict[str, Any]:
     """``compare_observations`` plus, for item intervals, ``removedClasses`` (resultID to
     disappearance class) and ``inconsistentResultIds``.  For in-process analysis only."""
@@ -326,7 +327,7 @@ def compare_observations_detailed(
     # This 1800 s end-to-start check applies to every kind. For commodities the
     # shared 1260 s start-to-start rule (analysis.books.MAX_GAP, enforced below)
     # is the binding one.
-    if expiry_gap > MAX_INTERVAL_SECONDS:
+    if expiry_gap > max_interval_seconds:
         exclusions.append("interval_too_long")
     ceiling, coverage_error = _common_ceiling(left, right)
     if coverage_error:

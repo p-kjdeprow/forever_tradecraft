@@ -58,6 +58,14 @@ records which slice a sweep took). The consecutive-observation interval rule abo
 observations of a cold item at the 900 s cadence: cold-item intervals are about N times longer than the
 1,260 s limit, so they yield no valid intervals and cold items are priced, not time-to-sale modelled.
 
+`python -m crowley.analysis rank --candidates` (`analysis/candidates.py`) is the cold-tier promotion view: recipes
+with a cold output or reagent, plus recipes rank excluded for sale evidence or fair trust, priced at each item's latest
+*attempted* observation in the lookback, with observation counts, lowest-price spread, supply and a depletion figure
+between consecutive observations of any gap length. That figure is an upper bound on sales (cancels and expiries look
+the same over long gaps). Unqueried and incomplete entries of aborted sweeps are not observations; an attempted item
+with no listings is an empty observation. Recipes are flagged when the margin at the median lowest price is positive,
+there are at least `--min-observations` (4) observations and listings in at least half of them.
+
 ## Metrics
 
 `crowley.analysis.metrics` computes pre-model metrics for each commodity item in

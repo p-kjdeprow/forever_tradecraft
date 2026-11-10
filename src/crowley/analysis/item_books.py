@@ -37,7 +37,7 @@ from fractions import Fraction
 from typing import Any
 
 from crowley.analysis.metrics import FAIR_WINDOW_SECONDS, _percentile
-from crowley.core.volume import compare_observations_detailed
+from crowley.core.volume import MAX_INTERVAL_SECONDS, compare_observations_detailed
 
 
 @dataclass(frozen=True)
@@ -87,12 +87,21 @@ def floor_price(book: ItemBook, item_key: str | None) -> Fraction | None:
     return min(prices) if prices else None
 
 
-def item_intervals(books: Sequence[ItemBook], item_key: str | None) -> list[ItemInterval | None]:
-    """One slot per adjacent pair; ``None`` where ``core.volume`` finds no usable evidence."""
+def item_intervals(
+    books: Sequence[ItemBook], item_key: str | None, *, max_interval_seconds: int | None = None
+) -> list[ItemInterval | None]:
+    """One slot per adjacent pair; ``None`` where ``core.volume`` finds no usable evidence.
+
+    ``max_interval_seconds`` overrides ``core.volume``'s 1800 s limit; only the cold-tier
+    promotion view passes it, to read depletion across the long gaps between cold observations.
+    """
 
     result: list[ItemInterval | None] = []
+    limit = MAX_INTERVAL_SECONDS if max_interval_seconds is None else max_interval_seconds
     for left, right in zip(books, books[1:], strict=False):
-        comparison = compare_observations_detailed(left.record, right.record, item_key=item_key)
+        comparison = compare_observations_detailed(
+            left.record, right.record, item_key=item_key, max_interval_seconds=limit
+        )
         if not comparison["valid"] or comparison["groupedScope"]:
             result.append(None)
             continue

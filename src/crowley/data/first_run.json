@@ -226,6 +226,32 @@
       ]
     },
     {
+      "item_id": 814,
+      "name": "Flask of Oil",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "engineering",
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/814",
+        "https://bindonforever.com/professions/engineering",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 818,
       "name": "Tigerseye",
       "category": "trade_goods",
@@ -769,6 +795,32 @@
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+      ]
+    },
+    {
+      "item_id": 2324,
+      "name": "Bleach",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "leatherworking",
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/2324",
+        "https://bindonforever.com/professions/leatherworking",
+        "https://bindonforever.com/professions/tailoring"
       ]
     },
     {
@@ -1615,6 +1667,30 @@
         "https://bindonforever.com/item/2598",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+      ]
+    },
+    {
+      "item_id": 2604,
+      "name": "Red Dye",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/2604",
+        "https://bindonforever.com/professions/tailoring"
       ]
     },
     {
@@ -5068,6 +5144,56 @@
       ]
     },
     {
+      "item_id": 4340,
+      "name": "Gray Dye",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "leatherworking",
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/4340",
+        "https://bindonforever.com/professions/leatherworking",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 4341,
+      "name": "Yellow Dye",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/4341",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 4342,
       "name": "Purple Dye",
       "category": "trade_goods",
@@ -7676,6 +7802,58 @@
       "binding": "bind_on_equip",
       "source_urls": [
         "https://bindonforever.com/item/6243",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 6260,
+      "name": "Blue Dye",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "leatherworking",
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6260",
+        "https://bindonforever.com/professions/leatherworking",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
+      "item_id": 6261,
+      "name": "Orange Dye",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "leatherworking",
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/6261",
+        "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring"
       ]
     },
@@ -12735,6 +12913,30 @@
       ]
     },
     {
+      "item_id": 10290,
+      "name": "Pink Dye",
+      "category": "trade_goods",
+      "tags": [
+        "recipe-dependency"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "input"
+      ],
+      "status": "excluded",
+      "pool": "core",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
+      "evidence": "client_data",
+      "auction_eligibility": "unverified",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/10290",
+        "https://bindonforever.com/professions/tailoring"
+      ]
+    },
+    {
       "item_id": 10498,
       "name": "Gyromatic Micro-Adjustor",
       "category": "components",
@@ -16663,9 +16865,9 @@
       "roles": [
         "input"
       ],
-      "status": "active",
+      "status": "excluded",
       "pool": "core",
-      "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
+      "reason": "The reference route explicitly buys this supply from a vendor; keep its vendor cost in recipe costing instead of the initial auction watchlist.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",

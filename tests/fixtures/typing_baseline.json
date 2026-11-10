@@ -5,11 +5,10 @@
     "core": 0,
     "data": 0,
     "gui": 0,
-    "native": 5,
+    "native": 0,
     "ops": 4,
     "scan": 0,
     "server": 0,
-    "session": 453,
     "store": 0,
     "trading": 0
   },

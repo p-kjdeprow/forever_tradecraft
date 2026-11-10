@@ -57,17 +57,6 @@ def _pin_fixture_target() -> None:
     game_target.packaged_game_target = _fixture_target
     watchlist.load_catalog = _fixture_load_catalog
 
-    from crowley.session import source_binding
-
-    real_read_resource = source_binding._read_resource
-
-    def fixture_read_resource(resource_name: str) -> bytes:
-        if resource_name == "targets/selected":
-            return b"verified-beta\n"
-        return real_read_resource(resource_name)
-
-    source_binding._read_resource = fixture_read_resource
-
 
 @pytest.fixture(scope="session")
 def packaged_selection_target() -> GameTarget:
@@ -87,9 +76,8 @@ def packaged_catalog() -> Catalog:
     return _REAL_LOAD_CATALOG(enforce_target=False)
 
 
-# These values are intentionally preserved: the DB URL controls the xdist guard,
-# and the toolchain path locates the pinned native build tool like XDG_CACHE_HOME.
-_PRESERVED_ENVIRONMENT = frozenset({"CROWLEY_TEST_DATABASE_URL", "CROWLEY_RUST_TOOLCHAIN"})
+# This value is intentionally preserved: the DB URL controls the xdist guard.
+_PRESERVED_ENVIRONMENT = frozenset({"CROWLEY_TEST_DATABASE_URL"})
 _original_environment: dict[str, str] | None = None
 _temporary_roots: tuple[tempfile.TemporaryDirectory[str], tempfile.TemporaryDirectory[str]] | None = None
 _removed_environment_names: tuple[str, ...] = ()

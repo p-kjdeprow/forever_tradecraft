@@ -15,8 +15,7 @@ from crowley.core import savedvars
 from crowley.core.game_target import packaged_game_target
 from crowley.core.scanformat import ScanFormatError, validate_v2_envelope
 from crowley.core.watchlist import load_catalog
-from crowley.session.decoder import PixelDecoder
-from crowley.session.protocol import decode_frame
+from crowley.gui.frames import PixelDecoder, decode_frame
 
 from .wow_harness import Auction, WowClient
 

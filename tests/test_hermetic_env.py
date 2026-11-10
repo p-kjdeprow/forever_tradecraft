@@ -23,7 +23,4 @@ def test_companion_paths_use_private_xdg_roots() -> None:
     assert stat.S_IMODE(config_root.stat().st_mode) == 0o700
     assert stat.S_IMODE(state_root.stat().st_mode) == 0o700
     assert not resolved_config_path.is_relative_to(Path.home())
-    assert {name for name in os.environ if name.startswith("CROWLEY_")} <= {
-        "CROWLEY_TEST_DATABASE_URL",
-        "CROWLEY_RUST_TOOLCHAIN",
-    }
+    assert {name for name in os.environ if name.startswith("CROWLEY_")} <= {"CROWLEY_TEST_DATABASE_URL"}

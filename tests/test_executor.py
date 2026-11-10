@@ -7,7 +7,7 @@ from dataclasses import replace
 import pytest
 
 from crowley.core.game_target import packaged_game_target
-from crowley.session.protocol import decode_frame
+from crowley.gui.frames import decode_frame
 
 from .wow_harness import Auction, WowClient
 

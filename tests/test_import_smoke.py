@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import pkgutil
 import subprocess
 import sys
@@ -78,3 +79,17 @@ def test_console_script_help_exits_zero(script: str) -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout.strip()
+
+
+def test_session_stack_is_gone() -> None:
+    assert importlib.util.find_spec("crowley.session") is None
+    assert set(SCRIPTS) == {
+        "crowley-server",
+        "crowley-companion",
+        "crowley-watchlist",
+        "crowley-scan",
+        "crowley-ops",
+        "crowley-trading",
+        "crowley-paper-step",
+        "crowley-native",
+    }

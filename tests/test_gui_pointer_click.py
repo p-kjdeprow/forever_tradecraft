@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 
 from crowley.gui import click_gate
-from crowley.session import pointer_execution as pointer_exec
-from crowley.session.executor import BindingMetadata, Point, PointerButton, PointerTarget, Rect
+from crowley.gui import pointer as pointer_exec
+from crowley.gui.pointer import BindingMetadata, Point, PointerButton, PointerTarget, Rect
 
 
 def _binding() -> BindingMetadata:
@@ -21,7 +21,7 @@ def _target(rect: Rect | None = None) -> PointerTarget:
 
 
 def _reserve_then_wait(directory: str, ready: multiprocessing.connection.Connection) -> None:
-    with pointer_exec.acquire_click_rate_permit() as permit:
+    with click_gate.acquire_click_rate_permit() as permit:
         permit.precommit()
         ready.send("GO_BOUNDARY_REACHED")
         time.sleep(30)
@@ -78,7 +78,7 @@ def test_failed_durable_precommit_refuses_before_click_go(tmp_path: Path, monkey
     state_dir = tmp_path / "runtime"
     state_dir.mkdir(mode=0o700)
     monkeypatch.setattr("crowley.gui.click_gate._session_state_directory", lambda: state_dir)
-    permit = pointer_exec.acquire_click_rate_permit()
+    permit = click_gate.acquire_click_rate_permit()
     monkeypatch.setattr(
         "crowley.gui.click_gate._write_state",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(pointer_exec.PointerExecutionError("disk full")),
@@ -108,7 +108,7 @@ def test_deadline_after_durable_precommit_keeps_reservation_without_press(
             time.sleep(0.005)
 
     monkeypatch.setattr("crowley.gui.click_gate._write_state", slow_write_state)
-    permit = pointer_exec.acquire_click_rate_permit()
+    permit = click_gate.acquire_click_rate_permit()
     deadline = time.monotonic() + 0.25
     try:
         with pytest.raises(pointer_exec.PointerExecutionError, match="after durable precommit"):
@@ -141,7 +141,7 @@ def test_boot_identity_change_resets_only_the_old_monotonic_domain(tmp_path: Pat
         },
     )
     start = time.monotonic()
-    with pointer_exec.acquire_click_rate_permit() as permit:
+    with click_gate.acquire_click_rate_permit() as permit:
         assert permit.is_open
     assert time.monotonic() - start < 0.5
 
@@ -170,7 +170,7 @@ def test_process_death_after_go_boundary_preserves_spacing_for_next_owner(
         owner.join(timeout=3.0)
         assert not owner.is_alive()
         started = time.monotonic()
-        with pointer_exec.acquire_click_rate_permit() as next_owner:
+        with click_gate.acquire_click_rate_permit() as next_owner:
             assert next_owner.is_open
         assert time.monotonic() - started >= 0.95
     finally:

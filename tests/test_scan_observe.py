@@ -14,6 +14,7 @@ from crowley.core.companion_state import (
     dump_bytes,
 )
 from crowley.gui.capture import CaptureError
+from crowley.gui.frames import PLAN_COUNT
 from crowley.scan import observe
 from crowley.scan.policy import LoopState, Target
 from tests.support.scan_frames import render, snapshot
@@ -105,7 +106,7 @@ def make(
         disk=FakeDisk(),
         presence=presence or FakePresence(),
         target=TARGET,
-        contract=ProtocolContract(428, 900, 600, 20, ()),
+        contract=ProtocolContract(PLAN_COUNT, 900, 600, 20, ()),
         canvas_crop=(0, 0, 256, 256),
         clock=clock,
         monotonic=clock,

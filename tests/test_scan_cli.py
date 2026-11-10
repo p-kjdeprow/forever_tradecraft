@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from crowley.core.game_target import load_game_target
+from crowley.gui.frames import PLAN_COUNT
 from crowley.scan import cli, config, loop, observe, presence
 from tests.ops.test_install import _write_host
 
@@ -112,7 +113,7 @@ def loaded_config(root: Path) -> config.ScanConfig:
         saved_variables=root / "Crowley.lua",
         companion_state=root / "companion.json",
         data_lua=root / "Data.lua",
-        contract=ProtocolContract(428, 900, 600, 20, ()),
+        contract=ProtocolContract(PLAN_COUNT, 900, 600, 20, ()),
     )
 
 

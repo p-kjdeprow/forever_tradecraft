@@ -6,7 +6,7 @@ from typing import Any
 
 from PIL import Image
 
-from crowley.gui.frames import encode_frame, pack_cells
+from crowley.gui.frames import PLAN_COUNT, encode_frame, pack_cells
 
 
 def snapshot(sequence: int = 1) -> dict[str, Any]:
@@ -31,7 +31,7 @@ def snapshot(sequence: int = 1) -> dict[str, Any]:
         "house": {"key": "beta-normal-alliance", "source": "auto"},
         "plan": {
             "hash": "a" * 64,
-            "count": 428,
+            "count": PLAN_COUNT,
             "cadenceSeconds": 900,
             "sweepCapSeconds": 600,
             "initialPriceLevels": 20,
@@ -84,7 +84,7 @@ def snapshot(sequence: int = 1) -> dict[str, Any]:
             "startedAt": 0,
             "dueAt": 0,
             "ordinal": 0,
-            "planned": 428,
+            "planned": PLAN_COUNT,
             "cursorItemID": 0,
             "scheduleFence": {"state": "armed", "reason": "", "command": "/crowley session fence"},
         },

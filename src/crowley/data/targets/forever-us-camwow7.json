@@ -22,7 +22,7 @@
     "catalogId": "first-run",
     "catalogRevision": 3,
     "cadenceSeconds": 900,
-    "sweepCapSeconds": 600,
+    "sweepCapSeconds": 750,
     "initialPriceLevels": 20
   },
   "routeProvenance": "unmeasured on client build 70862"

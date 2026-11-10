@@ -112,7 +112,7 @@ enforced in strategy and execution; empty capabilities mean unavailable.
 ## Open follow-ups
 
 - **Tiered scanning** (proposed by the analysis session): a hot tier of about 350 items every sweep plus 1/N of a
-  rotating cold tier, so recipe outputs can be priced inside the 600 s sweep cap (the flat plan is limited to about
+  rotating cold tier, so recipe outputs can be priced inside the 750 s sweep cap (the flat plan is limited to about
   430 items at 1.0-1.31 s each). It needs an addon plan and server validation change, after the loop is stable.
   A gap-free cadence comes first: P(sale) evidence only counts books with gaps of 21 minutes or less.
 - **Addon trim (phase 3) deferred:** remove the movement, hover and unused executor snapshot fields from Agent

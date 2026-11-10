@@ -5,7 +5,7 @@
 - **No official data feed.** Blizzard's Game Data API has no Forever auction endpoint, so
   every price we have comes from our own in-game observations. Starts are 900 seconds apart
   while a character stands at an auctioneer; all 428 active watchlist IDs may not finish every sweep. Each item
-  has a 30-second query budget, each sweep has a 600-second budget, and the client permits at
+  has a 30-second query budget, each sweep has a 750-second budget (target `sweepCapSeconds`), and the client permits at
   most 100 throttled sends in any rolling 60 seconds.
 - **Addons cannot do I/O.** The only way out is SavedVariables, written on `/reload`,
   logout or exit. The only way in is an addon file loaded at login or `/reload`. The

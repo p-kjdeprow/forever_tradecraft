@@ -46,8 +46,10 @@ MAX_MARKER_BYTES = 128
 MAX_JOURNAL_BYTES = 128 * 1024
 # Hourly backup cadence plus a 15-minute completion grace period.
 BACKUP_MAX_AGE_SECONDS = 75 * 60
-UPLOAD_MAX_AGE_SECONDS = 30 * 60
-WAIT_DUE_GRACE_SECONDS = 4 * 60
+# Three 15-minute cadences.
+UPLOAD_MAX_AGE_SECONDS = 45 * 60
+# After a human hold ends the loop needs time to resume and complete a sweep.
+HOLD_GRACE_SECONDS = 25 * 60
 SERVICE_TIMEOUT_SECONDS = 5.0
 SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 # The scan loop rewrites its status at least every 60 s (scan.loop.HEARTBEAT_S).
@@ -70,7 +72,17 @@ class OperationPaths:
 
     state_root: Path
     backup_root: Path
-    companion_state: Path
+
+
+def _companion_state_path() -> Path:
+    """The live companion state file, resolved exactly as the companion resolves it."""
+
+    from crowley.companion.config import state_path
+
+    try:
+        return state_path()
+    except Exception as exc:
+        raise OperationsError("companion state path cannot be resolved") from exc
 
 
 def operation_paths() -> OperationPaths:
@@ -81,7 +93,6 @@ def operation_paths() -> OperationPaths:
     return OperationPaths(
         state_root=dirs.crowley_state / market_backup.OPERATIONS_STATE,
         backup_root=dirs.crowley_state / market_backup.BACKUP_STATE,
-        companion_state=dirs.crowley_state / "companion-state.json",
     )
 
 
@@ -363,6 +374,11 @@ def _bounded_status(value: Any) -> dict[str, Any]:
         ):
             raise OperationsError(f"status {name} is invalid")
         result[name] = float(item)
+    ended = value.get("last_hold_ended_at")
+    if ended is not None:
+        if isinstance(ended, bool) or not isinstance(ended, (int, float)) or not math.isfinite(ended):
+            raise OperationsError("status last_hold_ended_at is invalid")
+        result["last_hold_ended_at"] = float(ended)
     return result
 
 
@@ -567,7 +583,7 @@ def _status_issues(status: dict[str, Any], now: dt.datetime) -> list[str]:
     issues: list[str] = []
     if now.timestamp() - status["updated_at"] > STATUS_MAX_AGE_SECONDS:
         issues.append("scan_status_stale")
-    if status["action"] == "fault":
+    if status["fault_code"]:
         issues.append(f"scan_fault_{status['fault_code'] or 'unknown'}"[:64])
     return issues
 
@@ -588,10 +604,7 @@ def health_operation(
     status: dict[str, Any] | None = None
     services: dict[str, dict[str, str]] = {}
     if companion_state_path is None:
-        try:
-            companion_state_path = operation_paths().companion_state
-        except OperationsError:
-            issues.append("xdg_paths_unavailable")
+        companion_state_path = _companion_state_path()
     try:
         status = _read_scan_status(scan_status_path or scan_loop.status_path())
     except Exception:
@@ -603,13 +616,14 @@ def health_operation(
         service_issues = ["services_unavailable"]
     backup_facts, backup_issues = _backup_record(backup_root, state_root, current)
     holding = status is not None and status["action"] == "hold_human"
-    if companion_state_path is None:
-        upload_facts: dict[str, Any] = {"latest_age_seconds": None}
-        upload_issues = ["companion_state_unavailable"]
-    else:
-        upload_facts, upload_issues = _upload_facts(companion_state_path, current, uploads_fn)
-    if holding:
-        # A human is at the machine: no input is sent and no new data is expected.
+    upload_facts, upload_issues = _upload_facts(companion_state_path, current, uploads_fn)
+    recently_held = (
+        status is not None
+        and "last_hold_ended_at" in status
+        and 0 <= current.timestamp() - status["last_hold_ended_at"] < HOLD_GRACE_SECONDS
+    )
+    if holding or recently_held:
+        # A human is at the machine, or just left: no new data is expected yet.
         upload_issues = [i for i in upload_issues if i != "uploads_stale"]
     issues.extend(service_issues)
     issues.extend(upload_issues)

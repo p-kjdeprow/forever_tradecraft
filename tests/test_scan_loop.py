@@ -270,3 +270,16 @@ def test_run_ticks_until_stopped(tmp_path: Path) -> None:
     scan.run(stop=stop, sleep=sleeps.append)
     assert len(sleeps) == 3 and all(0 <= s <= loop.TICK_S for s in sleeps)
     assert len(observer.states) == 3
+
+
+def test_status_records_when_a_human_hold_ended(tmp_path: Path) -> None:
+    scan, observer, _actor, _out, clock = make(tmp_path)
+    status_file = tmp_path / "run" / "scan-status.json"
+    observer.obs = [observation(LoopState(), human_active=True, human_reason="keyboard")]
+    scan.tick()
+    status = json.loads(status_file.read_text())
+    assert status["action"] == "hold_human" and "last_hold_ended_at" not in status
+    clock.now += 30
+    observer.obs = [observation(LoopState())]
+    scan.tick()
+    assert json.loads(status_file.read_text())["last_hold_ended_at"] == clock.now

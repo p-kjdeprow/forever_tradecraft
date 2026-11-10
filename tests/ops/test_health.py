@@ -591,3 +591,93 @@ def test_health_journal_failure_cannot_leave_fresh_green_latest(
 
 def test_health_watches_the_scan_and_companion_services_only() -> None:
     assert ops.SERVICE_NAMES == ("crowley-scan.service", "crowley-companion.service")
+
+
+def test_health_surfaces_a_fault_code_on_any_action(tmp_path: Path) -> None:
+    result = _health(tmp_path, status=_good_status(action="wait", fault_code="no_progress"))
+    assert "scan_fault_no_progress" in result["issues"]
+
+
+def test_uploads_stale_limit_is_three_cadences() -> None:
+    assert ops.UPLOAD_MAX_AGE_SECONDS == 45 * 60
+    assert ops.HOLD_GRACE_SECONDS == 25 * 60
+
+
+def test_stale_uploads_get_a_grace_period_after_a_hold_ends(tmp_path: Path) -> None:
+    stale = {"uid": int(NOW.timestamp()) - (ops.UPLOAD_MAX_AGE_SECONDS + 1)}
+    recent = _health(
+        tmp_path,
+        status=_good_status(last_hold_ended_at=NOW.timestamp() - 600),
+        uploads=stale,
+    )
+    assert recent["classification"] == "operational"
+    expired = _health(
+        tmp_path / "x",
+        status=_good_status(last_hold_ended_at=NOW.timestamp() - (ops.HOLD_GRACE_SECONDS + 1)),
+        uploads=stale,
+    )
+    assert "uploads_stale" in expired["issues"]
+
+
+def _write_default_companion_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from crowley.config import resolve_companion
+    from tests.support.config import (
+        fixture_companion_tunables,
+        fixture_host,
+        fixture_target,
+        fixture_xdg,
+        write_companion_toml,
+        write_host_toml,
+    )
+
+    xdg = fixture_xdg(tmp_path)
+    for name, value in {
+        "HOME": str(xdg.config_home.parent),
+        "XDG_CONFIG_HOME": str(xdg.config_home),
+        "XDG_STATE_HOME": str(xdg.state_home),
+        "XDG_CACHE_HOME": str(xdg.cache_home),
+        "XDG_RUNTIME_DIR": str(xdg.runtime_dir),
+    }.items():
+        monkeypatch.setenv(name, value)
+    host = fixture_host(tmp_path)
+    xdg.crowley_config.mkdir(parents=True)
+    write_host_toml(xdg.crowley_config / "host.toml", host)
+    write_companion_toml(xdg.crowley_config / "companion.toml")
+    return resolve_companion(fixture_target(), host, fixture_companion_tunables(), xdg=xdg).state_file
+
+
+def test_health_default_companion_state_is_the_live_resolved_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    live = _write_default_companion_config(tmp_path, monkeypatch)
+    live.parent.mkdir(parents=True, exist_ok=True)
+    write_companion_state(live, uploaded={"uid": int(time.time()) - 30})
+    legacy = Path(os.environ["XDG_STATE_HOME"]) / "crowley" / "companion-state.json"
+    assert not legacy.exists()
+    status_file = tmp_path / "scan-status.json"
+    now = datetime.now(UTC).replace(microsecond=0)
+    status_file.write_text(
+        json.dumps(_good_status(updated_at=now.timestamp(), started_at=now.timestamp() - 60)),
+        encoding="utf-8",
+    )
+    result = ops.health_operation(
+        state_root=tmp_path / "state-root",
+        backup_root=tmp_path / "backups",
+        scan_status_path=status_file,
+        service_fn=_healthy_services,
+    )
+    assert not {"uploads_unavailable", "uploads_invalid", "uploads_unknown", "uploads_stale"} & set(
+        result["issues"]
+    )
+    assert result["uploads"]["latest_age_seconds"] is not None
+
+
+def test_health_fails_loudly_when_the_companion_state_cannot_be_resolved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_default_companion_config(tmp_path, monkeypatch)
+    (Path(os.environ["XDG_CONFIG_HOME"]) / "crowley" / "host.toml").unlink()
+    with pytest.raises(ops.OperationsError, match="companion state path cannot be resolved"):
+        ops.health_operation(
+            state_root=tmp_path / "state-root", backup_root=tmp_path / "backups", service_fn=_healthy_services
+        )

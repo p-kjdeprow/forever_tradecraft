@@ -132,7 +132,6 @@ def main(argv: list[str] | None = None) -> int:
                 result = health.health_operation(
                     state_root=paths.state_root,
                     backup_root=paths.backup_root,
-                    companion_state_path=paths.companion_state,
                 )
         except (health.OperationsError, OSError, ValueError) as exc:
             print(

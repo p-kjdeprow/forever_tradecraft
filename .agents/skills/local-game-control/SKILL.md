@@ -446,10 +446,6 @@ when IPC status does not expose it; an absent field is not evidence of clearance
 Inspect actual target geometry and pointer at the failed boundary; post-cleanup
 focus cannot establish its cause.
 
-`native_calibration_operator.py control-preflight` mutates the game through
-defer/construct/recovery; it is not a read-only gate check. When native proof is
-valid and the checkpoint is absent, input-only preparation uses ordinary
-identity/scene/held-input/status checks followed by resume and input-calibrate.
 A planned collection cutoff should stop new scans while allowing authorized save/logout
 cleanup. A user's explicit takeover or stop ends input immediately, including cleanup.
 

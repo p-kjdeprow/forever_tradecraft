@@ -168,6 +168,8 @@ class ScanLoop:
         self._reported = _Reported()
         self._status_key = ""
         self._status_at = 0.0
+        self._held = False
+        self._last_hold_ended_at: float | None = None
         self._started_at = clock() if started_at is None else started_at
 
     def _log(self, event: str, **fields: Any) -> None:
@@ -192,6 +194,12 @@ class ScanLoop:
     def _report(
         self, action: str, fault_code: str, detail: str, summary: dict[str, Any], **extra: Any
     ) -> None:
+        held = action == "hold_human" or (action == "relaunching" and bool(summary.get("human_active")))
+        if self._held and not held:
+            self._last_hold_ended_at = self._clock()
+        self._held = held
+        if self._last_hold_ended_at is not None:
+            extra = {**extra, "last_hold_ended_at": self._last_hold_ended_at}
         signature = (action, fault_code, detail)
         if signature != self._reported.signature:
             self._reported.signature = signature

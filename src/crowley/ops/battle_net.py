@@ -178,12 +178,24 @@ def locate_play_button(image: Image.Image, window: Box) -> Box:
     if not plausible:
         sizes = ", ".join(f"{box.width}x{box.height}" for _, box in regions)
         raise BattleNetPlayError(f"blue regions have an implausible Play button size: {sizes}")
-    if len(plausible) > 1:
-        raise BattleNetPlayError(f"ambiguous Play button: {len(plausible)} plausible blue regions")
-    box = plausible[0]
-    located = Box(left + box.left, top + box.top, box.width, box.height)
-    _verify_play_label(image, located)
-    return located
+    # Other blue controls (a "Play Now" banner button, dialog buttons) can share the
+    # quarter; only a region whose label reads "Play" counts.  Live 2026-11-09: two
+    # plausible regions made a relaunch fail and cost a 15 min backoff.
+    labelled: list[Box] = []
+    rejections: list[str] = []
+    for box in plausible:
+        located = Box(left + box.left, top + box.top, box.width, box.height)
+        try:
+            _verify_play_label(image, located)
+        except BattleNetPlayError as exc:
+            rejections.append(f"{box.width}x{box.height}: {exc}")
+            continue
+        labelled.append(located)
+    if not labelled:
+        raise BattleNetPlayError("no blue region is labelled Play: " + "; ".join(rejections))
+    if len(labelled) > 1:
+        raise BattleNetPlayError(f"ambiguous Play button: {len(labelled)} blue regions labelled Play")
+    return labelled[0]
 
 
 def inner_target(box: Box) -> Box:

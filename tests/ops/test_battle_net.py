@@ -59,6 +59,14 @@ def test_blue_outside_the_bottom_left_quarter_is_ignored() -> None:
         locate_play_button(image, WINDOW)
 
 
+def test_another_blue_button_without_the_play_label_is_ignored() -> None:
+    # Live 2026-11-09: a second plausible blue region made a relaunch fail.
+    image = _screen()
+    _rect(image, 192, 942, 230, 55)
+    _rect(image, 192, 700, 230, 55, label="Play Now")
+    assert locate_play_button(image, WINDOW) == Box(192, 942, 230, 55)
+
+
 def test_two_plausible_buttons_are_ambiguous() -> None:
     image = _screen()
     _rect(image, 192, 942, 230, 55)

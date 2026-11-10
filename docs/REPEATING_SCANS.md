@@ -1,7 +1,7 @@
 # Repeating scans: operator guide
 
 `crowley-scan` (unit `crowley-scan.service`) keeps WoW Forever in the world with the auction house open, so the
-addon's own 900 s timer sweeps the scan plan (481 hot items every sweep plus one of six cold slices of 51 or 52 items, 788 in the plan, catalog revision 5), and gets each sweep to the server. It recovers from crashes,
+addon's own 900 s timer sweeps the scan plan (480 hot items every sweep plus one of six cold slices of 51 or 52 items, 787 in the plan, catalog revision 5), and gets each sweep to the server. It recovers from crashes,
 disconnects, maintenance and reboots without an operator. Design: [ARCHITECTURE](ARCHITECTURE.md). Host setup:
 [GAME_SETUP](GAME_SETUP.md). Current state: [HANDOFF](HANDOFF.md).
 

@@ -29,9 +29,12 @@ RULES = rules_for_house(House("us", "normal", "alliance"))
 
 def test_vendor_supply_catalog_heuristic_matches_reviewed_ids() -> None:
     assert vendor_supply_ids() == {
+        814,
         2320,
         2321,
+        2324,
         2325,
+        2604,
         2605,
         2678,
         2692,
@@ -40,9 +43,15 @@ def test_vendor_supply_catalog_heuristic_matches_reviewed_ids() -> None:
         3372,
         4289,
         4291,
+        4340,
+        4341,
         4470,
+        6260,
+        6261,
         8343,
         8925,
+        10290,
+        14341,
     }
 
 

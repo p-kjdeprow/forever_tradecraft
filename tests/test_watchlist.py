@@ -12,14 +12,14 @@ def test_shipped_plan_covers_professions_and_preserves_review_states():
     catalog = load_catalog()
     active = [item for item in catalog.items if item.status == "active"]
     plan = catalog.scan_plan()
-    assert len(catalog.items) == 662
+    assert len(catalog.items) == 639
     assert len(active) == 481
-    assert sum(item.status == "research" for item in catalog.items) == 139
+    assert sum(item.status == "research" for item in catalog.items) == 116
     assert sum(item.status == "excluded" for item in catalog.items) == 42
-    assert plan["revision"] == 4
+    assert plan["revision"] == 5
     assert plan["targetClientBuild"] == "1.60.1.70450"
-    assert plan["catalogHash"] == "9ebdbd5d6308d5de1888cb65c2a275633e2e87f39ed3b99f3b171c3e05dbf025"
-    assert plan["planHash"] == "a1a842aaf57ecca88262da7f454b6b01df0a96db3071d73d932024c5f9509b17"
+    assert plan["catalogHash"] == "86502e5c234335157e8dedea3408c2fff65cc6e8ff8a23d16e5dd2e584ec45c2"
+    assert plan["planHash"] == "61c825700b854b4753a1d78a89d5db85ca0d598ced3f06981b46f15abb1794d1"
     assert len(plan["pools"]["core"]) == 423
     assert len(plan["pools"]["discovery"]) == 58
     professions = {profession for item in active for profession in item.professions}

@@ -20,10 +20,10 @@
   },
   "scan": {
     "catalogId": "first-run",
-    "catalogRevision": 4,
+    "catalogRevision": 5,
     "cadenceSeconds": 900,
     "sweepCapSeconds": 750,
-    "coldSlices": 0,
+    "coldSlices": 6,
     "initialPriceLevels": 20
   },
   "routeProvenance": "unmeasured on client build 70862"

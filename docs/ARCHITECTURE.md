@@ -143,8 +143,8 @@ before completion makes that batch incomplete and prevents cross-house evidence.
 A catalog item with `pool: "cold"` is swept in rotation instead of every cycle. The plan body carries
 `pools.cold` (ordered item IDs) and the integer `coldSlices` (N); both are part of `planJSON` and so of
 `planHash`. N comes from the target's `scan.coldSlices` and must be positive exactly when the plan has cold
-items, and at most the number of cold items (no empty slices). `forever-us-camwow7` stays 0 until the catalog
-gains cold items; that change sets it to 6. Cold item `i` of `pools.cold` belongs to slice `i % N`.
+items, and at most the number of cold items (no empty slices). `forever-us-camwow7` is 6 since catalog revision 5 added the first
+307 cold items (51 or 52 per slice). Cold item `i` of `pools.cold` belongs to slice `i % N`.
 
 A sweep attempts every core/discovery item plus slice `k`, in plan order. `k` is a rotation counter, not a
 clock function: the addon persists `CrowleyDB.coldSliceNext` (0..N-1, with `coldSliceCount` = N), a sweep uses

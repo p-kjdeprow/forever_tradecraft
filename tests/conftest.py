@@ -50,8 +50,14 @@ def _pin_fixture_target() -> None:
     game_target.packaged_game_target.cache_clear()
     game_target.canonical_plan.cache_clear()
 
-    _FIXTURE_CATALOG = _REAL_LOAD_CATALOG(enforce_target=False).model_copy(
-        update={"client_build": _fixture_target().full_build, "reviewed_on": "2026-10-16"}
+    # The fixture target has coldSlices 0, so its world is the shipped catalog without the cold pool.
+    real = _REAL_LOAD_CATALOG(enforce_target=False)
+    _FIXTURE_CATALOG = real.model_copy(
+        update={
+            "client_build": _fixture_target().full_build,
+            "reviewed_on": "2026-10-16",
+            "items": [item for item in real.items if item.pool != "cold"],
+        }
     )
     game_target.selected_target = _fixture_target
     game_target.packaged_game_target = _fixture_target

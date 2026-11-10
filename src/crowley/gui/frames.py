@@ -46,6 +46,13 @@ class ProtocolContract:
     sweep_cap_seconds: int
     initial_price_levels: int
     plan_item_ids: tuple[int, ...]
+    # Valid sweep set sizes: hot count + |slice j| for each cold slice j.  Empty means the whole
+    # plan (no cold items), i.e. exactly plan_count.
+    planned_sizes: tuple[int, ...] = ()
+
+    @property
+    def sweep_sizes(self) -> tuple[int, ...]:
+        return self.planned_sizes or (self.plan_count,)
 
     @classmethod
     def from_plan(cls, plan: Mapping[str, object], *, sweep_cap_seconds: int = 600) -> ProtocolContract:
@@ -72,7 +79,21 @@ class ProtocolContract:
             or sweep_cap_seconds <= 0
         ):
             raise ProtocolError("canonical plan sweep cap is malformed")
-        return cls(len(item_ids), cadence, sweep_cap_seconds, levels, tuple(item_ids))
+        slices = plan.get("coldSlices")
+        pools = plan.get("pools")
+        if (
+            isinstance(slices, bool)
+            or not isinstance(slices, int)
+            or slices < 0
+            or not isinstance(pools, dict)
+        ):
+            raise ProtocolError("canonical plan cold slices are malformed")
+        cold = pools.get("cold")
+        if not isinstance(cold, list) or (slices > 0) != bool(cold) or slices > len(cold):
+            raise ProtocolError("canonical plan cold pool is malformed")
+        hot_count = len(item_ids) - len(cold)
+        sizes = tuple(hot_count + len(cold[j::slices]) for j in range(slices))
+        return cls(len(item_ids), cadence, sweep_cap_seconds, levels, tuple(item_ids), sizes)
 
 
 DEFAULT_PROTOCOL_CONTRACT = ProtocolContract(481, 900, 600, 20, tuple())
@@ -842,9 +863,9 @@ def validate_snapshot(
         if cursor_item_id and cursor_item_id not in configured_ids:
             raise _error("scanner.cursorItemID", "cursor is outside the configured plan")
     # plan.count is the whole plan; a sweep attempts the hot items plus one cold slice, so
-    # planned is the size of the current sweep's item set.
-    if not 1 <= planned <= rules.plan_count:
-        raise _error("scanner.planned", f"must be in [1, {rules.plan_count}]")
+    # scanner.planned is exactly hot + |slice j| for some j (plan_count when there is no cold pool).
+    if planned not in rules.sweep_sizes:
+        raise _error("scanner.planned", f"must be one of {sorted(set(rules.sweep_sizes))}")
     if phase in {"ready", "scheduled", "blocked"} and (active_id or started):
         raise _error("scanner", "inactive phase cannot have active ID/start")
     if phase == "scheduled" and due == 0:

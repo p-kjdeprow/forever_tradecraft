@@ -50,6 +50,14 @@ uv run python -m crowley.analysis \
 exact time-left values above 172800 seconds. The loader performs one read-only
 transaction and never writes to the database.
 
+## Cold items
+
+With a cold pool (`coldSlices` N > 0 in the plan), core and discovery items are observed every sweep but each
+cold item is observed only once every N sweeps, in a strict rotation (`market_sweeps.context.coldSlice`
+records which slice a sweep took). The consecutive-observation interval rule above therefore never links two
+observations of a cold item at the 900 s cadence: cold-item intervals are about N times longer than the
+1,260 s limit, so they yield no valid intervals and cold items are priced, not time-to-sale modelled.
+
 ## Metrics
 
 `crowley.analysis.metrics` computes pre-model metrics for each commodity item in

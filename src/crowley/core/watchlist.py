@@ -128,6 +128,9 @@ class Catalog(CatalogModel):
                 f"cold_slices={cold_slices} requires cold items and cold items require cold_slices > 0 "
                 f"(active cold items: {sum(item.pool == 'cold' for item in active)})"
             )
+        cold_count = sum(item.pool == "cold" for item in active)
+        if cold_slices > cold_count > 0:
+            raise ValueError(f"cold_slices={cold_slices} exceeds the {cold_count} cold items (empty slices)")
         body = {
             "schemaVersion": 2,
             "id": self.id,

@@ -13,14 +13,13 @@ from crowley.core import savedvars
 from crowley.core.game_target import target_scan_plan
 from crowley.core.scanformat import (
     ScanFormatError,
-    cold_slice_index,
     decode_json_payload,
     encode_json_payload,
     sweep_item_ids,
     validate_envelope,
 )
 from crowley.core.watchlist import Catalog, load_catalog
-from crowley.gui.frames import PLAN_COUNT, ProtocolError, validate_snapshot
+from crowley.gui.frames import PLAN_COUNT, ProtocolContract, ProtocolError, validate_snapshot
 from tests.support.scan_frames import snapshot
 
 from .wow_harness import TARGET, Auction, WowClient
@@ -108,13 +107,9 @@ def test_cold_item_i_belongs_to_slice_i_mod_n() -> None:
     assert sorted(seen) == sorted(cold)
 
 
-def test_slice_index_follows_start_time_and_cadence() -> None:
-    assert cold_slice_index(1_760_000_000, CADENCE, COLD_SLICES) == (1_760_000_000 // CADENCE) % COLD_SLICES
-    base = 900 * 1000
-    assert [cold_slice_index(base + 900 * n + 17, CADENCE, 6) for n in range(7)] == [
-        (1000 + n) % 6 for n in range(7)
-    ]
-    assert cold_slice_index(base + 899, CADENCE, 6) == cold_slice_index(base, CADENCE, 6)
+def test_cold_slices_cannot_exceed_the_number_of_cold_items() -> None:
+    with pytest.raises(ValueError, match="empty slices"):
+        synthetic_catalog().scan_plan(cold_slices=8)
 
 
 def test_sweep_items_without_cold_plan_is_the_whole_plan() -> None:
@@ -140,38 +135,113 @@ def _scan_once(client: WowClient, *, force: bool) -> None:
     raise AssertionError("sweep did not finish")
 
 
+def _stored_scans(client: WowClient) -> list[dict]:
+    stored = savedvars.loads(client.saved_variables())["CrowleyDB"]["scans"]
+    return sorted(stored.values(), key=lambda scan: scan["startedAt"])
+
+
+def _db(client: WowClient):
+    return client.lua.globals().CrowleyDB
+
+
 @pytest.fixture(scope="module")
 def cold_sweeps() -> list[dict]:
-    """Three consecutive sweeps of the cold plan, one per slice."""
+    """Four consecutive sweeps of the cold plan: slices 0, 1, 2, then 0 again (wrap)."""
     client = WowClient(target=cold_target(), catalog=synthetic_catalog())
     client.login()
     client.set_canonical_plan()
-    scans: list[dict] = []
-    for index in range(COLD_SLICES):
+    assert _db(client).coldSliceNext is None
+    expected_next = [1, 2, 0, 1]
+    for index in range(COLD_SLICES + 1):
         _scan_once(client, force=index > 0)
-        # Start the next sweep one bucket later so it takes the next slice.
-        client.advance(CADENCE - int(client.lua.globals()._now) % CADENCE + 1)
-        stored = savedvars.loads(client.saved_variables())["CrowleyDB"]["scans"]
-        scans = sorted(stored.values(), key=lambda scan: scan["startedAt"])
-    assert len(scans) == COLD_SLICES
+        assert _db(client).coldSliceNext == expected_next[index]
+        assert _db(client).coldSliceCount == COLD_SLICES
+    scans = _stored_scans(client)
+    assert len(scans) == COLD_SLICES + 1
     return scans
 
 
-def test_addon_sweeps_hot_items_plus_the_slice_for_its_start_time(cold_sweeps: list[dict]) -> None:
+def test_addon_rotates_slices_with_a_persisted_counter(cold_sweeps: list[dict]) -> None:
     plan = cold_plan()
-    indexes = []
+    assert [raw["coldSlice"] for raw in cold_sweeps] == [
+        {"index": index % COLD_SLICES, "count": COLD_SLICES} for index in range(COLD_SLICES + 1)
+    ]
     for raw in cold_sweeps:
-        expected_k = (raw["startedAt"] // CADENCE) % COLD_SLICES
-        assert raw["coldSlice"] == {"index": expected_k, "count": COLD_SLICES}
+        k = raw["coldSlice"]["index"]
         validated = validate_envelope(envelope_of(raw))
         # The explicit observation keys are the attempted set.
-        assert sorted(int(key) for key in validated["decoded"]["observations"]) == sweep_item_ids(
-            plan, expected_k
-        )
+        assert sorted(int(key) for key in validated["decoded"]["observations"]) == sweep_item_ids(plan, k)
         assert validated["decoded"]["planJSON"] == plan["planJSON"]
-        assert raw["numObservations"] == len(sweep_item_ids(plan, expected_k))
-        indexes.append(expected_k)
-    assert sorted(indexes) == list(range(COLD_SLICES))
+        assert raw["numObservations"] == len(sweep_item_ids(plan, k))
+
+
+def _timed_out_sweep(client: WowClient, *, close: bool = False) -> dict:
+    """A sweep that ends with an unqueried tail: by sweep timeout, or by closing the auction house."""
+    before = len(_stored_scans(client))
+    client.set_auctions([Auction(itemID=2589, name="Linen Cloth", count=1, buyout=100)])
+    client.set_event_behavior(delay=601)
+    client.fire("AUCTION_HOUSE_SHOW")
+    client.slash("scan force")
+    if close:
+        client.fire("AUCTION_HOUSE_CLOSED")
+    else:
+        client.advance(600)
+        client.run_timers()
+    scans = _stored_scans(client)
+    assert len(scans) == before + 1
+    return scans[-1]
+
+
+@pytest.mark.parametrize("close", [False, True])
+def test_aborted_or_timed_out_cold_sweep_validates_and_advances_the_counter(close: bool) -> None:
+    client = WowClient(target=cold_target(), catalog=synthetic_catalog())
+    client.login()
+    client.set_canonical_plan()
+    raw = _timed_out_sweep(client, close=close)
+    validated = validate_envelope(envelope_of(raw))
+    observations = validated["decoded"]["observations"]
+    assert any(obs["query"]["kind"] == "unqueried" for obs in observations.values())
+    assert sorted(int(key) for key in observations) == sweep_item_ids(cold_plan(), 0)
+    assert _db(client).coldSliceNext == 1
+
+
+def test_cursor_on_a_cold_item_from_another_slice_resumes_in_the_swept_set() -> None:
+    plan = cold_plan()
+    swept = sweep_item_ids(plan, 0)
+    foreign = next(item for item in plan["pools"]["cold"] if item not in swept)
+    client = WowClient(target=cold_target(), catalog=synthetic_catalog())
+    client.login()
+    client.set_canonical_plan()
+    _db(client).cursorItemID = foreign
+    _db(client).cursorPlanHash = plan["planHash"]
+    raw = _timed_out_sweep(client)
+    observations = validate_envelope(envelope_of(raw))["decoded"]["observations"]
+    assert sorted(int(key) for key in observations) == swept
+    # Resume after the last swept item at or below the cursor.
+    before = [item for item in swept if item <= foreign]
+    first = next(key for key, obs in observations.items() if obs["ordinal"] == 1)
+    assert int(first) == swept[(swept.index(before[-1]) + 1) % len(swept)]
+
+
+@pytest.mark.parametrize(
+    ("stored_next", "stored_count", "reason"),
+    [(1, 5, "count_changed"), (7, COLD_SLICES, "out_of_range"), (-1, COLD_SLICES, "out_of_range")],
+)
+def test_counter_resets_loudly_when_count_changed_or_value_out_of_range(
+    stored_next: int, stored_count: int, reason: str
+) -> None:
+    client = WowClient(target=cold_target(), catalog=synthetic_catalog())
+    client.login()
+    client.set_canonical_plan()
+    _db(client).coldSliceNext = stored_next
+    _db(client).coldSliceCount = stored_count
+    raw = _timed_out_sweep(client)
+    assert raw["coldSlice"] == {"index": 0, "count": COLD_SLICES}
+    assert _db(client).coldSliceReset.reason == reason
+    assert _db(client).coldSliceNext == 1
+    assert _db(client).coldSliceCount == COLD_SLICES
+    events = [event.type for event in _db(client).lastQueryTrace.events.values()]
+    assert "cold_slice_reset" in events
 
 
 def test_addon_envelope_without_cold_items_has_no_cold_slice_field() -> None:
@@ -229,15 +299,35 @@ def test_server_rejects_an_extra_cold_item_from_another_slice(cold_sweeps: list[
         validate_envelope(_mutated(raw, add))
 
 
-def test_server_rejects_a_slice_index_that_does_not_match_the_start_time(cold_sweeps: list[dict]) -> None:
+def test_server_rejects_an_index_that_disagrees_with_the_attempted_set(cold_sweeps: list[dict]) -> None:
     raw = cold_sweeps[0]
-    wrong = (raw["coldSlice"]["index"] + 1) % COLD_SLICES
 
     def set_index(envelope: dict, _decoded: dict) -> None:
-        envelope["coldSlice"]["index"] = wrong
+        envelope["coldSlice"]["index"] = 1
 
-    with pytest.raises(ScanFormatError, match="index does not match"):
+    with pytest.raises(ScanFormatError, match="exactly one entry per swept item"):
         validate_envelope(_mutated(raw, set_index))
+
+
+@pytest.mark.parametrize("index", [COLD_SLICES, COLD_SLICES + 4])
+def test_server_rejects_an_index_at_or_above_the_slice_count(cold_sweeps: list[dict], index: int) -> None:
+    def set_index(envelope: dict, _decoded: dict) -> None:
+        envelope["coldSlice"]["index"] = index
+
+    with pytest.raises(ScanFormatError, match="below the slice count"):
+        validate_envelope(_mutated(cold_sweeps[0], set_index))
+
+
+def test_server_rejects_an_explicit_null_cold_slice(cold_sweeps: list[dict]) -> None:
+    def null(envelope: dict, _decoded: dict) -> None:
+        envelope["coldSlice"] = None
+
+    with pytest.raises(ScanFormatError, match="coldSlice must be an object"):
+        validate_envelope(_mutated(cold_sweeps[0], null))
+    plain = envelope_of(cold_sweeps[0])
+    plain["coldSlice"] = None
+    with pytest.raises(ScanFormatError):
+        validate_envelope(plain)
 
 
 def test_server_rejects_wrong_slice_count_or_missing_field(cold_sweeps: list[dict]) -> None:
@@ -310,21 +400,43 @@ def test_plan_with_inconsistent_cold_slices_is_rejected() -> None:
 # --- frames decoder --------------------------------------------------------------------------
 
 
-def test_scanner_planned_may_be_a_subset_of_the_plan() -> None:
+def _contract(plan: dict) -> ProtocolContract:
+    return ProtocolContract.from_plan(plan)
+
+
+def test_scanner_planned_must_equal_hot_plus_one_slice() -> None:
+    plan = cold_plan()
+    contract = _contract(plan)
+    hot = len(plan["pools"]["core"]) + len(plan["pools"]["discovery"])
+    sizes = sorted({hot + len(plan["pools"]["cold"][j::COLD_SLICES]) for j in range(COLD_SLICES)})
+    assert sizes == sorted(contract.sweep_sizes) or set(sizes) == set(contract.sweep_sizes)
+    for planned in sizes:
+        value = snapshot()
+        value["plan"] = {**value["plan"], "count": contract.plan_count}
+        value["scanner"] = {**value["scanner"], "planned": planned}
+        validate_snapshot(value, contract=replace_contract(contract))
+    for planned in (contract.plan_count, hot, hot + 1 if hot + 1 not in sizes else 0, sizes[0] - 1):
+        value = snapshot()
+        value["plan"] = {**value["plan"], "count": contract.plan_count}
+        value["scanner"] = {**value["scanner"], "planned": planned}
+        with pytest.raises(ProtocolError, match="scanner.planned"):
+            validate_snapshot(value, contract=replace_contract(contract))
+
+
+def replace_contract(contract: ProtocolContract) -> ProtocolContract:
+    """The real contract with the default fixture's cadence/cap/levels (the snapshot fixture's values)."""
+    return ProtocolContract(contract.plan_count, 900, 600, 20, contract.plan_item_ids, contract.planned_sizes)
+
+
+def test_scanner_planned_is_exactly_plan_count_without_cold_items() -> None:
     value = snapshot()
     value["scanner"] = {**value["scanner"], "planned": PLAN_COUNT - 5}
-    validate_snapshot(value)
-
-
-@pytest.mark.parametrize("planned", [0, PLAN_COUNT + 1])
-def test_scanner_planned_outside_one_to_plan_count_is_rejected(planned: int) -> None:
-    value = snapshot()
-    value["scanner"] = {**value["scanner"], "planned": planned}
     with pytest.raises(ProtocolError, match="scanner.planned"):
         validate_snapshot(value)
+    validate_snapshot(snapshot())
 
 
-def test_last_saved_planned_may_be_a_cold_slice_sized_set() -> None:
+def test_last_saved_planned_keeps_the_previous_plan_size_relaxation() -> None:
     value = snapshot()
     value["lastSaved"] = {
         **value["lastSaved"],
@@ -336,3 +448,14 @@ def test_last_saved_planned_may_be_a_cold_slice_sized_set() -> None:
         "rows": 4,
     }
     validate_snapshot(value)
+
+
+def test_idle_scanner_status_reports_the_next_sweep_set_size() -> None:
+    plan = cold_plan()
+    client = WowClient(target=cold_target(), catalog=synthetic_catalog())
+    client.login()
+    client.set_canonical_plan()
+    assert client.ns.Scanner.Status().planned == len(sweep_item_ids(plan, 0))
+    _db(client).coldSliceNext = 1
+    _db(client).coldSliceCount = COLD_SLICES
+    assert client.ns.Scanner.Status().planned == len(sweep_item_ids(plan, 1))

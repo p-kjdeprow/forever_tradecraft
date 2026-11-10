@@ -41,15 +41,17 @@ function State.PlanOrder(itemIDs, cursor)
 end
 
 -- Items one sweep attempts, in plan order: every core/discovery item plus cold slice k, where cold
--- item i (0-based, pools.cold order) is in slice i % N and k = floor(startedAt / cadence) % N.
+-- item i (0-based, pools.cold order) is in slice i % N and k is the persisted rotation counter.
 -- Returns the ids and {index = k, count = N}, or nil for a plan without cold items.
-function State.SweepItems(plan, startedAt, cadence)
+function State.SweepItems(plan, k)
   local slices = plan.coldSlices
   if type(slices) ~= "number" or slices < 0 or slices ~= math.floor(slices) then
     error("scanner state plan coldSlices is malformed")
   end
   if slices == 0 then return plan.itemIDs, nil end
-  local k = math.floor(startedAt / cadence) % slices
+  if type(k) ~= "number" or k < 0 or k >= slices or k ~= math.floor(k) then
+    error("scanner state cold slice index is out of range")
+  end
   local chosen, cold = {}, {}
   for index, itemID in ipairs(plan.pools.cold) do
     cold[itemID] = true

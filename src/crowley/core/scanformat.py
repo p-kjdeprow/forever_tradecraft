@@ -262,6 +262,8 @@ def _validate_plan(plan_json: Any, plan_hash: Any) -> dict[str, Any]:
         raise ScanFormatError("plan pools must partition itemIDs")
     if (cold_slices > 0) != bool(plan["pools"].get("cold")):
         raise ScanFormatError("plan.coldSlices must be positive exactly when pools.cold is nonempty")
+    if cold_slices > len(plan["pools"].get("cold", ())):
+        raise ScanFormatError("plan.coldSlices exceeds the number of cold items")
     plan["initialPriceLevels"] = initial_levels
     return plan
 
@@ -642,11 +644,6 @@ def _validate_observation(
     return row_count
 
 
-def cold_slice_index(started_at: int, cadence_seconds: int, cold_slices: int) -> int:
-    """The cold slice k swept by a sweep that started at ``started_at`` (epoch seconds)."""
-    return (started_at // cadence_seconds) % cold_slices
-
-
 def sweep_item_ids(plan: dict[str, Any], cold_slice: int | None) -> list[int]:
     """Items one sweep attempts, in plan order: every hot item, then cold slice ``cold_slice``.
 
@@ -665,21 +662,25 @@ def sweep_item_ids(plan: dict[str, Any], cold_slice: int | None) -> list[int]:
     return [item_id for item_id in plan["itemIDs"] if item_id in hot or item_id in chosen]
 
 
-def _validate_cold_slice(value: Any, plan: dict[str, Any], started: int) -> int | None:
-    """Return the sweep's cold slice index, or None for a plan without cold items."""
+def _validate_cold_slice(present: bool, value: Any, plan: dict[str, Any]) -> int | None:
+    """Return the sweep's cold slice index, or None for a plan without cold items.
+
+    The addon rotates slices with a persisted counter, so the index carries no information the
+    server can derive; it only has to be in range and agree with the attempted item set.
+    """
     cold_slices = plan.get("coldSlices", 0)
     if cold_slices == 0:
-        if value is not None:
+        if present:
             raise ScanFormatError("envelope.coldSlice is only valid for a plan with cold slices")
         return None
-    if value is None:
+    if not present:
         raise ScanFormatError("envelope.coldSlice is required when the plan has cold slices")
     _keys(value, {"index", "count"}, "envelope.coldSlice")
     if _int(value["count"], "envelope.coldSlice.count") != cold_slices:
         raise ScanFormatError("envelope.coldSlice.count does not match plan.coldSlices")
     index = _int(value["index"], "envelope.coldSlice.index")
-    if index != cold_slice_index(started, plan["cadenceSeconds"], cold_slices):
-        raise ScanFormatError("envelope.coldSlice.index does not match the sweep start time")
+    if index >= cold_slices:
+        raise ScanFormatError("envelope.coldSlice.index must be below the slice count")
     return index
 
 
@@ -755,7 +756,8 @@ def _validate_owned(value: Any, sweep_start: int, sweep_end: int) -> None:
 def validate_envelope(raw: dict[str, Any]) -> dict[str, Any]:
     """Validate and return a supported envelope with its decoded payload."""
     # coldSlice is the one optional envelope key; it is validated against the plan below.
-    cold_slice_raw = raw.get("coldSlice") if isinstance(raw, dict) else None
+    cold_slice_present = isinstance(raw, dict) and "coldSlice" in raw
+    cold_slice_raw = raw["coldSlice"] if cold_slice_present else None
     if isinstance(raw, dict):
         raw = {key: value for key, value in raw.items() if key != "coldSlice"}
     _keys(
@@ -820,7 +822,7 @@ def validate_envelope(raw: dict[str, Any]) -> dict[str, Any]:
     decoded = decode_json_payload(raw["payload"])
     _keys(decoded, {"planHash", "planJSON", "observations", "owned"}, "payload")
     plan = _validate_plan(decoded["planJSON"], decoded["planHash"])
-    cold_index = _validate_cold_slice(cold_slice_raw, plan, started)
+    cold_index = _validate_cold_slice(cold_slice_present, cold_slice_raw, plan)
     # Attempted items are exactly the observation keys: an attempted item with zero listings
     # has an observation (coverage full/empty), an unattempted one has no key at all.
     swept = sweep_item_ids(plan, cold_index)

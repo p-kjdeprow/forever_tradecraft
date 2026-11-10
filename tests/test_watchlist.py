@@ -19,7 +19,7 @@ def test_shipped_plan_covers_professions_and_preserves_review_states():
     assert plan["revision"] == 4
     assert plan["targetClientBuild"] == "1.60.1.70450"
     assert plan["catalogHash"] == "9ebdbd5d6308d5de1888cb65c2a275633e2e87f39ed3b99f3b171c3e05dbf025"
-    assert plan["planHash"] == "00de6a4b612f62245637108ba6fa0b70d90cf128dc437c1eff5375b7d12dcc42"
+    assert plan["planHash"] == "a1a842aaf57ecca88262da7f454b6b01df0a96db3071d73d932024c5f9509b17"
     assert len(plan["pools"]["core"]) == 423
     assert len(plan["pools"]["discovery"]) == 58
     professions = {profession for item in active for profession in item.professions}

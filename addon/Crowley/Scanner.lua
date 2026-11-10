@@ -1025,6 +1025,29 @@ function Scanner.Schedule(source)
   })
 end
 
+-- The slice the next sweep takes: db.coldSliceNext (0..N-1), advanced by Finish. First use starts at 0.
+-- A stored count that differs from N, or a stored value outside 0..N-1, resets to 0 loudly (print,
+-- db.coldSliceReset and a cold_slice_reset query-trace event); it is never clamped.
+local function peekColdSlice(slices)
+  local nextIndex, count = ns.db.coldSliceNext, ns.db.coldSliceCount
+  if nextIndex == nil and count == nil then return 0 end
+  if count ~= slices then return 0, "count_changed" end
+  if type(nextIndex) ~= "number" or nextIndex < 0 or nextIndex >= slices or nextIndex ~= math.floor(nextIndex) then
+    return 0, "out_of_range"
+  end
+  return nextIndex
+end
+
+function Scanner.ColdSliceForSweep(slices)
+  local nextIndex, count = ns.db.coldSliceNext, ns.db.coldSliceCount
+  local index, reason = peekColdSlice(slices)
+  if not reason then return index end
+  ns.db.coldSliceNext, ns.db.coldSliceCount = 0, slices
+  ns.db.coldSliceReset = { reason = reason, at = time(), stored = tostring(nextIndex), storedCount = tostring(count) }
+  ns.Print("cold slice counter reset to 0: " .. reason)
+  return 0, reason
+end
+
 function Scanner.Start(force, source)
   source = source or "manual"
   if state then return ns.Print("a sweep is already running") end
@@ -1058,8 +1081,10 @@ function Scanner.Start(force, source)
   local sweepPlanJSON = CROWLEY_DATA.scanPlan.planJSON
   local sweepState = ns.ScannerState.NewSweep(plan, ns.Context.House(), ns.Context.Snapshot(), time(), sweepGeneration)
   sweepState.planHash, sweepState.planJSON, sweepState.cursor = sweepPlanHash, sweepPlanJSON, cursor
-  -- This sweep attempts every hot item plus exactly one cold slice, k = floor(startedAt / cadence) % N.
-  local sweepIDs, coldSlice = ns.ScannerState.SweepItems(plan, sweepState.startedAt, CADENCE)
+  -- This sweep attempts every hot item plus exactly one cold slice, k = the persisted rotation counter.
+  local sliceIndex, resetReason
+  if plan.coldSlices > 0 then sliceIndex, resetReason = Scanner.ColdSliceForSweep(plan.coldSlices) end
+  local sweepIDs, coldSlice = ns.ScannerState.SweepItems(plan, sliceIndex)
   sweepState.coldSlice = coldSlice
   -- The cursor names an item of the whole plan; resume after the last swept item at or before it.
   local sweepCursor
@@ -1073,6 +1098,7 @@ function Scanner.Start(force, source)
   state = sweepState
   ns.db.activeQueryTrace = state.queryTrace
   traceEvent("sweep_start", nil, { planned = #state.order, house = state.house.key })
+  if resetReason then traceEvent("cold_slice_reset", nil, { reason = resetReason, count = plan.coldSlices }) end
   ns.db.lastSweepStart = state.startedAt
   scheduleEvent("start_commit", {
     source = source, token = scheduleToken, currentToken = scheduleToken, due = state.startedAt + CADENCE,
@@ -1172,6 +1198,10 @@ function Scanner.Finish()
   }
   ns.db.storageBlocked = stored >= ns.MAX_STORED_SCANS
   ns.db.cursorItemID, ns.db.cursorPlanHash = s.cursor, s.planHash
+  -- Completed and aborted sweeps alike advance the cold rotation.
+  if s.coldSlice then
+    ns.db.coldSliceNext, ns.db.coldSliceCount = (s.coldSlice.index + 1) % s.coldSlice.count, s.coldSlice.count
+  end
   ns.Print(("sweep saved: %d observations, %d rows for %s - /reload to upload"):format(#s.order, ns.db.scans[id].numRows, s.house.key))
   Scanner.Schedule("finish")
 end
@@ -1185,9 +1215,14 @@ function Scanner.Status()
   if state then plan = state.plan else plan, planError = loadPlan() end
   local status = {
     phase = "ready", activeSweepId = "", startedAt = 0, dueAt = 0, ordinal = 0,
-    planned = plan and #(plan.itemIDs or {}) or 0, cursorItemID = db.cursorItemID or 0,
+    planned = 0, cursorItemID = db.cursorItemID or 0,
     reason = "",
   }
+  if plan and not state then
+    -- Idle: the size of the item set the next sweep will attempt (hot plus the next cold slice).
+    local ids = ns.ScannerState.SweepItems(plan, (plan.coldSlices or 0) > 0 and (peekColdSlice(plan.coldSlices)) or nil)
+    status.planned = #ids
+  end
   if state then
     status.phase = state.ownedHandler and "owned" or "item"
     status.startedAt = state.startedAt or 0

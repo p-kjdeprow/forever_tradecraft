@@ -1,7 +1,7 @@
 # Repeating scans: operator guide
 
 `crowley-scan` (unit `crowley-scan.service`) keeps WoW Forever in the world with the auction house open, so the
-addon's own 900 s timer sweeps the 428-item plan, and gets each sweep to the server. It recovers from crashes,
+addon's own 900 s timer sweeps the scan plan (427 items, catalog revision 3), and gets each sweep to the server. It recovers from crashes,
 disconnects, maintenance and reboots without an operator. Design: [ARCHITECTURE](ARCHITECTURE.md). Host setup:
 [GAME_SETUP](GAME_SETUP.md). Current state: [HANDOFF](HANDOFF.md).
 
@@ -94,3 +94,18 @@ systemctl --user disable --now crowley-scan
 
 Before stopping for a long time, let one save-reload and ack-reload finish so SavedVariables are clean. To go back
 to the old session stack, reinstall the tag `pre-simplify` (`git show pre-simplify`); it is not supported otherwise.
+
+## Changing the scan plan
+
+The plan lives in three places that must agree: the installed package (`first_run.json`, target JSON and the
+addon's `GeneratedTarget.lua`), the server image (it serves the canonical plan that the companion writes into
+`Crowley_Data/Data.lua`), and the client's loaded addon data. Deploy in this order, right after an upload:
+
+1. `uv tool install --force --reinstall --link-mode copy .` and `crowley-ops install --game-root ...`.
+2. `crowley-ops image build --source "$PWD"`, then the compose `up -d` from the README (recreates the server).
+3. `systemctl --user restart crowley-companion` and wait until `Data.lua` carries the new `planHash`.
+4. `systemctl --user restart crowley-scan`, then make the client reload: the loop's next save flush does it, or
+   end the client and let the loop relaunch it.
+
+If the client loads before step 3, the addon refuses the old plan and frames stop decoding; one more `/reload`
+(or relaunch) after step 3 fixes it.

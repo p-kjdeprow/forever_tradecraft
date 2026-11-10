@@ -90,6 +90,7 @@ def test_session_stack_is_gone() -> None:
         "crowley-scan",
         "crowley-ops",
         "crowley-trading",
+        "crowley-advise",
         "crowley-paper-step",
         "crowley-native",
     }

@@ -69,6 +69,7 @@ from crowley.analysis.item_books import (
 from crowley.analysis.metrics import _percentile
 from crowley.analysis.rank import (
     SECONDS_PER_HOUR,
+    Evaluation,
     LoadedInputs,
     RankConfig,
     RankInputs,
@@ -541,13 +542,18 @@ def build_candidates(
     *,
     min_observations: int,
     fair_lookback_hours: float = DEFAULT_FAIR_LOOKBACK_HOURS,
+    evaluation: Evaluation | None = None,
 ) -> CandidateReport:
-    """Select the population, evaluate each recipe on its latest attempted observations, order them."""
+    """Select the population, evaluate each recipe on its latest attempted observations, order them.
+
+    ``evaluation`` is the rank evaluation of the same ``inputs`` and ``config`` when the caller
+    already has it (it is the expensive part); otherwise it is computed here.
+    """
 
     if min_observations < 1:
         raise ValueError("min_observations must be at least 1")
     cold_ids = cold_pool.items
-    evaluation = evaluate_trades(inputs, config)
+    evaluation = evaluate_trades(inputs, config) if evaluation is None else evaluation
     unranked = {item.spell_id: item.reason for item in evaluation.excluded}
     evidence = _Evidence(inputs, config, fair_lookback_hours)
     candidates: list[Candidate] = []

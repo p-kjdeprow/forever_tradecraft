@@ -10,7 +10,7 @@ from crowley.core.watchlist import load_catalog
 
 from .config import get_settings
 from .db import create_pool, verify_current
-from .routes import account, addon, dashboard, health, houses, paper, queues, reference, scans
+from .routes import account, addon, advice, dashboard, health, houses, paper, queues, reference, scans
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ def create_app() -> FastAPI:
     application.include_router(health.router)
     application.include_router(scans.router)
     application.include_router(houses.router)
+    application.include_router(advice.router)
     application.include_router(reference.router)
     application.include_router(account.router)
     application.include_router(addon.router)

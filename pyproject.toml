@@ -23,6 +23,7 @@ crowley-watchlist = "crowley.core.watchlist:main"
 crowley-scan = "crowley.scan.cli:main"
 crowley-ops = "crowley.ops.cli:main"
 crowley-trading = "crowley.trading.__main__:main"
+crowley-advise = "crowley.advisor.cli:main"
 crowley-paper-step = "crowley.ops.paper_step:main"
 crowley-native = "crowley.native.build:main"
 

@@ -1,0 +1,51 @@
+"""Run the evaluators over one shared ``MarketState`` and apply the user's filters."""
+
+from __future__ import annotations
+
+from crowley.advisor.estimates import EstimateProvider, SnapshotEstimates
+from crowley.advisor.evaluators import EVALUATORS, Context
+from crowley.advisor.model import STRATEGIES, Advice, AdviceConfig, Exclusion, StrategyResult
+from crowley.advisor.state import MarketState
+
+
+def apply_filters(result: StrategyResult, config: AdviceConfig) -> StrategyResult:
+    """Move pathways under ``--min-profit`` / ``--min-volume`` into the exclusions, so they stay counted."""
+
+    kept = []
+    excluded = list(result.exclusions)
+    for pathway in result.pathways:
+        if pathway.threshold_profit < config.min_profit:
+            detail = f"{float(pathway.threshold_profit):.1f}c below {config.min_profit}c"
+            excluded.append(Exclusion(result.strategy, pathway.key, "below_min_profit", detail))
+        elif pathway.volume_per_hour < config.min_volume:
+            detail = f"{float(pathway.volume_per_hour):.2f}/h below {float(config.min_volume):.2f}/h"
+            excluded.append(Exclusion(result.strategy, pathway.key, "below_min_volume", detail))
+        else:
+            kept.append(pathway)
+    return StrategyResult(result.strategy, tuple(kept), tuple(excluded), result.considered, result.notes)
+
+
+def advise(state: MarketState, config: AdviceConfig, estimates: EstimateProvider | None = None) -> Advice:
+    """Evaluate the configured strategies against ``state`` (never the database)."""
+
+    ctx = Context(state, SnapshotEstimates(state) if estimates is None else estimates, config)
+    results = tuple(
+        apply_filters(EVALUATORS[name].evaluate(ctx), config)
+        for name in STRATEGIES
+        if name in config.strategies
+    )
+    pathways = tuple(
+        sorted(
+            (pathway for result in results for pathway in result.pathways),
+            key=lambda pathway: (-pathway.profit_per_hour, pathway.key),
+        )
+    )
+    return Advice(
+        house_key=state.house_key,
+        client_build=state.client_build,
+        as_of_t=state.as_of_t,
+        sweep_id=state.sweep_id,
+        config=config,
+        results=results,
+        pathways=pathways,
+    )

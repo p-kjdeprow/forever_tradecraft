@@ -242,7 +242,10 @@ def restore(data: dict[str, Any]) -> LoopState:
     if set(data) != set(DURABLE_FIELDS):
         raise ValueError(f"scan-loop state keys mismatch: {sorted(set(data) ^ set(DURABLE_FIELDS))}")
     known = {f.name for f in fields(LoopState)}
-    values = {k: (tuple(v) if k in _TUPLE_FIELDS else v) for k, v in data.items() if k in known}
+    values: dict[str, Any] = {}
+    for key, value in data.items():
+        if key in known:
+            values[key] = tuple(value) if key in _TUPLE_FIELDS else value
     return LoopState(**values)
 
 

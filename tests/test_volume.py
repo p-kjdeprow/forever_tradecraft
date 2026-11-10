@@ -424,3 +424,44 @@ def test_commodity_non_exact_time_left_fails_loudly():
     before, after = _commodity_pair([_row(1, 5, seconds=None)], [_row(1, 1, seconds=None)])
     with pytest.raises(ValueError, match="exact timeLeft"):
         compare_observations(before, after)
+
+
+COMMON_INTERVAL_KEYS = {
+    "commodity",
+    "commodityDepletionUnits",
+    "commodityDepletionUnitsPerHour",
+    "commodityReplenishmentUnits",
+    "commodityReplenishmentUnitsPerHour",
+    "commonPriceScope",
+    "comparedHours",
+    "comparedSeconds",
+    "eligibleIndividualSaleCandidateUnits",
+    "excludedIntervals",
+    "expirationPossibleUnits",
+    "expiryGapSeconds",
+    "exposureSeconds",
+    "groupedScope",
+    "inconsistentUnits",
+    "individual",
+    "individualExposureSeconds",
+    "individualRateAvailable",
+    "individualRateDenominatorHours",
+    "kind",
+    "observedIndividualAddedUnits",
+    "observedIndividualRemovedUnits",
+    "saleCandidateRateLabel",
+    "saleCandidateUnitsPerHour",
+    "timeLeftUnknownUnits",
+    "unknownUnits",
+    "valid",
+}
+
+
+def test_report_interval_keys_are_pinned_and_carry_no_per_auction_detail():
+    item = volume_report([_obs(100, [_row(7, 3)]), _obs(200, [])], hours=24, end=300)
+    assert set(item["intervals"][0]) == COMMON_INTERVAL_KEYS
+    commodity = volume_report(
+        [_obs(100, [], kind="commodity"), _obs(200, [], kind="commodity")], hours=24, end=300
+    )
+    assert set(commodity["intervals"][0]) == COMMON_INTERVAL_KEYS | {"aggregateCommodityChurnUnits"}
+    assert "removedClasses" not in compare_observations(_obs(100, [_row(7, 3)]), _obs(200, []))

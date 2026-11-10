@@ -229,6 +229,9 @@ def _base_result(*, elapsed: int = 0, expiry_gap: int = 0) -> dict[str, Any]:
     }
 
 
+PER_AUCTION_KEYS = ("removedClasses", "inconsistentResultIds")
+
+
 def compare_observations(
     previous: dict[str, Any],
     current: dict[str, Any],
@@ -236,7 +239,25 @@ def compare_observations(
     item_key: str | None = None,
     raw_identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Compare two consecutive observations and return conservative evidence."""
+    """Compare two consecutive observations and return conservative evidence.
+
+    The HTTP-facing result: it carries no per-auction detail.
+    """
+    result = compare_observations_detailed(previous, current, item_key=item_key, raw_identity=raw_identity)
+    for key in PER_AUCTION_KEYS:
+        result.pop(key, None)
+    return result
+
+
+def compare_observations_detailed(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    item_key: str | None = None,
+    raw_identity: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """``compare_observations`` plus, for item intervals, ``removedClasses`` (resultID to
+    disappearance class) and ``inconsistentResultIds``.  For in-process analysis only."""
     left = _observation(previous)
     right = _observation(current)
     left_meta = _record_meta(previous)
@@ -339,6 +360,11 @@ def compare_observations(
         "unknownUnits": 0,
         "commodityDepletionUnits": 0,
         "commodityReplenishmentUnits": 0,
+        # Item-kind per-auction detail (empty for commodity intervals): resultID -> the
+        # disappearance class of every identity auction that left the requested scope, and
+        # the resultIDs whose identity changed between the two observations.
+        "removedClasses": {},
+        "inconsistentResultIds": [],
     }
     if kind == "commodity":
         # One bottom-walk implementation: the analysis package's. Depletion is
@@ -430,6 +456,7 @@ def compare_observations(
                 affected_units = 0
             result["inconsistentUnits"] += affected_units
             result["unknownUnits"] += affected_units
+    result["inconsistentResultIds"] = sorted(inconsistent_ids)
     before = {
         row["resultID"]: row
         for row in left_rows
@@ -445,6 +472,7 @@ def compare_observations(
             units = row["quantity"]
             result["observedIndividualRemovedUnits"] += units
             classification = _time_class(row, expiry_gap)
+            result["removedClasses"][auction_id] = classification
             if classification == "expiration_possible":
                 result["expirationPossibleUnits"] += units
             elif classification == "time_left_unknown":

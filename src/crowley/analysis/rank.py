@@ -38,6 +38,32 @@ Estimators, all stated here so the table can be read honestly:
   The recipe status uses the character's latest capture at or before ``as_of`` (the client
   export is a static per-build dataset and is not selected by time).
 
+Item-kind (non-commodity) outputs, such as gear, bags and gadgets, are evaluated on a separate path
+(``analysis/item_books.py``) with the same estimators, restated for one-unit auctions:
+
+* Book: the ``coverage = 'full'`` item-kind observation of each sweep for this house and build;
+  rows are auctions (``quantity`` is the availability of identical one-unit auctions, the unit
+  price is the per-auction buyout).  An item whose books carry more than one ``itemKey`` is
+  excluded as ``output_item_variants`` rather than mixing variants.
+* Target: ``output_target_price`` unchanged, on levels built from the book's auctions and a fair
+  value that is the strictly-past 24 h median of the per-book *lowest buyout* (same ``min_fair_n``,
+  band and demand-coverage trust checks).  So the target undercuts the lowest buyout above
+  ``buy_ratio * fair`` by one copper, clamped to ``[floor_ratio, cap_ratio] * fair``.
+* Sale evidence: auctions that disappear between consecutive full observations, judged by
+  ``core.volume.compare_observations`` (grouped scopes, changed identities and unknown time-left
+  give no evidence; a disappearance that could be an expiry is skipped, never counted).  A
+  cheapest-first walk per interval yields the consumed units; a hypothetical listing sells when
+  walk units strictly above its price reach its quantity within the horizon.  Starts, eligibility
+  (an unbroken usable ``[t, t + horizon]``, decided before the outcome) and independence are the
+  commodity design.  Units/h is the walk's consumed units over the interval exposures.
+* Item-kind reagents are priced from the same item-kind book: the cheapest auctions of the latest
+  sweep, worst-case fill at the batch quantity, versus vendor (``source_reagent`` on the book's
+  levels).  A reagent whose latest book mixes ``itemKey`` variants is excluded as
+  ``reagent_item_variants``.
+* Outputs whose client bonding is bind-on-pickup are excluded as ``output_bind_on_pickup``; an
+  output with no client item data (bonding null) as ``output_bonding_unknown``.  Both are decided
+  before any pricing, after the check that the item was scanned at all.
+
 Strategy-only parameters ``min_margin``, ``max_spend_share`` and ``capacity_share`` are not
 applied here; ``share`` is the analogue of ``capacity_share``.  Recipes with random yields are
 excluded as ``random_yield`` (the trading loader leaves them out of the engine's recipes).
@@ -53,12 +79,22 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from fractions import Fraction
-from typing import Any
+from typing import Any, Protocol
 
 import psycopg
 
 from crowley.analysis.books import Book, Interval, load_commodity_books, valid_intervals
 from crowley.analysis.common import jsonable
+from crowley.analysis.item_books import (
+    ItemBook,
+    ItemInterval,
+    cheapest_cost,
+    floor_price,
+    item_fair,
+    item_intervals,
+    load_item_books,
+    replay_item_listing,
+)
 from crowley.analysis.metrics import FAIR_MIN_BOOKS, demand_metrics, fair_value
 from crowley.analysis.time_to_sale import HORIZON, replay_many
 from crowley.core.auction_rules import AuctionHouseRules, rules_for_house
@@ -81,8 +117,28 @@ from crowley.trading.strategies.pricing import (
     source_reagent,
 )
 
-DEFAULT_PROFESSIONS = frozenset({"alchemy", "tailoring"})
+DEFAULT_PROFESSIONS = frozenset({"alchemy", "tailoring", "engineering"})
 SECONDS_PER_HOUR = 3600
+BIND_ON_PICKUP = 1
+TRADEABLE_BONDING = frozenset({0, 2, 3})  # none, bind on equip, bind on use (client_items.bonding)
+# Every reason a recipe can be excluded for; _Excluded rejects anything else.
+EXCLUSION_REASONS = (
+    "insufficient_independent_evidence",
+    "invalid_output_quantity",
+    "no_outputs",
+    "output_bind_on_pickup",
+    "output_bonding_unknown",
+    "output_fair_unavailable",
+    "output_fair_untrusted",
+    "output_item_variants",
+    "output_no_current_book",
+    "output_no_observed_demand",
+    "output_not_commodity",
+    "output_not_in_plan",
+    "random_yield",
+    "reagent_item_variants",
+    "reagent_unpriceable",
+)
 HISTORY_HOURS = 24  # extra history loaded so early starts have a full 24 h fair-value window
 DEFAULT_MIN_FAIR_N = int(fraction_parameter(CRAFTING_PARAMS, "min_fair_n"))
 DEFAULT_MAX_BAND_WIDTH = float(fraction_parameter(CRAFTING_PARAMS, "max_band_width"))
@@ -145,6 +201,13 @@ class RankInputs:
     observed_kinds: Mapping[int, str] = field(default_factory=dict)
     # Spells of the requested professions whose outputs are not fixed-yield.
     random_yield_spells: tuple[int, ...] = ()
+    # Spells of the requested professions that have no client output row at all.
+    no_output_spells: tuple[int, ...] = ()
+    # Professions of the two spell lists above (for the per-profession breakdown only).
+    excluded_spell_professions: Mapping[int, frozenset[str]] = field(default_factory=dict)
+    # Item id -> full item-kind books.  None: item-kind data was not loaded, so item-kind
+    # outputs are excluded as output_not_commodity (the commodity-only behaviour).
+    item_books: Mapping[int, Sequence[ItemBook]] | None = None
 
 
 @dataclass(frozen=True)
@@ -172,6 +235,7 @@ class TradeRow:
     recipe_item_id: int | None = None
     payback_crafts: Fraction | None = None
     payback_hours: Fraction | None = None
+    kind: str = "commodity"  # "commodity" | "item" | "mixed" (a multi-output recipe of both)
 
 
 @dataclass(frozen=True)
@@ -187,6 +251,7 @@ class Exclusion:
     spell_id: int
     reason: str
     detail: str
+    professions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -195,13 +260,31 @@ class Evaluation:
     excluded: tuple[Exclusion, ...]
     considered: int
 
+    def __post_init__(self) -> None:
+        if self.considered != len(self.rows) + len(self.excluded):
+            raise RuntimeError(
+                f"{self.considered} recipes considered but {len(self.rows)} evaluated and "
+                f"{len(self.excluded)} excluded"
+            )
+
     def exclusion_counts(self) -> dict[str, int]:
         return dict(sorted(Counter(item.reason for item in self.excluded).items()))
+
+    def exclusion_counts_by_profession(self) -> dict[str, dict[str, int]]:
+        """Reason counts per profession; a recipe of two professions counts under each."""
+
+        counts: dict[str, Counter[str]] = {}
+        for item in self.excluded:
+            for profession in item.professions or ("(unattributed)",):
+                counts.setdefault(profession, Counter())[item.reason] += 1
+        return {name: dict(sorted(counter.items())) for name, counter in sorted(counts.items())}
 
 
 class _Excluded(Exception):
     def __init__(self, reason: str, detail: str) -> None:
         super().__init__(reason, detail)
+        if reason not in EXCLUSION_REASONS:
+            raise ValueError(f"unregistered exclusion reason {reason!r}")
         self.reason = reason
         self.detail = detail
 
@@ -277,14 +360,87 @@ def _horizon_observable(
     return True
 
 
-def _history(books: Sequence[Book], inputs: RankInputs, config: RankConfig) -> list[Book]:
+class _Timed(Protocol):
+    @property
+    def t(self) -> float: ...
+
+
+def _history[B: _Timed](books: Sequence[B], inputs: RankInputs, config: RankConfig) -> list[B]:
     start = inputs.as_of_t - (config.lookback_hours + HISTORY_HOURS) * SECONDS_PER_HOUR
     return [book for book in books if start <= book.t <= inputs.as_of_t]
 
 
-def _window(books: Sequence[Book], inputs: RankInputs, config: RankConfig) -> list[Book]:
+def _window[B: _Timed](books: Sequence[B], inputs: RankInputs, config: RankConfig) -> list[B]:
     start = inputs.as_of_t - config.lookback_hours * SECONDS_PER_HOUR
     return [book for book in books if start <= book.t <= inputs.as_of_t]
+
+
+def item_levels_snapshot(item_id: int, book: ItemBook, item_key: str | None) -> ItemSnapshot:
+    """A snapshot of one item-kind book's auctions as price levels; statistics are unavailable."""
+
+    by_price: dict[int, int] = {}
+    for auction in book.scoped(item_key):
+        if auction.unit.denominator != 1:
+            raise ValueError(f"item {item_id} has a non-integral buyout {auction.unit}")
+        by_price[int(auction.unit)] = by_price.get(int(auction.unit), 0) + auction.quantity
+    levels = tuple(Level(price, by_price[price]) for price in sorted(by_price))
+    return ItemSnapshot(
+        item_id=item_id,
+        t=int(book.t),
+        levels=levels,
+        visible_min=levels[0].unit_price if levels else None,
+        visible_units=sum(level.quantity for level in levels),
+        fair=None,
+        fair_band=None,
+        fair_n=0,
+        trend_per_day=None,
+        demand_units_per_day=None,
+        demand_eligible_seconds=0.0,
+        volatility_per_hour=None,
+        half_life_hours=None,
+    )
+
+
+def item_snapshot_from_books(
+    item_id: int,
+    books: Sequence[ItemBook],
+    floors: Sequence[Fraction | None],
+    intervals: Sequence[ItemInterval | None],
+    item_key: str | None,
+    min_books: int,
+) -> ItemSnapshot:
+    """Item-kind snapshot at the last book: strictly-past fair value of the floor and walk demand.
+
+    ``intervals`` are the usable intervals among ``books`` (one slot per adjacent pair).
+    """
+
+    base = item_levels_snapshot(item_id, books[-1], item_key)
+    fair = item_fair(books, floors, len(books) - 1, min_books=min_books)
+    band = fair["band"]
+    usable = [interval for interval in intervals if interval is not None]
+    seconds = sum(interval.exposure for interval in usable)
+    units = sum(units for interval in usable for _, units in interval.consumed)
+    return replace(
+        base,
+        fair=fair["value"],
+        fair_band=None if band["p25"] is None or band["p75"] is None else (band["p25"], band["p75"]),
+        fair_n=fair["n"],
+        demand_units_per_day=Fraction(units * 86400, seconds) if seconds else None,
+        demand_eligible_seconds=float(seconds),
+    )
+
+
+def _independent_estimate(determined: Sequence[tuple[float, bool]], horizon: float) -> SaleEstimate:
+    """P(sale) over a greedy subset of determined starts at least one horizon apart."""
+
+    independent = sold = 0
+    last: float | None = None
+    for start_t, was_sold in determined:
+        if last is None or start_t >= last + horizon:
+            last = start_t
+            independent += 1
+            sold += was_sold
+    return SaleEstimate(sold / independent if independent else 0.0, len(determined), independent, sold)
 
 
 class _Evaluator:
@@ -294,6 +450,12 @@ class _Evaluator:
         self._windows: dict[int, list[Book]] = {}
         self._outputs: dict[int, ItemSnapshot] = {}
         self._estimates: dict[tuple[int, int], SaleEstimate] = {}
+        self._kinds: dict[int, str] = {}
+        self._demand_notes: dict[int, str] = {}
+        self._item_keys: dict[int, str | None] = {}
+        self._item_series: dict[
+            int, tuple[list[ItemBook], list[Fraction | None], list[ItemInterval | None]]
+        ] = {}
 
     def window(self, item_id: int) -> list[Book] | None:
         if item_id not in self._windows:
@@ -309,27 +471,117 @@ class _Evaluator:
     def history(self, item_id: int) -> list[Book]:
         return _history(self.inputs.books.get(item_id, ()), self.inputs, self.config)
 
+    def item_series(
+        self, item_id: int
+    ) -> tuple[list[ItemBook], list[Fraction | None], list[ItemInterval | None]]:
+        """Item-kind history books, their floors and usable intervals (one variant, cached)."""
+
+        if item_id not in self._item_series:
+            books = _history((self.inputs.item_books or {}).get(item_id, ()), self.inputs, self.config)
+            keys = sorted({key for book in books for key in book.item_keys})
+            if len(keys) > 1:
+                raise _Excluded("output_item_variants", f"item {item_id} books carry itemKeys {keys}")
+            key = keys[0] if keys else None
+            self._item_keys[item_id] = key
+            floors = [floor_price(book, key) for book in books]
+            self._item_series[item_id] = (books, floors, item_intervals(books, key))
+        return self._item_series[item_id]
+
     def reagent_source(self, item_id: int, quantity: int) -> Source | None:
         window = self.window(item_id)
         snapshot = None if window is None else levels_snapshot(item_id, window[-1])
+        if window is None:
+            latest = [
+                book
+                for book in (self.inputs.item_books or {}).get(item_id, ())
+                if book.sweep_id == self.inputs.latest_sweep_id
+            ]
+            if latest:
+                keys = sorted(latest[-1].item_keys)
+                if len(keys) > 1:
+                    raise _Excluded(
+                        "reagent_item_variants", f"reagent {item_id} book carries itemKeys {keys}"
+                    )
+                return self._item_reagent_source(item_id, quantity, latest[-1])
         return source_reagent(snapshot, self.inputs.facts.get(item_id), item_id, quantity)
+
+    def _item_reagent_source(self, item_id: int, quantity: int, book: ItemBook) -> Source | None:
+        """Exact sum of the cheapest buyable auctions (not ours) versus vendor; a tie goes to the AH."""
+
+        vendor = source_reagent(None, self.inputs.facts.get(item_id), item_id, quantity)
+        ah = cheapest_cost(book, None, quantity)
+        if ah is not None and (vendor is None or ah[0] <= vendor.full_cost):
+            return Source(item_id, quantity, "ah", ah[1], ah[0])
+        return vendor
+
+    def output_kind(self, item_id: int) -> str:
+        """``"commodity"`` or ``"item"``; an output that was never scanned is excluded."""
+
+        if self.inputs.books.get(item_id):
+            return "commodity"
+        kind = self.inputs.observed_kinds.get(item_id)
+        if kind is None:
+            raise _Excluded("output_not_in_plan", f"item {item_id} was never scanned for this house/build")
+        return kind
+
+    def check_tradeable(self, item_id: int) -> None:
+        """Bind-on-pickup outputs cannot be auctioned; unknown bonding is never assumed tradeable."""
+
+        facts = self.inputs.facts.get(item_id)
+        if facts is None:
+            raise _Excluded("output_bonding_unknown", f"item {item_id} has no client item data")
+        if facts.bonding == BIND_ON_PICKUP:
+            raise _Excluded("output_bind_on_pickup", f"item {item_id} is bind on pickup")
+        if facts.bonding not in TRADEABLE_BONDING:
+            raise ValueError(f"item {item_id} has unrecognised client bonding {facts.bonding}")
 
     def output_snapshot(self, item_id: int) -> ItemSnapshot:
         if item_id in self._outputs:
             return self._outputs[item_id]
-        window = self.window(item_id)
-        if window is None:
-            raise self._missing_book(item_id)
-        if item_id not in self.inputs.facts:
-            raise _Excluded("output_no_client_facts", f"item {item_id} has no client facts")
-        snapshot = snapshot_from_books(item_id, window)
+        kind = self.output_kind(item_id)
+        self.check_tradeable(item_id)
+        self._kinds[item_id] = kind
+        if kind == "item" and self.inputs.item_books is not None:
+            snapshot = self._item_output_snapshot(item_id)
+        else:
+            window = self.window(item_id)
+            if window is None:
+                raise self._missing_book(item_id)
+            snapshot = snapshot_from_books(item_id, window)
+        return self._trusted(item_id, snapshot)
+
+    def _item_output_snapshot(self, item_id: int) -> ItemSnapshot:
+        books, floors, intervals = self.item_series(item_id)
+        window = _window(books, self.inputs, self.config)
+        if not window or window[-1].sweep_id != self.inputs.latest_sweep_id:
+            raise _Excluded(
+                "output_no_current_book", f"item {item_id} has no full item-kind book in the latest sweep"
+            )
+        offset = len(books) - len(window)
+        usable = sum(interval is not None for interval in intervals[offset:])
+        self._demand_notes[item_id] = (
+            f" ({usable} of {len(window) - 1} window intervals usable for item-kind sale evidence)"
+        )
+        return item_snapshot_from_books(
+            item_id,
+            window,
+            floors[offset:],
+            intervals[offset:],
+            self._item_keys[item_id],
+            self.config.min_fair_books,
+        )
+
+    def _trusted(self, item_id: int, snapshot: ItemSnapshot) -> ItemSnapshot:
         if snapshot.fair is None:
             raise _Excluded(
                 "output_fair_unavailable",
                 f"item {item_id}: {snapshot.fair_n} strictly-past reference books in window",
             )
         if snapshot.demand_units_per_day is None or snapshot.demand_units_per_day <= 0:
-            raise _Excluded("output_no_observed_demand", f"item {item_id} shows no bottom-walk demand")
+            raise _Excluded(
+                "output_no_observed_demand",
+                f"item {item_id} shows no bottom-walk demand{self._demand_notes.get(item_id, '')}",
+            )
         if not trustworthy_fair(
             snapshot,
             min_fair_n=self.config.min_fair_n,
@@ -349,17 +601,45 @@ class _Evaluator:
             return _Excluded(
                 "output_no_current_book", f"item {item_id} was observed earlier but not in the latest sweep"
             )
-        kind = self.inputs.observed_kinds.get(item_id)
-        if kind is None:
-            return _Excluded("output_not_in_plan", f"item {item_id} was never scanned for this house/build")
+        kind = self.inputs.observed_kinds[item_id]  # output_kind() already required it
         if kind != "commodity":
-            return _Excluded("output_not_commodity", f"item {item_id} is scanned as kind {kind!r}")
+            return _Excluded(
+                "output_not_commodity",
+                f"item {item_id} is scanned as kind {kind!r} and this input set carries no item-kind data",
+            )
         return _Excluded("output_no_current_book", f"commodity {item_id} has no book in the lookback window")
 
     def sale_estimate(self, item_id: int, quantity: int) -> SaleEstimate:
         key = (item_id, quantity)
         if key in self._estimates:
             return self._estimates[key]
+        if self._kinds[item_id] == "item" and self.inputs.item_books is not None:
+            estimate = self._item_sale_estimate(item_id, quantity)
+        else:
+            estimate = self._commodity_sale_estimate(item_id, quantity)
+        self._estimates[key] = estimate
+        return estimate
+
+    def _item_sale_estimate(self, item_id: int, quantity: int) -> SaleEstimate:
+        history, floors, intervals = self.item_series(item_id)
+        horizon = self.config.horizon_seconds
+        first_start_t = self.inputs.as_of_t - self.config.lookback_hours * SECONDS_PER_HOUR
+        item_key = self._item_keys[item_id]
+        determined: list[tuple[float, bool]] = []
+        for index, book in enumerate(history):
+            if book.t < first_start_t:
+                continue  # earlier books only supply fair-value history and replay context
+            fair = item_fair(history, floors, index, min_books=self.config.min_fair_books)["value"]
+            if fair is None:
+                continue
+            snapshot = replace(item_levels_snapshot(item_id, book, item_key), fair=fair)
+            price = output_target_price(snapshot, self.config.pricing)
+            sold = replay_item_listing(history, intervals, index, price, quantity, horizon)
+            if sold is not None:
+                determined.append((book.t, sold))
+        return _independent_estimate(determined, horizon)
+
+    def _commodity_sale_estimate(self, item_id: int, quantity: int) -> SaleEstimate:
         assert self.window(item_id) is not None
         history = self.history(item_id)
         horizon = self.config.horizon_seconds
@@ -385,18 +665,7 @@ class _Evaluator:
                 continue
             sold_in_time = result.event_time is not None and result.event_time <= horizon
             determined.append((history[index].t, sold_in_time))
-        independent = sold = 0
-        last: float | None = None
-        for start_t, was_sold in determined:
-            if last is None or start_t >= last + horizon:
-                last = start_t
-                independent += 1
-                sold += was_sold
-        estimate = SaleEstimate(
-            sold / independent if independent else 0.0, len(determined), independent, sold
-        )
-        self._estimates[key] = estimate
-        return estimate
+        return _independent_estimate(determined, horizon)
 
     def evaluate(self, recipe: Recipe) -> TradeRow:
         config = self.config
@@ -463,6 +732,8 @@ class _Evaluator:
         assert crafts_per_hour is not None
 
         margin = (revenue - reagent_cost) / batch
+        kinds = {self._kinds[item_id] for item_id in snapshots}
+        kind = next(iter(kinds)) if len(kinds) == 1 else "mixed"
         return TradeRow(
             spell_id=recipe.spell_id,
             professions=tuple(sorted(recipe.professions)),
@@ -481,6 +752,7 @@ class _Evaluator:
             crafts_per_hour=crafts_per_hour,
             profit_per_hour=margin * crafts_per_hour,
             capital_per_batch=reagent_cost + deposits,
+            kind=kind,
         )
 
     def annotate(self, row: TradeRow, recipe: Recipe) -> TradeRow:
@@ -517,9 +789,26 @@ def evaluate_trades(inputs: RankInputs, config: RankConfig) -> Evaluation:
     evaluator = _Evaluator(inputs, config)
     rows: list[TradeRow] = []
     excluded: list[Exclusion] = []
-    considered = len(inputs.random_yield_spells)
+    considered = len(inputs.random_yield_spells) + len(inputs.no_output_spells)
+    lookup = inputs.excluded_spell_professions
     for spell_id in inputs.random_yield_spells:
-        excluded.append(Exclusion(spell_id, "random_yield", "recipe output is not a fixed yield"))
+        excluded.append(
+            Exclusion(
+                spell_id,
+                "random_yield",
+                "recipe output is not a fixed yield",
+                tuple(sorted(lookup.get(spell_id, ()))),
+            )
+        )
+    for spell_id in inputs.no_output_spells:
+        excluded.append(
+            Exclusion(
+                spell_id,
+                "no_outputs",
+                "recipe has no client output row",
+                tuple(sorted(lookup.get(spell_id, ()))),
+            )
+        )
     for recipe in sorted(inputs.recipes, key=lambda entry: entry.spell_id):
         if not recipe.professions & config.professions:
             continue
@@ -527,7 +816,14 @@ def evaluate_trades(inputs: RankInputs, config: RankConfig) -> Evaluation:
         try:
             rows.append(evaluator.annotate(evaluator.evaluate(recipe), recipe))
         except _Excluded as exc:
-            excluded.append(Exclusion(recipe.spell_id, exc.reason, exc.detail))
+            excluded.append(
+                Exclusion(
+                    recipe.spell_id,
+                    exc.reason,
+                    exc.detail,
+                    tuple(sorted(recipe.professions & config.professions)),
+                )
+            )
     return Evaluation(tuple(rows), tuple(excluded), considered)
 
 
@@ -629,21 +925,54 @@ def _observed_kinds(conn: Any, house_key: str, client_build: str, item_ids: Sequ
     return kinds
 
 
-def _random_yield_spells(conn: Any, client_build: str, professions: frozenset[str]) -> tuple[int, ...]:
-    """Spells of the professions with a non-fixed output (the trading loader skips them)."""
+def _excluded_spells(
+    conn: Any, client_build: str, professions: frozenset[str], loaded: frozenset[int]
+) -> tuple[tuple[int, ...], tuple[int, ...], dict[int, frozenset[str]]]:
+    """Requested-profession spells the trading loader does not return, each with its reason.
+
+    Returns (random-yield spells, spells with no client output row, their professions).  Every
+    spell of the professions must be either loaded or one of these; anything else is a loader
+    gap and fails loudly rather than vanishing from the accounting.
+    """
 
     rows = conn.execute(
         """
-        SELECT DISTINCT o.spell_id
+        SELECT s.spell_id, array_agg(DISTINCT s.profession), r.spell_id IS NOT NULL,
+               EXISTS (SELECT 1 FROM client_recipe_outputs o
+                       WHERE o.export_id = e.id AND o.spell_id = s.spell_id),
+               EXISTS (SELECT 1 FROM client_recipe_outputs o
+                       WHERE o.export_id = e.id AND o.spell_id = s.spell_id AND o.yield_kind <> 'fixed')
         FROM latest_client_export AS e
-        JOIN client_recipe_outputs AS o ON o.export_id = e.id
-        JOIN client_recipe_skill_lines AS s ON s.export_id = o.export_id AND s.spell_id = o.spell_id
-        WHERE e.client_build = %s AND o.yield_kind <> 'fixed' AND s.profession = ANY(%s)
-        ORDER BY o.spell_id
+        JOIN client_recipe_skill_lines AS s ON s.export_id = e.id
+        LEFT JOIN client_recipes AS r ON r.export_id = e.id AND r.spell_id = s.spell_id
+        WHERE e.client_build = %s AND s.profession = ANY(%s)
+        GROUP BY s.spell_id, r.spell_id, e.id
+        ORDER BY s.spell_id
         """,
         (client_build, sorted(professions)),
     ).fetchall()
-    return tuple(int(row[0]) for row in rows)
+    random_yield: list[int] = []
+    no_output: list[int] = []
+    attribution: dict[int, frozenset[str]] = {}
+    seen: set[int] = set()
+    for raw_spell, spell_professions, in_recipes, has_output, has_random in rows:
+        spell_id = int(raw_spell)
+        seen.add(spell_id)
+        if not in_recipes:
+            raise RuntimeError(f"skill-line spell {spell_id} has no client_recipes row")
+        if has_random:
+            random_yield.append(spell_id)
+        elif not has_output:
+            no_output.append(spell_id)
+        elif spell_id not in loaded:
+            raise RuntimeError(f"fixed-yield spell {spell_id} was not returned by the recipe loader")
+        else:
+            continue
+        attribution[spell_id] = frozenset(spell_professions)
+    unknown = sorted(loaded - seen)
+    if unknown:
+        raise RuntimeError(f"loaded recipes {unknown} have no skill line in the requested professions")
+    return tuple(random_yield), tuple(no_output), attribution
 
 
 def _names(conn: Any, client_build: str, item_ids: Sequence[int]) -> dict[int, str]:
@@ -703,8 +1032,27 @@ def load_rank_inputs(
     )
     names = _names(conn, build, display_ids)
     output_ids = sorted({item_id for recipe in recipes for item_id, _ in recipe.outputs})
-    observed_kinds = _observed_kinds(conn, house_key, build, output_ids)
-    random_yield = _random_yield_spells(conn, build, config.professions)
+    reagent_ids = sorted({item_id for recipe in recipes for item_id, _ in recipe.reagents})
+    observed_kinds = _observed_kinds(conn, house_key, build, sorted({*output_ids, *reagent_ids}))
+    item_outputs = [item_id for item_id in output_ids if observed_kinds.get(item_id) == "item"]
+    item_books = load_item_books(
+        conn,
+        house_key,
+        item_outputs,
+        client_build=build,
+        start_t=int(finished_t - (config.lookback_hours + HISTORY_HOURS) * SECONDS_PER_HOUR),
+        end_t=int(finished_t),
+    )
+    # Reagents are priced from the latest sweep's book only.
+    item_reagents = [
+        item_id
+        for item_id in reagent_ids
+        if observed_kinds.get(item_id) == "item" and item_id not in item_outputs
+    ]
+    item_books.update(load_item_books(conn, house_key, item_reagents, client_build=build, sweep_id=sweep_id))
+    random_yield, no_output, excluded_professions = _excluded_spells(
+        conn, build, config.professions, frozenset(recipe.spell_id for recipe in recipes)
+    )
     inputs = RankInputs(
         house_key=house_key,
         as_of_t=finished_t,
@@ -717,6 +1065,9 @@ def load_rank_inputs(
         teaching_prices=teaching_prices,
         observed_kinds=observed_kinds,
         random_yield_spells=random_yield,
+        no_output_spells=no_output,
+        excluded_spell_professions=excluded_professions,
+        item_books=item_books,
     )
     return LoadedInputs(inputs, build, names)
 
@@ -741,7 +1092,8 @@ def format_table(
 ) -> str:
     shown = rows if limit is None else rows[:limit]
     header = (
-        f"{'spell':>7} {'output (item id)':<38} {'cost':>9} {'margin':>9} {'P(sale)':>7} {'sold/ind':>8} "
+        f"{'spell':>7} {'kind':<4} {'output (item id)':<38} {'cost':>9} {'margin':>9} {'P(sale)':>7} "
+        f"{'sold/ind':>8} "
         f"{'units/h':>8} {'profit/h':>10} {'capital':>10} {'status':<20} {'recipe':>10} {'payback':>8}"
     )
     lines = [header]
@@ -752,7 +1104,7 @@ def format_table(
         if row.recipe_price is not None:
             recipe = _gold(row.recipe_price)
         lines.append(
-            f"{row.spell_id:>7} {label[:38]:<38} {_gold(row.reagent_cost_per_craft):>9} "
+            f"{row.spell_id:>7} {row.kind[:4]:<4} {label[:38]:<38} {_gold(row.reagent_cost_per_craft):>9} "
             f"{_gold(row.margin_per_craft):>9} {row.sale_probability:>7.2f} "
             f"{f'{row.sold_starts}/{row.independent_starts}':>8}{'*' if row.target_above_lowest else ' '}"
             f"{float(row.market_units_per_hour):>8.2f} {_gold(row.profit_per_hour):>10} "
@@ -768,6 +1120,10 @@ def format_table(
     )
     for reason, count in counts.items():
         lines.append(f"  excluded {reason}: {count}")
+    for profession, by_reason in evaluation.exclusion_counts_by_profession().items():
+        lines.append(
+            f"  {profession}: " + ", ".join(f"{reason} {count}" for reason, count in by_reason.items())
+        )
     return "\n".join(lines)
 
 
@@ -779,6 +1135,7 @@ def report_json(
         "rows": [{**asdict(row), "names": {str(i): names.get(i) for i, _ in row.outputs}} for row in rows],
         "excluded": [asdict(item) for item in evaluation.excluded],
         "exclusion_counts": evaluation.exclusion_counts(),
+        "exclusion_counts_by_profession": evaluation.exclusion_counts_by_profession(),
         "considered": evaluation.considered,
     }
     return json.dumps(jsonable(payload), indent=2, sort_keys=True)
@@ -790,7 +1147,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--house", required=True, help="explicit house key, e.g. us-normal-alliance")
     parser.add_argument("--build", help="full client build, e.g. 1.60.1.70862 (default: latest sweep's)")
     parser.add_argument("--character", help="classify recipes against this character's latest capture")
-    parser.add_argument("--professions", default="alchemy,tailoring")
+    parser.add_argument("--professions", default=",".join(sorted(DEFAULT_PROFESSIONS)))
     parser.add_argument("--lookback-hours", type=float, default=24.0)
     parser.add_argument("--horizon-hours", type=float, default=2.0)
     parser.add_argument("--min-sale-prob", type=float, default=0.5)
@@ -887,6 +1244,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 __all__ = [
+    "EXCLUSION_REASONS",
     "SaleEstimate",
     "parse_as_of",
     "Evaluation",
@@ -897,6 +1255,8 @@ __all__ = [
     "TradeRow",
     "build_parser",
     "evaluate_trades",
+    "item_levels_snapshot",
+    "item_snapshot_from_books",
     "levels_snapshot",
     "load_rank_inputs",
     "main",

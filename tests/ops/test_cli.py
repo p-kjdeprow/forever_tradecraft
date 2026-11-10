@@ -50,22 +50,21 @@ def test_health_forwards_xdg_paths_and_returns_operation_exit_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     paths = _xdg(tmp_path, monkeypatch)
-    calls: list[tuple[Path, Path, Path, Path]] = []
+    calls: list[tuple[Path, Path, Path]] = []
 
     def run(
         *,
-        config_path: Path,
         state_root: Path,
         backup_root: Path,
         companion_state_path: Path,
     ) -> dict[str, object]:
-        calls.append((config_path, state_root, backup_root, companion_state_path))
+        calls.append((state_root, backup_root, companion_state_path))
         return {"classification": "gated", "exit_code": 3}
 
     monkeypatch.setattr(health, "health_operation", run)
 
     assert cli.main(["health"]) == 3
-    assert calls == [(paths.config_path, paths.state_root, paths.backup_root, paths.companion_state)]
+    assert calls == [(paths.state_root, paths.backup_root, paths.companion_state)]
     assert json.loads(capsys.readouterr().out) == {
         "schema": health.OPS_SCHEMA,
         "operation": "health",

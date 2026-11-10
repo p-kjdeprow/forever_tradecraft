@@ -130,7 +130,6 @@ def main(argv: list[str] | None = None) -> int:
                 )
             else:
                 result = health.health_operation(
-                    config_path=paths.config_path,
                     state_root=paths.state_root,
                     backup_root=paths.backup_root,
                     companion_state_path=paths.companion_state,

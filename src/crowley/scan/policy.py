@@ -72,6 +72,8 @@ AH_FAILED_RELAUNCH_S = 1800.0
 ACTIVATIONS = 3
 ACTIVATION_WINDOW_S = 300.0
 STEP_WAIT_S = 5.0  # how long a typed-command step may wait for its readback
+SUBMIT_CONFIRM_S = 60.0  # a submitted command must close chat (or reload) within this
+GAME_MENU_ESCAPE_S = 30.0  # min gap between Escapes that close the Game Menu
 TYPED_STALL_S = 30.0  # frames stopped during TYPED: Escape after this
 FRESH_BEFORE_RETURN_S = 3.0
 RELAUNCH_FAST_COUNT = 3
@@ -450,6 +452,12 @@ def _decide(obs: Observation) -> Decision:
         st = replace(st, blocking_since=since)
         if now - since >= STUCK_RELAUNCH_S:
             return _relaunch(obs, st, "blocking_ui", "blocking_ui")
+        # The Game Menu is a known UI that Escape closes (and a stray Escape opens).  With
+        # the chat box closed, one Escape per 30 s dismisses it; anything else holds.
+        if snap.blocking_ui == "game_menu_shown" and not snap.chat_active:
+            if obs.mono >= st.tx_cooldown_until:
+                st = replace(st, tx=None, tx_cooldown_until=obs.mono + GAME_MENU_ESCAPE_S)
+                return Decision(Action.PRESS_ESCAPE, st, fault_code="blocking_ui", detail="close_game_menu")
         return _fault(st, "blocking_ui", snap.blocking_ui)
     if st.tx is not None or snap.chat_active:  # 5
         result = _chat(obs, st, snap)
@@ -541,6 +549,15 @@ def _chat(obs: Observation, st: LoopState, snap: Snapshot) -> Decision | LoopSta
         tx = replace(tx, at=mono)
         st = replace(st, tx=tx)
     waited = mono - tx.at
+    if tx.step is Step.SUBMITTED:
+        # Return was sent: never Escape this transaction.  The client may render the
+        # command for a few frames, and a /reload replaces the whole UI.  Done when the
+        # box closes; unconfirmed after SUBMIT_CONFIRM_S is a fault, not a retry.
+        if not snap.chat_active:
+            return replace(st, tx=None)
+        if waited < SUBMIT_CONFIRM_S:
+            return _wait(st, "tx_submitted")
+        return _fault(replace(st, tx=None, tx_cooldown_until=mono + 30), "submit_unconfirmed")
     if snap.chat_active and text:
         if not tx.command.startswith(text):
             return _fault(st, "chat_foreign_text", f"len={len(text)}")

@@ -689,3 +689,38 @@ def test_restore_rejects_wrongly_typed_values(key: str, value: object) -> None:
     data[key] = value
     with pytest.raises(ValueError, match=key):
         restore(data)
+
+
+def test_submitted_reload_still_rendered_is_never_escaped() -> None:
+    # Live 2026-11-09: one more frame showed "/reload" after Return; 5 s later the old
+    # rule escaped it, opening the Game Menu.  A submitted command waits, never escapes.
+    for at in (MONO - 1, MONO - 6, MONO - 59):
+        d = decide(chat_obs("/reload", Step.SUBMITTED, at=at))
+        check(d, Action.WAIT)
+        assert d.detail == "tx_submitted"
+
+
+def test_submitted_command_closes_when_chat_closes() -> None:
+    d = decide(chat_obs("", Step.SUBMITTED, active=False))
+    assert d.state.tx is None
+
+
+def test_submitted_command_unconfirmed_after_60_s_faults_without_escape() -> None:
+    d = decide(chat_obs("/reload", Step.SUBMITTED, at=MONO - 61))
+    check(d, Action.FAULT, "submit_unconfirmed")
+    assert d.state.tx is None
+
+
+def test_game_menu_with_closed_chat_is_escaped_once_per_30_s() -> None:
+    o = obs(snap(blocking_ui="game_menu_shown"), state=LoopState(last_new_sweep_at=WALL))
+    d = decide(o)
+    check(d, Action.PRESS_ESCAPE, "blocking_ui")
+    assert d.detail == "close_game_menu"
+    again = decide(with_state(o, **{f: getattr(d.state, f) for f in ("tx_cooldown_until", "blocking_since")}))
+    check(again, Action.FAULT, "blocking_ui")
+
+
+def test_other_popups_and_game_menu_over_chat_are_never_escaped() -> None:
+    check(decide(obs(snap(blocking_ui="static_popup_shown"))), Action.FAULT, "blocking_ui")
+    over_chat = obs(snap(blocking_ui="game_menu_shown", chat_active=True, chat_focused=True))
+    check(decide(over_chat), Action.FAULT, "blocking_ui")

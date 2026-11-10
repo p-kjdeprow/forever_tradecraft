@@ -647,3 +647,45 @@ def test_durable_fields_round_trip_through_json() -> None:
         restore({**data, "extra": 1})
     with pytest.raises(ValueError):
         restore({k: v for k, v in data.items() if k != "flush_uid"})
+
+
+def test_hold_human_detail_is_constant() -> None:
+    a = decide(obs(human_active=True, human_reason="physical input 1.0s ago"))
+    b = decide(obs(human_active=True, human_reason="physical input 9.0s ago"))
+    assert a.detail == b.detail == "human input within 5 min"
+
+
+def test_non_fullscreen_window_is_invalid_before_the_no_frame_rows() -> None:
+    # No decodable frame for 11 min (rows 2 and 3 would relaunch) but the window is wrong.
+    o = replace(obs(), snapshot=None, window_ok=False, last_frame_at=WALL - 660)
+    first = decide(o)
+    check(first, Action.FAULT, "window_invalid")
+    later = replace(o, wall=WALL + 1800, state=first.state, last_frame_at=WALL - 660)
+    check(decide(later), Action.RELAUNCH, "window_invalid")
+    never = replace(o, frames_seen_this_process=0, process_started_at=WALL - 660, last_frame_at=None)
+    check(decide(never), Action.FAULT, "window_invalid")
+
+
+def test_window_bad_clock_clears_when_the_window_is_valid_again() -> None:
+    bad = decide(replace(obs(), snapshot=None, window_ok=False))
+    good = decide(replace(obs(), snapshot=None, state=bad.state))
+    assert good.state.window_bad_since is None
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("relaunch_attempts", "3"),
+        ("relaunch_attempts", True),
+        ("last_relaunch_at", "now"),
+        ("flush_uid", 5),
+        ("ah_attempts", [1.0, "x"]),
+        ("ah_attempts", 5),
+        ("window_bad_since", False),
+    ],
+)
+def test_restore_rejects_wrongly_typed_values(key: str, value: object) -> None:
+    data = durable_fields(LoopState())
+    data[key] = value
+    with pytest.raises(ValueError, match=key):
+        restore(data)

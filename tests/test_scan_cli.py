@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import stat
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,7 @@ from typing import Any
 import pytest
 
 from crowley.core.game_target import load_game_target
-from crowley.scan import cli, config, loop, presence
+from crowley.scan import cli, config, loop, observe, presence
 from tests.ops.test_install import _write_host
 
 TARGET_FIXTURE = Path(__file__).parent / "fixtures" / "targets" / "verified-beta.json"
@@ -105,6 +106,7 @@ def loaded_config(root: Path) -> config.ScanConfig:
         target=TARGET,
         matcher=OwnedGameMatcher("Wow.exe", "C:\\wow.exe", str(root / "wine"), 1),
         window_class="wow.exe",
+        window_title="World of Warcraft",
         display=":0",
         canvas_crop=(80, 48, 256, 256),
         saved_variables=root / "Crowley.lua",
@@ -134,7 +136,11 @@ def test_load_scan_config_pins_come_from_target_host_and_installed_addon(
     )
     assert target.addon_version == "0.2.0" and target.auctioneer == "Auctioneer Jaxon"
     assert len(target.plan_hash) == 64
-    assert loaded.window_class == game.window_class and loaded.display == ":crowley-test"
+    assert (
+        loaded.window_title == "World of Warcraft"
+        and loaded.window_class == game.window_class
+        and loaded.display == ":crowley-test"
+    )
     assert loaded.canvas_crop == (80, 48, 256, 256)
     assert loaded.matcher.comm == game.executable[:15] and loaded.matcher.argv0 == game.windows_argv0
     assert loaded.matcher.wine_prefix == str(env / "wine")
@@ -151,11 +157,37 @@ def test_addon_version_requires_a_version_line(tmp_path: Path) -> None:
         config.addon_version(tmp_path / "missing.toc")
 
 
-def test_probe_frame_exit_codes(env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_probe_frame_exit_codes(
+    env: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     monkeypatch.setattr(cli, "load_scan_config", lambda: loaded_config(env))
     for result, code in ((True, 0), (False, 1)):
         monkeypatch.setattr(cli.Observer, "probe_frame", lambda self, r=result: r)
         assert cli.main(["probe-frame"]) == code
+
+    def broken(self: Any) -> bool:
+        raise observe.ObserveError("xdotool exploded")
+
+    monkeypatch.setattr(cli.Observer, "probe_frame", broken)
+    assert cli.main(["probe-frame"]) == 3
+    assert "xdotool exploded" in capsys.readouterr().err
+    monkeypatch.setattr(cli.Observer, "probe_frame", lambda self: True)
+
+    def bad_config() -> config.ScanConfig:
+        raise config.ScanConfigError("no host.toml")
+
+    monkeypatch.setattr(cli, "load_scan_config", bad_config)
+    assert cli.main(["probe-frame"]) == 3  # config failures are errors, never "no frame"
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["probe-frame", "--bogus"])
+    assert exc.value.code == 2
+
+
+def test_crowley_toc_version_equals_the_addon_ns_version() -> None:
+    root = Path(__file__).parents[1] / "addon" / "Crowley"
+    toc = config.addon_version(root / "Crowley.toc")
+    match = re.search(r'^ns\.VERSION = "([^"]+)"', (root / "Core.lua").read_text(encoding="utf-8"), re.M)
+    assert match is not None and match.group(1) == toc
 
 
 def test_help_is_quiet() -> None:

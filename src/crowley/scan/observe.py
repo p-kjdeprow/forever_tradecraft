@@ -95,11 +95,13 @@ class WindowState:
 ABSENT_WINDOW = WindowState(None, 0, False, False, (0, 0), "no process")
 
 type X11Run = Callable[[list[str]], tuple[int, str]]
-_HEX_ID = re.compile(r"^\s+(0x[0-9a-fA-F]+)\s", re.MULTILINE)
+_CHILD = re.compile(r"^\s+(0x[0-9a-fA-F]+)\s.*?\s(\d+)x(\d+)[+-]\d+[+-]\d+\s", re.MULTILINE)
 
 
 class WindowSource(Protocol):
-    def observe(self) -> WindowState: ...
+    def observe(self, pids: list[int]) -> WindowState:
+        """The one visible game window owned by *pids*."""
+        ...
 
 
 def x11_runner(env: dict[str, str]) -> X11Run:
@@ -124,10 +126,12 @@ def x11_environment(display: str, environ: dict[str, str] | None = None) -> dict
 
 
 class X11Window:
-    """Exactly one visible game-class window, fullscreen at the origin, and who has focus."""
+    """Exactly one visible game window (class, title and _NET_WM_PID of an owned process),
+    at the display origin and size with exactly one child at display size; and who has focus."""
 
-    def __init__(self, window_class: str, run: X11Run) -> None:
+    def __init__(self, window_class: str, window_title: str, run: X11Run) -> None:
         self._pattern = f"^{re.escape(window_class)}$"
+        self._title = window_title
         self._run = run
 
     def _must(self, argv: list[str]) -> str:
@@ -136,11 +140,23 @@ class X11Window:
             raise ObserveError(f"{' '.join(argv[:2])} exited {code}")
         return out
 
-    def observe(self) -> WindowState:
+    def _owned(self, xid: int, pids: list[int]) -> bool:
+        code, title = self._run(["xdotool", "getwindowname", str(xid)])
+        if code != 0 or title.strip() != self._title:
+            return False
+        code, pid = self._run(["xdotool", "getwindowpid", str(xid)])
+        return code == 0 and pid.strip().isdigit() and int(pid) in pids
+
+    def _children(self, xid: int) -> list[tuple[int, tuple[int, int]]]:
+        tree = self._must(["xwininfo", "-id", hex(xid), "-children"])
+        return [(int(m[0], 16), (int(m[1]), int(m[2]))) for m in _CHILD.findall(tree)]
+
+    def observe(self, pids: list[int]) -> WindowState:
         code, out = self._run(["xdotool", "search", "--onlyvisible", "--class", self._pattern])
         if code not in (0, 1):  # 1 = no match
             raise ObserveError(f"xdotool search exited {code}")
-        ids = [int(line) for line in out.split()] if code == 0 else []
+        candidates = [int(line) for line in out.split()] if code == 0 else []
+        ids = [xid for xid in candidates if self._owned(xid, pids)]
         size = self._must(["xdotool", "getdisplaygeometry"]).split()
         display = (int(size[0]), int(size[1]))
         if len(ids) != 1:
@@ -152,24 +168,23 @@ class X11Window:
             if key in ("X", "Y", "WIDTH", "HEIGHT"):
                 geometry[key] = int(value)
         rect = (geometry.get("X"), geometry.get("Y"), geometry.get("WIDTH"), geometry.get("HEIGHT"))
-        ok = rect == (0, 0, display[0], display[1])
-        detail = "" if ok else f"geometry={rect} display={display}"
-        return WindowState(xid, 1, ok, self._focused(xid), display, detail)
+        children = self._children(xid)
+        problems = []
+        if rect != (0, 0, display[0], display[1]):
+            problems.append(f"geometry={rect} display={display}")
+        if len(children) != 1 or children[0][1] != display:
+            problems.append(f"children={[size for _id, size in children]}")
+        focused = self._focused(xid, [child for child, _size in children])
+        return WindowState(xid, 1, not problems, focused, display, ",".join(problems))
 
-    def _focused(self, xid: int) -> bool:
+    def _focused(self, xid: int, children: list[int]) -> bool:
         code, out = self._run(["xdotool", "getwindowfocus"])
         foreground = int(out.strip()) if code == 0 and out.strip().isdigit() else 0
         if foreground == 0:
             code, out = self._run(["xprop", "-root", "_NET_ACTIVE_WINDOW"])
             match = re.search(r"#\s*(0x[0-9a-fA-F]+)", out) if code == 0 else None
             foreground = int(match.group(1), 16) if match else 0
-        if foreground == xid:
-            return True
-        if foreground == 0:
-            return False
-        code, tree = self._run(["xwininfo", "-id", hex(xid), "-children"])
-        children = {int(m, 16) for m in _HEX_ID.findall(tree)} if code == 0 else set()
-        return foreground in children
+        return foreground != 0 and (foreground == xid or foreground in children)
 
 
 # --- canvas -------------------------------------------------------------------------------
@@ -436,16 +451,24 @@ class Observer:
         return self._latest
 
     def probe_frame(self) -> bool:
-        """One capture and decode with a throwaway decoder: is a valid frame on screen?"""
+        """One capture and decode with a throwaway decoder.
 
-        window = self._window.observe()
+        True: a valid frame decoded.  False: verified no frame (the game window is valid and the
+        capture worked, but nothing decodes).  Anything that stops us from verifying (no game
+        process, bad window, capture failure) raises `ObserveError` or `CaptureError`.
+        """
+
+        pids = self._process.pids()
+        if not pids:
+            raise ObserveError("no owned game process")
+        window = self._window.observe(pids)
         if not window.ok or window.xid is None:
-            return False
+            raise ObserveError(f"game window is not valid: {window.detail}")
         decoder = self._new_decoder()
+        image = self._canvas.capture(window.display)
         try:
-            image = self._canvas.capture(window.display)
             decoder.decode(image, monotonic=self._monotonic(), window_identity=f"probe:{window.xid}")
-        except (gui_capture.CaptureError, ObserveError, ProtocolError):
+        except ProtocolError:
             return False
         return True
 
@@ -460,7 +483,7 @@ class Observer:
             self._frames_seen = 0
             self._last_frame_at = None
             self._latest = None
-        window = self._window.observe() if alive else ABSENT_WINDOW
+        window = self._window.observe(pids) if alive else ABSENT_WINDOW
         self.window = window
         if key is not None and window.ok and window.xid is not None:
             self._sample(window, f"{key[0][0]}:{started}:{window.xid}")

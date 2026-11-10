@@ -47,7 +47,8 @@ class FakeWindow:
     def __init__(self, ok: bool = True, focused: bool = True, xid: int = 77) -> None:
         self.state = observe.WindowState(xid, 1, ok, focused, DISPLAY)
 
-    def observe(self) -> observe.WindowState:
+    def observe(self, pids: list[int]) -> observe.WindowState:
+        self.pids = pids
         return self.state
 
 
@@ -249,16 +250,32 @@ def test_decoder_epoch_resets_on_process_and_window_change() -> None:
     assert obs.decode_error == ""
 
 
-def test_probe_frame_uses_a_throwaway_decoder() -> None:
+def test_probe_frame_is_tristate_with_a_throwaway_decoder() -> None:
     obs, _p, window, canvas, _c = make()
     canvas.frames = [render(snapshot(1))]
-    assert obs.probe_frame()
-    assert obs.probe_frame()  # no sequence/boot memory between probes
+    assert obs.probe_frame() is True
+    assert obs.probe_frame() is True  # no sequence/boot memory between probes
+    from PIL import Image
+
+    canvas.frames = [Image.new("RGB", (256, 256), (7, 7, 7))]
+    assert obs.probe_frame() is False  # window valid, capture worked, nothing decodes
     canvas.error = CaptureError("x")
-    assert not obs.probe_frame()
+    with pytest.raises(CaptureError):
+        obs.probe_frame()
     canvas.error = None
-    window.state = observe.WindowState(None, 0, False, False, DISPLAY)
-    assert not obs.probe_frame()
+    window.state = observe.WindowState(None, 0, False, False, DISPLAY, "window_count=0")
+    with pytest.raises(observe.ObserveError, match="not valid"):
+        obs.probe_frame()
+    no_process, *_rest = make(process=FakeProcess([]))
+    with pytest.raises(observe.ObserveError, match="no owned game process"):
+        no_process.probe_frame()
+
+
+def test_observer_passes_the_owned_pids_to_the_window_source() -> None:
+    obs, _p, window, canvas, _c = make(process=FakeProcess([10, 12]))
+    canvas.frames = [render(snapshot(1))]
+    obs.observe(LoopState())
+    assert window.pids == [10, 12]
 
 
 def test_presence_is_passed_through() -> None:
@@ -271,15 +288,33 @@ def test_presence_is_passed_through() -> None:
 # --- window source ------------------------------------------------------------------------
 
 
+TITLE = "World of Warcraft"
+FULLSCREEN = "WINDOW=77\nX=0\nY=0\nWIDTH=1920\nHEIGHT=1080\nSCREEN=0\n"
+ONE_CHILD = 'xwininfo: Window id: 0x4d\n  1 child:\n     0x4e "wow.exe": ("x" "y")  1920x1080+0+0  +0+0\n'
+
+
 def x11_runner(
-    ids: str, geometry: str, focus: str, *, active: str = "", tree: str = ""
+    ids: str = "77\n",
+    geometry: str = FULLSCREEN,
+    focus: str = "77\n",
+    *,
+    active: str = "",
+    tree: str = ONE_CHILD,
+    names: dict[str, str] | None = None,
+    pids: dict[str, str] | None = None,
 ) -> tuple[observe.X11Run, list[list[str]]]:
     calls: list[list[str]] = []
+    names = names or {}
+    pids = pids or {}
 
     def run(argv: list[str]) -> tuple[int, str]:
         calls.append(argv)
         if argv[1] == "search":
             return (0, ids) if ids else (1, "")
+        if argv[1] == "getwindowname":
+            return 0, names.get(argv[2], TITLE) + "\n"
+        if argv[1] == "getwindowpid":
+            return 0, pids.get(argv[2], "10") + "\n"
         if argv[1] == "getdisplaygeometry":
             return 0, "1920 1080\n"
         if argv[1] == "getwindowgeometry":
@@ -295,39 +330,52 @@ def x11_runner(
     return run, calls
 
 
-FULLSCREEN = "WINDOW=77\nX=0\nY=0\nWIDTH=1920\nHEIGHT=1080\nSCREEN=0\n"
+def window(run: observe.X11Run) -> observe.X11Window:
+    return observe.X11Window("wow.exe", TITLE, run)
 
 
-def test_window_exactly_one_fullscreen_focused() -> None:
-    run, calls = x11_runner("77\n", FULLSCREEN, "77\n")
-    state = observe.X11Window("wow.exe", run).observe()
+def test_window_exactly_one_owned_fullscreen_focused() -> None:
+    run, calls = x11_runner()
+    state = window(run).observe([10])
     assert (state.xid, state.ok, state.focused, state.display) == (77, True, True, DISPLAY)
     assert calls[0] == ["xdotool", "search", "--onlyvisible", "--class", "^wow\\.exe$"]
 
 
+def test_window_match_requires_title_and_owned_pid() -> None:
+    run, _ = x11_runner(ids="77\n78\n", names={"78": "Other"}, pids={"77": "10", "78": "10"})
+    assert window(run).observe([10]).xid == 77  # 78 has the wrong title
+    run, _ = x11_runner(pids={"77": "999"})
+    state = window(run).observe([10])
+    assert not state.ok and state.xid is None and state.count == 0
+    run, _ = x11_runner(ids="77\n78\n", pids={"77": "10", "78": "11"})
+    assert window(run).observe([10, 11]).count == 2  # two owned windows is not exactly one
+
+
 def test_window_focus_on_child_and_active_window() -> None:
-    tree = 'xwininfo: Window id: 0x4d\n  1 child:\n     0x4e "wow.exe": ("x" "y")  1920x1080+0+0  +0+0\n'
-    run, _ = x11_runner("77\n", FULLSCREEN, "78\n", tree=tree)
-    assert observe.X11Window("wow.exe", run).observe().focused
-    run, _ = x11_runner("77\n", FULLSCREEN, "0\n", active="0x4d")
-    assert observe.X11Window("wow.exe", run).observe().focused
-    run, _ = x11_runner("77\n", FULLSCREEN, "99\n", tree=tree)
-    assert not observe.X11Window("wow.exe", run).observe().focused
+    run, _ = x11_runner(focus="78\n")  # 0x4e == 78 is the child
+    assert window(run).observe([10]).focused
+    run, _ = x11_runner(focus="0\n", active="0x4d")
+    assert window(run).observe([10]).focused
+    run, _ = x11_runner(focus="99\n")
+    assert not window(run).observe([10]).focused
 
 
 @pytest.mark.parametrize(
-    ("ids", "geometry"),
+    ("kwargs", "detail"),
     [
-        ("", FULLSCREEN),
-        ("77\n78\n", FULLSCREEN),
-        ("77\n", "X=10\nY=0\nWIDTH=1920\nHEIGHT=1080\n"),
-        ("77\n", "X=0\nY=0\nWIDTH=1900\nHEIGHT=1080\n"),
+        ({"ids": ""}, "window_count=0"),
+        ({"ids": "77\n78\n"}, "window_count=2"),
+        ({"geometry": "X=10\nY=0\nWIDTH=1920\nHEIGHT=1080\n"}, "geometry"),
+        ({"geometry": "X=0\nY=0\nWIDTH=1900\nHEIGHT=1080\n"}, "geometry"),
+        ({"tree": "  0 children:\n"}, "children=[]"),
+        ({"tree": ONE_CHILD + '     0x4f "x": ()  10x10+0+0  +0+0\n'}, "children"),
+        ({"tree": ONE_CHILD.replace("1920x1080", "1900x1080")}, "children"),
     ],
 )
-def test_window_not_ok(ids: str, geometry: str) -> None:
-    run, _ = x11_runner(ids, geometry, "77\n")
-    state = observe.X11Window("wow.exe", run).observe()
-    assert not state.ok and state.detail
+def test_window_not_ok(kwargs: dict[str, Any], detail: str) -> None:
+    run, _ = x11_runner(**kwargs)
+    state = window(run).observe([10])
+    assert not state.ok and detail in state.detail
 
 
 # --- disk ---------------------------------------------------------------------------------

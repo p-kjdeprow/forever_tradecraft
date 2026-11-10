@@ -304,7 +304,10 @@ class Actor:
         if action in (Action.WAIT, Action.HOLD_HUMAN, Action.FAULT):
             return "none"
         if action is Action.RELAUNCH:
-            self._terminate(self._matcher.pids())
+            try:
+                self._terminate(self._matcher.pids())
+            except RuntimeError as exc:  # the client survived SIGKILL: a per-tick fault
+                raise ActError(f"owned game process could not be terminated: {exc}") from exc
             self.launcher.start()
             return "relaunch_started"
         if action is Action.ACTIVATE_WINDOW or action in INPUT_ACTIONS:

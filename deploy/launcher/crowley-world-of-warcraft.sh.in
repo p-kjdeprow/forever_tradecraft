@@ -260,21 +260,28 @@ done
 # Enter World.  The -launcherlogin flow logs in with the last character selected, so
 # the client sits at character select (after maintenance this can take minutes).  The
 # shell has no cheap detector for that screen, but the addon's canvas frame only exists in
-# the world.  So: settle, and while the game window still exists and no frame decodes
-# (`crowley-scan probe-frame`), press Return (Return at character select is Enter World),
-# up to ENTER_WORLD_ATTEMPTS times.  No click is involved.
+# the world.  `crowley-scan probe-frame` exits 0 when a frame decodes (in the world), 1 when
+# verified no frame (not in the world), anything else when it could not verify.  So: settle,
+# probe, and press Return (Return at character select is Enter World) only on exit 1;
+# repeat until the world is reached, the window is gone, or 10 minutes pass.  No click.
 ENTER_WORLD_SETTLE_SECONDS=15
-ENTER_WORLD_ATTEMPTS=6
+ENTER_WORLD_TIMEOUT_SECONDS=600
 enter_world() {
     x11 xdotool windowactivate --sync "$game_window" \
         && x11 xdotool key --clearmodifiers Return
 }
-attempt=1
-while [ "$attempt" -le "$ENTER_WORLD_ATTEMPTS" ]; do
+waited=0
+while :; do
+    [ "$waited" -lt "$ENTER_WORLD_TIMEOUT_SECONDS" ] || fail "The client did not reach the world within $ENTER_WORLD_TIMEOUT_SECONDS seconds."
     sleep "$ENTER_WORLD_SETTLE_SECONDS"
-    x11 xdotool getwindowname "$game_window" >/dev/null 2>&1 || break
-    ! x11 "$CROWLEY_SCAN" probe-frame || break
-    gui_step enter_world
-    attempt=$((attempt + 1))
+    waited=$((waited + ENTER_WORLD_SETTLE_SECONDS))
+    x11 xdotool getwindowname "$game_window" >/dev/null 2>&1 || fail 'The game window disappeared before the world was reached.'
+    probe=0
+    x11 "$CROWLEY_SCAN" probe-frame || probe=$?
+    case "$probe" in
+        0) break ;;
+        1) gui_step enter_world ;;
+        *) fail "crowley-scan probe-frame could not verify the client (exit $probe)." ;;
+    esac
 done
 printf '%s\n' 'WoW client started by Battle.net.'

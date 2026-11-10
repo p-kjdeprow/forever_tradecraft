@@ -53,6 +53,7 @@ SET_BINDING_COMMAND = (
     "if a=='' or a=='INTERACTTARGET' then SetBinding('CTRL-F12','INTERACTTARGET') end"
 )
 RELOAD_COMMAND = "/reload"
+HUMAN_HOLD_DETAIL = "human input within 5 min"  # constant so the journal logs a hold once
 
 STALE_FRAME_S = 10.0  # frames older than this are not acted on
 NO_FRAME_S = 600.0  # rows 2 and 3
@@ -244,9 +245,29 @@ def restore(data: dict[str, Any]) -> LoopState:
     known = {f.name for f in fields(LoopState)}
     values: dict[str, Any] = {}
     for key, value in data.items():
+        _check_durable_value(key, value)
         if key in known:
             values[key] = tuple(value) if key in _TUPLE_FIELDS else value
     return LoopState(**values)
+
+
+def _is_number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _check_durable_value(key: str, value: object) -> None:
+    if key in _TUPLE_FIELDS:
+        ok = isinstance(value, list) and all(_is_number(item) for item in value)
+    elif key in ("flush_uid", "flush_boot"):
+        ok = isinstance(value, str)
+    elif key in ("relaunch_attempts", "no_progress_stage"):
+        ok = isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    elif key == "no_progress_at":
+        ok = _is_number(value)
+    else:  # optional wall-clock times
+        ok = value is None or _is_number(value)
+    if not ok:
+        raise ValueError(f"scan-loop state field {key} has an invalid value: {value!r}")
 
 
 @dataclass(frozen=True)
@@ -392,9 +413,19 @@ def decide(obs: Observation) -> Decision:
 def _decide(obs: Observation) -> Decision:
     st, now, snap = obs.state, obs.wall, obs.snapshot
     if obs.human_active:  # P
-        return Decision(Action.HOLD_HUMAN, st, detail=obs.human_reason)
+        return Decision(Action.HOLD_HUMAN, st, detail=HUMAN_HOLD_DETAIL)
     if not obs.process_alive:  # 1
         return _relaunch(obs, st, "no_process")
+    # Window validity precedes the frame-age rows: a window that is not one fullscreen
+    # game window cannot be decoded, and its own 30 min clock must run instead of rows 2/3.
+    if not obs.window_ok:
+        since = now if st.window_bad_since is None else st.window_bad_since
+        st = replace(st, window_bad_since=since)
+        if now - since >= STUCK_RELAUNCH_S:
+            return _relaunch(obs, st, "window_invalid", "window_invalid")
+        return _fault(st, "window_invalid")
+    if st.window_bad_since is not None:
+        st = replace(st, window_bad_since=None)
     age = None if obs.last_frame_at is None else now - obs.last_frame_at
     if obs.frames_seen_this_process > 0:
         if age is None or age >= NO_FRAME_S:  # 2
@@ -403,12 +434,6 @@ def _decide(obs: Observation) -> Decision:
         return _relaunch(obs, st, "no_frames_after_launch", "no_frames_after_launch")
     if snap is None or now - snap.received_at > STALE_FRAME_S:
         return _stale(obs, st, snap)
-    if not obs.window_ok:
-        since = now if st.window_bad_since is None else st.window_bad_since
-        st = replace(st, window_bad_since=since)
-        if now - since >= STUCK_RELAUNCH_S:
-            return _relaunch(obs, st, "window_invalid", "window_invalid")
-        return _fault(st, "window_invalid")
     st = _track(obs, snap)
     pins = obs.target
 

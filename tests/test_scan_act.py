@@ -289,3 +289,15 @@ def test_activate_window_runs_xdotool_windowactivate_sync() -> None:
     assert calls == [["xdotool", "windowactivate", "--sync", "55"]]
     with pytest.raises(act.ActError):
         act.activate_window({}, 55, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", ""))
+
+
+def test_terminate_failure_is_an_action_fault_not_a_crash(tmp_path: Path) -> None:
+    runner, _recording, order = actor(tmp_path)
+
+    def stuck(pids: Any) -> int:
+        raise RuntimeError("owned game process survived SIGKILL")
+
+    runner._terminate = stuck
+    with pytest.raises(act.ActError, match="could not be terminated"):
+        runner.execute(decision(Action.RELAUNCH), None)
+    assert order == []  # the launcher was never started

@@ -124,6 +124,7 @@ def test_scan_unit_conflicts_with_the_session_units_and_is_not_enabled() -> None
         "KillMode=process",
         "Restart=always",
         "RestartSec=5s",
+        "StartLimitIntervalSec=0",
     ):
         assert line in scan
     source = Path(install.__file__).read_text(encoding="utf-8")
@@ -269,9 +270,13 @@ def test_launcher_selects_the_target_product_without_repeated_exec(tmp_path: Pat
     # Enter World repeats until a canvas frame decodes (no blind fixed settle).
     assert "CHARACTER_SELECT_SETTLE_SECONDS" not in rendered
     assert "ENTER_WORLD_SETTLE_SECONDS=15" in rendered
-    assert "ENTER_WORLD_ATTEMPTS=6" in rendered
-    assert 'x11 "$CROWLEY_SCAN" probe-frame' in rendered
-    assert rendered.index("probe-frame") < rendered.index("gui_step enter_world")
+    assert "ENTER_WORLD_TIMEOUT_SECONDS=600" in rendered
+    assert "ENTER_WORLD_ATTEMPTS" not in rendered
+    assert 'x11 "$CROWLEY_SCAN" probe-frame || probe=$?' in rendered
+    # Return only on exit 1; 0 breaks; anything else fails.
+    assert "0) break ;;" in rendered and "1) gui_step enter_world ;;" in rendered
+    assert "*) fail " in rendered
+    assert rendered.index("probe-frame") < rendered.index("1) gui_step enter_world")
     # Every input step holds the shared GUI lease and passes the presence gate.
     assert '"$CROWLEY_SCAN" presence-ok' in rendered
     assert '9>"$GUI_LOCK"' in rendered and 'flock -w "$GUI_LEASE_WAIT_SECONDS" 9' in rendered

@@ -623,6 +623,26 @@ def _check_gnome_animations(problems: list[str]) -> None:
         problems.append("GNOME animations must be disabled: enable-animations is not false")
 
 
+def _check_gnome_idle_delay(problems: list[str]) -> None:
+    """Require the session never to blank on idle: a blank screen cannot be captured."""
+
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.session", "idle-delay"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        problems.append(f"GNOME idle-delay could not be checked: gsettings is unavailable ({exc})")
+        return
+    if result.returncode != 0:
+        problems.append("GNOME idle-delay could not be checked: gsettings failed")
+    elif result.stdout.strip() != "uint32 0":
+        problems.append("GNOME idle-delay must be 0: org.gnome.desktop.session idle-delay is not uint32 0")
+
+
 def _check_account(resolved: OpsResolvedConfig | None, problems: list[str]) -> None:
     if resolved is None:
         return
@@ -663,6 +683,7 @@ def doctor(
         return DoctorReport((f"XDG paths invalid: {exc}",))
     target = packaged_game_target()
     _check_gnome_animations(problems)
+    _check_gnome_idle_delay(problems)
     host = _check_host(xdg, problems)
     _check_tunables(xdg, problems)
     _check_pinned_binaries(xdg, environment, problems)

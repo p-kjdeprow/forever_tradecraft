@@ -2,6 +2,8 @@
 Description=Crowley scan loop
 After=graphical-session.target
 Conflicts=crowley-session.service crowley-session-supervisor.service
+# A crash loop keeps retrying every RestartSec instead of hitting the start limit.
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple

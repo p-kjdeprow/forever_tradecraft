@@ -30,6 +30,7 @@ class ScanConfig:
     target: Target
     matcher: OwnedGameMatcher
     window_class: str
+    window_title: str
     display: str
     canvas_crop: tuple[int, int, int, int]
     saved_variables: Path
@@ -81,6 +82,7 @@ def load_scan_config() -> ScanConfig:
         target=target,
         matcher=matcher,
         window_class=game.window_class,
+        window_title=host.window_title,
         display=host.display,
         canvas_crop=host.canvas_crop,
         saved_variables=resolved.saved_variables,

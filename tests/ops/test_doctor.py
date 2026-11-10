@@ -82,6 +82,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
     monkeypatch.setattr(install, "packaged_game_target", lambda: target)
     monkeypatch.setattr(doctor, "packaged_game_target", lambda: target)
     monkeypatch.setattr(doctor, "_check_gnome_animations", lambda _problems: None)
+    monkeypatch.setattr(doctor, "_check_gnome_idle_delay", lambda _problems: None)
     flavor = game_root / target.product_dir
     (flavor / "Interface" / "AddOns").mkdir(parents=True)
     account = flavor / "WTF" / "Account" / "850981908#1"
@@ -447,4 +448,41 @@ def test_doctor_reports_unavailable_gsettings(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(doctor.subprocess, "run", unavailable)
     problems: list[str] = []
     doctor._check_gnome_animations(problems)
+    assert "gsettings is unavailable" in "\n".join(problems)
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode", "expected"),
+    (
+        ("uint32 0\n", 0, None),
+        ("uint32 300\n", 0, "idle-delay must be 0"),
+        ("", 1, "gsettings failed"),
+    ),
+)
+def test_doctor_checks_gnome_idle_delay(
+    monkeypatch: pytest.MonkeyPatch, stdout: str, returncode: int, expected: str | None
+) -> None:
+    seen: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(command)
+        return subprocess.CompletedProcess(command, returncode, stdout, "")
+
+    monkeypatch.setattr(doctor.subprocess, "run", run)
+    problems: list[str] = []
+    doctor._check_gnome_idle_delay(problems)
+    assert seen == [["gsettings", "get", "org.gnome.desktop.session", "idle-delay"]]
+    if expected is None:
+        assert problems == []
+    else:
+        assert expected in "\n".join(problems)
+
+
+def test_doctor_reports_unavailable_gsettings_for_idle_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(_command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("gsettings")
+
+    monkeypatch.setattr(doctor.subprocess, "run", unavailable)
+    problems: list[str] = []
+    doctor._check_gnome_idle_delay(problems)
     assert "gsettings is unavailable" in "\n".join(problems)

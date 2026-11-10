@@ -60,11 +60,24 @@ observations of a cold item at the 900 s cadence: cold-item intervals are about 
 
 `python -m crowley.analysis rank --candidates` (`analysis/candidates.py`) is the cold-tier promotion view: recipes
 with a cold output or reagent, plus recipes rank excluded for sale evidence or fair trust, priced at each item's latest
-*attempted* observation in the lookback, with observation counts, lowest-price spread, supply and a depletion figure
-between consecutive observations of any gap length. That figure is an upper bound on sales (cancels and expiries look
-the same over long gaps). Unqueried and incomplete entries of aborted sweeps are not observations; an attempted item
-with no listings is an empty observation. Recipes are flagged when the margin at the median lowest price is positive,
-there are at least `--min-observations` (4) observations and listings in at least half of them.
+*attempted* observation in the lookback. The cold pool is read from `pools.cold` of the plan each sweep in the window
+actually ran (`market_sweeps.plan_hash` to `market_plans.plan_body`); a plan from before the cold tier has none, and a
+plan that cannot be read fails the run. Unqueried and incomplete entries of aborted sweeps are not observations; an
+attempted item with no listings is an empty observation.
+
+Per output: observation counts, lowest-price min/median/max, supply at the latest observation (item-kind excludes our
+own auctions; commodity levels carry no per-unit ownership; `~` marks a bounded book, visible below its cutoff) and
+distinct sellers (item-kind, fully individual scope only). The target price uses rank's fair rule (median of prior
+reference prices, at least `min_fair_books` non-empty books) over `--fair-lookback-hours` (candidates only, default 72;
+rank uses 24) because a cold item has about 16 books a day. Without enough books the output has no target: target
+margin and score are shown as unavailable and the median-price margin and the flag still work.
+
+The depletion column is the observed bottom depletion between consecutive observations of any gap length (commodity
+bottom walk; item-kind owner-continuity walk, which skips possible expiries). It is a weak signal, not demand: it can
+over-count (cancels; partial commodity expiries) and under-count (same-price refills; listings posted and sold inside
+one gap). Recipes are flagged when the margin at the median lowest price is positive, every output has at least
+`--min-observations` (4) observations and listings in at least half of them. The score is the target margin per craft
+times the limiting output's crafts, min(depletion, supply) / units per craft.
 
 ## Metrics
 

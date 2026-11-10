@@ -1180,6 +1180,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="cold-tier promotion candidates (analysis/candidates.py) instead of the ranking",
     )
     parser.add_argument(
+        "--fair-lookback-hours",
+        type=float,
+        help="with --candidates: hours of prior books behind the fair value (default 72; rank uses 24)",
+    )
+    parser.add_argument(
         "--min-observations",
         type=int,
         help="with --candidates: observations a recipe's outputs need to be flagged (default 4)",
@@ -1220,15 +1225,23 @@ def main(argv: list[str] | None = None) -> int:
         as_of = None if args.as_of is None else parse_as_of(args.as_of)
     except ValueError as exc:
         parser.error(str(exc))
-    if args.min_observations is not None and not args.candidates:
-        parser.error("--min-observations requires --candidates")
+    if not args.candidates and (args.min_observations is not None or args.fair_lookback_hours is not None):
+        parser.error("--min-observations and --fair-lookback-hours require --candidates")
     if args.candidates:
-        from crowley.analysis.candidates import DEFAULT_MIN_OBSERVATIONS, run
+        from crowley.analysis.candidates import DEFAULT_FAIR_LOOKBACK_HOURS, DEFAULT_MIN_OBSERVATIONS, run
+
+        if args.all:
+            parser.error("--all does not apply to --candidates")
+        fair_hours = (
+            DEFAULT_FAIR_LOOKBACK_HOURS if args.fair_lookback_hours is None else args.fair_lookback_hours
+        )
+        if fair_hours < 24:
+            parser.error("--fair-lookback-hours must be at least 24")
 
         minimum = DEFAULT_MIN_OBSERVATIONS if args.min_observations is None else args.min_observations
         if minimum < 1:
             parser.error("--min-observations must be at least 1")
-        return run(args, config, as_of, minimum)
+        return run(args, config, as_of, minimum, fair_hours)
     url = args.database_url or os.environ.get("CROWLEY_DATABASE_URL")
     if not url:
         parser.error("--database-url or CROWLEY_DATABASE_URL is required")

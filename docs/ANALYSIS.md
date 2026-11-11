@@ -132,3 +132,50 @@ vendor-sell arbitrage, expected profit once) and `farming` (market value/h, a ca
 - The route caches the unfiltered evaluation per (house, build, latest sweep, character, options);
   `min_profit` and `min_volume` apply per request. Books are pinned to the keyed sweep, a character
   capture is read at the request's `as_of`. `advisor.service.warm` can precompute after an upload.
+
+### Forecasts (`python -m crowley.forecast validate`, advisor `--estimates forecast`)
+
+The advisor reads prices and demand through one estimate provider. `--estimates snapshot` reports
+the present: the current lowest listing and the trailing bottom-walk rate. `--estimates forecast`
+is the default. It replaces two values with validated forecasts: the **sale price** (what a listing
+made now competes with at the end of the horizon) and **units/h** over the horizon. Buying always
+uses the current lowest listing.
+
+- **Models.** Price: `last` (baseline), `median_24h`, `ewma_6h` (6 h half-life) and `trend_24h`
+  (Theil–Sen over hourly medians). Demand: `trailing` (baseline, exactly the snapshot rate over
+  the lookback), `trailing_6h` and `hour_profile` (trailing × the market's UTC hour-of-day
+  multiplier, a ratio of sums over the past 72 h).
+- **Walk-forward.** Origins sit on whole UTC hours over the 72 h before as-of. A model sees only
+  books at or before its origin, and a target counts only when it was fully observed by as-of.
+- **Scoring.**
+  - Price error is the mean absolute log error.
+  - Demand error is the squared error, because demand is intermittent and absolute error would
+    reward predicting zero.
+  - Each challenger is compared with the baseline on the origins both of them scored.
+- **Choice rule.**
+  - A challenger is used for an item only when it has at least 12 paired origins, at least 5%
+    skill, positive skill in both the earlier and the later half of those origins, and can
+    predict at as-of.
+  - Otherwise the baseline is used, so with no validated skill, forecast advice equals snapshot
+    advice.
+- **What is not forecast.**
+  - Item-kind outputs.
+  - Cold-tier crafts: they're priced from their latest cold observation.
+  - Crafting crafts/h: it stays rank's measured rate.
+  - Flip evidence: it stays its own replay.
+- **Validation runs, 2026-11-11.** On beta (as-of 2026-10-22 12:00 CDT) and on live 70862
+  history, `last` stays the price forecast for about 90% of items. The challengers' median skill
+  is negative, so most of the market is best priced at its current lowest, and a challenger is
+  trusted only for the minority where it is stable.
+- `python -m crowley.forecast validate --house KEY [--build] [--as-of] [--items]` prints the
+  per-model table and the items where a challenger qualifies.
+
+### Dashboard advice view
+
+`/dashboard` has an **Advice** view next to Paper runs. The form sends one
+`GET /v1/houses/{key}/advice` request with every option, including `estimates`, and an optional
+auto-refresh re-runs it every 15 minutes while the view is visible. The page shows four things:
+- the forecast summary;
+- the four sections, with the same titles and columns as the CLI;
+- each pathway's steps, details and forecast notes;
+- per-strategy exclusion counts.

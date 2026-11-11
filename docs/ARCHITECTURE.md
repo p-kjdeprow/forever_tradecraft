@@ -195,6 +195,10 @@ source for recipes and static item facts; bulk game data is never committed.
 
 `src/crowley/analysis/` holds the offline models' inputs: commodity time-to-sale and the market
 metrics package (`python -m crowley.analysis.metrics`); see [ANALYSIS.md](ANALYSIS.md).
+`src/crowley/forecast/` holds the walk-forward validated price and demand forecasts
+(`python -m crowley.forecast validate`). `src/crowley/advisor/` ranks trading pathways from the
+stored history (`crowley-advise`, `GET /v1/houses/{key}/advice`, the dashboard's Advice view) and
+reads prices through either snapshot or forecast estimates; see [ANALYSIS.md](ANALYSIS.md).
 
 `GET /v1/houses/{house}/items/{item_key}/volume?hours=24` accepts 1–168 hours and compares
 only new observations whose end windows fall inside the request. It reports actual compared

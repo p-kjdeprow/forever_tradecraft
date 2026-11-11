@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Crowley paper trading</title>
+  <title>Crowley dashboard</title>
   <style>
     :root {
       color-scheme: light;
@@ -116,6 +116,7 @@
     .advice-fields > label { display: grid; gap: .2rem; min-width: 8rem; }
     .advice-fields > label.house-field { flex: 1 1 15rem; }
     .advice-fields input[type="number"] { width: 7rem; }
+    input[type="checkbox"] { min-height: 0; padding: 0; width: 1rem; height: 1rem; }
     .advice-fieldset { display: flex; flex-wrap: wrap; gap: .45rem .8rem; margin: 0; padding: .55rem .7rem .65rem; border: 1px solid var(--line); border-radius: .45rem; }
     .advice-fieldset legend { padding: 0 .3rem; font-weight: 650; }
     .advice-fieldset label { display: flex; align-items: center; gap: .3rem; }
@@ -152,8 +153,8 @@
 <body>
   <header>
     <div>
-      <h1>Paper trading dashboard</h1>
-      <p class="muted">Read-only strategy performance and decisions</p>
+      <h1>Crowley dashboard</h1>
+      <p class="muted">Read-only paper runs and on-demand trading advice</p>
     </div>
     <div class="view-switch" aria-label="Dashboard view">
       <button id="paper-view-button" type="button" aria-pressed="true">Paper runs</button>
@@ -289,7 +290,7 @@
               <label><input type="checkbox" name="strategy" value="raw_materials" checked>Raw materials</label>
               <label><input type="checkbox" name="strategy" value="vendor_arbitrage" checked>Vendor arbitrage</label>
             </fieldset>
-            <label><input id="advice-auto" type="checkbox"> Auto-refresh</label>
+            <label><input id="advice-auto" type="checkbox"> Auto-refresh (15 min)</label>
             <button class="primary" type="submit">Get advice</button>
           </div>
         </form>

@@ -17,6 +17,7 @@
     "config": 0,
     "core/auction_rules.py": 0,
     "domain": 0,
+    "forecast": 0,
     "platform": 0
   }
 }

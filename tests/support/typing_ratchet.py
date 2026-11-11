@@ -17,7 +17,13 @@ from typing import Final
 
 BASELINE_RELATIVE_PATH: Final = Path("tests/fixtures/typing_baseline.json")
 SOURCE_RELATIVE_PATH: Final = Path("src/crowley")
-STRICT_DIRECTORY_RELATIVE_PATHS: Final = (Path("advisor"), Path("config"), Path("domain"), Path("platform"))
+STRICT_DIRECTORY_RELATIVE_PATHS: Final = (
+    Path("advisor"),
+    Path("config"),
+    Path("domain"),
+    Path("forecast"),
+    Path("platform"),
+)
 STRICT_FILE_RELATIVE_PATHS: Final = (Path("core/auction_rules.py"),)
 
 

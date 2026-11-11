@@ -13,11 +13,22 @@ import pytest
 from crowley.forecast import __main__ as forecast_cli
 from crowley.server.db import migrate
 from tests.test_advisor_db import NEW as BUILD
-from tests.test_advisor_db import _export, _house, _sweep
+from tests.test_advisor_db import _export, _sweep
 from tests.test_analysis_candidates_db import _observe
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = [pytest.mark.db, pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")]
+
+
+def _house(conn: psycopg.Connection, key: str, faction: str, region: str) -> int:
+    """A house in its own region: (region, ruleset, faction) is unique and other suites commit us/normal."""
+
+    row = conn.execute(
+        "INSERT INTO houses (key, region, ruleset, faction) VALUES (%s, %s, 'normal', %s) RETURNING id",
+        (key, region, faction),
+    ).fetchone()
+    assert row is not None
+    return row[0]
 
 
 def test_validate_cli_is_pinned_to_as_of_house_and_build(
@@ -30,8 +41,8 @@ def test_validate_cli_is_pinned_to_as_of_house_and_build(
             suffix = os.urandom(4).hex()
             house_key = f"us-normal-alliance-forecast-{suffix}"
             foreign_key = f"us-normal-horde-forecast-{suffix}"
-            house = _house(conn, house_key, "alliance")
-            foreign = _house(conn, foreign_key, "horde")
+            house = _house(conn, house_key, "alliance", f"t{suffix}")
+            foreign = _house(conn, foreign_key, "horde", f"t{suffix}")
             _export(conn, BUILD, output_sell_price=100)
             sweeps: list[int] = []
             for index, minutes in enumerate((0, 15, 30)):

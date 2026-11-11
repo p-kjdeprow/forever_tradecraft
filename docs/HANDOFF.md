@@ -31,7 +31,7 @@ Make gold on the WoW Forever auction house with several independently profitable
 
 ## Current state (2026-11-09)
 
-- WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70862, interface
+- WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70888 (re-pinned 2026-11-11 after the 2026-11-10 patch from 70862), interface
   16001, house `us-normal-alliance` ([LAUNCH_TARGET](LAUNCH_TARGET.md)).
 - **Running:** `crowley-scan.service` (the only game-facing process) and `crowley-companion.service`, both
   enabled. Docker `crowley-server-1` and `crowley-db-1` up; migrations 001-012 ship in the package.
@@ -122,4 +122,4 @@ enforced in strategy and execution; empty capabilities mean unavailable.
   (backups were disabled during the cutover).
 - **Executor driver:** nothing automates the in-game executor button or mailbox trips now. Reintroducing it
   needs a design that obeys the click rules in `CLAUDE.md` and the small-loop rule.
-- **Launch target:** route provenance is `unmeasured on client build 70862`; routes are not shipped.
+- **Launch target:** route provenance is `unmeasured on client build 70888`; routes are not shipped.

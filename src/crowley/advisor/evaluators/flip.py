@@ -352,11 +352,19 @@ def pool(prepared: dict[int, Prepared]) -> Pooled:
     )
 
 
-def shrunk_fill(trades: list[FlipTrade], pooled: Pooled) -> Fraction:
-    """The item's own mean fill pulled toward the pool by ``PRIOR_STRENGTH`` pseudo-trades."""
+def shrunk_fill(trades: list[FlipTrade], prior: Pooled) -> Fraction:
+    """The item's own mean fill pulled toward ``prior`` by ``PRIOR_STRENGTH`` pseudo-trades.
+
+    ``prior`` must be the pool of the OTHER items, so the item's own trades are not counted twice.
+    With no other item's trades there is no prior at all and the result is the own mean.
+    """
 
     own = sum((Fraction(trade.fill) for trade in trades), Fraction(0))
-    return (own + PRIOR_STRENGTH * pooled.fill) / (len(trades) + PRIOR_STRENGTH)
+    if prior.flips == 0:
+        if not trades:
+            raise ValueError("no trades of the item and none of any other: there is no fill to estimate")
+        return own / len(trades)
+    return (own + PRIOR_STRENGTH * prior.fill) / (len(trades) + PRIOR_STRENGTH)
 
 
 class FlipEvaluator:
@@ -415,16 +423,24 @@ class FlipEvaluator:
                     f"{pooled.flips} independent past flips across all items (need {config.flip_min_trades})",
                 )
                 continue
-            out.keep(self._pathway(ctx, item_id, item, now, buy, pooled))
+            out.keep(self._pathway(ctx, item_id, item, now, buy, pooled, prepared))
         return out.result()
 
     def _pathway(
-        self, ctx: Context, item_id: int, item: Prepared, now: FlipContext, buy: FlipBuy, pooled: Pooled
+        self,
+        ctx: Context,
+        item_id: int,
+        item: Prepared,
+        now: FlipContext,
+        buy: FlipBuy,
+        pooled: Pooled,
+        prepared: dict[int, Prepared],
     ) -> Pathway:
         state, config = ctx.state, ctx.config
         series = item.series
         fact = state.facts[item_id]
-        fill = shrunk_fill(item.trades, pooled)
+        others = pool({other: p for other, p in prepared.items() if other != item_id})
+        fill = shrunk_fill(item.trades, others)
         carry, vendor = expected_profit(buy, fill, fact.sell_price, state.rules, config)
         net = carry if config.flip_unsold_value == "cost" else vendor
         own_full = sum(trade.fill >= 1 for trade in item.trades)
@@ -434,10 +450,10 @@ class FlipEvaluator:
             "independent_starts",
             own,
             successes=sum(trade.fill > 0 for trade in item.trades),
-            usable=pooled.flips,
+            usable=sum(trade.quantity for trade in item.trades),
             detail=(
                 f"this item's own past flips ({own_full} sold everything, {own_zero} nothing); "
-                f"pooled {pooled.flips} flips of {pooled.items} items"
+                "usable is the units those flips bought"
             ),
         )
         demand = Evidence("demand_intervals", now.intervals, detail="usable past intervals behind units/h")
@@ -483,6 +499,7 @@ class FlipEvaluator:
                 "expected_profit_now": net,
                 "unit_fill_rate": fill,
                 "pooled_fill": pooled.fill,
+                "prior_fill_excluding_item": others.fill,
                 "pooled_flips": pooled.flips,
                 "pooled_full_partial_zero": (pooled.full, pooled.partial, pooled.zero),
                 "own_past_flips": own,

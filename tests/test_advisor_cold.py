@@ -101,3 +101,9 @@ def test_target_priced_cold_candidate_without_a_target_is_excluded_for_that_reas
     config = replace(CONFIG, crafting_price="target")
     reasons = [e.reason for e in by_strategy(advise(state, config), "crafting").exclusions]
     assert reasons == ["no_target_price"]
+
+
+def test_cold_candidate_without_a_target_is_excluded_on_the_default_basis_too():
+    state = cold_state([cold_book(k) for k in range(4)])
+    result = by_strategy(advise(state, CONFIG), "crafting")
+    assert [e.reason for e in result.exclusions] == ["no_target_price"] and not result.pathways

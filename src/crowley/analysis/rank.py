@@ -1009,8 +1009,15 @@ def load_rank_inputs(
     client_build: str | None = None,
     character: str | None = None,
     as_of: datetime | None = None,
+    account_as_of: datetime | None = None,
+    account_follows_as_of: bool = True,
 ) -> LoadedInputs:
-    """Read everything ``evaluate_trades`` needs for one house and build (read-only)."""
+    """Read everything ``evaluate_trades`` needs for one house and build (read-only).
+
+    ``as_of`` scopes the sweep and the books.  The character capture is read at the same ``as_of``
+    unless ``account_follows_as_of`` is False, when ``account_as_of`` (None: the latest capture)
+    scopes it instead, so a capture taken after the sweep is still seen.
+    """
 
     house = House.parse(house_key)
     sweep_id, finished_t, build = latest_sweep(conn, house_key, client_build, as_of)
@@ -1025,7 +1032,10 @@ def load_rank_inputs(
         end_t=int(finished_t),
         client_build=build,
     )
-    account = None if character is None else load_account_snapshot(conn, house_key, character, as_of=as_of)
+    capture_as_of = as_of if account_follows_as_of else account_as_of
+    account = (
+        None if character is None else load_account_snapshot(conn, house_key, character, as_of=capture_as_of)
+    )
     teaching_ids = sorted(
         {item_id for recipe in recipes for item_id in recipe.acquisition.teaching_item_ids}
         if account is not None

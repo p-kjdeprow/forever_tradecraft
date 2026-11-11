@@ -115,3 +115,20 @@ sweeps are invisible and therefore understate demand; bottom cancellations can
 look like purchases and overstate demand; the counterfactual assumes the new
 listing does not change other sellers' behaviour; and interval-resolution event
 times are upper bounds.
+
+## Advisor (`python -m crowley.advisor`, `crowley-advise`, `GET /v1/houses/{key}/advice`)
+
+On-demand ranking of trading pathways from the stored scan history, one house and build as of one
+sweep. Pathways sit in sections whose values mean different things and are never mixed:
+`ranked` (crafting and recipe purchases, profit/h = margin x crafts/h x P(sale)), `unmeasured`
+(cold-tier crafts and vendor to AH, profit/h at P = 1, an upper bound), `one_off` (flips and
+vendor-sell arbitrage, expected profit once) and `farming` (market value/h, a capacity and not income).
+
+- **recipe_purchase** profit/h is the income the recipe unlocks and excludes the recipe's cost;
+  the cost is in `capital`, and `payback_crafts` / `payback_hours` say how long it takes to earn back.
+- **flip** fill is the per-trade unit fill within the horizon, each item shrunk toward the pool of
+  the other items. Past starts assume the cheap units can be bought at t (optimistic) and keep
+  intervals that reached the price cutoff (a lower bound on fill).
+- The route caches the unfiltered evaluation per (house, build, latest sweep, character, options);
+  `min_profit` and `min_volume` apply per request. Books are pinned to the keyed sweep, a character
+  capture is read at the request's `as_of`. `advisor.service.warm` can precompute after an upload.

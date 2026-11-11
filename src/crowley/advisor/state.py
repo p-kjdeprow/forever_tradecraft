@@ -7,7 +7,9 @@ and adds the cold pool, display names and the gatherable-goods catalog tags.
 
 Scoping: the latest sweep at or before ``as_of`` for the house and build fixes ``as_of_t``;
 every book, the cold pool and the account snapshot are restricted to that house, that build
-and ``<= as_of_t``.  Nothing from a later sweep is loaded.
+and ``<= as_of_t``.  Nothing from a later sweep is loaded.  The character capture follows ``as_of``
+by default; with ``account_follows_as_of=False`` it is read at ``account_as_of`` instead (None: the
+latest capture), because a capture can be taken after the sweep it is used with.
 """
 
 from __future__ import annotations
@@ -128,6 +130,8 @@ def load_market_state(
     character: str | None = None,
     professions: frozenset[str],
     lookback_hours: float = 24.0,
+    account_as_of: datetime | None = None,
+    account_follows_as_of: bool = True,
 ) -> MarketState:
     """Read one house and build as of ``as_of`` (default: its latest sweep), read-only.
 
@@ -145,6 +149,8 @@ def load_market_state(
             character=character,
             as_of=as_of,
             fair_lookback_hours=FAIR_LOOKBACK_HOURS,
+            account_as_of=account_as_of,
+            account_follows_as_of=account_follows_as_of,
         )
         inputs = loaded.loaded.inputs
         known = {profession for recipe in inputs.recipes for profession in recipe.professions}

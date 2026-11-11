@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from fractions import Fraction
 from typing import Any, Protocol
 
 from crowley.advisor.cache import AdviceCache
-from crowley.advisor.engine import advise
+from crowley.advisor.engine import advise, filter_advice
 from crowley.advisor.model import DEFAULT_PROFESSIONS, STRATEGIES, Advice, AdviceConfig, OptionError
 from crowley.advisor.state import MarketState, load_market_state
 from crowley.analysis.rank import latest_sweep
@@ -107,8 +107,15 @@ def cached_advice(
     """Advice for the latest sweep (at or before ``as_of``), from the cache or computed once.
 
     Two short database visits and no CPU work under a connection: one resolves the latest sweep
-    (the cache key), and on a miss one loads the state and releases the connection before the
-    evaluators run.  ``validate_house(conn, key)`` lets the caller check the house first.
+    (part of the cache key), and on a miss one loads the state and releases the connection before
+    the evaluators run.  ``validate_house(conn, key)`` lets the caller check the house first.
+
+    Scoping: books and the sweep are pinned to the keyed sweep, whatever has been ingested since;
+    the character capture is not, it is read at the caller's ``as_of`` (None: the latest capture),
+    exactly as the CLI does, so a capture taken after the sweep is seen.  Because captures change
+    without a new sweep, a character-specific entry is keyed on ``as_of`` too and the cache's TTL
+    bounds its age.  ``min_profit`` and ``min_volume`` are applied per request to the cached
+    unfiltered evaluation and are not part of the key.
     """
 
     with pool.connection() as conn:
@@ -117,10 +124,10 @@ def cached_advice(
         conn.commit()
         sweep_id, finished_t, resolved_build = latest_sweep(conn, house_key, build, as_of)
         conn.commit()
-    key = (house_key, resolved_build, sweep_id, character, config)
+    unfiltered = replace(config, min_profit=0, min_volume=Fraction(0))
+    key = (house_key, resolved_build, sweep_id, character, as_of if character else None, unfiltered)
 
     def compute() -> CachedAdvice:
-        # Pin the load to the sweep that was keyed, whatever has been ingested since.
         pinned = datetime.fromtimestamp(finished_t, UTC) + timedelta(milliseconds=1)
         with pool.connection() as conn:
             state = load_market_state(
@@ -131,10 +138,15 @@ def cached_advice(
                 character=character,
                 professions=config.professions,
                 lookback_hours=config.lookback_hours,
+                account_as_of=as_of,
+                account_follows_as_of=False,
             )
-        return CachedAdvice(advise(state, config), dict(state.names))
+        if state.sweep_id != sweep_id:
+            raise RuntimeError(f"loaded sweep {state.sweep_id} but the cache key is sweep {sweep_id}")
+        return CachedAdvice(advise(state, unfiltered), dict(state.names))
 
-    return cache.get_or_compute(key, compute)
+    cached = cache.get_or_compute(key, compute)
+    return CachedAdvice(filter_advice(cached.advice, config), cached.names)
 
 
 def warm(

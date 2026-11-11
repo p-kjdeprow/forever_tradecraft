@@ -8,10 +8,11 @@ import sys
 
 import psycopg
 
-from crowley.advisor.model import DEFAULT_PROFESSIONS, STRATEGIES
+from crowley.advisor.model import DEFAULT_PROFESSIONS, STRATEGIES, OptionError
 from crowley.advisor.render import advice_json, format_table
 from crowley.advisor.service import make_config, run_advice
 from crowley.analysis.rank import parse_as_of
+from crowley.core.errors import MarketDataNotFound
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,10 +79,13 @@ def main(argv: list[str] | None = None) -> int:
     url = args.database_url or os.environ.get("CROWLEY_DATABASE_URL")
     if not url:
         parser.error("--database-url or CROWLEY_DATABASE_URL is required")
-    with psycopg.connect(url, autocommit=True) as conn:
-        advice, state = run_advice(
-            conn, args.house, config, build=args.build, as_of=as_of, character=args.character
-        )
+    try:
+        with psycopg.connect(url, autocommit=True) as conn:
+            advice, state = run_advice(
+                conn, args.house, config, build=args.build, as_of=as_of, character=args.character
+            )
+    except (OptionError, MarketDataNotFound) as exc:
+        parser.error(str(exc))
     if args.json:
         print(advice_json(advice, dict(state.names), args.limit, args.exclusions))
     else:

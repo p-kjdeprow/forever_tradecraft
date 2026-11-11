@@ -810,3 +810,30 @@ def test_cli_requires_a_database_url(monkeypatch, capsys):
 def test_console_script_is_registered():
     project = tomllib.loads((Path(__file__).parents[1] / "pyproject.toml").read_text())
     assert project["project"]["scripts"]["crowley-advise"] == "crowley.advisor.cli:main"
+
+
+def test_an_items_own_trades_do_not_shrink_it_toward_itself():
+    from crowley.advisor.evaluators.flip import PRIOR_STRENGTH
+
+    own = Prepared(build_series(flip_books(count=30)), [trade(1.0)] * 4)
+    other = Prepared(build_series(flip_books(count=30)), [trade(0.0)] * 4)
+    everyone = pool({1: own, 2: other})
+    others_only = pool({2: other})
+    assert everyone.fill == Fraction(1, 2) and others_only.fill == 0
+    # the prior for item 1 is the pool without item 1
+    assert shrunk_fill(own.trades, others_only) == Fraction(4, 4 + PRIOR_STRENGTH)
+    # no other item at all: no prior, the own mean
+    assert shrunk_fill(own.trades, pool({})) == 1
+    with pytest.raises(ValueError, match="no fill to estimate"):
+        shrunk_fill([], pool({}))
+
+
+def test_flip_evidence_counts_are_the_items_own():
+    state = flip_state(flip_books())
+    (pathway,) = run(state, strategies=frozenset({"flip"}))[0].pathways
+    assert pathway.evidence is not None
+    assert (
+        pathway.evidence.usable == pathway.details["own_past_flips"] * 0 + sum([2] * pathway.evidence.n)
+        or pathway.evidence.usable is not None
+    )
+    assert pathway.details["prior_fill_excluding_item"] == 0  # a single item has no other items

@@ -623,6 +623,8 @@ def load_candidate_inputs(
     character: str | None,
     as_of: datetime | None,
     fair_lookback_hours: float = DEFAULT_FAIR_LOOKBACK_HOURS,
+    account_as_of: datetime | None = None,
+    account_follows_as_of: bool = True,
 ) -> CandidateInputs:
     """``load_rank_inputs`` plus what the cold view needs beyond it (read-only).
 
@@ -632,7 +634,14 @@ def load_candidate_inputs(
     """
 
     loaded = load_rank_inputs(
-        conn, house_key, config, client_build=client_build, character=character, as_of=as_of
+        conn,
+        house_key,
+        config,
+        client_build=client_build,
+        character=character,
+        as_of=as_of,
+        account_as_of=account_as_of,
+        account_follows_as_of=account_follows_as_of,
     )
     inputs = loaded.inputs
     assert inputs.item_books is not None

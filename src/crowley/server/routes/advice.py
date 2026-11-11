@@ -48,10 +48,14 @@ def advice(
     """Ranked trading pathways for one house and build, read from the stored scan history.
 
     The same options and output as ``python -m crowley.advisor --json``.  Results are cached per
-    (house, build, latest sweep, character, options): a miss loads the market state (tens of
+    (house, build, latest sweep, character, options; ``min_profit``, ``min_volume`` and the display
+    options are applied per request): a miss loads the market state (tens of
     seconds), holding a database connection only for that read, and computes outside any
     connection; a hit does no database work beyond finding the latest sweep.  ``advisor.service.warm``
-    can precompute the default advice after each sweep upload.
+    can precompute the default advice after each sweep upload.  Books are pinned to the keyed sweep;
+    a character's capture is read at ``as_of`` (default: the latest), so a capture taken after the
+    sweep is used, and a cached character entry picks up a newer capture when its TTL (15 minutes)
+    expires.
 
     Errors: an invalid option is a 400, an unknown house, sweep, build, export or character capture
     is a 404, and anything else (a failed invariant) is a 500.

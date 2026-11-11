@@ -303,13 +303,15 @@ def candidate_pathway(ctx: Context, analysis: CraftingAnalysis, candidate: Candi
         if stat.latest_lowest is None or stat.latest_lowest <= 1:
             return Rejected("no_current_listing", f"output {stat.item_id} has no listing to undercut")
         undercut[stat.item_id] = int(stat.latest_lowest) - 1
-    targets = {stat.item_id: stat.target_price for stat in candidate.outputs}
+    targets: dict[int, int] = {}
+    for stat in candidate.outputs:
+        if stat.target_price is None:
+            return Rejected("no_target_price", f"output {stat.item_id} has no fair value, so no target price")
+        targets[stat.item_id] = stat.target_price
     if config.crafting_price == "target":
-        if any(price is None for price in targets.values()):
-            return Rejected("no_target_price", "an output has no fair value, so no target price")
-        prices = {item: price for item, price in targets.items() if price is not None}
+        prices = targets
     else:
-        prices = {item: min(price, targets[item] or price) for item, price in undercut.items()}
+        prices = {item: min(price, targets[item]) for item, price in undercut.items()}
     margin = margin_at(ctx, outputs, dict(prices), candidate.reagent_cost_per_craft)
     limiting = next(stat for stat in candidate.outputs if stat.item_id == candidate.limiting_item_id)
     hours = Fraction(round(limiting.depletion_seconds), SECONDS_PER_HOUR)

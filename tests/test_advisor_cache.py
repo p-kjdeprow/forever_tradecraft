@@ -84,3 +84,49 @@ def test_invalid_sizes_fail_loudly():
         AdviceCache(max_entries=0)
     with pytest.raises(ValueError):
         AdviceCache(ttl_seconds=0)
+
+
+def test_failed_computation_leaves_no_lock_behind():
+    cache: AdviceCache[int] = AdviceCache()
+
+    def boom() -> int:
+        raise RuntimeError("no")
+
+    for _ in range(3):
+        with pytest.raises(RuntimeError):
+            cache.get_or_compute("k", boom)
+    assert cache.lock_count == 0
+    cache.get_or_compute("k", lambda: 1)
+    assert cache.lock_count == 1  # a successful key keeps its lock while cached
+    cache.clear()
+    assert cache.lock_count == 0
+
+
+@pytest.mark.parametrize(("slots", "peak"), [(1, 1), (2, 2)])
+def test_distinct_keys_compute_at_most_slots_at_a_time(slots, peak):
+    cache: AdviceCache[int] = AdviceCache(max_entries=8, max_concurrent_computes=slots)
+    running = 0
+    highest = 0
+    guard = threading.Lock()
+
+    def compute() -> int:
+        nonlocal running, highest
+        with guard:
+            running += 1
+            highest = max(highest, running)
+        time.sleep(0.15)
+        with guard:
+            running -= 1
+        return 1
+
+    threads = [threading.Thread(target=cache.get_or_compute, args=(f"k{i}", compute)) for i in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert highest == peak
+
+
+def test_a_zero_compute_slots_cache_is_rejected():
+    with pytest.raises(ValueError):
+        AdviceCache(max_concurrent_computes=0)

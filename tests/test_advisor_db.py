@@ -155,6 +155,26 @@ def test_market_state_is_scoped_to_house_build_and_as_of() -> None:
             _observe(conn, horde, h_sweep, OUTPUT, 1, "commodity", (999,), minutes=45)
             _observe(conn, horde, h_sweep, HORDE_ONLY, 2, "commodity", (8,), minutes=45)
 
+            # a character's first capture arrives AFTER the latest sweep (minute 35)
+            tag = f"late-{suffix}"
+            capture = conn.execute(
+                """
+                INSERT INTO account_captures (capture_uid, house_id, character, captured_at, raw, content_digest)
+                VALUES (%s, %s, 'Dandune', %s, %s, %s) RETURNING id
+                """,
+                (
+                    tag,
+                    alliance,
+                    BASE + timedelta(minutes=50),
+                    Jsonb({"recipes": {"171": {}}, "professions": {}}),
+                    hashlib.sha256(tag.encode()).hexdigest(),
+                ),
+            ).fetchone()[0]
+            conn.execute(
+                "INSERT INTO account_recipes (capture_id, skill_line_id, spell_id) VALUES (%s, 171, 9001)",
+                (capture,),
+            )
+
             sweeps_before = conn.execute("SELECT count(*) FROM market_sweeps").fetchone()[0]
 
             def load(house: str, build: str | None = NEW, as_of: datetime | None = None):
@@ -204,6 +224,29 @@ def test_market_state_is_scoped_to_house_build_and_as_of() -> None:
             assert set(other.books) == {OUTPUT, HORDE_ONLY}
             assert [min(g.unit for g in book.groups) for book in other.books[OUTPUT]] == [999]
             assert other.cold_pool is not None and set(other.cold_pool.by_sweep) == {h_sweep}
+
+            # the capture is read at the caller's as_of, not the sweep's: seen after the sweep, and a
+            # capture scoped by the sweep (the CLI with --as-of at the sweep) is correctly absent
+            seen = load_market_state(
+                conn,
+                ALLIANCE,
+                client_build=NEW,
+                as_of=BASE + timedelta(minutes=36),
+                character="Dandune",
+                professions=PROFESSIONS,
+                account_follows_as_of=False,
+            )
+            assert seen.sweep_id == a_sweeps[2]
+            assert seen.account is not None and seen.account.known_spell_ids == {9001}
+            with pytest.raises(MarketDataNotFound, match="at or before"):
+                load_market_state(
+                    conn,
+                    ALLIANCE,
+                    client_build=NEW,
+                    as_of=BASE + timedelta(minutes=36),
+                    character="Dandune",
+                    professions=PROFESSIONS,
+                )
 
             # nothing before the first sweep, and no such build, fail loudly
             with pytest.raises(MarketDataNotFound, match="no market sweep"):

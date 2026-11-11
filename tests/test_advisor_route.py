@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from dataclasses import replace
+from datetime import UTC, datetime
 
 import pytest
 from fastapi import FastAPI
@@ -44,7 +46,8 @@ class FakePool:
 class Harness:
     def __init__(self) -> None:
         self.pool = FakePool()
-        self.sweep = 7
+        self.sweep = 59  # the synthetic books' latest sweep
+        self.load_sweep: int | None = None
         self.loads: list[dict] = []
         self.sweeps: list[tuple] = []
         self.houses: list[str] = []
@@ -72,7 +75,7 @@ def harness(monkeypatch):
         h.loads.append({"key": key, **kwargs})
         if h.fail_load:
             raise h.fail_load
-        return h.state
+        return replace(h.state, inputs=replace(h.state.inputs, latest_sweep_id=h.load_sweep or h.sweep))
 
     def advise(state, config):
         h.open_during_compute.append(h.pool.open)  # CPU work must hold no connection
@@ -158,7 +161,7 @@ def test_warm_populates_the_cache_for_the_default_advice(harness):
     warmed = service.warm(harness.pool, cache, HOUSE, config=config)
     assert len(cache) == 1 and warmed.advice.house_key == harness.state.house_key
     again = service.cached_advice(harness.pool, cache, HOUSE, config)
-    assert again is warmed and len(harness.loads) == 1
+    assert again.advice == warmed.advice and len(harness.loads) == 1
 
 
 @pytest.mark.parametrize(
@@ -209,3 +212,49 @@ def test_failed_computation_is_not_cached(harness):
     harness.fail_load = None
     assert get(harness).status_code == 200
     assert len(harness.loads) == 2
+
+
+def test_capture_is_read_at_the_callers_as_of_not_the_keyed_sweep(harness):
+    assert get(harness, character="Bob").status_code == 200
+    (load,) = harness.loads
+    # books are pinned to the keyed sweep; the capture is not: no as_of means the latest capture
+    assert load["account_follows_as_of"] is False and load["account_as_of"] is None
+    assert load["as_of"].timestamp() == pytest.approx(1_000_000.0, abs=0.01)
+    when = "2026-11-09T12:00:00+00:00"
+    assert get(harness, character="Bob", as_of=when).status_code == 200
+    assert harness.loads[-1]["account_as_of"] == datetime(2026, 11, 9, 12, tzinfo=UTC)
+
+
+def test_a_loaded_sweep_that_is_not_the_keyed_sweep_is_a_500(harness):
+    harness.load_sweep = 99
+    assert get(harness).status_code == 500
+
+
+def test_as_of_values_resolving_to_one_sweep_share_a_cache_entry(harness):
+    assert get(harness).status_code == 200
+    assert get(harness, as_of="2026-11-09T12:00:00+00:00").status_code == 200
+    assert get(harness, as_of="2026-11-09T13:00:00+00:00").status_code == 200
+    assert len(harness.loads) == 1
+    # with a character the capture depends on as_of, so the entries are separate
+    get(harness, character="Bob", as_of="2026-11-09T12:00:00+00:00")
+    get(harness, character="Bob", as_of="2026-11-09T13:00:00+00:00")
+    get(harness, character="Bob", as_of="2026-11-09T13:00:00+00:00")
+    assert len(harness.loads) == 3
+
+
+def test_min_profit_and_min_volume_are_applied_per_request_not_cached(harness):
+    everything = get(harness).json()
+    strict = get(harness, min_profit=10**9).json()
+    assert len(harness.loads) == 1
+    assert everything["section_totals"]["farming"] > 0 and strict["section_totals"]["farming"] == 0
+    assert (
+        strict["strategies"]["raw_materials"]["exclusion_counts"]["below_min_profit"]
+        == (everything["section_totals"]["farming"])
+    )
+    assert (
+        strict["strategies"]["raw_materials"]["considered"]
+        == everything["strategies"]["raw_materials"]["considered"]
+    )
+    assert get(harness, min_volume=10**9).json()["section_totals"]["farming"] == 0
+    assert get(harness).json() == everything  # the cached unfiltered evaluation is untouched
+    assert len(harness.loads) == 1

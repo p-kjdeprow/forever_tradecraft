@@ -686,7 +686,21 @@ class StubEstimates:
     """A provider that is not a snapshot: every item sells for 1000 at 7 units/h."""
 
     def estimate(self, item_id: int) -> PriceEstimate | None:
-        return PriceEstimate(item_id, "commodity", 1000, 9, Fraction(1000), 20, Fraction(7), 100, 24.0)
+        return PriceEstimate(
+            item_id,
+            "commodity",
+            1000,
+            9,
+            Fraction(1000),
+            20,
+            Fraction(7),
+            100,
+            24.0,
+            sale_price=1000,
+        )
+
+    def summary(self) -> None:
+        return None
 
 
 def test_evaluators_consume_the_estimate_provider_seam():

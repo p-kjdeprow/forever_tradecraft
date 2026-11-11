@@ -3,20 +3,22 @@
 Population: the active ``trade_goods`` items of the scan plan whose catalog tags mark them as
 gatherable (``state.GATHERABLE_TAGS``: herbs, leather and hides, cloth, ore, stone, fish, ...; bars are
 smelted, not gathered, so they are not in it).
-For each one the pathway is "gather it, list it at 1c under the current lowest listing":
+For each one the pathway is "gather it, list it at 1c under the forecast-selected sale price"
+(or the current lowest in snapshot mode):
 
 * profit per unit is that price net of the AH cut and the deposit (a stack of up to 20), with no
   material cost; the character's time is the real cost and is not priced.
-* volume is the observed bottom-walk units/h; ``value_per_hour_flowing`` (units/h at the current
-  lowest price) is the whole market's money flow through the item.  It is market capacity, not the
-  character's income: it says how much farming the item can absorb.  The pathway sits in the
-  ``farming`` section, ordered by it, and has no per-hour profit.
+* volume is the observed or forecast-selected demand units/h; ``value_per_hour_flowing`` uses the
+  expected sale price and is the whole market's money flow through the item.  It is market
+  capacity, not the character's income: it says how much farming the item can absorb.  The pathway
+  sits in the ``farming`` section, ordered by it, and has no per-hour profit.
 * P(sale) is not measured, so confidence is at most "low" (the common rule).
 """
 
 from __future__ import annotations
 
 from fractions import Fraction
+from typing import Any
 
 from crowley.advisor.evaluators.base import Collector, Context
 from crowley.advisor.model import Evidence, Pathway, Step, StrategyResult, pathway_confidence
@@ -46,7 +48,8 @@ class RawMaterialsEvaluator:
             if est is None:
                 out.exclude(key, "no_current_book", "not observed in the latest sweep")
                 continue
-            if est.lowest is None or est.lowest <= 1:
+            sale_price = est.sale_price
+            if sale_price is None or sale_price <= 1:
                 out.exclude(key, "no_current_listing", "nothing listed to undercut")
                 continue
             if est.units_per_hour is None or est.units_per_hour <= 0:
@@ -55,10 +58,19 @@ class RawMaterialsEvaluator:
                 )
                 continue
             quantity = min(STACK, fact.max_stack)
-            price = est.lowest - 1
+            price = sale_price - 1
             deposit_total = deposit(fact.sell_price, quantity, config.listing_hours, state.rules)
             per_unit = price * (1 - state.rules.seller_cut) - Fraction(deposit_total, quantity)
             demand = Evidence("demand_intervals", est.demand_intervals, detail="usable book intervals")
+            details: dict[str, Any] = {
+                "current_lowest": est.lowest,
+                "fair": est.fair,
+                "value_per_hour_flowing": est.units_per_hour * sale_price,
+                "tags": state.gatherable[item_id],
+                "note": "no material cost; the character's time is not priced",
+            }
+            if est.forecast is not None:
+                details.update({"sale_price": {item_id: est.sale_price}, "forecast": {item_id: est.forecast}})
             out.keep(
                 Pathway(
                     strategy=self.name,
@@ -86,15 +98,9 @@ class RawMaterialsEvaluator:
                     capital=Fraction(deposit_total),
                     profit_per_hour=None,
                     one_off_profit=None,
-                    sort_value=est.units_per_hour * est.lowest,
+                    sort_value=est.units_per_hour * sale_price,
                     confidence=pathway_confidence(None, demand),
-                    details={
-                        "current_lowest": est.lowest,
-                        "fair": est.fair,
-                        "value_per_hour_flowing": est.units_per_hour * est.lowest,
-                        "tags": state.gatherable[item_id],
-                        "note": "no material cost; the character's time is not priced",
-                    },
+                    details=details,
                 )
             )
         return out.result()

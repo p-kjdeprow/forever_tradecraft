@@ -319,6 +319,45 @@ def test_advice_model_uses_real_render_payload_and_render_contracts():
     assert actual["strategies"][0] == "considered 1, pathways 1, excluded 0"
 
 
+def test_advice_model_renders_forecast_summary_and_per_item_notes():
+    payload = _advice_payload()
+    payload["parameters"]["estimates"] = "forecast"
+    payload["forecast"] = {
+        "horizon_hours": 2,
+        "window_hours": 24,
+        "items_scored": 1,
+        "items_forecast": 1,
+        "price_models": {"last": 1, "median_24h": 0, "ewma_6h": 0, "trend_24h": 0},
+        "demand_models": {"trailing": 1, "trailing_6h": 0, "hour_profile": 0},
+        "median_price_skill": None,
+        "median_demand_skill": None,
+    }
+    payload["sections"]["ranked"][0]["details"]["sale_price"] = {"1001": 12345}
+    payload["sections"]["ranked"][0]["details"]["forecast"] = {
+        "1001": {
+            "price_model": "last",
+            "price_skill": None,
+            "price_n": 12,
+            "demand_model": "trailing",
+            "demand_skill": None,
+            "demand_n": 12,
+        }
+    }
+    actual = _node(
+        _emit_script(
+            f"""
+            const model = buildAdviceModel({json.dumps(payload)});
+            emit({{ summary: model.forecast.text, notes: model.sections[0].rows[0].forecastNotes, details: model.sections[0].rows[0].details }});
+            """
+        )
+    )
+    assert "Price: last 1" in actual["summary"] and "demand: trailing 1" in actual["summary"]
+    assert actual["notes"] == [
+        "Copper Widget (1001): sale 1g 23s 45c; price last (baseline, n=12); demand trailing (baseline, n=12)"
+    ]
+    assert all(item["key"] not in ("sale_price", "forecast") for item in actual["details"])
+
+
 def test_advice_query_and_money_validation():
     payload = _advice_payload()
     actual = _node(

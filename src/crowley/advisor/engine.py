@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from crowley.advisor.estimates import EstimateProvider, SnapshotEstimates
+from crowley.advisor.estimates import EstimateProvider, make_estimates
 from crowley.advisor.evaluators import EVALUATORS, Context
 from crowley.advisor.model import (
     SECTIONS,
@@ -66,8 +66,10 @@ def filter_advice(advice: Advice, config: AdviceConfig) -> Advice:
 def advise(state: MarketState, config: AdviceConfig, estimates: EstimateProvider | None = None) -> Advice:
     """Evaluate the configured strategies against ``state`` (never the database)."""
 
-    ctx = Context(state, SnapshotEstimates(state) if estimates is None else estimates, config)
+    provider = make_estimates(state, config) if estimates is None else estimates
+    ctx = Context(state, provider, config)
     results = tuple(EVALUATORS[name].evaluate(ctx) for name in STRATEGIES if name in config.strategies)
+    summary = provider.summary()
     unfiltered = Advice(
         house_key=state.house_key,
         client_build=state.client_build,
@@ -76,5 +78,6 @@ def advise(state: MarketState, config: AdviceConfig, estimates: EstimateProvider
         config=config,
         results=results,
         pathways=(),
+        forecast=summary,
     )
     return filter_advice(unfiltered, config)

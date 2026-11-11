@@ -23,10 +23,13 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from fractions import Fraction
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from crowley.analysis.time_to_sale import CHECKPOINTS
 from crowley.trading.strategies.common import SECONDS_PER_HOUR
+
+if TYPE_CHECKING:
+    from .estimates import ForecastSummary
 
 STRATEGIES = ("crafting", "recipe_purchase", "flip", "raw_materials", "vendor_arbitrage")
 SECTIONS = ("ranked", "unmeasured", "one_off", "farming")
@@ -259,6 +262,7 @@ class StrategyResult:
 class AdviceConfig:
     strategies: frozenset[str] = frozenset(STRATEGIES)
     professions: frozenset[str] = DEFAULT_PROFESSIONS
+    estimates: str = "forecast"  # validated demand/sale price; snapshot makes sale_price current lowest
     min_profit: int = 0  # copper, per craft (crafting) or per unit (the rest)
     min_volume: Fraction = Fraction(0)  # market units per hour
     share: Fraction = Fraction(1, 10)  # capture share of the observed market flow
@@ -267,7 +271,7 @@ class AdviceConfig:
     lookback_hours: float = 24.0  # crafting / demand window
     batch_crafts: int = 10
     min_independent_starts: int = 4
-    crafting_price: str = "lowest"  # headline basis: min(lowest - 1, rank target) | "target"
+    crafting_price: str = "lowest"  # headline basis: min(sale_price - 1, rank target) | "target"
     listing_hours: int = 12  # one listing duration for every evaluator's deposit
     max_cold_age_hours: float = 3.0  # cold-tier rows older than this are excluded as stale
     # flip (defaults won on the beta calibration split)
@@ -285,6 +289,8 @@ class AdviceConfig:
             raise OptionError("at least one strategy is required")
         if not self.professions:
             raise OptionError("at least one profession is required")
+        if self.estimates not in ("snapshot", "forecast"):
+            raise OptionError("estimates must be 'snapshot' or 'forecast'")
         if not 0 < self.share <= 1:
             raise OptionError("share must be in (0, 1]")
         if round(self.horizon_hours * SECONDS_PER_HOUR) not in CHECKPOINTS:
@@ -325,6 +331,7 @@ class Advice:
     config: AdviceConfig
     results: tuple[StrategyResult, ...]  # after the min-profit / min-volume filters
     pathways: tuple[Pathway, ...]  # grouped by section order, each by descending sort_value
+    forecast: ForecastSummary | None = None  # None for snapshot mode
 
     def section(self, name: str) -> tuple[Pathway, ...]:
         return tuple(pathway for pathway in self.pathways if pathway.section == name)

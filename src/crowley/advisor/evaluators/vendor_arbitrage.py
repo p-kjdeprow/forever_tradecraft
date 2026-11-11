@@ -6,14 +6,16 @@
   one-off (section ``one_off``, no per-hour figure); the history's arrival rate of such listings
   (new groups below the vendor price, summed over valid intervals) is shown as its volume.
 * ``buy``: items a vendor sells (client facts: bundle size and price) that list on the AH above the
-  vendor price.  Buy bundles, list 1c under the lowest listing; the AH cut and the deposit come off,
-  and the rate is the observed bottom-walk units/h at the configured share.
+  vendor price.  Buy bundles, list 1c under the forecast-selected sale price (the current lowest
+  in snapshot mode); the AH cut and the deposit come off, and the rate is the observed or
+  forecast-selected demand units/h at the configured share.
 """
 
 from __future__ import annotations
 
 from fractions import Fraction
 from math import floor
+from typing import Any
 
 from crowley.advisor.evaluators.base import Collector, Context
 from crowley.advisor.model import Evidence, Pathway, Step, StrategyResult, pathway_confidence
@@ -126,7 +128,8 @@ class VendorArbitrageEvaluator:
             if est is None:
                 out.exclude(key, "no_current_book", "not observed in the latest sweep")
                 continue
-            if est.lowest is None or est.lowest <= 1:
+            sale_price = est.sale_price
+            if sale_price is None or sale_price <= 1:
                 out.exclude(key, "no_opportunity", "nothing listed to undercut")
                 continue
             if est.units_per_hour is None or est.units_per_hour <= 0:
@@ -137,7 +140,7 @@ class VendorArbitrageEvaluator:
             if fact.vendor_bundle_size is None or fact.vendor_bundle_price is None:
                 raise RuntimeError(f"vendor supply {item_id} has no bundle size or price")
             unit_cost = Fraction(fact.vendor_bundle_price, fact.vendor_bundle_size)
-            price = est.lowest - 1
+            price = sale_price - 1
             quantity = max(
                 1,
                 floor(
@@ -150,6 +153,13 @@ class VendorArbitrageEvaluator:
                 out.exclude(key, "non_positive_profit", f"vendor {float(unit_cost):.0f}c vs AH net {price}c")
                 continue
             demand = Evidence("demand_intervals", est.demand_intervals, detail="usable book intervals")
+            details: dict[str, Any] = {
+                "direction": "vendor_to_ah",
+                "vendor_unit_cost": unit_cost,
+                "current_lowest": est.lowest,
+            }
+            if est.forecast is not None:
+                details.update({"sale_price": {item_id: est.sale_price}, "forecast": {item_id: est.forecast}})
             out.keep(
                 Pathway(
                     strategy=self.name,
@@ -185,10 +195,6 @@ class VendorArbitrageEvaluator:
                     one_off_profit=None,
                     sort_value=config.share * est.units_per_hour * per_unit,
                     confidence=pathway_confidence(None, demand),
-                    details={
-                        "direction": "vendor_to_ah",
-                        "vendor_unit_cost": unit_cost,
-                        "current_lowest": est.lowest,
-                    },
+                    details=details,
                 )
             )

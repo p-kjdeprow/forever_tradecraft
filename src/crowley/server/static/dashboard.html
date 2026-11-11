@@ -124,6 +124,7 @@
     .money-inputs label { display: grid; flex: 1 1 5rem; gap: .2rem; min-width: 0; }
     .advice-fields .money-inputs input { width: 5rem; max-width: 100%; }
     .advice-meta { display: flex; flex-wrap: wrap; gap: .35rem 1.2rem; color: var(--muted); }
+    .advice-forecast { margin-top: .6rem; color: var(--muted); }
     .stale-warning { color: var(--bad); font-weight: 750; }
     .advice-sections { display: grid; gap: 1rem; margin-top: 1rem; }
     .advice-table { min-width: 980px; }
@@ -255,6 +256,12 @@
                 <option value="target">Target</option>
               </select>
             </label>
+            <label for="advice-estimates">Estimates
+              <select id="advice-estimates" name="estimates">
+                <option value="forecast" selected>Forecast</option>
+                <option value="snapshot">Snapshot</option>
+              </select>
+            </label>
             <label for="advice-limit">Limit
               <input id="advice-limit" name="limit" type="number" min="1" max="500" step="1" value="25" required>
             </label>
@@ -290,6 +297,7 @@
       <section class="panel" aria-labelledby="advice-meta-heading">
         <h2 id="advice-meta-heading">Advice run</h2>
         <div id="advice-meta" class="advice-meta"></div>
+        <div id="advice-forecast" class="advice-forecast"></div>
       </section>
       <section id="advice-results" class="advice-sections" aria-live="polite"></section>
       <section class="panel" aria-labelledby="advice-summary-heading">
@@ -558,6 +566,10 @@
       params.set("horizon_hours", String(horizon));
       params.set("price_basis", options.priceBasis);
       params.set("limit", String(limit));
+      if (options.estimates !== undefined) {
+        if (options.estimates !== "forecast" && options.estimates !== "snapshot") throw new Error("estimates must be forecast or snapshot");
+        params.set("estimates", options.estimates);
+      }
       const character = options.character == null ? "" : String(options.character).trim();
       if (character) params.set("character", character);
       return `?${params.toString()}`;
@@ -609,6 +621,40 @@
       if (typeof value.note !== "string") throw new Error(`${label}.note is invalid`);
       return value;
     }
+    function validateAdviceForecastNote(note, label) {
+      if (note === null) return note;
+      const value = adviceObject(note, label);
+      if (typeof value.price_model !== "string" || !value.price_model) throw new Error(`${label}.price_model is invalid`);
+      adviceFinite(value.price_skill, `${label}.price_skill`, true);
+      adviceSafeInteger(value.price_n, `${label}.price_n`);
+      if (typeof value.demand_model !== "string" || !value.demand_model) throw new Error(`${label}.demand_model is invalid`);
+      adviceFinite(value.demand_skill, `${label}.demand_skill`, true);
+      adviceSafeInteger(value.demand_n, `${label}.demand_n`);
+      return value;
+    }
+    function validateAdviceForecastDetails(details, label) {
+      if (Object.prototype.hasOwnProperty.call(details, "sale_price")) {
+        const prices = adviceObject(details.sale_price, `${label}.sale_price`);
+        for (const [item, price] of Object.entries(prices)) {
+          if (!/^\d+$/.test(item)) throw new Error(`${label}.sale_price has an invalid item id`);
+          adviceSafeInteger(price, `${label}.sale_price.${item}`, true);
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(details, "forecast")) {
+        const notes = adviceObject(details.forecast, `${label}.forecast`);
+        for (const [item, note] of Object.entries(notes)) {
+          if (!/^\d+$/.test(item)) throw new Error(`${label}.forecast has an invalid item id`);
+          validateAdviceForecastNote(note, `${label}.forecast.${item}`);
+        }
+        const prices = adviceObject(details.sale_price, `${label}.sale_price`);
+        if (Object.keys(prices).some((item) => !Object.prototype.hasOwnProperty.call(notes, item)) || Object.keys(notes).some((item) => !Object.prototype.hasOwnProperty.call(prices, item))) {
+          throw new Error(`${label} forecast item maps must have matching keys`);
+        }
+      }
+      if (Object.prototype.hasOwnProperty.call(details, "sale_price") !== Object.prototype.hasOwnProperty.call(details, "forecast")) {
+        throw new Error(`${label} forecast details must include sale_price and forecast together`);
+      }
+    }
     function validateAdvicePathway(pathway, section, index) {
       const label = `sections.${section}[${index}]`;
       const value = adviceObject(pathway, label);
@@ -630,8 +676,33 @@
       adviceFinite(value.profit_per_hour, `${label}.profit_per_hour`, true);
       adviceFinite(value.one_off_profit, `${label}.one_off_profit`, true);
       adviceFinite(value.sort_value, `${label}.sort_value`);
-      adviceObject(value.details, `${label}.details`);
+      const details = adviceObject(value.details, `${label}.details`);
+      validateAdviceForecastDetails(details, `${label}.details`);
       return value;
+    }
+    function validateAdviceForecast(value) {
+      if (value === null) return value;
+      const forecast = adviceObject(value, "advice payload.forecast");
+      adviceFinite(forecast.horizon_hours, "advice payload.forecast.horizon_hours");
+      adviceFinite(forecast.window_hours, "advice payload.forecast.window_hours");
+      for (const key of ["items_scored", "items_forecast"]) {
+        adviceSafeInteger(forecast[key], `advice payload.forecast.${key}`);
+        if (forecast[key] < 0) throw new Error(`advice payload.forecast.${key} must be non-negative`);
+      }
+      for (const target of ["price_models", "demand_models"]) {
+        const models = adviceObject(forecast[target], `advice payload.forecast.${target}`);
+        let total = 0;
+        for (const [model, count] of Object.entries(models)) {
+          if (typeof model !== "string" || !model) throw new Error(`advice payload.forecast.${target} has an invalid model`);
+          adviceSafeInteger(count, `advice payload.forecast.${target}.${model}`);
+          if (count < 0) throw new Error(`advice payload.forecast.${target}.${model} must be non-negative`);
+          total += count;
+        }
+        if (total !== forecast.items_forecast) throw new Error(`advice payload.forecast.${target} does not sum to items_forecast`);
+      }
+      adviceFinite(forecast.median_price_skill, "advice payload.forecast.median_price_skill", true);
+      adviceFinite(forecast.median_demand_skill, "advice payload.forecast.median_demand_skill", true);
+      return forecast;
     }
     function validateAdvicePayload(payload) {
       const value = adviceObject(payload, "advice payload");
@@ -639,6 +710,8 @@
       adviceFinite(value.as_of_epoch, "advice payload.as_of_epoch");
       if (typeof value.sweep_id !== "string" && !Number.isSafeInteger(value.sweep_id)) throw new Error("advice payload sweep_id is invalid");
       const parameters = adviceObject(value.parameters, "advice payload.parameters");
+      if (parameters.estimates !== "snapshot" && parameters.estimates !== "forecast") throw new Error("advice payload.parameters.estimates is invalid");
+      validateAdviceForecast(value.forecast);
       for (const key of ["strategies", "professions"]) {
         if (!Array.isArray(parameters[key]) || parameters[key].some((item) => typeof item !== "string" || !item)) throw new Error(`advice payload.parameters.${key} is invalid`);
       }
@@ -709,6 +782,14 @@
       if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
       return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
     }
+    function buildAdviceForecastModel(forecast) {
+      if (forecast === null) return null;
+      const modelText = (models) => Object.entries(models).map(([name, count]) => `${name} ${count}`).join(", ");
+      const skillText = (price, demand) => `median skill price ${price === null ? "—" : price.toFixed(3)}, demand ${demand === null ? "—" : demand.toFixed(3)}`;
+      return {
+        text: `Price: ${modelText(forecast.price_models)}; demand: ${modelText(forecast.demand_models)}; ${skillText(forecast.median_price_skill, forecast.median_demand_skill)} (scored ${forecast.items_scored}, forecast ${forecast.items_forecast}; ${forecast.horizon_hours} h horizon, ${forecast.window_hours} h window)`,
+      };
+    }
     function buildAdviceModel(payload) {
       const value = validateAdvicePayload(payload);
       const date = new Date(value.as_of_epoch * 1000);
@@ -741,7 +822,7 @@
               ? `${pathway.sale_probability.toFixed(2)} ${pathway.evidence.successes}/${pathway.evidence.n}`
               : pathway.sale_probability.toFixed(2);
           }
-          return {
+          const row = {
             title: pathway.title,
             strategy: pathway.strategy,
             profit: pathway.profit_label,
@@ -752,8 +833,22 @@
             capital: formatAdviceCopper(pathway.capital),
             confidence: pathway.confidence,
             steps: pathway.steps.map((step) => describeAdviceStep(step, value.names)),
-            details: Object.entries(pathway.details).map(([key, detail]) => ({ key, value: formatAdviceDetail(detail) })),
+            details: Object.entries(pathway.details)
+              .filter(([key]) => key !== "sale_price" && key !== "forecast")
+              .map(([key, detail]) => ({ key, value: formatAdviceDetail(detail) })),
           };
+          if (Object.prototype.hasOwnProperty.call(pathway.details, "forecast")) {
+            const notes = pathway.details.forecast;
+            row.forecastNotes = Object.entries(notes).map(([item, note]) => {
+              const label = Object.prototype.hasOwnProperty.call(value.names, item) ? value.names[item] : `item ${item}`;
+              if (note === null) return `${label} (${item}): no forecast`;
+              const price = pathway.details.sale_price[item] === null ? "—" : formatAdviceCopper(pathway.details.sale_price[item]);
+              const priceSkill = note.price_skill === null ? "baseline" : `skill ${note.price_skill.toFixed(3)}`;
+              const demandSkill = note.demand_skill === null ? "baseline" : `skill ${note.demand_skill.toFixed(3)}`;
+              return `${label} (${item}): sale ${price}; price ${note.price_model} (${priceSkill}, n=${note.price_n}); demand ${note.demand_model} (${demandSkill}, n=${note.demand_n})`;
+            });
+          }
+          return row;
         }),
       }));
       const strategies = Object.entries(value.strategies).map(([name, summary]) => {
@@ -769,7 +864,7 @@
           notes: [...summary.notes],
         };
       });
-      return { meta, sections, strategies };
+      return { meta, forecast: buildAdviceForecastModel(value.forecast), sections, strategies };
     }
     /* DASHBOARD PURE LOGIC END */
     (() => {
@@ -986,6 +1081,11 @@
         meta.replaceChildren();
         for (const value of [model.meta.house, model.meta.build, model.meta.sweep, model.meta.asOf, model.meta.age]) meta.append(adviceText("span", value));
         if (model.meta.stale) meta.append(adviceText("span", model.meta.staleText, "stale-warning"));
+        const forecast = $("advice-forecast");
+        if (forecast) {
+          forecast.replaceChildren();
+          if (model.forecast !== null) forecast.append(adviceText("span", model.forecast.text));
+        }
 
         const sections = $("advice-results");
         sections.replaceChildren();
@@ -1008,6 +1108,7 @@
             const summary = adviceText("summary", row.title);
             details.append(summary);
             for (const [index, step] of row.steps.entries()) details.append(adviceText("p", `${index + 1}. ${step}`, "advice-details"));
+            for (const note of row.forecastNotes || []) details.append(adviceText("p", `Forecast: ${note}`, "advice-details"));
             for (const detail of row.details) details.append(adviceText("p", `${detail.key}: ${detail.value}`, "advice-details"));
             pathwayCell.append(details);
             tableRow.append(pathwayCell);
@@ -1125,6 +1226,7 @@
           share: $("advice-share").value,
           horizonHours: $("advice-horizon").value,
           priceBasis: $("advice-price-basis").value,
+          estimates: $("advice-estimates").value,
           limit: $("advice-limit").value,
         };
       }

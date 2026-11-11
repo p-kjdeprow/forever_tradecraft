@@ -29,6 +29,7 @@ def csv(text: str | None, label: str) -> frozenset[str] | None:
 
 def make_config(
     *,
+    estimates: str = "forecast",
     strategies: str | None = None,
     professions: str | None = None,
     min_profit: int = 0,
@@ -44,6 +45,7 @@ def make_config(
     """Build an ``AdviceConfig`` from raw option values; raises ``OptionError`` on a bad one."""
 
     return AdviceConfig(
+        estimates=estimates,
         strategies=csv(strategies, "strategies") or frozenset(STRATEGIES),
         professions=csv(professions, "professions") or DEFAULT_PROFESSIONS,
         min_profit=min_profit,

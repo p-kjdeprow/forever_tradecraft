@@ -21,6 +21,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--house", required=True, help="explicit house key, e.g. us-normal-alliance")
     parser.add_argument("--build", help="full client build, e.g. 1.60.1.70862 (default: the latest sweep's)")
     parser.add_argument("--as-of", help="ISO timestamp with offset; default is the latest sweep")
+    parser.add_argument("--estimates", choices=("snapshot", "forecast"), default="forecast")
     parser.add_argument(
         "--strategies", help=f"comma-separated subset of {','.join(STRATEGIES)} (default all)"
     )
@@ -37,7 +38,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--price-basis",
         choices=("lowest", "target"),
         default="lowest",
-        help="crafting headline price: 1c under the current lowest listing, or rank's target",
+        help=(
+            "crafting headline price: 1c under expected sale price (current lowest in snapshot), "
+            "or rank's target"
+        ),
     )
     parser.add_argument(
         "--max-cold-age-hours", type=float, default=3.0, help="exclude cold-tier rows with older prices"
@@ -57,6 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = make_config(
+            estimates=args.estimates,
             strategies=args.strategies,
             professions=args.professions,
             min_profit=args.min_profit,

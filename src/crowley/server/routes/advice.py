@@ -32,6 +32,7 @@ def advice(
     request: Request,
     build: str | None = None,
     as_of: str | None = None,
+    estimates: str = "forecast",
     strategies: str | None = None,
     professions: str | None = None,
     min_profit: int = Query(default=0, ge=0),
@@ -63,6 +64,7 @@ def advice(
 
     try:
         config = make_config(
+            estimates=estimates,
             strategies=strategies,
             professions=professions,
             min_profit=min_profit,

@@ -2,18 +2,22 @@
 
 Rank supplies the economics it always did (reagent cost, margin at its target price, P(sale)
 from independent replay starts, market units/h, capital).  This evaluator adds the price a human
-would actually post now.  The headline price of each output is ``min(lowest - 1, rank target)``:
-1c under the CURRENT lowest listing, but never above the target the P(sale) was measured at, so
-the headline profit and the measured P refer to the same or a lower price.  ``crafting_price=
-"target"`` uses rank's target alone.  Both margins stay in the details.
+would actually post now.  The headline price of each output is ``min(sale_price - 1, rank target)``:
+1c under the expected selling price, but never above the target the P(sale) was measured at, so
+the headline profit and the measured P refer to the same or a lower price.  Forecast estimates
+choose ``sale_price`` and demand; snapshot estimates make ``sale_price`` equal to the current
+lowest listing.  ``crafting_price="target"`` uses rank's target alone.  Current-lowest diagnostics
+and both undercut margins stay in the details.
 
 Expected profit per hour is ``margin x crafts/h x P(sale)``: a listing that sells with probability
 P within the horizon earns P of its margin per attempt.  A zero P is always excluded.
 
 A cold-pool candidate (``analysis.candidates``) becomes a pathway only for a recipe that rank
 excluded (a cold item has no book in the latest sweep, or too few to replay) and that the
-candidate view flags.  It has no P(sale) and goes to the ``unmeasured`` section; its volume is the
-observed any-gap bottom depletion per hour and its profit per hour is taken at P = 1.  It is
+candidate view flags.  Its prices come from the candidate view's latest cold observation, not from
+the estimate provider, so cold items are not forecast.  It has no P(sale) and goes to the
+``unmeasured`` section; its volume is the observed any-gap bottom depletion per hour and its
+profit per hour is taken at P = 1.  It is
 excluded when it has no depletion intervals (``no_observed_demand``) or when any price behind it
 was last observed more than ``max_cold_age_hours`` ago (``stale_observation``), and its steps start
 with "verify price".  Every recipe rank considered is counted exactly once.
@@ -24,6 +28,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from fractions import Fraction
 from math import ceil
+from typing import Any
 
 from crowley.advisor.estimates import PriceEstimate
 from crowley.advisor.evaluators.base import Collector, Context
@@ -47,13 +52,16 @@ from crowley.trading.strategies.pricing import Source
 
 @dataclass(frozen=True)
 class CraftRow:
-    """One rank row with the current-lowest repricing next to rank's target."""
+    """One rank row with current and expected selling prices next to rank's target."""
 
     row: TradeRow
     lowest: dict[int, int | None]  # output item -> current lowest listing
+    sale_price: dict[int, int | None]  # output item -> expected selling price
     price_undercut: dict[int, int] | None  # output item -> 1c under it; None when any is unpriceable
+    price_undercut_sale: dict[int, int] | None
     price_headline: dict[int, int] | None  # the configured headline price; None when unpriceable
     margin_undercut: Fraction | None  # margin per craft at ``price_undercut``
+    margin_undercut_sale: Fraction | None
     margin_headline: Fraction | None  # margin per craft at ``price_headline``
 
 
@@ -114,7 +122,9 @@ def _craft_row(ctx: Context, row: TradeRow) -> CraftRow:
         item: ctx.estimates.estimate(item) for item, _ in row.outputs
     }
     lowest = {item: None if est is None else est.lowest for item, est in estimates.items()}
+    sale_price = {item: None if est is None else est.sale_price for item, est in estimates.items()}
     undercut = {item: _undercut(value) for item, value in lowest.items()}
+    sale_undercut = {item: _undercut(value) for item, value in sale_price.items()}
     outputs = dict(row.outputs)
     target = dict(row.target_prices)
     price_undercut = (
@@ -127,16 +137,36 @@ def _craft_row(ctx: Context, row: TradeRow) -> CraftRow:
         if price_undercut is None
         else margin_at(ctx, outputs, dict(price_undercut), row.reagent_cost_per_craft)
     )
+    price_undercut_sale = (
+        None
+        if any(price is None for price in sale_undercut.values())
+        else {item: price for item, price in sale_undercut.items() if price is not None}
+    )
+    margin_undercut_sale = (
+        None
+        if price_undercut_sale is None
+        else margin_at(ctx, outputs, dict(price_undercut_sale), row.reagent_cost_per_craft)
+    )
     if ctx.config.crafting_price == "target":
         headline: dict[int, int] | None = target
-    elif price_undercut is None:
+    elif price_undercut_sale is None:
         headline = None
     else:
-        headline = {item: min(price_undercut[item], target[item]) for item in outputs}
+        headline = {item: min(price_undercut_sale[item], target[item]) for item in outputs}
     margin_headline = (
         None if headline is None else margin_at(ctx, outputs, dict(headline), row.reagent_cost_per_craft)
     )
-    return CraftRow(row, lowest, price_undercut, headline, margin_undercut, margin_headline)
+    return CraftRow(
+        row,
+        lowest,
+        sale_price,
+        price_undercut,
+        price_undercut_sale,
+        headline,
+        margin_undercut,
+        margin_undercut_sale,
+        margin_headline,
+    )
 
 
 def analyze(ctx: Context) -> CraftingAnalysis:
@@ -169,7 +199,7 @@ def analyze(ctx: Context) -> CraftingAnalysis:
 
 
 def headline_margin(craft: CraftRow) -> Fraction | None:
-    """The headline margin per craft (None: unpriceable at the current lowest)."""
+    """The configured headline margin per craft (None when its listing price is unavailable)."""
 
     return craft.margin_headline
 
@@ -240,6 +270,41 @@ def row_pathway(ctx: Context, analysis: CraftingAnalysis, craft: CraftRow) -> Pa
     )
     probability = Fraction(row.sale_probability)
     per_hour = margin * row.crafts_per_hour * probability
+    details: dict[str, Any] = {
+        "kind": row.kind,
+        "price_basis": ctx.config.crafting_price,
+        "headline_prices": prices,
+        "margin_at_headline": margin,
+        "margin_at_undercut_lowest": craft.margin_undercut,
+        "margin_at_target": row.margin_per_craft,
+        "price_undercut_lowest": craft.price_undercut,
+        "current_lowest": craft.lowest,
+        "target_prices": dict(row.target_prices),
+        "sale_probability_measured_at": "rank target price (headline price is never above it)",
+        "profit_per_hour_formula": "margin x crafts/h x P(sale)",
+        "profit_per_hour_at_p1": margin * row.crafts_per_hour,
+        "target_above_lowest": row.target_above_lowest,
+        "reagent_cost_per_craft": row.reagent_cost_per_craft,
+        "crafts_per_hour": row.crafts_per_hour,
+        "batch_crafts": ctx.config.batch_crafts,
+        "listing_hours": ctx.config.listing_hours,
+        "recipe_status": row.status or "unchecked (no character)",
+        "professions": row.professions,
+    }
+    forecast_estimates = {item: ctx.estimates.estimate(item) for item in outputs}
+    if any(est is not None and est.forecast is not None for est in forecast_estimates.values()):
+        details.update(
+            {
+                "sale_price": {
+                    item: None if est is None else est.sale_price for item, est in forecast_estimates.items()
+                },
+                "forecast": {
+                    item: None if est is None else est.forecast for item, est in forecast_estimates.items()
+                },
+                "price_undercut_sale": craft.price_undercut_sale,
+                "margin_at_undercut_sale": craft.margin_undercut_sale,
+            }
+        )
     return Pathway(
         strategy="crafting",
         section="ranked",
@@ -259,27 +324,7 @@ def row_pathway(ctx: Context, analysis: CraftingAnalysis, craft: CraftRow) -> Pa
         one_off_profit=None,
         sort_value=per_hour,
         confidence=pathway_confidence(evidence, demand),
-        details={
-            "kind": row.kind,
-            "price_basis": ctx.config.crafting_price,
-            "headline_prices": prices,
-            "margin_at_headline": margin,
-            "margin_at_undercut_lowest": craft.margin_undercut,
-            "margin_at_target": row.margin_per_craft,
-            "price_undercut_lowest": craft.price_undercut,
-            "current_lowest": craft.lowest,
-            "target_prices": dict(row.target_prices),
-            "sale_probability_measured_at": "rank target price (headline price is never above it)",
-            "profit_per_hour_formula": "margin x crafts/h x P(sale)",
-            "profit_per_hour_at_p1": margin * row.crafts_per_hour,
-            "target_above_lowest": row.target_above_lowest,
-            "reagent_cost_per_craft": row.reagent_cost_per_craft,
-            "crafts_per_hour": row.crafts_per_hour,
-            "batch_crafts": ctx.config.batch_crafts,
-            "listing_hours": ctx.config.listing_hours,
-            "recipe_status": row.status or "unchecked (no character)",
-            "professions": row.professions,
-        },
+        details=details,
     )
 
 
@@ -364,6 +409,7 @@ def candidate_pathway(ctx: Context, analysis: CraftingAnalysis, candidate: Candi
         details={
             "kind": "cold",
             "price_basis": config.crafting_price,
+            "price_source": "latest_cold_observation",
             "headline_prices": prices,
             "margin_at_headline": margin,
             "margin_at_target": candidate.margin_per_craft,

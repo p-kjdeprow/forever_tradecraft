@@ -8,6 +8,7 @@ from dataclasses import asdict, is_dataclass
 from fractions import Fraction
 from typing import Any, cast
 
+from crowley.advisor.estimates import ForecastNote
 from crowley.advisor.model import SECTIONS, Advice, Pathway, Step
 from crowley.analysis.rank import gold
 
@@ -83,6 +84,31 @@ def _last_cell(pathway: Pathway) -> Fraction:
     return value
 
 
+def _forecast_lines(pathway: Pathway, names: Mapping[int, str]) -> list[str]:
+    notes = pathway.details.get("forecast")
+    prices = pathway.details.get("sale_price")
+    if not isinstance(notes, Mapping) or not isinstance(prices, Mapping):
+        return []
+    typed_notes = cast("Mapping[int, ForecastNote | None]", notes)
+    typed_prices = cast("Mapping[int, int | None]", prices)
+    lines: list[str] = []
+    for item_id, note in sorted(typed_notes.items()):
+        label = names.get(int(item_id), f"item {item_id}")
+        if note is None:
+            lines.append(f"    forecast {label} ({item_id}): unavailable")
+            continue
+        price = typed_prices[item_id]
+        price_text = "-" if price is None else gold(price)
+        price_skill = "baseline" if note.price_skill is None else f"skill {note.price_skill:.3f}"
+        demand_skill = "baseline" if note.demand_skill is None else f"skill {note.demand_skill:.3f}"
+        lines.append(
+            f"    forecast {label} ({item_id}): sale {price_text}; "
+            f"price {note.price_model} ({price_skill}, n={note.price_n}); "
+            f"demand {note.demand_model} ({demand_skill}, n={note.demand_n})"
+        )
+    return lines
+
+
 def format_section(
     name: str, pathways: tuple[Pathway, ...], limit: int | None, names: Mapping[int, str], steps: bool
 ) -> list[str]:
@@ -104,6 +130,7 @@ def format_section(
         )
         if steps:
             lines.extend(f"    {i}. {describe_step(step, names)}" for i, step in enumerate(pathway.steps, 1))
+            lines.extend(_forecast_lines(pathway, names))
     lines.append(f"  shown {len(shown)} of {len(pathways)}")
     return lines
 
@@ -130,6 +157,23 @@ def format_table(advice: Advice, names: Mapping[int, str], limit: int | None, st
             f"excluded {len(result.exclusions)} ({counts})"
         )
         lines.extend(f"    note: {note}" for note in result.notes)
+    if advice.forecast is not None:
+        price = ", ".join(f"{model} {count}" for model, count in advice.forecast.price_models.items())
+        demand = ", ".join(f"{model} {count}" for model, count in advice.forecast.demand_models.items())
+        price_skill = (
+            "-" if advice.forecast.median_price_skill is None else f"{advice.forecast.median_price_skill:.3f}"
+        )
+        demand_skill = (
+            "-"
+            if advice.forecast.median_demand_skill is None
+            else f"{advice.forecast.median_demand_skill:.3f}"
+        )
+        lines.append(
+            f"forecast: horizon {advice.forecast.horizon_hours:g} h, "
+            f"window {advice.forecast.window_hours:g} h, "
+            f"scored {advice.forecast.items_scored}, forecast {advice.forecast.items_forecast}; "
+            f"price [{price}] median skill {price_skill}; demand [{demand}] median skill {demand_skill}"
+        )
     return "\n".join(lines)
 
 
@@ -145,7 +189,9 @@ def advice_payload(
         "client_build": advice.client_build,
         "as_of_epoch": advice.as_of_t,
         "sweep_id": advice.sweep_id,
+        "forecast": plain(advice.forecast),
         "parameters": {
+            "estimates": config.estimates,
             "strategies": sorted(config.strategies),
             "professions": sorted(config.professions),
             "min_profit": config.min_profit,

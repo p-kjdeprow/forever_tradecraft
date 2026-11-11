@@ -59,6 +59,8 @@
     .toolbar { padding: .7rem 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .7rem; }
     .toolbar label { font-weight: 650; }
     .toolbar select { min-width: min(28rem, 100%); }
+    .view-switch { display: flex; gap: .35rem; flex-wrap: wrap; }
+    .view-switch button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
     .token-form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; width: 100%; }
     .token-form label { display: grid; gap: .2rem; flex: 1 1 18rem; }
     input, select, button {
@@ -109,6 +111,33 @@
     .pending-list { display: grid; gap: .35rem; }
     .pending-item { padding: .45rem .6rem; border-left: 3px solid var(--accent); background: var(--accent-soft); }
     .empty { color: var(--muted); padding: .5rem 0; }
+    .advice-form { display: grid; gap: .8rem; }
+    .advice-fields { display: flex; flex-wrap: wrap; align-items: end; gap: .7rem; }
+    .advice-fields > label { display: grid; gap: .2rem; min-width: 8rem; }
+    .advice-fields > label.house-field { flex: 1 1 15rem; }
+    .advice-fields input[type="number"] { width: 7rem; }
+    .advice-fieldset { display: flex; flex-wrap: wrap; gap: .45rem .8rem; margin: 0; padding: .55rem .7rem .65rem; border: 1px solid var(--line); border-radius: .45rem; }
+    .advice-fieldset legend { padding: 0 .3rem; font-weight: 650; }
+    .advice-fieldset label { display: flex; align-items: center; gap: .3rem; }
+    .advice-fields > div { flex: 1 1 16rem; min-width: 0; max-width: 100%; }
+    .money-inputs { display: flex; flex-wrap: wrap; gap: .3rem; max-width: 100%; }
+    .money-inputs label { display: grid; flex: 1 1 5rem; gap: .2rem; min-width: 0; }
+    .advice-fields .money-inputs input { width: 5rem; max-width: 100%; }
+    .advice-meta { display: flex; flex-wrap: wrap; gap: .35rem 1.2rem; color: var(--muted); }
+    .stale-warning { color: var(--bad); font-weight: 750; }
+    .advice-sections { display: grid; gap: 1rem; margin-top: 1rem; }
+    .advice-table { min-width: 980px; }
+    .advice-table td.advice-pathway { text-align: left; white-space: normal; min-width: 19rem; }
+    .advice-table td.advice-pathway details { white-space: normal; }
+    .advice-table td.advice-pathway summary { cursor: pointer; font-weight: 650; }
+    .advice-details { margin: .35rem 0 0 1rem; color: var(--muted); }
+    .advice-details p { margin: .2rem 0; }
+    .advice-summary { display: grid; gap: .8rem; }
+    .advice-strategy { border-top: 1px solid var(--line); padding-top: .65rem; }
+    .advice-strategy:first-child { border-top: 0; padding-top: 0; }
+    .advice-strategy h3 { margin-bottom: .2rem; }
+    .advice-strategy ul { margin: .2rem 0; padding-left: 1.2rem; }
+    .advice-strategy li { color: var(--muted); }
     @media (min-width: 800px) {
       .grid.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     }
@@ -125,7 +154,11 @@
       <h1>Paper trading dashboard</h1>
       <p class="muted">Read-only strategy performance and decisions</p>
     </div>
-    <button id="forget-token" type="button">Forget token</button>
+    <div class="view-switch" aria-label="Dashboard view">
+      <button id="paper-view-button" type="button" aria-pressed="true">Paper runs</button>
+      <button id="advice-view-button" type="button" aria-pressed="false">Advice</button>
+      <button id="forget-token" type="button">Forget token</button>
+    </div>
   </header>
   <main>
     <section class="toolbar" aria-label="Dashboard controls">
@@ -135,12 +168,15 @@
         </label>
         <button class="primary" type="submit">Save token</button>
       </form>
-      <label for="run-select">Run</label>
-      <select id="run-select" aria-label="Paper run"></select>
+      <span id="paper-controls">
+        <label for="run-select">Run</label>
+        <select id="run-select" aria-label="Paper run"></select>
+      </span>
       <span id="status" class="status" role="status" aria-live="polite">Enter an API token to begin.</span>
     </section>
 
-    <div id="dashboard-content" hidden>
+    <div id="paper-view">
+      <div id="dashboard-content" hidden>
       <section class="panel" aria-labelledby="run-heading">
         <h2 id="run-heading">Run</h2>
         <div id="run-meta" class="meta"></div>
@@ -185,6 +221,81 @@
           <div id="pending-content" class="pending-list"></div>
         </section>
       </div>
+      </div>
+    </div>
+
+    <div id="advice-view" hidden>
+      <section class="panel" aria-labelledby="advice-form-heading">
+        <h2 id="advice-form-heading">Advice options</h2>
+        <form id="advice-form" class="advice-form">
+          <div class="advice-fields">
+            <label class="house-field" for="advice-house">House
+              <select id="advice-house" name="house" required></select>
+            </label>
+            <label for="advice-character">Character (optional)
+              <input id="advice-character" name="character" type="text" autocomplete="off">
+            </label>
+            <label for="advice-min-volume">Min volume (units/h)
+              <input id="advice-min-volume" name="min_volume" type="number" min="0" step="any" value="0" required>
+            </label>
+            <label for="advice-share">Share (%)
+              <input id="advice-share" name="share" type="number" min="0.01" max="100" step="any" value="10" required>
+            </label>
+            <label for="advice-horizon">Horizon
+              <select id="advice-horizon" name="horizon_hours">
+                <option value="2">2 h</option>
+                <option value="6">6 h</option>
+                <option value="12">12 h</option>
+                <option value="24">24 h</option>
+              </select>
+            </label>
+            <label for="advice-price-basis">Price basis
+              <select id="advice-price-basis" name="price_basis">
+                <option value="lowest">Lowest</option>
+                <option value="target">Target</option>
+              </select>
+            </label>
+            <label for="advice-limit">Limit
+              <input id="advice-limit" name="limit" type="number" min="1" max="500" step="1" value="25" required>
+            </label>
+            <div>
+              <span>Min profit</span>
+              <div class="money-inputs">
+                <label for="advice-profit-gold"><span class="muted">gold</span><input id="advice-profit-gold" name="min_profit_gold" type="number" min="0" step="1" value="0" required></label>
+                <label for="advice-profit-silver"><span class="muted">silver</span><input id="advice-profit-silver" name="min_profit_silver" type="number" min="0" max="99" step="1" value="0" required></label>
+                <label for="advice-profit-copper"><span class="muted">copper</span><input id="advice-profit-copper" name="min_profit_copper" type="number" min="0" max="99" step="1" value="0" required></label>
+              </div>
+            </div>
+          </div>
+          <div class="advice-fields">
+            <fieldset class="advice-fieldset">
+              <legend>Professions</legend>
+              <label><input type="checkbox" name="profession" value="alchemy" checked>Alchemy</label>
+              <label><input type="checkbox" name="profession" value="tailoring" checked>Tailoring</label>
+              <label><input type="checkbox" name="profession" value="engineering" checked>Engineering</label>
+            </fieldset>
+            <fieldset class="advice-fieldset">
+              <legend>Strategies</legend>
+              <label><input type="checkbox" name="strategy" value="crafting" checked>Crafting</label>
+              <label><input type="checkbox" name="strategy" value="recipe_purchase" checked>Recipe purchase</label>
+              <label><input type="checkbox" name="strategy" value="flip" checked>Flip</label>
+              <label><input type="checkbox" name="strategy" value="raw_materials" checked>Raw materials</label>
+              <label><input type="checkbox" name="strategy" value="vendor_arbitrage" checked>Vendor arbitrage</label>
+            </fieldset>
+            <label><input id="advice-auto" type="checkbox"> Auto-refresh</label>
+            <button class="primary" type="submit">Get advice</button>
+          </div>
+        </form>
+      </section>
+      <section class="panel" aria-labelledby="advice-meta-heading">
+        <h2 id="advice-meta-heading">Advice run</h2>
+        <div id="advice-meta" class="advice-meta"></div>
+      </section>
+      <section id="advice-results" class="advice-sections" aria-live="polite"></section>
+      <section class="panel" aria-labelledby="advice-summary-heading">
+        <h2 id="advice-summary-heading">Strategy summary</h2>
+        <div id="advice-strategy-summary" class="advice-summary"></div>
+      </section>
     </div>
   </main>
 
@@ -382,18 +493,313 @@
       if (!detail.pending) return [];
       return Object.entries(detail.pending.intents).flatMap(([strategy, intents]) => intents.map((intent) => ({ strategy, action: summarizeIntent(intent) })));
     }
+
+    const ADVICE_STRATEGIES = ["crafting", "recipe_purchase", "flip", "raw_materials", "vendor_arbitrage"];
+    const ADVICE_SECTIONS = ["ranked", "unmeasured", "one_off", "farming"];
+    const ADVICE_SECTION_TITLES = {
+      ranked: "RANKED: recurring crafts with a measured P(sale); profit/h = margin x crafts/h x P(sale)",
+      unmeasured: "UNMEASURED: recurring, P(sale) not measurable (cold tier, vendor to AH); profit/h taken at P = 1, an upper bound",
+      one_off: "ONE-OFF: opportunities listed right now; value is the expected profit of doing it once",
+      farming: "FARMING VALUE: gatherable goods; market value/h is the whole market's capacity, not your income",
+    };
+    const ADVICE_COLUMNS = {
+      ranked: ["profit", "vol/h", "P (sold/n)", "profit/h"],
+      unmeasured: ["profit", "vol/h", "P", "profit/h@P1"],
+      one_off: ["profit/unit", "vol/h", "unit fill (n)", "one-off"],
+      farming: ["net/unit", "vol/h", "P", "mkt value/h"],
+    };
+
+    function adviceInputInteger(value, label) {
+      const text = typeof value === "number" ? String(value) : value;
+      if (typeof text !== "string" || !/^\d+$/.test(text)) throw new Error(`${label} must be a non-negative integer`);
+      const parsed = Number(text);
+      if (!Number.isSafeInteger(parsed)) throw new Error(`${label} is too large`);
+      return parsed;
+    }
+    function adviceInputNumber(value, label) {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) throw new Error(`${label} must be finite`);
+      return parsed;
+    }
+    function goldToCopper(gold, silver, copper) {
+      const g = adviceInputInteger(gold, "gold");
+      const s = adviceInputInteger(silver, "silver");
+      const c = adviceInputInteger(copper, "copper");
+      if (s >= 100 || c >= 100) throw new Error("silver and copper must be less than 100");
+      const total = g * 10000 + s * 100 + c;
+      if (!Number.isSafeInteger(total)) throw new Error("gold amount is too large");
+      return total;
+    }
+    function buildAdviceQuery(options) {
+      if (options === null || typeof options !== "object" || Array.isArray(options)) throw new Error("advice options must be an object");
+      const requiredList = (key) => {
+        if (!Array.isArray(options[key]) || options[key].length === 0 || options[key].some((value) => typeof value !== "string" || !value)) {
+          throw new Error(`${key} must be a non-empty list`);
+        }
+        return options[key];
+      };
+      const strategies = requiredList("strategies");
+      const professions = requiredList("professions");
+      const minProfit = goldToCopper(options.minProfitGold, options.minProfitSilver, options.minProfitCopper);
+      const minVolume = adviceInputNumber(options.minVolume, "minVolume");
+      const sharePercent = adviceInputNumber(options.share, "share");
+      const horizon = adviceInputNumber(options.horizonHours, "horizonHours");
+      const limit = adviceInputInteger(options.limit, "limit");
+      if (minVolume < 0 || sharePercent <= 0 || sharePercent > 100 || horizon <= 0 || limit < 1) {
+        throw new Error("advice options are outside their allowed ranges");
+      }
+      if (options.priceBasis !== "lowest" && options.priceBasis !== "target") throw new Error("priceBasis must be lowest or target");
+      const params = new URLSearchParams();
+      params.set("strategies", strategies.join(","));
+      params.set("professions", professions.join(","));
+      params.set("min_profit", String(minProfit));
+      params.set("min_volume", String(minVolume));
+      params.set("share", String(sharePercent / 100));
+      params.set("horizon_hours", String(horizon));
+      params.set("price_basis", options.priceBasis);
+      params.set("limit", String(limit));
+      const character = options.character == null ? "" : String(options.character).trim();
+      if (character) params.set("character", character);
+      return `?${params.toString()}`;
+    }
+    function formatAdviceCopper(value) {
+      if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("advice copper value must be finite");
+      const rounded = Math.round(Math.abs(value));
+      const gold = Math.floor(rounded / 10000);
+      const silver = Math.floor((rounded % 10000) / 100);
+      const copper = rounded % 100;
+      return `${value < 0 ? "-" : ""}${gold}g ${silver}s ${copper}c`;
+    }
+    function adviceGold(value) {
+      if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("step price must be finite");
+      const rounded = Math.round(value);
+      const sign = rounded < 0 ? "-" : "";
+      const absolute = Math.abs(rounded);
+      return `${sign}${Math.floor(absolute / 10000)}g${String(Math.floor((absolute % 10000) / 100)).padStart(2, "0")}s${String(absolute % 100).padStart(2, "0")}c`;
+    }
+    function adviceObject(value, label) {
+      if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`);
+      return value;
+    }
+    function adviceFinite(value, label, nullable = false) {
+      if (nullable && value === null) return value;
+      if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${label} must be a finite number`);
+      return value;
+    }
+    function adviceSafeInteger(value, label, nullable = false) {
+      if (nullable && value === null) return value;
+      if (typeof value !== "number" || !Number.isSafeInteger(value)) throw new Error(`${label} must be an integer`);
+      return value;
+    }
+    function validateAdviceEvidence(value, label) {
+      if (value === null) return value;
+      const evidence = adviceObject(value, label);
+      if (typeof evidence.kind !== "string" || !evidence.kind) throw new Error(`${label}.kind is invalid`);
+      adviceSafeInteger(evidence.n, `${label}.n`);
+      if (evidence.n < 0) throw new Error(`${label}.n must be non-negative`);
+      adviceSafeInteger(evidence.successes, `${label}.successes`, true);
+      adviceSafeInteger(evidence.usable, `${label}.usable`, true);
+      if (typeof evidence.detail !== "string") throw new Error(`${label}.detail is invalid`);
+      return evidence;
+    }
+    function validateAdviceStep(step, label) {
+      const value = adviceObject(step, label);
+      if (typeof value.action !== "string" || !value.action) throw new Error(`${label}.action is invalid`);
+      for (const key of ["item_id", "spell_id", "quantity", "price"]) adviceSafeInteger(value[key], `${label}.${key}`, true);
+      if (typeof value.note !== "string") throw new Error(`${label}.note is invalid`);
+      return value;
+    }
+    function validateAdvicePathway(pathway, section, index) {
+      const label = `sections.${section}[${index}]`;
+      const value = adviceObject(pathway, label);
+      for (const key of ["strategy", "section", "key", "title", "profit_label", "confidence"]) {
+        if (typeof value[key] !== "string" || !value[key]) throw new Error(`${label}.${key} is invalid`);
+      }
+      if (value.section !== section || !ADVICE_STRATEGIES.includes(value.strategy)) throw new Error(`${label} has an invalid section or strategy`);
+      if (!Array.isArray(value.steps) || value.steps.length === 0) throw new Error(`${label}.steps must be non-empty`);
+      value.steps.forEach((step, stepIndex) => validateAdviceStep(step, `${label}.steps[${stepIndex}]`));
+      adviceFinite(value.profit_per_unit, `${label}.profit_per_unit`);
+      adviceFinite(value.profit_per_craft, `${label}.profit_per_craft`, true);
+      adviceFinite(value.volume_per_hour, `${label}.volume_per_hour`);
+      adviceFinite(value.sale_probability, `${label}.sale_probability`, true);
+      adviceFinite(value.fill_rate, `${label}.fill_rate`, true);
+      validateAdviceEvidence(value.evidence, `${label}.evidence`);
+      validateAdviceEvidence(value.demand_evidence, `${label}.demand_evidence`);
+      adviceSafeInteger(value.listed_units, `${label}.listed_units`, true);
+      adviceFinite(value.capital, `${label}.capital`);
+      adviceFinite(value.profit_per_hour, `${label}.profit_per_hour`, true);
+      adviceFinite(value.one_off_profit, `${label}.one_off_profit`, true);
+      adviceFinite(value.sort_value, `${label}.sort_value`);
+      adviceObject(value.details, `${label}.details`);
+      return value;
+    }
+    function validateAdvicePayload(payload) {
+      const value = adviceObject(payload, "advice payload");
+      for (const key of ["house", "client_build"]) if (typeof value[key] !== "string" || !value[key]) throw new Error(`advice payload ${key} is invalid`);
+      adviceFinite(value.as_of_epoch, "advice payload.as_of_epoch");
+      if (typeof value.sweep_id !== "string" && !Number.isSafeInteger(value.sweep_id)) throw new Error("advice payload sweep_id is invalid");
+      const parameters = adviceObject(value.parameters, "advice payload.parameters");
+      for (const key of ["strategies", "professions"]) {
+        if (!Array.isArray(parameters[key]) || parameters[key].some((item) => typeof item !== "string" || !item)) throw new Error(`advice payload.parameters.${key} is invalid`);
+      }
+      for (const key of ["min_profit", "min_volume", "share", "horizon_hours", "min_sale_prob", "max_cold_age_hours", "flip_x", "flip_undercut"]) adviceFinite(parameters[key], `advice payload.parameters.${key}`);
+      if (typeof parameters.crafting_price !== "string" || !parameters.crafting_price) throw new Error("advice payload.parameters.crafting_price is invalid");
+      adviceSafeInteger(parameters.listing_hours, "advice payload.parameters.listing_hours");
+      adviceSafeInteger(value.total_pathways, "advice payload.total_pathways");
+      const totals = adviceObject(value.section_totals, "advice payload.section_totals");
+      const sections = adviceObject(value.sections, "advice payload.sections");
+      for (const name of ADVICE_SECTIONS) {
+        if (!Array.isArray(sections[name])) throw new Error(`advice payload.sections.${name} must be a list`);
+        adviceSafeInteger(totals[name], `advice payload.section_totals.${name}`);
+        sections[name].forEach((pathway, index) => validateAdvicePathway(pathway, name, index));
+      }
+      const names = adviceObject(value.names, "advice payload.names");
+      for (const [item, name] of Object.entries(names)) {
+        if (!/^\d+$/.test(item) || typeof name !== "string" || !name) throw new Error("advice payload.names is invalid");
+      }
+      const strategies = adviceObject(value.strategies, "advice payload.strategies");
+      for (const [strategy, summary] of Object.entries(strategies)) {
+        if (!ADVICE_STRATEGIES.includes(strategy)) throw new Error(`advice payload.strategies.${strategy} is invalid`);
+        const item = adviceObject(summary, `advice payload.strategies.${strategy}`);
+        for (const key of ["considered", "pathways", "excluded"]) adviceSafeInteger(item[key], `advice payload.strategies.${strategy}.${key}`);
+        const counts = adviceObject(item.exclusion_counts, `advice payload.strategies.${strategy}.exclusion_counts`);
+        for (const [reason, count] of Object.entries(counts)) {
+          if (typeof reason !== "string" || !reason) throw new Error("advice exclusion reason is invalid");
+          adviceSafeInteger(count, `advice exclusion count ${reason}`);
+        }
+        if (!Array.isArray(item.notes) || item.notes.some((note) => typeof note !== "string")) throw new Error(`advice payload.strategies.${strategy}.notes is invalid`);
+      }
+      return value;
+    }
+    function validateAdviceHouses(payload) {
+      if (!Array.isArray(payload)) throw new Error("houses response must be a list");
+      payload.forEach((house, index) => {
+        const value = adviceObject(house, `houses[${index}]`);
+        if (typeof value.key !== "string" || !value.key) throw new Error(`houses[${index}].key is invalid`);
+      });
+      return payload;
+    }
+    function describeAdviceStep(step, names) {
+      let what = step.action.replaceAll("_", " ");
+      if (step.item_id !== null) {
+        const label = Object.prototype.hasOwnProperty.call(names, String(step.item_id)) ? names[String(step.item_id)] : `item ${step.item_id}`;
+        what += step.quantity ? ` ${step.quantity}x ${label} (${step.item_id})` : ` ${label} (${step.item_id})`;
+      }
+      if (step.spell_id !== null) what += ` spell ${step.spell_id}${step.quantity ? ` x${step.quantity}` : ""}`;
+      if (step.price !== null) what += ` ${step.action.startsWith("buy") ? "at or below" : "at"} ${adviceGold(step.price)}`;
+      return what + (step.note ? ` (${step.note})` : "");
+    }
+    function formatAdviceDetail(value) {
+      if (value === null) return "—";
+      if (typeof value === "string") return value;
+      if (typeof value === "number") {
+        if (!Number.isFinite(value)) throw new Error("advice detail number must be finite");
+        return String(value);
+      }
+      if (typeof value === "boolean") return String(value);
+      const rendered = JSON.stringify(value);
+      if (rendered === undefined) throw new Error("advice detail is not JSON-compatible");
+      return rendered;
+    }
+    function formatAdviceNumber(value) {
+      return String(Number(value.toFixed(2)));
+    }
+    function formatAdviceAge(seconds) {
+      if (seconds < 60) return `${Math.round(seconds)}s`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+      return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
+    }
+    function buildAdviceModel(payload) {
+      const value = validateAdvicePayload(payload);
+      const date = new Date(value.as_of_epoch * 1000);
+      if (Number.isNaN(date.getTime())) throw new Error("advice payload.as_of_epoch is not a valid date");
+      const ageSeconds = Math.max(0, Date.now() / 1000 - value.as_of_epoch);
+      const meta = {
+        house: `House: ${value.house}`,
+        build: `Build: ${value.client_build}`,
+        sweep: `Sweep: ${value.sweep_id}`,
+        asOf: `As of: ${date.toLocaleString()}`,
+        age: `Age: ${formatAdviceAge(ageSeconds)}`,
+        stale: ageSeconds > 30 * 60,
+        staleText: ageSeconds > 30 * 60 ? "stale data" : "",
+      };
+      const sections = ADVICE_SECTIONS.map((name) => ({
+        name,
+        title: ADVICE_SECTION_TITLES[name],
+        columns: [...ADVICE_COLUMNS[name]],
+        rows: value.sections[name].map((pathway) => {
+          let lastValue;
+          if (name === "one_off") lastValue = pathway.one_off_profit;
+          else if (name === "farming") lastValue = pathway.sort_value;
+          else lastValue = pathway.profit_per_hour;
+          if (lastValue === null) throw new Error(`advice pathway ${pathway.key} has no section value`);
+          let evidence = "-";
+          if (name === "one_off") {
+            if (pathway.fill_rate !== null) evidence = `${pathway.fill_rate.toFixed(2)} (${pathway.evidence === null ? 0 : pathway.evidence.n})`;
+          } else if (pathway.sale_probability !== null) {
+            evidence = pathway.evidence !== null && pathway.evidence.successes !== null
+              ? `${pathway.sale_probability.toFixed(2)} ${pathway.evidence.successes}/${pathway.evidence.n}`
+              : pathway.sale_probability.toFixed(2);
+          }
+          return {
+            title: pathway.title,
+            strategy: pathway.strategy,
+            profit: pathway.profit_label,
+            volume: formatAdviceNumber(pathway.volume_per_hour),
+            listed: pathway.listed_units === null ? "—" : String(pathway.listed_units),
+            evidence,
+            last: formatAdviceCopper(lastValue),
+            capital: formatAdviceCopper(pathway.capital),
+            confidence: pathway.confidence,
+            steps: pathway.steps.map((step) => describeAdviceStep(step, value.names)),
+            details: Object.entries(pathway.details).map(([key, detail]) => ({ key, value: formatAdviceDetail(detail) })),
+          };
+        }),
+      }));
+      const strategies = Object.entries(value.strategies).map(([name, summary]) => {
+        const reasons = Object.entries(summary.exclusion_counts)
+          .sort(([left], [right]) => left.localeCompare(right))
+          .sort(([, left], [, right]) => right - left)
+          .slice(0, 3)
+          .map(([reason, count]) => `${reason} (${count})`);
+        return {
+          name,
+          counts: `considered ${summary.considered}, pathways ${summary.pathways}, excluded ${summary.excluded}`,
+          reasons,
+          notes: [...summary.notes],
+        };
+      });
+      return { meta, sections, strategies };
+    }
     /* DASHBOARD PURE LOGIC END */
     (() => {
       "use strict";
       const TOKEN_KEY = "crowley.paperDashboard.apiToken";
-      const state = { token: "", runs: [], detail: null, selected: "" };
+      const VIEW_KEY = "crowley.paperDashboard.view";
+      const state = { token: "", noTokenStatus: "Enter an API token to begin.", runs: [], detail: null, selected: "", view: "paper", viewGeneration: 0, requestGeneration: 0, adviceRequestGeneration: null, adviceOptions: null, adviceInFlight: false, adviceHouses: [], adviceHousesLoaded: false, adviceHousesPromise: null };
+      let refreshTimer = null;
       const $ = (id) => document.getElementById(id);
 
       function storedToken() {
         try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (_) { return ""; }
       }
+      function storedView() {
+        try {
+          const view = localStorage.getItem(VIEW_KEY);
+          return view === "advice" || view === "paper" ? view : "paper";
+        } catch (_) { return "paper"; }
+      }
+      function invalidateRequests() {
+        state.viewGeneration += 1;
+        state.requestGeneration += 1;
+      }
+      function saveView(view) {
+        try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* A private browsing context may deny storage. */ }
+      }
       function saveToken(value) {
         state.token = value.trim();
+        invalidateRequests();
+        state.noTokenStatus = state.token ? "Enter an API token to begin." : "Token forgotten. Enter it to begin.";
         try {
           if (state.token) localStorage.setItem(TOKEN_KEY, state.token);
           else localStorage.removeItem(TOKEN_KEY);
@@ -419,9 +825,20 @@
         $("status").textContent = message;
         $("status").classList.toggle("error", error);
       }
-      async function getJSON(path) {
+      function currentAdviceStatus() {
+        if (!state.token) return state.noTokenStatus;
+        if (!state.adviceHousesLoaded) return "Loading advice houses…";
+        return state.adviceHouses.length ? "Advice ready — choose options and request advice." : "No houses found.";
+      }
+      async function getJSON(path, includeDetail = false) {
         const response = await fetch(path, { headers: { Authorization: `Bearer ${state.token}` } });
-        if (!response.ok) throw new Error(response.status === 401 ? "The API token was rejected." : `Request failed (${response.status}).`);
+        if (!response.ok) {
+          let body = null;
+          try { body = await response.json(); } catch (_) { /* Some proxies return an empty error body. */ }
+          if (response.status === 401) throw new Error("The API token was rejected.");
+          if (includeDetail && (response.status === 400 || response.status === 404) && body && typeof body.detail !== "undefined") throw new Error(String(body.detail));
+          throw new Error(`Request failed (${response.status}).`);
+        }
         return response.json();
       }
       function renderRunOptions() {
@@ -555,6 +972,81 @@
           container.append(item);
         }
       }
+      function adviceText(tag, value, className = "") {
+        const element = document.createElement(tag);
+        if (className) element.className = className;
+        element.textContent = value;
+        return element;
+      }
+      function adviceTableCell(value, className = "") {
+        return adviceText("td", value, className);
+      }
+      function renderAdviceModel(model) {
+        const meta = $("advice-meta");
+        meta.replaceChildren();
+        for (const value of [model.meta.house, model.meta.build, model.meta.sweep, model.meta.asOf, model.meta.age]) meta.append(adviceText("span", value));
+        if (model.meta.stale) meta.append(adviceText("span", model.meta.staleText, "stale-warning"));
+
+        const sections = $("advice-results");
+        sections.replaceChildren();
+        for (const section of model.sections) {
+          const panel = adviceText("section", "", "panel");
+          const heading = adviceText("h2", section.title);
+          panel.append(heading);
+          const tableWrap = adviceText("div", "", "table-wrap");
+          const table = adviceText("table", "", "advice-table");
+          const header = adviceText("tr", "");
+          for (const value of ["pathway", "strategy", section.columns[0], section.columns[1], "listed", section.columns[2], section.columns[3], "capital", "confidence"]) header.append(adviceText("th", value));
+          const thead = adviceText("thead", "");
+          thead.append(header);
+          table.append(thead);
+          const body = adviceText("tbody", "");
+          for (const row of section.rows) {
+            const tableRow = adviceText("tr", "");
+            const pathwayCell = adviceText("td", "", "advice-pathway");
+            const details = document.createElement("details");
+            const summary = adviceText("summary", row.title);
+            details.append(summary);
+            for (const [index, step] of row.steps.entries()) details.append(adviceText("p", `${index + 1}. ${step}`, "advice-details"));
+            for (const detail of row.details) details.append(adviceText("p", `${detail.key}: ${detail.value}`, "advice-details"));
+            pathwayCell.append(details);
+            tableRow.append(pathwayCell);
+            tableRow.append(adviceTableCell(row.strategy));
+            tableRow.append(adviceTableCell(row.profit));
+            tableRow.append(adviceTableCell(row.volume));
+            tableRow.append(adviceTableCell(row.listed));
+            tableRow.append(adviceTableCell(row.evidence));
+            tableRow.append(adviceTableCell(row.last));
+            tableRow.append(adviceTableCell(row.capital));
+            const confidenceKind = row.confidence === "high" ? "good" : row.confidence === "low" ? "bad" : "neutral";
+            const confidence = adviceText("span", row.confidence, `badge ${confidenceKind}`);
+            const confidenceCell = document.createElement("td");
+            confidenceCell.append(confidence);
+            tableRow.append(confidenceCell);
+            body.append(tableRow);
+          }
+          table.append(body);
+          tableWrap.append(table);
+          panel.append(tableWrap);
+          sections.append(panel);
+        }
+
+        const summaries = $("advice-strategy-summary");
+        summaries.replaceChildren();
+        for (const strategy of model.strategies) {
+          const panel = adviceText("article", "", "advice-strategy");
+          panel.append(adviceText("h3", strategy.name));
+          panel.append(adviceText("p", strategy.counts));
+          if (strategy.reasons.length) {
+            panel.append(adviceText("p", "Top exclusion reasons:"));
+            const list = document.createElement("ul");
+            for (const reason of strategy.reasons) list.append(adviceText("li", reason));
+            panel.append(list);
+          }
+          for (const note of strategy.notes) panel.append(adviceText("p", `Note: ${note}`));
+          summaries.append(panel);
+        }
+      }
       function renderDetail(detail) {
         validateRunDetail(detail);
         renderMeta(detail);
@@ -575,45 +1067,212 @@
           return false;
         }
       }
-      async function refresh() {
+      function renderAdviceHouses(houses) {
+        const select = $("advice-house");
+        const selected = select.value;
+        select.replaceChildren();
+        for (const house of houses) {
+          const option = document.createElement("option");
+          option.value = house.key;
+          option.textContent = house.key;
+          select.append(option);
+        }
+        if (!houses.length) {
+          const option = document.createElement("option");
+          option.value = "";
+          option.textContent = "No houses";
+          select.append(option);
+        }
+        select.value = houses.some((house) => house.key === selected) ? selected : (houses[0]?.key || "");
+      }
+      async function loadAdviceHouses() {
+        if (!state.token || state.adviceHousesLoaded) return;
+        if (state.adviceHousesPromise) return state.adviceHousesPromise;
+        const viewGeneration = state.viewGeneration;
+        const isCurrent = () => state.view === "advice" && state.viewGeneration === viewGeneration;
+        state.adviceHousesPromise = (async () => {
+          try {
+            const houses = validateAdviceHouses(await getJSON("/v1/houses", true));
+            if (!isCurrent()) return;
+            state.adviceHouses = houses;
+            state.adviceHousesLoaded = true;
+            renderAdviceHouses(state.adviceHouses);
+            if (!state.adviceInFlight) {
+              setStatus(currentAdviceStatus(), !state.adviceHouses.length);
+            }
+          } catch (error) {
+            if (isCurrent() && !state.adviceInFlight) setStatus(error.message, true);
+          } finally {
+            state.adviceHousesPromise = null;
+            if (state.token && state.view === "advice" && state.viewGeneration !== viewGeneration && !state.adviceHousesLoaded) void loadAdviceHouses();
+          }
+        })();
+        return state.adviceHousesPromise;
+      }
+      function adviceChecked(name) {
+        return [...document.querySelectorAll(`input[name="${name}"]:checked`)].map((input) => input.value);
+      }
+      function readAdviceOptions() {
+        return {
+          house: $("advice-house").value,
+          character: $("advice-character").value,
+          professions: adviceChecked("profession"),
+          strategies: adviceChecked("strategy"),
+          minProfitGold: $("advice-profit-gold").value,
+          minProfitSilver: $("advice-profit-silver").value,
+          minProfitCopper: $("advice-profit-copper").value,
+          minVolume: $("advice-min-volume").value,
+          share: $("advice-share").value,
+          horizonHours: $("advice-horizon").value,
+          priceBasis: $("advice-price-basis").value,
+          limit: $("advice-limit").value,
+        };
+      }
+      function requestIsCurrent(view, viewGeneration, requestGeneration) {
+        return state.view === view && state.viewGeneration === viewGeneration && state.requestGeneration === requestGeneration;
+      }
+      async function refreshAdvice(options = state.adviceOptions) {
+        if (state.view !== "advice") return;
         if (!state.token) {
-          $("dashboard-content").hidden = true;
-          setStatus("Enter an API token to begin.");
+          setStatus(currentAdviceStatus());
           return;
         }
+        if (state.adviceInFlight) {
+          setStatus("Advice is already computing…");
+          return;
+        }
+        if (!options || !options.house) {
+          setStatus("Choose a house and request advice.");
+          return;
+        }
+        state.adviceOptions = options;
+        state.adviceInFlight = true;
+        const viewGeneration = state.viewGeneration;
+        const requestGeneration = ++state.requestGeneration;
+        state.adviceRequestGeneration = requestGeneration;
+        const isCurrent = () => requestIsCurrent("advice", viewGeneration, requestGeneration);
+        setStatus("Computing advice…");
+        try {
+          const payload = await getJSON(`/v1/houses/${encodeURIComponent(options.house)}/advice${buildAdviceQuery(options)}`, true);
+          if (!isCurrent()) return;
+          const model = buildAdviceModel(payload);
+          if (!isCurrent()) return;
+          renderAdviceModel(model);
+          setStatus(`Advice updated ${new Date().toISOString().replace("T", " ").replace(".000Z", " UTC")}`);
+        } catch (error) {
+          if (isCurrent()) setStatus(error.message, true);
+        } finally {
+          const ownsRequest = state.adviceRequestGeneration === requestGeneration;
+          if (ownsRequest) state.adviceInFlight = false;
+          if (!isCurrent() && state.view === "advice" && !state.adviceInFlight) {
+            setStatus(currentAdviceStatus());
+          }
+        }
+      }
+      function stopRefreshTimer() {
+        if (refreshTimer !== null) {
+          window.clearInterval(refreshTimer);
+          refreshTimer = null;
+        }
+      }
+      function scheduleRefresh() {
+        stopRefreshTimer();
+        if (state.view === "paper") {
+          refreshTimer = window.setInterval(() => { if (state.view === "paper") refresh(); }, 60 * 1000);
+        } else if ($("advice-auto").checked) {
+          refreshTimer = window.setInterval(() => {
+            if (state.view === "advice" && $("advice-auto").checked) refreshAdvice();
+          }, 15 * 60 * 1000);
+        }
+      }
+      function switchView(view, refreshNow = true) {
+        if (view !== "paper" && view !== "advice") throw new Error(`unknown dashboard view ${view}`);
+        if (view !== state.view) state.viewGeneration += 1;
+        state.view = view;
+        saveView(view);
+        $("paper-view").hidden = view !== "paper";
+        $("advice-view").hidden = view !== "advice";
+        $("paper-controls").hidden = view !== "paper";
+        $("paper-view-button").setAttribute("aria-pressed", String(view === "paper"));
+        $("advice-view-button").setAttribute("aria-pressed", String(view === "advice"));
+        scheduleRefresh();
+        if (view === "advice") {
+          if (!state.adviceInFlight) setStatus(currentAdviceStatus());
+          void loadAdviceHouses();
+        }
+        if (refreshNow && view === "paper") void refresh();
+      }
+      async function refresh() {
+        if (state.view !== "paper") return;
+        if (!state.token) {
+          $("dashboard-content").hidden = true;
+          setStatus(state.noTokenStatus);
+          return;
+        }
+        const viewGeneration = state.viewGeneration;
+        const requestGeneration = ++state.requestGeneration;
+        const isCurrent = () => requestIsCurrent("paper", viewGeneration, requestGeneration);
         setStatus("Refreshing…");
         try {
-          state.runs = validateRunList(await getJSON("/v1/paper/runs"));
+          const runs = validateRunList(await getJSON("/v1/paper/runs"));
+          if (!isCurrent()) return;
+          state.runs = runs;
           renderRunOptions();
           if (!state.selected) {
             $("dashboard-content").hidden = true;
             setStatus("No paper runs found.");
             return;
           }
-          state.detail = await getJSON(`/v1/paper/runs/${encodeURIComponent(state.selected)}`);
+          const detail = await getJSON(`/v1/paper/runs/${encodeURIComponent(state.selected)}`);
+          if (!isCurrent()) return;
+          state.detail = detail;
           if (!renderDashboardDetail(state.detail)) return;
           setStatus(`Updated ${new Date().toISOString().replace("T", " ").replace(".000Z", " UTC")}`);
         } catch (error) {
-          $("dashboard-content").hidden = true;
-          setStatus(error.message, true);
+          if (isCurrent()) {
+            $("dashboard-content").hidden = true;
+            setStatus(error.message, true);
+          }
         }
       }
       $("token-form").addEventListener("submit", (event) => {
         event.preventDefault();
         saveToken($("token").value);
-        refresh();
+        state.adviceHousesLoaded = false;
+        state.adviceHouses = [];
+        renderAdviceHouses([]);
+        if (state.view === "advice") void loadAdviceHouses();
+        else void refresh();
       });
       $("forget-token").addEventListener("click", () => {
         saveToken("");
+        state.adviceInFlight = false;
         state.runs = [];
         state.selected = "";
+        state.adviceOptions = null;
+        state.adviceHousesLoaded = false;
+        state.adviceHouses = [];
         renderRunOptions();
+        renderAdviceHouses([]);
+        $("advice-results").replaceChildren();
+        $("advice-strategy-summary").replaceChildren();
         $("dashboard-content").hidden = true;
         setStatus("Token forgotten. Enter it to begin.");
         $("token").focus();
       });
-      $("run-select").addEventListener("change", () => { state.selected = $("run-select").value; refresh(); });
-      window.__crowleyDashboardTest = { renderDetail, renderDashboardDetail, validateRunDetail };
+      $("run-select").addEventListener("change", () => { state.selected = $("run-select").value; void refresh(); });
+      $("paper-view-button").addEventListener("click", () => switchView("paper"));
+      $("advice-view-button").addEventListener("click", () => switchView("advice"));
+      $("advice-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        try { void refreshAdvice(readAdviceOptions()); } catch (error) { setStatus(error.message, true); }
+      });
+      $("advice-auto").addEventListener("change", scheduleRefresh);
+      window.__crowleyDashboardTest = {
+        renderDetail, renderDashboardDetail, validateRunDetail, buildAdviceQuery, goldToCopper,
+        formatAdviceCopper, validateAdvicePayload, buildAdviceModel, describeAdviceStep, switchView,
+        scheduleRefresh, state,
+      };
       state.token = storedToken();
       $("token").value = state.token;
       if (!state.token) {
@@ -621,8 +1280,9 @@
         if (entered) saveToken(entered);
       }
       renderRunOptions();
-      refresh();
-      window.setInterval(refresh, 60 * 1000);
+      switchView(storedView(), false);
+      if (state.view === "paper") void refresh();
+      else void loadAdviceHouses();
     })();
   </script>
 </body>

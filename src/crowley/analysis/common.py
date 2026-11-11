@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from fractions import Fraction
+from statistics import median
 from typing import Any
 
 from .books import Book
@@ -38,4 +40,16 @@ def jsonable(value: Any) -> Any:
     return value
 
 
-__all__ = ["REFERENCE_UNITS", "jsonable", "reference"]
+def median_pairwise_slope(points: Sequence[tuple[float, float]]) -> float | None:
+    """Return the median slope between every pair of points with distinct x values."""
+
+    slopes = [
+        (right_y - left_y) / (right_x - left_x)
+        for left_index, (left_x, left_y) in enumerate(points)
+        for right_x, right_y in points[left_index + 1 :]
+        if (right_x - left_x) != 0
+    ]
+    return None if not slopes else float(median(slopes))
+
+
+__all__ = ["REFERENCE_UNITS", "jsonable", "median_pairwise_slope", "reference"]

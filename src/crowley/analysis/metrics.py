@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 from fractions import Fraction
 from statistics import median, stdev
 from typing import Any
@@ -26,7 +27,7 @@ from .books import (
     load_commodity_books,
     valid_intervals,
 )
-from .common import jsonable, reference
+from .common import jsonable, median_pairwise_slope, reference
 from .time_to_sale import kaplan_meier
 
 FAIR_WINDOW_SECONDS = 86400
@@ -46,6 +47,15 @@ PARAMETERS = {
 }
 
 
+@dataclass(frozen=True)
+class TrailingDemand:
+    """Bottom-walk demand and its exact coverage for a sequence of intervals."""
+
+    units_per_hour: Fraction | None
+    usable_intervals: int
+    covered_seconds: float
+
+
 def _items(books: dict[Any, Sequence[Book]] | Sequence[Book]) -> dict[Any, list[Book]]:
     if isinstance(books, dict):
         return {item_id: list(item_books) for item_id, item_books in books.items()}
@@ -58,9 +68,16 @@ def _time_fraction(seconds: float) -> Fraction:
 
 
 def _rate(total: int | Fraction, covered_seconds: float) -> Fraction | None:
+    hourly = units_per_hour(total, covered_seconds)
+    return None if hourly is None else hourly * 24
+
+
+def units_per_hour(total: int | Fraction, covered_seconds: float) -> Fraction | None:
+    """Return an exact hourly rate, or ``None`` when no time was covered."""
+
     if covered_seconds <= 0:
         return None
-    return Fraction(total) * 86400 / _time_fraction(covered_seconds)
+    return Fraction(total) * 3600 / _time_fraction(covered_seconds)
 
 
 def _multiplier_key(multiplier: Fraction) -> str:
@@ -124,13 +141,9 @@ def _fair_at(
 
     trend = None
     if include_trend:
-        slopes: list[float] = []
-        for left_index, (left_t, left_ref) in enumerate(observations):
-            for right_t, right_ref in observations[left_index + 1 :]:
-                dt_days = (right_t - left_t) / 86400
-                if dt_days != 0:
-                    slopes.append((math.log(float(right_ref)) - math.log(float(left_ref))) / dt_days)
-        trend = float(median(slopes)) if slopes else None
+        trend = median_pairwise_slope(
+            [(observation_t / 86400, math.log(float(value))) for observation_t, value in observations]
+        )
     p25 = percentile(refs, Fraction(1, 4))
     p75 = percentile(refs, Fraction(3, 4))
     return {
@@ -257,6 +270,20 @@ def demand_metrics(
         "non_bottom_copper_per_day": _rate(non_bottom_copper, covered_seconds),
         "non_bottom_copper_per_day_covered_seconds": covered_seconds,
     }
+
+
+def trailing_demand(intervals: Sequence[Interval | None]) -> TrailingDemand:
+    """Aggregate bottom-walk units over the valid intervals, exactly as the advisor does."""
+
+    valid = [interval for interval in intervals if interval is not None]
+    covered_seconds = sum((interval.dt for interval in valid), 0.0)
+    units = sum(quantity for interval in valid for _, quantity in interval.walk.consumed)
+    per_hour = units_per_hour(units, covered_seconds)
+    return TrailingDemand(
+        per_hour,
+        len(valid),
+        covered_seconds,
+    )
 
 
 def _cheapest_groups(book: Book, ceiling: Fraction | None = None) -> list[Group]:
@@ -661,4 +688,7 @@ __all__ = [
     "fair_value",
     "opportunity_metrics",
     "risk_metrics",
+    "TrailingDemand",
+    "trailing_demand",
+    "units_per_hour",
 ]

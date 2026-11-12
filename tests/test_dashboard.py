@@ -176,7 +176,8 @@ global.document = {{
   createElementNS: () => new FakeNode(),
   querySelectorAll: (selector) => {{ const name = selector.match(/name="([^"]+)"/)?.[1]; return (checkedInputs[name] || []).map((value) => ({{ value }})); }},
 }};
-global.localStorage = {{ getItem: () => null, setItem: () => {{}}, removeItem: () => {{}} }};
+const storage = new Map();
+global.localStorage = {{ getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: (key) => storage.delete(key) }};
 const intervals = [];
 global.window = {{ prompt: () => "", setInterval: (fn, ms) => {{ const id = intervals.length + 1; intervals.push({{ id, fn, ms, active: true }}); return id; }}, clearInterval: (id) => {{ const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; }} }};
 global.fetch = () => {{ throw new Error("fetch should not run in this rendering test"); }};
@@ -339,6 +340,13 @@ def test_advice_model_renders_forecast_summary_and_per_item_notes():
         "median_demand_skill": None,
     }
     payload["sections"]["ranked"][0]["details"]["sale_price"] = {"1001": 12345}
+    payload["sections"]["ranked"][0]["details"].update(
+        {
+            "cooldown_seconds": 3600,
+            "cooldown_group": "Transmute - Alchemy",
+            "cooldown_limited": True,
+        }
+    )
     payload["sections"]["ranked"][0]["details"]["forecast"] = {
         "1001": {
             "price_model": "last",
@@ -362,6 +370,9 @@ def test_advice_model_renders_forecast_summary_and_per_item_notes():
         "Copper Widget (1001): sale 1g 23s 45c; price last (baseline, n=12); demand trailing (baseline, n=12)"
     ]
     assert all(item["key"] not in ("sale_price", "forecast") for item in actual["details"])
+    assert {"key": "cooldown", "value": "1 h; group Transmute - Alchemy; limits crafts/h"} in actual[
+        "details"
+    ]
 
 
 def test_advice_query_and_money_validation():
@@ -398,6 +409,53 @@ def test_advice_query_and_money_validation():
     assert actual["money"] == "-1g 23s 46c"
     assert len(actual["errors"]) == 4
     assert any("sections" in error for error in actual["errors"])
+
+
+def test_advice_house_defaults_remember_and_persist_selection():
+    script = _fake_dom_script(_detail()).split("\nconst detail = ", 1)[0]
+    script = script.replace(
+        'global.window = { prompt: () => "", setInterval: (fn, ms) => { const id = intervals.length + 1; intervals.push({ id, fn, ms, active: true }); return id; }, clearInterval: (id) => { const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; } };',
+        'global.window = { prompt: () => "", setInterval: (fn, ms) => { const id = intervals.length + 1; intervals.push({ id, fn, ms, active: true }); return id; }, clearInterval: (id) => { const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; } };\nfunction emit(value) { console.log(JSON.stringify(value)); }',
+    )
+    script += """
+const dashboard = window.__crowleyDashboardTest;
+const houseKey = "crowley.paperDashboard.adviceHouse";
+const houses = dashboard.validateAdviceHouses([
+  { key: "beta", last_scan_at: "2026-01-01T00:00:00+00:00" },
+  { key: "live", last_scan_at: "2026-02-01T00:00:00Z" },
+  { key: "empty", last_scan_at: null },
+]);
+const select = nodes.get("advice-house");
+dashboard.renderAdviceHouses(houses);
+const newest = select.value;
+storage.set(houseKey, "beta");
+select.value = "";
+dashboard.renderAdviceHouses(houses);
+const remembered = select.value;
+storage.set(houseKey, "missing");
+select.value = "";
+dashboard.renderAdviceHouses(houses);
+const missingFallsBack = select.value;
+select.value = "beta";
+select.listeners.change();
+const persisted = storage.get(houseKey);
+let invalidTimestamp = "";
+try { dashboard.validateAdviceHouses([{ key: "bad", last_scan_at: "2026-02-30T00:00:00Z" }]); }
+catch (error) { invalidTimestamp = error.message; }
+let missingTimestamp = "";
+try { dashboard.validateAdviceHouses([{ key: "bad" }]); }
+catch (error) { missingTimestamp = error.message; }
+emit({ newest, remembered, missingFallsBack, persisted, invalidTimestamp, missingTimestamp });
+"""
+    actual = _node(script)
+    assert actual == {
+        "newest": "live",
+        "remembered": "beta",
+        "missingFallsBack": "live",
+        "persisted": "beta",
+        "invalidTimestamp": "houses[0].last_scan_at is invalid",
+        "missingTimestamp": "houses[0].last_scan_at is invalid",
+    }
 
 
 def test_view_switch_scheduler_polls_live_advice_only_while_visible():

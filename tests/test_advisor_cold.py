@@ -21,8 +21,8 @@ from tests.test_analysis_candidates import (
 CONFIG = AdviceConfig(professions=frozenset({"alchemy"}), batch_crafts=2, strategies=frozenset({"crafting"}))
 
 
-def cold_state(books, **kwargs):
-    return replace(state_of(cold_inputs(books, [SELLER], **kwargs)), cold_pool=POOL)
+def cold_state(books, recipes=(SELLER,), **kwargs):
+    return replace(state_of(cold_inputs(books, recipes, **kwargs)), cold_pool=POOL)
 
 
 def test_cold_pool_recipe_is_an_unmeasured_low_confidence_pathway():
@@ -55,6 +55,19 @@ def test_cold_pool_recipe_is_an_unmeasured_low_confidence_pathway():
     )
     assert [e.reason for e in plain.exclusions] == ["rank:output_no_current_book"]
     assert plain.considered == 1
+
+
+def test_cold_pool_crafting_cooldown_caps_market_rate():
+    recipe = replace(SELLER, cooldown_group="Transmute - Alchemy", cooldown_seconds=3600)
+    state = cold_state([cold_book(k) for k in range(12)], recipes=[recipe])
+    config = replace(CONFIG, share=Fraction(1))
+    result = by_strategy(advise(state, config), "crafting")
+    (pathway,) = result.pathways
+    assert pathway.details["crafts_per_hour"] == 1
+    assert pathway.details["cooldown_seconds"] == 3600
+    assert pathway.details["cooldown_group"] == "Transmute - Alchemy"
+    assert pathway.details["cooldown_limited"] is True
+    assert pathway.profit_per_hour == pathway.profit_per_craft
 
 
 def test_cold_observation_age_gate():

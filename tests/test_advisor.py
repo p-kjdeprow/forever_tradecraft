@@ -248,6 +248,37 @@ def test_crafting_headline_is_min_of_undercut_lowest_and_target_and_both_are_exp
     assert pathway.steps[0].price == 10 and pathway.steps[0].quantity == 4
 
 
+def test_ranked_crafting_cooldown_caps_profit_and_shared_timer_is_noted():
+    group = "Transmute - Alchemy"
+    recipes = [
+        replace(SELLER, spell_id=spell_id, cooldown_group=group, cooldown_seconds=3600) for spell_id in (1, 8)
+    ]
+    recipes[1] = replace(recipes[1], outputs=((1001, 2),))
+    state = state_of(make_inputs(recipes))
+    advice, _ = run(state, strategies=frozenset({"crafting"}))
+    result = by_strategy(advice, "crafting")
+    assert len(result.pathways) == 2
+    assert result.notes == (
+        "2 pathways share cooldown group Transmute - Alchemy; one character can run only one of them per cooldown",
+    )
+    for pathway in result.pathways:
+        assert pathway.profit_per_craft is not None and pathway.sale_probability is not None
+        assert pathway.details["crafts_per_hour"] == 1
+        assert pathway.details["cooldown_seconds"] == 3600
+        assert pathway.details["cooldown_group"] == group
+        assert pathway.details["cooldown_limited"] is True
+        assert pathway.profit_per_hour == pathway.profit_per_craft * pathway.details[
+            "crafts_per_hour"
+        ] * Fraction(pathway.sale_probability)
+    low_profit = min(pathway.threshold_profit for pathway in result.pathways)
+    filtered = apply_filters(
+        result,
+        AdviceConfig(professions=frozenset({"alchemy"}), min_profit=int(low_profit) + 1),
+    )
+    assert len(filtered.pathways) == 1
+    assert not filtered.notes
+
+
 def test_headline_can_never_be_above_the_measured_price():
     # the lowest listing is far above the target: the headline is the target, not lowest - 1
     inputs = make_inputs([SELLER])

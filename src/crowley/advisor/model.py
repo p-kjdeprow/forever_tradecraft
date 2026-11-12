@@ -8,7 +8,8 @@ Sections (a pathway is ranked only against pathways whose value means the same t
 
 * ``ranked``: a recurring flow with a measured P(sale).  ``sort_value`` is expected profit per
   hour, ``margin x crafts/h x P(sale)`` (a pathway that sells with probability P earns P of its
-  margin per attempt).  Crafting and recipe purchases.
+  margin per attempt). Crafting crafts/h is capped by recipe cooldown; recipes in one cooldown
+  group share a timer. Crafting and recipe purchases.
 * ``unmeasured``: a recurring flow whose P(sale) cannot be measured (cold-tier crafts, vendor to
   AH).  ``sort_value`` is the same formula taken at P = 1, so it is an upper bound.
 * ``one_off``: an opportunity listed right now (flips, vendor-sell arbitrage).  ``sort_value`` is

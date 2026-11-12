@@ -123,6 +123,9 @@ sweep. Pathways sit in sections whose values mean different things and are never
 `ranked` (crafting and recipe purchases, profit/h = margin x crafts/h x P(sale)), `unmeasured`
 (cold-tier crafts and vendor to AH, profit/h at P = 1, an upper bound), `one_off` (flips and
 vendor-sell arbitrage, expected profit once) and `farming` (market value/h, a capacity and not income).
+For rank and crafting advice, crafts/h is capped at `min(share × market units/h ÷ output qty,
+3600 ÷ cooldown seconds)` when the recipe has a cooldown. Recipes in one cooldown group share one
+timer per character, so their pathways are alternatives and their rates are not additive.
 
 - **recipe_purchase** profit/h is the income the recipe unlocks and excludes the recipe's cost;
   the cost is in `capital`, and `payback_crafts` / `payback_hours` say how long it takes to earn back.

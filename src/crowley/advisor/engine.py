@@ -17,6 +17,26 @@ from crowley.advisor.model import (
 )
 from crowley.advisor.state import MarketState
 
+_SHARED_COOLDOWN_NOTE_MARKER = " pathways share cooldown group "
+
+
+def _shared_cooldown_notes(pathways: tuple[Pathway, ...]) -> tuple[str, ...]:
+    counts: dict[str, int] = {}
+    for pathway in pathways:
+        group = pathway.details.get("cooldown_group")
+        if pathway.strategy == "crafting" and isinstance(group, str) and group:
+            counts[group] = counts.get(group, 0) + 1
+    return tuple(
+        f"{count}{_SHARED_COOLDOWN_NOTE_MARKER}{group}; one character can run only one of them per cooldown"
+        for group, count in sorted(counts.items())
+        if count >= 2
+    )
+
+
+def _is_shared_cooldown_note(note: str) -> bool:
+    prefix, marker, _ = note.partition(_SHARED_COOLDOWN_NOTE_MARKER)
+    return bool(marker) and prefix.isdecimal()
+
 
 def apply_filters(result: StrategyResult, config: AdviceConfig) -> StrategyResult:
     """Move pathways under ``--min-profit`` / ``--min-volume`` into the exclusions, so they stay counted."""
@@ -32,7 +52,11 @@ def apply_filters(result: StrategyResult, config: AdviceConfig) -> StrategyResul
             excluded.append(Exclusion(result.strategy, pathway.key, "below_min_volume", detail))
         else:
             kept.append(pathway)
-    return StrategyResult(result.strategy, tuple(kept), tuple(excluded), result.considered, result.notes)
+    notes = result.notes
+    if result.strategy == "crafting":
+        notes = tuple(note for note in notes if not _is_shared_cooldown_note(note))
+        notes += _shared_cooldown_notes(tuple(kept))
+    return StrategyResult(result.strategy, tuple(kept), tuple(excluded), result.considered, notes)
 
 
 def order(pathways: tuple[Pathway, ...]) -> tuple[Pathway, ...]:

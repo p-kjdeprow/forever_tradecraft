@@ -31,7 +31,8 @@ Estimators, all stated here so the table can be read honestly:
   consumed from the cheap end of the book, so it understates demand.
 * Expected profit per hour: ``margin_per_craft * crafts_per_hour`` where
   ``crafts_per_hour = min over outputs (share * market_units_per_hour / output_qty)``;
-  ``share`` is the capture share of the observed market flow.
+  ``share`` is the capture share of the observed market flow, capped by the recipe cooldown.
+  Recipes with the same cooldown group share one timer.
 * Capital per batch: reagent cost for the batch plus the batch listing deposits.
 * Recipe price (recipes not known by the character): the cheapest item-kind listing of any
   teaching item in the latest sweep; payback in crafts is ``price / margin_per_craft``.
@@ -228,6 +229,9 @@ class TradeRow:
     target_above_lowest: bool  # a target above the current lowest listing: expect a wait
     market_units_per_hour: Fraction  # limiting output
     crafts_per_hour: Fraction
+    cooldown_seconds: int
+    cooldown_group: str | None
+    cooldown_limited: bool
     profit_per_hour: Fraction
     capital_per_batch: Fraction
     status: str | None = None
@@ -245,6 +249,17 @@ class SaleEstimate:
     usable_starts: int
     independent_starts: int
     sold_starts: int
+
+
+def crafting_capacity(market_rate: Fraction, recipe: Recipe) -> tuple[Fraction, bool]:
+    """Return market crafts/h capped by this recipe's cooldown, and whether cooldown binds."""
+
+    if recipe.cooldown_seconds <= 0:
+        return market_rate, False
+    cooldown_rate = Fraction(SECONDS_PER_HOUR, recipe.cooldown_seconds)
+    if cooldown_rate <= market_rate:
+        return cooldown_rate, True
+    return market_rate, False
 
 
 @dataclass(frozen=True)
@@ -741,6 +756,7 @@ class RankEvaluator:
             if crafts_per_hour is None or rate < crafts_per_hour:
                 crafts_per_hour, limiting_units = rate, units_per_hour
         assert crafts_per_hour is not None
+        crafts_per_hour, cooldown_limited = crafting_capacity(crafts_per_hour, recipe)
 
         margin = (revenue - reagent_cost) / batch
         kinds = {self._kinds[item_id] for item_id in snapshots}
@@ -761,6 +777,9 @@ class RankEvaluator:
             target_above_lowest=above_lowest,
             market_units_per_hour=limiting_units,
             crafts_per_hour=crafts_per_hour,
+            cooldown_seconds=recipe.cooldown_seconds,
+            cooldown_group=recipe.cooldown_group,
+            cooldown_limited=cooldown_limited,
             profit_per_hour=margin * crafts_per_hour,
             capital_per_batch=reagent_cost + deposits,
             kind=kind,
@@ -1117,7 +1136,8 @@ def format_table(
     header = (
         f"{'spell':>7} {'kind':<4} {'output (item id)':<38} {'cost':>9} {'margin':>9} {'P(sale)':>7} "
         f"{'sold/ind':>8} "
-        f"{'units/h':>8} {'profit/h':>10} {'capital':>10} {'status':<20} {'recipe':>10} {'payback':>8}"
+        f"{'units/h':>8} {'profit/h':>10} {'capital':>10} {'cooldown':<42} {'status':<20} "
+        f"{'recipe':>10} {'payback':>8}"
     )
     lines = [header]
     for row in shown:
@@ -1126,12 +1146,24 @@ def format_table(
         recipe = row.recipe_price_state or "-"
         if row.recipe_price is not None:
             recipe = gold(row.recipe_price)
+        cooldown = "-"
+        if row.cooldown_seconds > 0:
+            if row.cooldown_seconds % SECONDS_PER_HOUR == 0:
+                duration = f"{row.cooldown_seconds // SECONDS_PER_HOUR} h"
+            elif row.cooldown_seconds % 60 == 0:
+                duration = f"{row.cooldown_seconds // 60} m"
+            else:
+                duration = f"{row.cooldown_seconds} s"
+            group = f" group {row.cooldown_group}" if row.cooldown_group is not None else ""
+            binding = "; limits crafts/h" if row.cooldown_limited else ""
+            cooldown = f"{duration}{group}{binding}"
         lines.append(
             f"{row.spell_id:>7} {row.kind[:4]:<4} {label[:38]:<38} {gold(row.reagent_cost_per_craft):>9} "
             f"{gold(row.margin_per_craft):>9} {row.sale_probability:>7.2f} "
             f"{f'{row.sold_starts}/{row.independent_starts}':>8}{'*' if row.target_above_lowest else ' '}"
             f"{float(row.market_units_per_hour):>8.2f} {gold(row.profit_per_hour):>10} "
-            f"{gold(row.capital_per_batch):>10} {(row.status or '-'):<20} {recipe:>10} {payback:>8}"
+            f"{gold(row.capital_per_batch):>10} {cooldown:<42} {(row.status or '-'):<20} "
+            f"{recipe:>10} {payback:>8}"
         )
     counts = evaluation.exclusion_counts()
     lines.append(

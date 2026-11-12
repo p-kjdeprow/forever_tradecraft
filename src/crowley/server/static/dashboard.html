@@ -756,6 +756,14 @@
       payload.forEach((house, index) => {
         const value = adviceObject(house, `houses[${index}]`);
         if (typeof value.key !== "string" || !value.key) throw new Error(`houses[${index}].key is invalid`);
+        const timestamp = value.last_scan_at;
+        if (timestamp !== null) {
+          const iso = /^\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])T(?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/;
+          const date = typeof timestamp === "string" ? new Date(`${timestamp.slice(0, 10)}T00:00:00.000Z`) : null;
+          if (typeof timestamp !== "string" || !iso.test(timestamp) || !Number.isFinite(Date.parse(timestamp)) || date === null || date.toISOString().slice(0, 10) !== timestamp.slice(0, 10)) {
+            throw new Error(`houses[${index}].last_scan_at is invalid`);
+          }
+        }
       });
       return payload;
     }
@@ -802,6 +810,16 @@
       const rendered = JSON.stringify(value);
       if (rendered === undefined) throw new Error("advice detail is not JSON-compatible");
       return rendered;
+    }
+    function formatAdviceCooldown(seconds, group, limited) {
+      const hours = Math.floor(seconds / 3600);
+      const minutes = Math.floor(seconds % 3600 / 60);
+      const remainder = seconds % 60;
+      const duration = [hours ? `${hours} h` : "", minutes ? `${minutes} m` : "", remainder ? `${remainder} s` : ""]
+        .filter(Boolean).join(" ") || "0 s";
+      const groupText = group === null ? "" : `; group ${group}`;
+      const limitedText = limited ? "; limits crafts/h" : "";
+      return `${duration}${groupText}${limitedText}`;
     }
     function formatAdviceNumber(value) {
       return String(Number(value.toFixed(2)));
@@ -863,9 +881,15 @@
             confidence: pathway.confidence,
             steps: pathway.steps.map((step) => describeAdviceStep(step, value.names)),
             details: Object.entries(pathway.details)
-              .filter(([key]) => key !== "sale_price" && key !== "forecast")
+              .filter(([key]) => !["sale_price", "forecast", "cooldown_seconds", "cooldown_group", "cooldown_limited"].includes(key))
               .map(([key, detail]) => ({ key, value: formatAdviceDetail(detail) })),
           };
+          if (pathway.details.cooldown_seconds > 0) {
+            row.details.push({
+              key: "cooldown",
+              value: formatAdviceCooldown(pathway.details.cooldown_seconds, pathway.details.cooldown_group, pathway.details.cooldown_limited),
+            });
+          }
           if (Object.prototype.hasOwnProperty.call(pathway.details, "forecast")) {
             const notes = pathway.details.forecast;
             row.forecastNotes = Object.entries(notes).map(([item, note]) => {
@@ -901,6 +925,7 @@
       const TOKEN_KEY = "crowley.paperDashboard.apiToken";
       const VIEW_KEY = "crowley.paperDashboard.view";
       const LIVE_KEY = "crowley.paperDashboard.live";
+      const ADVICE_HOUSE_KEY = "crowley.paperDashboard.adviceHouse";
       const state = { token: "", noTokenStatus: "Enter an API token to begin.", runs: [], detail: null, selected: "", view: "paper", viewGeneration: 0, requestGeneration: 0, pollGeneration: 0, adviceRequestGeneration: null, adviceOptions: null, adviceInFlight: false, pollInFlight: false, adviceRenderedHouse: null, adviceRenderedSweepId: null, latestSweep: null, adviceHouses: [], adviceHousesLoaded: false, adviceHousesPromise: null };
       let refreshTimer = null;
       let advicePollTimer = null;
@@ -920,6 +945,9 @@
           const view = localStorage.getItem(VIEW_KEY);
           return view === "advice" || view === "paper" ? view : "paper";
         } catch (_) { return "paper"; }
+      }
+      function storedAdviceHouse() {
+        try { return localStorage.getItem(ADVICE_HOUSE_KEY) || ""; } catch (_) { return ""; }
       }
       function invalidateRequests() {
         state.viewGeneration += 1;
@@ -946,6 +974,9 @@
       }
       function saveLive(value) {
         try { localStorage.setItem(LIVE_KEY, String(value)); } catch (_) { /* A private browsing context may deny storage. */ }
+      }
+      function saveAdviceHouse(value) {
+        try { localStorage.setItem(ADVICE_HOUSE_KEY, value); } catch (_) { /* A private browsing context may deny storage. */ }
       }
       function saveToken(value) {
         state.token = value.trim();
@@ -1243,6 +1274,15 @@
       function renderAdviceHouses(houses) {
         const select = $("advice-house");
         const selected = select.value;
+        const remembered = storedAdviceHouse();
+        const currentHouse = houses.find((house) => house.key === selected);
+        const rememberedHouse = houses.find((house) => house.key === remembered);
+        const newestHouse = houses.reduce((newest, house) => {
+          if (newest === null) return house;
+          const scannedAt = house.last_scan_at === null ? -Infinity : Date.parse(house.last_scan_at);
+          const newestAt = newest.last_scan_at === null ? -Infinity : Date.parse(newest.last_scan_at);
+          return scannedAt > newestAt ? house : newest;
+        }, null);
         select.replaceChildren();
         for (const house of houses) {
           const option = document.createElement("option");
@@ -1256,7 +1296,7 @@
           option.textContent = "No houses";
           select.append(option);
         }
-        select.value = houses.some((house) => house.key === selected) ? selected : (houses[0]?.key || "");
+        select.value = (currentHouse || rememberedHouse || newestHouse)?.key || "";
         if (select.value !== selected) {
           state.pollGeneration += 1;
           state.requestGeneration += 1;
@@ -1405,6 +1445,7 @@
         }
       }
       function adviceHouseChanged() {
+        saveAdviceHouse($("advice-house").value);
         state.pollGeneration += 1;
         state.requestGeneration += 1;
         stopAdvicePollTimer();
@@ -1507,7 +1548,7 @@
         scheduleRefresh();
       });
       window.__crowleyDashboardTest = {
-        renderDetail, renderDashboardDetail, validateRunDetail, buildAdviceQuery, goldToCopper,
+        renderDetail, renderDashboardDetail, validateRunDetail, validateAdviceHouses, renderAdviceHouses, buildAdviceQuery, goldToCopper,
         formatAdviceCopper, validateAdvicePayload, buildAdviceModel, describeAdviceStep, switchView,
         validateLatestSweep, advicePollStep, freshnessModel, pollLatestSweep, refreshAdvice, scheduleRefresh, readAdviceOptions, state,
       };

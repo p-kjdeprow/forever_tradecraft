@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import UTC, datetime
 from fractions import Fraction
@@ -15,10 +16,12 @@ from crowley.analysis.rank import (
     build_parser,
     config_from_args,
     evaluate_trades,
+    format_table,
     horizon_observable,
     levels_snapshot,
     parse_as_of,
     rank_trades,
+    report_json,
     select_rows,
 )
 from crowley.analysis.time_to_sale import replay_listing, replay_many
@@ -145,6 +148,29 @@ def test_margin_probability_and_profit_per_hour_math():
     assert row.market_units_per_hour == 30
     assert row.crafts_per_hour == Fraction(30, 4)  # share 1/4 of 30 units/h, one unit per craft
     assert row.profit_per_hour == row.margin_per_craft * Fraction(30, 4)
+
+
+def test_recipe_cooldown_caps_crafts_per_hour_and_is_reported():
+    transmute = replace(SELLER, cooldown_group="Transmute - Alchemy", cooldown_seconds=3600)
+    evaluation = evaluate_trades(make_inputs([transmute]), CONFIG)
+    (row,) = evaluation.rows
+    assert row.market_units_per_hour == 30
+    assert row.crafts_per_hour == 1
+    assert row.cooldown_group == "Transmute - Alchemy"
+    assert row.cooldown_seconds == 3600 and row.cooldown_limited is True
+    assert row.profit_per_hour == row.margin_per_craft
+    assert "1 h group Transmute - Alchemy; limits crafts/h" in format_table(
+        (row,), evaluation, {1001: "Widget"}
+    )
+    payload = json.loads(report_json((row,), evaluation, {}, {}))
+    assert payload["rows"][0]["cooldown_seconds"] == 3600
+    assert payload["rows"][0]["cooldown_group"] == "Transmute - Alchemy"
+    assert payload["rows"][0]["cooldown_limited"] is True
+
+    low_demand = replace(SELLER, outputs=((1001, 1000),), cooldown_seconds=86400)
+    (low_row,) = evaluate_trades(make_inputs([low_demand]), CONFIG).rows
+    assert low_row.crafts_per_hour == Fraction(3, 400)
+    assert low_row.cooldown_limited is False
 
 
 def test_reagent_sourcing_and_target_match_the_crafting_functions():
@@ -389,12 +415,14 @@ def test_recipe_status_price_and_payback():
             TeachingRequirement(5002, ALCHEMY_LINE, 100),
         ),
     )
+    learnable = replace(learnable, cooldown_group="spell:6", cooldown_seconds=3600)
     account = _account(frozenset({1}))
     prices = {5001: 900, 5002: 700}
     evaluation = evaluate_trades(make_inputs([SELLER, learnable], account, prices), CONFIG)
     known, buyable = evaluation.rows
     assert known.status == "known" and known.recipe_price is None and known.recipe_price_state is None
     assert buyable.status == "learnable_now"
+    assert buyable.crafts_per_hour == 1 and buyable.cooldown_limited
     assert (buyable.recipe_price, buyable.recipe_item_id, buyable.recipe_price_state) == (700, 5002, "listed")
     assert buyable.payback_crafts == Fraction(700) / buyable.margin_per_craft
     assert buyable.payback_hours == buyable.payback_crafts / buyable.crafts_per_hour

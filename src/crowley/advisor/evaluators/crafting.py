@@ -10,7 +10,8 @@ lowest listing.  ``crafting_price="target"`` uses rank's target alone.  Current-
 and both undercut margins stay in the details.
 
 Expected profit per hour is ``margin x crafts/h x P(sale)``: a listing that sells with probability
-P within the horizon earns P of its margin per attempt.  A zero P is always excluded.
+P within the horizon earns P of its margin per attempt. Crafts/h is capped by recipe cooldown;
+recipes in a shared cooldown group use one timer per character. A zero P is always excluded.
 
 A cold-pool candidate (``analysis.candidates``) becomes a pathway only for a recipe that rank
 excluded (a cold item has no book in the latest sweep, or too few to replay) and that the
@@ -44,6 +45,7 @@ from crowley.analysis.rank import (
     RankEvaluator,
     TradeRow,
     batch_net_revenue,
+    crafting_capacity,
     evaluate_trades,
 )
 from crowley.trading.strategies.common import SECONDS_PER_HOUR
@@ -286,6 +288,9 @@ def row_pathway(ctx: Context, analysis: CraftingAnalysis, craft: CraftRow) -> Pa
         "target_above_lowest": row.target_above_lowest,
         "reagent_cost_per_craft": row.reagent_cost_per_craft,
         "crafts_per_hour": row.crafts_per_hour,
+        "cooldown_seconds": row.cooldown_seconds,
+        "cooldown_group": row.cooldown_group,
+        "cooldown_limited": row.cooldown_limited,
         "batch_crafts": ctx.config.batch_crafts,
         "listing_hours": ctx.config.listing_hours,
         "recipe_status": row.status or "unchecked (no character)",
@@ -363,7 +368,10 @@ def candidate_pathway(ctx: Context, analysis: CraftingAnalysis, candidate: Candi
     if limiting.depletion_intervals == 0 or hours == 0 or limiting.observed_bottom_depletion_any_gap == 0:
         return Rejected("no_observed_demand", "no depletion observed between the cold observations")
     units_per_hour = Fraction(limiting.observed_bottom_depletion_any_gap) / hours
-    crafts_per_hour = config.share * units_per_hour / limiting.quantity
+    market_rate = config.share * units_per_hour / limiting.quantity
+    recipes_by_spell = {recipe.spell_id: recipe for recipe in ctx.state.recipes}
+    recipe = recipes_by_spell[candidate.spell_id]
+    crafts_per_hour, cooldown_limited = crafting_capacity(market_rate, recipe)
     batch = config.batch_crafts
     evidence = Evidence(
         "demand_intervals",
@@ -418,6 +426,9 @@ def candidate_pathway(ctx: Context, analysis: CraftingAnalysis, candidate: Candi
             "observation_age_hours": age,
             "observations": min(stat.observations for stat in candidate.outputs),
             "crafts_per_hour": crafts_per_hour,
+            "cooldown_seconds": recipe.cooldown_seconds,
+            "cooldown_group": recipe.cooldown_group,
+            "cooldown_limited": cooldown_limited,
             "profit_per_hour_formula": "margin x crafts/h at P = 1 (P unmeasured, an upper bound)",
             "batch_crafts": batch,
             "listing_hours": config.listing_hours,

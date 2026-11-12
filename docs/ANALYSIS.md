@@ -173,8 +173,10 @@ uses the current lowest listing.
 ### Dashboard advice view
 
 `/dashboard` has an **Advice** view next to Paper runs. The form sends one
-`GET /v1/houses/{key}/advice` request with every option, including `estimates`, and an optional
-auto-refresh re-runs it every 15 minutes while the view is visible. The page shows four things:
+`GET /v1/houses/{key}/advice` request with every option, including `estimates`. Live mode is on by
+default: while Advice is open it polls `GET /v1/houses/{key}/sweeps/latest` every minute and loads
+advice when the sweep changes. Scan uploads warm default advice after a new sweep is ingested;
+the freshness line warns when the latest sweep is over 45 minutes old. The page shows four things:
 - the forecast summary;
 - the four sections, with the same titles and columns as the CLI;
 - each pathway's steps, details and forecast notes;

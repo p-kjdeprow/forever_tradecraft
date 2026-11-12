@@ -1,9 +1,11 @@
 """Format-2 API tests against the temporary TimescaleDB when configured."""
 
+import asyncio
 import gzip
 import hashlib
 import json
 import os
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -109,6 +111,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "false")
     from crowley.server.app import app
     from crowley.server.config import get_settings
 
@@ -164,6 +167,7 @@ def legacy_client(tmp_path, monkeypatch):
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "false")
     from crowley.server.app import app
     from crowley.server.config import get_settings
 
@@ -1428,6 +1432,139 @@ def test_uid_path_is_content_addressed(client):
     archives = list(data_dir.glob("raw/format2/*/*.json.gz"))
     assert len(archives) == 1
     assert archives[0].resolve().is_relative_to(data_dir.resolve())
+
+
+def test_created_upload_warms_once_for_the_ingested_house_and_duplicate_does_not(client, monkeypatch):
+    from crowley.advisor import service
+    from crowley.server.config import get_settings
+
+    calls = []
+    monkeypatch.setattr(service, "warm", lambda pool, cache, house: calls.append((pool, cache, house)))
+    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "true")
+    get_settings.cache_clear()
+
+    raw = scan("warm-created-and-duplicate", "horde")
+    created = client.post("/v1/scans", json=raw)
+    assert created.status_code == 200, created.text
+    assert created.json()["status"] == "created"
+    assert [call[2] for call in calls] == ["us-normal-horde"]
+
+    duplicate = client.post("/v1/scans", json=raw)
+    assert duplicate.status_code == 200, duplicate.text
+    assert duplicate.json()["status"] == "duplicate"
+    assert [call[2] for call in calls] == ["us-normal-horde"]
+
+
+def test_warm_advice_false_disables_warming(client, monkeypatch):
+    from crowley.advisor import service
+
+    calls = []
+    monkeypatch.setattr(service, "warm", lambda *args: calls.append(args))
+    response = client.post("/v1/scans", json=scan("warm-disabled", "horde"))
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "created"
+    assert calls == []
+
+
+def test_warm_failure_is_logged_and_does_not_change_upload_response(client, monkeypatch, caplog):
+    from crowley.advisor import service
+    from crowley.server.config import get_settings
+
+    def fail_warm(pool, cache, house):
+        raise RuntimeError("warm failed")
+
+    monkeypatch.setattr(service, "warm", fail_warm)
+    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "true")
+    get_settings.cache_clear()
+    response = client.post("/v1/scans", json=scan("warm-failure", "horde"))
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "created"
+    assert any(
+        record.name == "crowley.server.routes.scans"
+        and "Failed to warm advice for house us-normal-horde" in record.getMessage()
+        for record in caplog.records
+    )
+
+
+def test_sync_warm_runs_after_upload_body_and_does_not_block_another_request(client, monkeypatch):
+    from crowley.advisor import service
+    from crowley.server.config import get_settings
+
+    warm_started = threading.Event()
+    release_warm = threading.Event()
+
+    def blocking_warm(pool, cache, house):
+        warm_started.set()
+        if not release_warm.wait(timeout=10):
+            raise RuntimeError("test did not release advice warmer")
+
+    monkeypatch.setattr(service, "warm", blocking_warm)
+    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "true")
+    get_settings.cache_clear()
+    application = client.app
+
+    def scope(method, path):
+        return {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.3"},
+            "http_version": "1.1",
+            "method": method,
+            "scheme": "http",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "root_path": "",
+            "headers": [
+                (b"authorization", f"Bearer {TOKEN}".encode()),
+                (b"content-type", b"application/json"),
+            ],
+            "client": ("testclient", 12345),
+            "server": ("testserver", 80),
+        }
+
+    async def invoke(method, path, body=b"", on_send=None):
+        messages = [{"type": "http.request", "body": body, "more_body": False}]
+        events = []
+
+        async def receive():
+            return messages.pop(0) if messages else {"type": "http.disconnect"}
+
+        async def send(event):
+            events.append(event)
+            if on_send is not None:
+                on_send(event)
+
+        await application(scope(method, path), receive, send)
+        return events
+
+    async def exercise():
+        upload_body_sent = asyncio.Event()
+
+        def capture_upload(event):
+            if event["type"] == "http.response.body":
+                upload_body_sent.set()
+
+        raw = scan(f"warm-nonblocking-{uuid.uuid4().hex}", "horde")
+        upload = asyncio.create_task(invoke("POST", "/v1/scans", json.dumps(raw).encode(), capture_upload))
+        try:
+            assert await asyncio.wait_for(asyncio.to_thread(warm_started.wait, 5), timeout=6)
+            await asyncio.wait_for(upload_body_sent.wait(), timeout=2)
+            assert not release_warm.is_set()
+            health_events = await asyncio.wait_for(invoke("GET", "/healthz"), timeout=2)
+            assert any(
+                event.get("status") == 200
+                for event in health_events
+                if event["type"] == "http.response.start"
+            )
+            assert not release_warm.is_set()
+        finally:
+            release_warm.set()
+        upload_events = await upload
+        assert any(
+            event.get("status") == 200 for event in upload_events if event["type"] == "http.response.start"
+        )
+
+    asyncio.run(exercise())
 
 
 def test_paper_run_api_and_dashboard(client):

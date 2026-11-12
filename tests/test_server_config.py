@@ -41,3 +41,17 @@ def test_server_settings_accept_explicit_required_environment(
 
     assert settings.database_url == "postgresql://db.example.invalid/crowley"
     assert settings.host == "server-test"
+
+
+def test_warm_advice_defaults_on_and_accepts_environment_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    values = {
+        "database_url": "postgresql://db.example.invalid/crowley",
+        "host": "test",
+        "api_token": "token",
+    }
+    assert ServerSettings(**values).warm_advice is True
+
+    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "false")
+    assert ServerSettings(**values).warm_advice is False
+    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "true")
+    assert ServerSettings(**values).warm_advice is True

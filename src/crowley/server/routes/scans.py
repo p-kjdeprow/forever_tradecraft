@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, StrictInt
 from starlette.concurrency import run_in_threadpool
 
+from crowley.advisor import service as advisor_service
 from crowley.core.scanformat import ScanFormatError
 from crowley.store.sweeps import record_probe
 
 from ..deps import Authed, Settings
 from ..encoding import _strict_json_object
 from ..ingest import SweepConflictError, _persist_market_sweep
+from .advice import ADVICE_CACHE
 
 router = APIRouter()
 
@@ -26,7 +29,9 @@ class ProbeRequest(BaseModel):
 
 
 @router.post("/v1/scans", dependencies=[Authed])
-async def upload_scan(request: Request, settings: Settings) -> dict[str, Any]:
+async def upload_scan(
+    request: Request, background_tasks: BackgroundTasks, settings: Settings
+) -> dict[str, Any]:
     """Upload the single accepted format-2 envelope."""
     raw = _strict_json_object(await request.body())
     try:
@@ -37,7 +42,18 @@ async def upload_scan(request: Request, settings: Settings) -> dict[str, Any]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SweepConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if result.status == "created" and settings.warm_advice:
+        background_tasks.add_task(_warm_advice, request.app.state.pool, result.house)
     return result.__dict__
+
+
+def _warm_advice(pool: Any, house_key: str) -> None:
+    """Warm default advice off the event loop; failed warming does not affect ingest."""
+
+    try:
+        advisor_service.warm(pool, ADVICE_CACHE, house_key)
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to warm advice for house %s", house_key)
 
 
 def _persist_market_sweep_request(pool: Any, raw: dict[str, Any], data_dir: Any) -> Any:

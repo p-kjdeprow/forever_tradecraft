@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from crowley.advisor.model import OptionError
 from crowley.advisor.render import advice_payload, plain
 from crowley.advisor.service import ADVICE_CACHE, cached_advice, make_config
-from crowley.analysis.rank import parse_as_of
+from crowley.analysis.rank import latest_sweep, parse_as_of
 from crowley.core.errors import MarketDataNotFound
 
 from ..deps import Authed
@@ -52,8 +52,8 @@ def advice(
     (house, build, latest sweep, character, options; ``min_profit``, ``min_volume`` and the display
     options are applied per request): a miss loads the market state (tens of
     seconds), holding a database connection only for that read, and computes outside any
-    connection; a hit does no database work beyond finding the latest sweep.  ``advisor.service.warm``
-    can precompute the default advice after each sweep upload.  Books are pinned to the keyed sweep;
+    connection; a hit does no database work beyond finding the latest sweep. ``advisor.service.warm``
+    precomputes the default advice in the scan upload background task. Books are pinned to the keyed sweep;
     a character's capture is read at ``as_of`` (default: the latest), so a capture taken after the
     sweep is used, and a cached character entry picks up a newer capture when its TTL (15 minutes)
     expires.
@@ -90,3 +90,23 @@ def advice(
     except MarketDataNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return plain(advice_payload(result.advice, result.names, limit, exclusions))
+
+
+@router.get("/v1/houses/{key}/sweeps/latest", dependencies=[Authed])
+def latest_house_sweep(key: str, request: Request, build: str | None = None) -> dict[str, Any]:
+    """Return the latest sweep identity and finish time without computing advice."""
+
+    try:
+        with request.app.state.pool.connection() as conn:
+            _house_id(conn, key)
+            conn.commit()
+            sweep_id, finished_epoch, client_build = latest_sweep(conn, key, build, None)
+            conn.commit()
+    except MarketDataNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {
+        "house": key,
+        "sweep_id": sweep_id,
+        "finished_epoch": finished_epoch,
+        "client_build": client_build,
+    }

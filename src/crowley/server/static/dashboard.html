@@ -279,8 +279,13 @@
             <fieldset class="advice-fieldset">
               <legend>Professions</legend>
               <label><input type="checkbox" name="profession" value="alchemy" checked>Alchemy</label>
-              <label><input type="checkbox" name="profession" value="tailoring" checked>Tailoring</label>
               <label><input type="checkbox" name="profession" value="engineering" checked>Engineering</label>
+              <label><input type="checkbox" name="profession" value="tailoring" checked>Tailoring</label>
+              <label><input type="checkbox" name="profession" value="blacksmithing">Blacksmithing</label>
+              <label><input type="checkbox" name="profession" value="leatherworking">Leatherworking</label>
+              <label><input type="checkbox" name="profession" value="enchanting">Enchanting</label>
+              <label><input type="checkbox" name="profession" value="cooking">Cooking</label>
+              <label><input type="checkbox" name="profession" value="first aid">First aid</label>
             </fieldset>
             <fieldset class="advice-fieldset">
               <legend>Strategies</legend>
@@ -290,13 +295,14 @@
               <label><input type="checkbox" name="strategy" value="raw_materials" checked>Raw materials</label>
               <label><input type="checkbox" name="strategy" value="vendor_arbitrage" checked>Vendor arbitrage</label>
             </fieldset>
-            <label><input id="advice-auto" type="checkbox"> Auto-refresh (15 min)</label>
+            <label><input id="advice-live" type="checkbox" checked> Live: update after each new sweep</label>
             <button class="primary" type="submit">Get advice</button>
           </div>
         </form>
       </section>
       <section class="panel" aria-labelledby="advice-meta-heading">
         <h2 id="advice-meta-heading">Advice run</h2>
+        <p id="advice-freshness" class="advice-forecast" aria-live="polite"></p>
         <div id="advice-meta" class="advice-meta"></div>
         <div id="advice-forecast" class="advice-forecast"></div>
       </section>
@@ -753,6 +759,28 @@
       });
       return payload;
     }
+    function validateLatestSweep(payload, expectedHouse) {
+      const value = adviceObject(payload, "latest sweep");
+      const keys = Object.keys(value).sort();
+      if (keys.join(",") !== "client_build,finished_epoch,house,sweep_id") throw new Error("latest sweep has an invalid shape");
+      if (typeof value.house !== "string" || !value.house || (expectedHouse !== undefined && value.house !== expectedHouse)) throw new Error("latest sweep.house is invalid");
+      if (typeof value.sweep_id !== "number" || !Number.isSafeInteger(value.sweep_id) || value.sweep_id < 1) throw new Error("latest sweep.sweep_id is invalid");
+      if (typeof value.finished_epoch !== "number" || !Number.isFinite(value.finished_epoch) || value.finished_epoch < 0 || !Number.isFinite(new Date(value.finished_epoch * 1000).getTime())) throw new Error("latest sweep.finished_epoch is invalid");
+      if (typeof value.client_build !== "string" || !value.client_build) throw new Error("latest sweep.client_build is invalid");
+      return value;
+    }
+    function freshnessModel(latest, nowEpoch = Date.now() / 1000) {
+      const minutes = Math.max(0, Math.floor((nowEpoch - latest.finished_epoch) / 60));
+      const finished = new Date(latest.finished_epoch * 1000).toISOString().replace("T", " ").replace(".000Z", " UTC");
+      const stale = nowEpoch - latest.finished_epoch > 45 * 60;
+      const text = `Latest sweep #${latest.sweep_id} finished ${finished} (${minutes} min ago)${stale ? `. No new sweep for ${minutes} min — the scanner may be offline.` : ""}`;
+      return { text, stale, minutes };
+    }
+    function advicePollStep(latest, house, renderedHouse, renderedSweepId, adviceInFlight) {
+      const hasRenderedAdvice = renderedHouse === house && renderedSweepId !== null;
+      const hasNewSweep = !hasRenderedAdvice || String(latest.sweep_id) !== String(renderedSweepId);
+      return { renderFreshness: true, requestAdvice: hasNewSweep && !adviceInFlight };
+    }
     function describeAdviceStep(step, names) {
       let what = step.action.replaceAll("_", " ");
       if (step.item_id !== null) {
@@ -872,12 +900,20 @@
       "use strict";
       const TOKEN_KEY = "crowley.paperDashboard.apiToken";
       const VIEW_KEY = "crowley.paperDashboard.view";
-      const state = { token: "", noTokenStatus: "Enter an API token to begin.", runs: [], detail: null, selected: "", view: "paper", viewGeneration: 0, requestGeneration: 0, adviceRequestGeneration: null, adviceOptions: null, adviceInFlight: false, adviceHouses: [], adviceHousesLoaded: false, adviceHousesPromise: null };
+      const LIVE_KEY = "crowley.paperDashboard.live";
+      const state = { token: "", noTokenStatus: "Enter an API token to begin.", runs: [], detail: null, selected: "", view: "paper", viewGeneration: 0, requestGeneration: 0, pollGeneration: 0, adviceRequestGeneration: null, adviceOptions: null, adviceInFlight: false, pollInFlight: false, adviceRenderedHouse: null, adviceRenderedSweepId: null, latestSweep: null, adviceHouses: [], adviceHousesLoaded: false, adviceHousesPromise: null };
       let refreshTimer = null;
+      let advicePollTimer = null;
       const $ = (id) => document.getElementById(id);
 
       function storedToken() {
         try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (_) { return ""; }
+      }
+      function storedLive() {
+        try {
+          const live = localStorage.getItem(LIVE_KEY);
+          return live === null || live === "true";
+        } catch (_) { return true; }
       }
       function storedView() {
         try {
@@ -889,12 +925,32 @@
         state.viewGeneration += 1;
         state.requestGeneration += 1;
       }
+      function stopAdvicePollTimer() {
+        if (advicePollTimer !== null) {
+          window.clearInterval(advicePollTimer);
+          advicePollTimer = null;
+        }
+      }
+      function bumpPollGeneration() {
+        state.pollGeneration += 1;
+        stopAdvicePollTimer();
+      }
+      function pollingEnabled() {
+        return state.view === "advice" && $("advice-live").checked && Boolean(state.token) && Boolean($("advice-house").value);
+      }
+      function pollIsCurrent(generation, house, token) {
+        return state.pollGeneration === generation && state.view === "advice" && $("advice-live").checked && state.token === token && $("advice-house").value === house;
+      }
       function saveView(view) {
         try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* A private browsing context may deny storage. */ }
+      }
+      function saveLive(value) {
+        try { localStorage.setItem(LIVE_KEY, String(value)); } catch (_) { /* A private browsing context may deny storage. */ }
       }
       function saveToken(value) {
         state.token = value.trim();
         invalidateRequests();
+        bumpPollGeneration();
         state.noTokenStatus = state.token ? "Enter an API token to begin." : "Token forgotten. Enter it to begin.";
         try {
           if (state.token) localStorage.setItem(TOKEN_KEY, state.token);
@@ -925,6 +981,21 @@
         if (!state.token) return state.noTokenStatus;
         if (!state.adviceHousesLoaded) return "Loading advice houses…";
         return state.adviceHouses.length ? "Advice ready — choose options and request advice." : "No houses found.";
+      }
+      function renderAdviceFreshness(latest) {
+        const model = freshnessModel(latest);
+        const line = $("advice-freshness");
+        line.textContent = model.text;
+        line.classList.toggle("stale-warning", model.stale);
+      }
+      function clearAdviceFreshness() {
+        const line = $("advice-freshness");
+        line.textContent = "";
+        line.classList.toggle("stale-warning", false);
+      }
+      function clearLatestSweep() {
+        state.latestSweep = null;
+        clearAdviceFreshness();
       }
       async function getJSON(path, includeDetail = false) {
         const response = await fetch(path, { headers: { Authorization: `Bearer ${state.token}` } });
@@ -1186,6 +1257,12 @@
           select.append(option);
         }
         select.value = houses.some((house) => house.key === selected) ? selected : (houses[0]?.key || "");
+        if (select.value !== selected) {
+          state.pollGeneration += 1;
+          state.requestGeneration += 1;
+          stopAdvicePollTimer();
+          clearLatestSweep();
+        }
       }
       async function loadAdviceHouses() {
         if (!state.token || state.adviceHousesLoaded) return;
@@ -1199,6 +1276,7 @@
             state.adviceHouses = houses;
             state.adviceHousesLoaded = true;
             renderAdviceHouses(state.adviceHouses);
+            scheduleRefresh();
             if (!state.adviceInFlight) {
               setStatus(currentAdviceStatus(), !state.adviceHouses.length);
             }
@@ -1259,8 +1337,11 @@
           const payload = await getJSON(`/v1/houses/${encodeURIComponent(options.house)}/advice${buildAdviceQuery(options)}`, true);
           if (!isCurrent()) return;
           const model = buildAdviceModel(payload);
+          if (payload.house !== options.house) throw new Error("advice response house does not match the selected house");
           if (!isCurrent()) return;
           renderAdviceModel(model);
+          state.adviceRenderedHouse = payload.house;
+          state.adviceRenderedSweepId = String(payload.sweep_id);
           setStatus(`Advice updated ${new Date().toISOString().replace("T", " ").replace(".000Z", " UTC")}`);
         } catch (error) {
           if (isCurrent()) setStatus(error.message, true);
@@ -1270,6 +1351,7 @@
           if (!isCurrent() && state.view === "advice" && !state.adviceInFlight) {
             setStatus(currentAdviceStatus());
           }
+          if (!isCurrent() && pollingEnabled() && !state.adviceInFlight) void pollLatestSweep();
         }
       }
       function stopRefreshTimer() {
@@ -1280,17 +1362,61 @@
       }
       function scheduleRefresh() {
         stopRefreshTimer();
+        stopAdvicePollTimer();
         if (state.view === "paper") {
           refreshTimer = window.setInterval(() => { if (state.view === "paper") refresh(); }, 60 * 1000);
-        } else if ($("advice-auto").checked) {
-          refreshTimer = window.setInterval(() => {
-            if (state.view === "advice" && $("advice-auto").checked) refreshAdvice();
-          }, 15 * 60 * 1000);
+        } else if (pollingEnabled()) {
+          advicePollTimer = window.setInterval(() => { void pollLatestSweep(); }, 60 * 1000);
+          void pollLatestSweep();
         }
+      }
+      async function pollLatestSweep() {
+        if (!pollingEnabled() || state.pollInFlight) return;
+        const generation = state.pollGeneration;
+        const house = $("advice-house").value;
+        const token = state.token;
+        const isCurrent = () => pollIsCurrent(generation, house, token);
+        state.pollInFlight = true;
+        try {
+          const response = await fetch(`/v1/houses/${encodeURIComponent(house)}/sweeps/latest`, { headers: { Authorization: `Bearer ${token}` } });
+          if (!isCurrent()) return;
+          if (!response.ok) {
+            let body = null;
+            try { body = await response.json(); } catch (_) { /* Some proxies return an empty error body. */ }
+            if (!isCurrent()) return;
+            if (response.status === 401) throw new Error("The API token was rejected.");
+            if ((response.status === 400 || response.status === 404) && body && typeof body.detail !== "undefined") throw new Error(String(body.detail));
+            throw new Error(`Request failed (${response.status}).`);
+          }
+          const latest = validateLatestSweep(await response.json(), house);
+          if (!isCurrent()) return;
+          state.latestSweep = latest;
+          renderAdviceFreshness(latest);
+          const step = advicePollStep(latest, house, state.adviceRenderedHouse, state.adviceRenderedSweepId, state.adviceInFlight);
+          if (step.requestAdvice && isCurrent()) {
+            const options = readAdviceOptions();
+            if (options.house === house && !state.adviceInFlight) void refreshAdvice(options);
+          }
+        } catch (error) {
+          if (isCurrent()) setStatus(error.message, true);
+        } finally {
+          state.pollInFlight = false;
+          if (state.pollGeneration !== generation && pollingEnabled()) void pollLatestSweep();
+        }
+      }
+      function adviceHouseChanged() {
+        state.pollGeneration += 1;
+        state.requestGeneration += 1;
+        stopAdvicePollTimer();
+        clearLatestSweep();
+        scheduleRefresh();
       }
       function switchView(view, refreshNow = true) {
         if (view !== "paper" && view !== "advice") throw new Error(`unknown dashboard view ${view}`);
-        if (view !== state.view) state.viewGeneration += 1;
+        if (view !== state.view) {
+          state.viewGeneration += 1;
+          bumpPollGeneration();
+        }
         state.view = view;
         saveView(view);
         $("paper-view").hidden = view !== "paper";
@@ -1355,8 +1481,12 @@
         state.adviceOptions = null;
         state.adviceHousesLoaded = false;
         state.adviceHouses = [];
+        state.adviceRenderedHouse = null;
+        state.adviceRenderedSweepId = null;
+        state.latestSweep = null;
         renderRunOptions();
         renderAdviceHouses([]);
+        clearAdviceFreshness();
         $("advice-results").replaceChildren();
         $("advice-strategy-summary").replaceChildren();
         $("dashboard-content").hidden = true;
@@ -1366,18 +1496,24 @@
       $("run-select").addEventListener("change", () => { state.selected = $("run-select").value; void refresh(); });
       $("paper-view-button").addEventListener("click", () => switchView("paper"));
       $("advice-view-button").addEventListener("click", () => switchView("advice"));
+      $("advice-house").addEventListener("change", adviceHouseChanged);
       $("advice-form").addEventListener("submit", (event) => {
         event.preventDefault();
         try { void refreshAdvice(readAdviceOptions()); } catch (error) { setStatus(error.message, true); }
       });
-      $("advice-auto").addEventListener("change", scheduleRefresh);
+      $("advice-live").addEventListener("change", () => {
+        saveLive($("advice-live").checked);
+        bumpPollGeneration();
+        scheduleRefresh();
+      });
       window.__crowleyDashboardTest = {
         renderDetail, renderDashboardDetail, validateRunDetail, buildAdviceQuery, goldToCopper,
         formatAdviceCopper, validateAdvicePayload, buildAdviceModel, describeAdviceStep, switchView,
-        scheduleRefresh, state,
+        validateLatestSweep, advicePollStep, freshnessModel, pollLatestSweep, refreshAdvice, scheduleRefresh, readAdviceOptions, state,
       };
       state.token = storedToken();
       $("token").value = state.token;
+      $("advice-live").checked = storedLive();
       if (!state.token) {
         const entered = window.prompt("Enter the Crowley API token");
         if (entered) saveToken(entered);

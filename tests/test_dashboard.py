@@ -1,13 +1,16 @@
 """Executable, browser-independent tests for the paper dashboard page."""
 
 import json
+import re
 import shutil
 import subprocess
 from fractions import Fraction
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from crowley.advisor.model import Advice, AdviceConfig, Evidence, Pathway, Step, StrategyResult
 from crowley.advisor.render import COLUMNS, SECTION_TITLES, advice_payload, plain
+from crowley.advisor.service import make_config
 from crowley.trading.engine import _allocate_capital
 
 ROOT = Path(__file__).parents[1]
@@ -156,7 +159,10 @@ class FakeNode {{
   querySelector(selector) {{ return this[selector === "tbody" ? "tbody" : selector === "tfoot" ? "tfoot" : "queryChild"]; }}
 }}
 const nodes = new Map();
-for (const id of ["token-form", "forget-token", "token", "status", "run-select", "dashboard-content", "run-meta", "chart", "sparks", "decisions-empty", "pending-content", "paper-view-button", "advice-view-button", "paper-view", "advice-view", "paper-controls", "advice-form", "advice-auto", "advice-house", "advice-character", "advice-profit-gold", "advice-profit-silver", "advice-profit-copper", "advice-min-volume", "advice-share", "advice-horizon", "advice-price-basis", "advice-limit", "advice-meta", "advice-results", "advice-strategy-summary"]) nodes.set(id, new FakeNode(id));
+for (const id of ["token-form", "forget-token", "token", "status", "run-select", "dashboard-content", "run-meta", "chart", "sparks", "decisions-empty", "pending-content", "paper-view-button", "advice-view-button", "paper-view", "advice-view", "paper-controls", "advice-form", "advice-live", "advice-house", "advice-character", "advice-profit-gold", "advice-profit-silver", "advice-profit-copper", "advice-min-volume", "advice-share", "advice-horizon", "advice-price-basis", "advice-estimates", "advice-limit", "advice-meta", "advice-freshness", "advice-results", "advice-strategy-summary"]) nodes.set(id, new FakeNode(id));
+const adviceDefaults = {{ "advice-profit-gold": "0", "advice-profit-silver": "0", "advice-profit-copper": "0", "advice-min-volume": "0", "advice-share": "10", "advice-horizon": "2", "advice-price-basis": "lowest", "advice-estimates": "forecast", "advice-limit": "25" }};
+for (const [id, value] of Object.entries(adviceDefaults)) nodes.get(id).value = value;
+const checkedInputs = {{ profession: ["alchemy", "engineering", "tailoring"], strategy: ["crafting", "recipe_purchase", "flip", "raw_materials", "vendor_arbitrage"] }};
 const performanceTable = new FakeNode("performance-table");
 performanceTable.tbody = new FakeNode("performance-body");
 performanceTable.tfoot = new FakeNode("performance-foot");
@@ -168,9 +174,9 @@ global.document = {{
   getElementById: (id) => nodes.get(id),
   createElement: () => new FakeNode(),
   createElementNS: () => new FakeNode(),
-  querySelectorAll: () => [],
+  querySelectorAll: (selector) => {{ const name = selector.match(/name="([^"]+)"/)?.[1]; return (checkedInputs[name] || []).map((value) => ({{ value }})); }},
 }};
-global.localStorage = {{ getItem: () => "", setItem: () => {{}}, removeItem: () => {{}} }};
+global.localStorage = {{ getItem: () => null, setItem: () => {{}}, removeItem: () => {{}} }};
 const intervals = [];
 global.window = {{ prompt: () => "", setInterval: (fn, ms) => {{ const id = intervals.length + 1; intervals.push({{ id, fn, ms, active: true }}); return id; }}, clearInterval: (id) => {{ const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; }} }};
 global.fetch = () => {{ throw new Error("fetch should not run in this rendering test"); }};
@@ -394,7 +400,7 @@ def test_advice_query_and_money_validation():
     assert any("sections" in error for error in actual["errors"])
 
 
-def test_view_switch_scheduler_only_arms_visible_view():
+def test_view_switch_scheduler_polls_live_advice_only_while_visible():
     script = _fake_dom_script(_detail()).split("\nconst detail = ", 1)[0]
     script = script.replace(
         'global.fetch = () => { throw new Error("fetch should not run in this rendering test"); };',
@@ -408,35 +414,23 @@ const dashboard = window.__crowleyDashboardTest;
 const active = () => intervals.filter((timer) => timer.active).map((timer) => timer.ms);
 const initial = active();
 dashboard.state.token = "token";
-const paperTimer = intervals.find((timer) => timer.active && timer.ms === 60000);
-paperTimer.fn();
-await settle();
-const stalePaperRequest = fetchWaiters.shift();
+dashboard.state.adviceHousesLoaded = true;
+dashboard.state.adviceHouses = [{ key: "test-house" }];
+nodes.get("advice-house").value = "test-house";
 dashboard.switchView("advice", false);
-const statusAtAdviceSwitch = nodes.get("status").textContent;
-const adviceOff = active();
-stalePaperRequest.resolve(response([]));
-await settle();
-const statusAfterStalePaper = nodes.get("status").textContent;
-const housesRequest = fetchWaiters.shift();
-housesRequest.resolve(response([{ key: "test-house" }]));
-await settle();
-const statusAfterHouses = nodes.get("status").textContent;
-dashboard.state.adviceOptions = { house: "test-house", character: "", professions: ["alchemy"], strategies: ["crafting"], minProfitGold: "0", minProfitSilver: "0", minProfitCopper: "0", minVolume: "0", share: "10", horizonHours: "2", priceBasis: "lowest", limit: "25" };
-nodes.get("advice-auto").checked = true;
-dashboard.scheduleRefresh();
 const adviceOn = active();
-const adviceTimer = intervals.find((timer) => timer.active && timer.ms === 900000);
-fetchCalls.length = 0;
+await settle();
+const firstPoll = fetchWaiters.shift();
+firstPoll.resolve(response({ house: "test-house", sweep_id: 42, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
+await settle();
+const adviceRequest = fetchWaiters.shift();
+adviceRequest.resolve(response(__ADVICE_PAYLOAD__));
+await settle();
+const adviceTimer = intervals.find((timer) => timer.active && timer.ms === 60000);
 adviceTimer.fn();
 await settle();
-const adviceRequestOne = fetchWaiters.shift();
-adviceRequestOne.resolve(response(__ADVICE_PAYLOAD__));
-await settle();
-adviceTimer.fn();
-await settle();
-const adviceRequestTwo = fetchWaiters.shift();
-adviceRequestTwo.resolve(response(__ADVICE_PAYLOAD__));
+const sameSweepPoll = fetchWaiters.shift();
+sameSweepPoll.resolve(response({ house: "test-house", sweep_id: 42, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
 await settle();
 const advicePaths = [...fetchCalls];
 dashboard.switchView("paper", false);
@@ -451,35 +445,281 @@ await settle();
 const paperPaths = [...fetchCalls];
 emit({
   initial,
-  adviceOff,
   adviceOn,
   paperAgain,
   paperHidden: nodes.get("paper-view").hidden,
   adviceHidden: nodes.get("advice-view").hidden,
   paperPressed: nodes.get("paper-view-button").attributes["aria-pressed"],
-  staleStatusPreserved: statusAfterStalePaper === statusAtAdviceSwitch,
-  adviceReadyStatus: statusAfterHouses,
   advicePaths,
   paperPaths,
-  adviceRepeatedExactly: advicePaths.length === 2 && advicePaths[0] === advicePaths[1],
+  adviceFetchedOnce: advicePaths.filter((path) => path.includes("/advice?")).length === 1,
+  livePollsLatestOnlyAfterFirstAdvice: advicePaths.filter((path) => path.endsWith("/sweeps/latest")).length === 2,
   paperTimerOnlyPaperEndpoints: paperPaths.every((path) => path.startsWith("/v1/paper/runs")),
 });
 """
     script = script.replace("__ADVICE_PAYLOAD__", json.dumps(_advice_payload()))
     actual = _node(script)
     assert actual["initial"] == [60000]
-    assert actual["adviceOff"] == []
-    assert actual["adviceOn"] == [900000]
+    assert actual["adviceOn"] == [60000]
     assert actual["paperAgain"] == [60000]
     assert actual["paperHidden"] is False
     assert actual["adviceHidden"] is True
     assert actual["paperPressed"] == "true"
-    assert actual["staleStatusPreserved"] is True
-    assert actual["adviceReadyStatus"] == "Advice ready — choose options and request advice."
-    assert actual["adviceRepeatedExactly"] is True
+    assert actual["adviceFetchedOnce"] is True
+    assert actual["livePollsLatestOnlyAfterFirstAdvice"] is True
     assert actual["paperTimerOnlyPaperEndpoints"] is True
-    assert actual["advicePaths"][0].startswith("/v1/houses/test-house/advice?")
+    assert next(path for path in actual["advicePaths"] if "/advice?" in path).startswith(
+        "/v1/houses/test-house/advice?"
+    )
     assert actual["paperPaths"] == ["/v1/paper/runs"]
+
+
+def test_default_professions_query_matches_the_warmed_advice_config():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    checked = {}
+    for name in ("profession", "strategy"):
+        checked[name] = [
+            value
+            for value, attributes in re.findall(
+                rf'<input type="checkbox" name="{name}" value="([^"]+)"([^>]*)>', html
+            )
+            if "checked" in attributes
+        ]
+    actual = _node(
+        _fake_dom_script(_detail()).split("\nconst detail = ", 1)[0]
+        + f"""
+const dashboard = window.__crowleyDashboardTest;
+checkedInputs.profession = {json.dumps(checked["profession"])};
+checkedInputs.strategy = {json.dumps(checked["strategy"])};
+const query = buildAdviceQuery(dashboard.readAdviceOptions());
+console.log(JSON.stringify({{ query }}));
+"""
+    )
+    params = parse_qs(actual["query"].removeprefix("?"))
+    assert params["professions"] == ["alchemy,engineering,tailoring"]
+    assert params["strategies"] == ["crafting,recipe_purchase,flip,raw_materials,vendor_arbitrage"]
+    config = make_config(
+        estimates=params["estimates"][0],
+        strategies=params["strategies"][0],
+        professions=params["professions"][0],
+        min_profit=int(params["min_profit"][0]),
+        min_volume=float(params["min_volume"][0]),
+        share=float(params["share"][0]),
+        horizon_hours=float(params["horizon_hours"][0]),
+        price_basis=params["price_basis"][0],
+    )
+    assert config == make_config()
+
+
+def test_latest_sweep_validator_poll_step_and_freshness_model():
+    actual = _node(
+        _emit_script(
+            """
+const latest = validateLatestSweep({ house: "test-house", sweep_id: 43, finished_epoch: 1800000000, client_build: "1.60.1.70862" }, "test-house");
+const freshness = freshnessModel(latest, latest.finished_epoch + 46 * 60);
+const invalid = [];
+for (const payload of [
+  { ...latest, sweep_id: "43" },
+  { ...latest, house: "other-house" },
+  { ...latest, extra: true },
+]) {
+  try { validateLatestSweep(payload, "test-house"); } catch (error) { invalid.push(error.message); }
+}
+emit({
+  requestNew: advicePollStep(latest, "test-house", "test-house", "42", false).requestAdvice,
+  requestSame: advicePollStep(latest, "test-house", "test-house", "43", false).requestAdvice,
+  suppressInFlight: advicePollStep(latest, "test-house", "test-house", "42", true).requestAdvice,
+  freshness,
+  invalid,
+});
+"""
+        )
+    )
+    assert actual["requestNew"] is True
+    assert actual["requestSame"] is False
+    assert actual["suppressInFlight"] is False
+    assert actual["freshness"]["stale"] is True
+    assert actual["freshness"]["minutes"] == 46
+    assert "No new sweep for 46 min — the scanner may be offline." in actual["freshness"]["text"]
+    assert len(actual["invalid"]) == 3
+
+
+def test_live_poll_new_sweep_fetches_advice_once_and_same_sweep_does_not():
+    actual = _node(
+        _controlled_advice_script(
+            """
+const response = (body) => ({ ok: true, status: 200, json: async () => body });
+const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+const emit = (value) => console.log(JSON.stringify(value));
+const dashboard = window.__crowleyDashboardTest;
+dashboard.state.token = "token";
+dashboard.state.view = "advice";
+dashboard.state.adviceHousesLoaded = true;
+dashboard.state.adviceHouses = [{ key: "test-house" }];
+nodes.get("advice-house").value = "test-house";
+dashboard.pollLatestSweep();
+await settle();
+fetchWaiters.shift().resolve(response({ house: "test-house", sweep_id: 42, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
+await settle();
+const adviceWaiter = fetchWaiters.shift();
+adviceWaiter.resolve(response(__ADVICE_PAYLOAD__));
+await settle();
+dashboard.pollLatestSweep();
+await settle();
+fetchWaiters.shift().resolve(response({ house: "test-house", sweep_id: 42, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
+await settle();
+emit({ fetchCalls, adviceCalls: fetchCalls.filter((path) => path.includes("/advice?")), renderedSweep: dashboard.state.adviceRenderedSweepId, freshness: nodes.get("advice-freshness").textContent });
+"""
+        )
+    )
+    assert [path for path in actual["fetchCalls"] if path.endswith("/sweeps/latest")] == [
+        "/v1/houses/test-house/sweeps/latest",
+        "/v1/houses/test-house/sweeps/latest",
+    ]
+    assert len(actual["adviceCalls"]) == 1
+    assert actual["renderedSweep"] == "42"
+    assert "Latest sweep #42 finished" in actual["freshness"]
+
+
+def test_live_poll_is_single_flight_and_does_not_invalidate_advice_in_flight():
+    actual = _node(
+        _controlled_advice_script(
+            """
+const response = (body) => ({ ok: true, status: 200, json: async () => body });
+const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+const emit = (value) => console.log(JSON.stringify(value));
+const dashboard = window.__crowleyDashboardTest;
+dashboard.state.token = "token";
+dashboard.state.view = "advice";
+dashboard.state.adviceRenderedHouse = "test-house";
+dashboard.state.adviceRenderedSweepId = "42";
+dashboard.state.adviceInFlight = true;
+dashboard.state.adviceRequestGeneration = 7;
+dashboard.state.requestGeneration = 7;
+nodes.get("advice-house").value = "test-house";
+dashboard.pollLatestSweep();
+dashboard.pollLatestSweep();
+await settle();
+const callCountBeforeResolve = fetchCalls.length;
+fetchWaiters.shift().resolve(response({ house: "test-house", sweep_id: 43, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
+await settle();
+const inFlightAfterPoll = dashboard.state.adviceInFlight;
+const requestGenerationAfterPoll = dashboard.state.requestGeneration;
+const adviceCallsWhileInFlight = fetchCalls.filter((path) => path.includes("/advice?")).length;
+dashboard.state.adviceInFlight = false;
+dashboard.pollLatestSweep();
+await settle();
+fetchWaiters.shift().resolve(response({ house: "test-house", sweep_id: 43, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
+await settle();
+emit({ fetchCalls, callCountBeforeResolve, inFlightAfterPoll, requestGenerationAfterPoll, adviceCallsWhileInFlight, adviceCallsAfterRetry: fetchCalls.filter((path) => path.includes("/advice?")).length });
+"""
+        )
+    )
+    assert actual["callCountBeforeResolve"] == 1
+    assert actual["inFlightAfterPoll"] is True
+    assert actual["requestGenerationAfterPoll"] == 7
+    assert actual["adviceCallsWhileInFlight"] == 0
+    assert actual["adviceCallsAfterRetry"] == 1
+
+
+def test_house_change_while_poll_is_pending_discards_stale_response():
+    actual = _node(
+        _controlled_advice_script(
+            """
+const response = (body) => ({ ok: true, status: 200, json: async () => body });
+const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+const emit = (value) => console.log(JSON.stringify(value));
+const dashboard = window.__crowleyDashboardTest;
+dashboard.state.token = "token";
+dashboard.state.view = "advice";
+dashboard.state.adviceHousesLoaded = true;
+nodes.get("advice-house").value = "old-house";
+dashboard.pollLatestSweep();
+await settle();
+nodes.get("advice-house").value = "new-house";
+nodes.get("advice-house").listeners.change();
+fetchWaiters.shift().resolve(response({ house: "old-house", sweep_id: 99, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
+await settle();
+emit({ fetchCalls, freshness: nodes.get("advice-freshness").textContent, latestSweep: dashboard.state.latestSweep, adviceCalls: fetchCalls.filter((path) => path.includes("/advice?")).length });
+"""
+        )
+    )
+    assert len(actual["fetchCalls"]) == 2
+    assert actual["fetchCalls"][0] == "/v1/houses/old-house/sweeps/latest"
+    assert actual["fetchCalls"][1] == "/v1/houses/new-house/sweeps/latest"
+    assert actual["freshness"] == ""
+    assert actual["latestSweep"] is None
+    assert actual["adviceCalls"] == 0
+
+
+def test_house_change_clears_old_freshness_when_new_house_poll_fails():
+    actual = _node(
+        _controlled_advice_script(
+            """
+const response = (body, status = 200) => ({ ok: status === 200, status, json: async () => body });
+const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+const emit = (value) => console.log(JSON.stringify(value));
+const dashboard = window.__crowleyDashboardTest;
+dashboard.state.token = "token";
+dashboard.state.view = "advice";
+dashboard.state.adviceHousesLoaded = true;
+dashboard.state.adviceRenderedHouse = "house-a";
+dashboard.state.adviceRenderedSweepId = "1";
+nodes.get("advice-house").value = "house-a";
+dashboard.pollLatestSweep();
+await settle();
+fetchWaiters.shift().resolve(response({ house: "house-a", sweep_id: 1, finished_epoch: 1000000, client_build: "1.60.1.70888" }));
+await settle();
+const freshnessForA = nodes.get("advice-freshness").textContent;
+const warningForA = nodes.get("advice-freshness").classList.contains("stale-warning");
+nodes.get("advice-house").value = "house-b";
+nodes.get("advice-house").listeners.change();
+const freshnessAfterSwitch = nodes.get("advice-freshness").textContent;
+const latestAfterSwitch = dashboard.state.latestSweep;
+const pollForB = fetchWaiters.shift();
+pollForB.resolve(response({ detail: "no market sweep" }, 404));
+await settle();
+emit({ freshnessForA, warningForA, freshnessAfterSwitch, latestAfterSwitch, freshnessAfterFailure: nodes.get("advice-freshness").textContent, warningAfterFailure: nodes.get("advice-freshness").classList.contains("stale-warning"), latestAfterFailure: dashboard.state.latestSweep, status: nodes.get("status").textContent });
+"""
+        )
+    )
+    assert actual["freshnessForA"].startswith("Latest sweep #1 finished")
+    assert actual["warningForA"] is True
+    assert actual["freshnessAfterSwitch"] == ""
+    assert actual["latestAfterSwitch"] is None
+    assert actual["freshnessAfterFailure"] == ""
+    assert actual["warningAfterFailure"] is False
+    assert actual["latestAfterFailure"] is None
+    assert actual["status"] == "no market sweep"
+
+
+def test_live_unchecked_while_poll_is_pending_stops_timer_and_prevents_advice():
+    actual = _node(
+        _controlled_advice_script(
+            """
+const response = (body) => ({ ok: true, status: 200, json: async () => body });
+const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
+const emit = (value) => console.log(JSON.stringify(value));
+const dashboard = window.__crowleyDashboardTest;
+dashboard.state.token = "token";
+dashboard.state.view = "advice";
+dashboard.state.adviceHousesLoaded = true;
+nodes.get("advice-house").value = "test-house";
+dashboard.scheduleRefresh();
+const pollTimer = intervals.find((timer) => timer.active && timer.ms === 60000);
+nodes.get("advice-live").checked = false;
+nodes.get("advice-live").listeners.change();
+pollTimer.fn();
+fetchWaiters.shift().resolve(response({ house: "test-house", sweep_id: 43, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
+await settle();
+emit({ fetchCalls, active: intervals.filter((timer) => timer.active).map((timer) => timer.ms), freshness: nodes.get("advice-freshness").textContent, adviceCalls: fetchCalls.filter((path) => path.includes("/advice?")).length });
+"""
+        )
+    )
+    assert actual["fetchCalls"] == ["/v1/houses/test-house/sweeps/latest"]
+    assert actual["active"] == []
+    assert actual["freshness"] == ""
+    assert actual["adviceCalls"] == 0
 
 
 def _controlled_advice_script(body: str) -> str:
@@ -504,26 +744,28 @@ dashboard.state.token = "token";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceHouses = [{ key: "test-house" }];
 dashboard.state.adviceOptions = options;
+nodes.get("advice-house").value = "test-house";
+nodes.get("advice-live").checked = false;
 dashboard.switchView("advice", false);
-nodes.get("advice-auto").checked = true;
-dashboard.scheduleRefresh();
-const adviceTimer = intervals.find((timer) => timer.active && timer.ms === 900000);
-adviceTimer.fn();
+dashboard.refreshAdvice(options);
 await settle();
 const adviceRequest = fetchWaiters.shift();
 const statusDuring = nodes.get("status").textContent;
+dashboard.refreshAdvice(options);
+const statusAfterSecondRequest = nodes.get("status").textContent;
 dashboard.switchView("advice", false);
 const statusAfterSameViewClick = nodes.get("status").textContent;
 adviceRequest.resolve(response(__ADVICE_PAYLOAD__));
 await settle();
-emit({ fetchCalls, statusDuring, statusAfterSameViewClick, statusAfter: nodes.get("status").textContent, renderedSections: nodes.get("advice-results").children.length, inFlight: dashboard.state.adviceInFlight });
+emit({ fetchCalls, statusDuring, statusAfterSecondRequest, statusAfterSameViewClick, statusAfter: nodes.get("status").textContent, renderedSections: nodes.get("advice-results").children.length, inFlight: dashboard.state.adviceInFlight });
 """
         )
     )
     assert len(actual["fetchCalls"]) == 1
     assert actual["fetchCalls"][0].startswith("/v1/houses/test-house/advice?")
     assert actual["statusDuring"] == "Computing advice…"
-    assert actual["statusAfterSameViewClick"] == "Computing advice…"
+    assert actual["statusAfterSecondRequest"] == "Advice is already computing…"
+    assert actual["statusAfterSameViewClick"] == "Advice is already computing…"
     assert actual["statusAfter"].startswith("Advice updated ")
     assert actual["renderedSections"] == 4
     assert actual["inFlight"] is False
@@ -542,11 +784,10 @@ dashboard.state.token = "token";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceHouses = [{ key: "test-house" }];
 dashboard.state.adviceOptions = options;
+nodes.get("advice-house").value = "test-house";
+nodes.get("advice-live").checked = false;
 dashboard.switchView("advice", false);
-nodes.get("advice-auto").checked = true;
-dashboard.scheduleRefresh();
-const adviceTimer = intervals.find((timer) => timer.active && timer.ms === 900000);
-adviceTimer.fn();
+dashboard.refreshAdvice(options);
 await settle();
 const adviceRequest = fetchWaiters.shift();
 const statusDuring = nodes.get("status").textContent;
@@ -580,11 +821,10 @@ dashboard.state.token = "token";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceHouses = [{ key: "test-house" }];
 dashboard.state.adviceOptions = options;
+nodes.get("advice-house").value = "test-house";
+nodes.get("advice-live").checked = false;
 dashboard.switchView("advice", false);
-nodes.get("advice-auto").checked = true;
-dashboard.scheduleRefresh();
-const adviceTimer = intervals.find((timer) => timer.active && timer.ms === 900000);
-adviceTimer.fn();
+dashboard.refreshAdvice(options);
 await settle();
 const adviceRequest = fetchWaiters.shift();
 nodes.get("forget-token").listeners.click();

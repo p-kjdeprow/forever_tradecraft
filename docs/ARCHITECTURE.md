@@ -113,6 +113,9 @@ The addon keeps at most 6 unacknowledged sweeps. The companion acknowledges uplo
 through Data.lua, and the addon prunes them on the next load. At capacity it pauses and never
 evicts evidence. Uploads are idempotent on the addon-generated sweep ID.
 
+The server warms default advice after each newly created scan upload unless `CROWLEY_WARM_ADVICE=false`.
+The metadata-only `GET /v1/houses/{key}/sweeps/latest[?build=...]` route exposes the latest sweep for the dashboard's live Advice view.
+
 ## Scan format (v2 and v3)
 
 `CrowleyDB.scans[id]` holds an envelope with `format=3`, integer sweep bounds, house/context,

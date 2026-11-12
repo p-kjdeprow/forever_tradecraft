@@ -161,7 +161,7 @@ def warm(
 ) -> CachedAdvice:
     """Compute the default advice (or ``config``'s) for the house's latest sweep into ``cache``.
 
-    Intended to be called after a sweep upload is ingested, so the next request is a hit.
+    The scan upload background task calls this after ingest so the next request is a hit.
     """
 
     return cached_advice(pool, cache, house_key, make_config() if config is None else config, build=build)

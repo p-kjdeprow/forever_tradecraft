@@ -21,6 +21,7 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/v1/houses/{key}/items/{item_key}/history", "require_token"),
         ("GET", "/v1/houses/{key}/items/{item_key}/volume", "require_token"),
         ("GET", "/v1/houses/{key}/advice", "require_token"),
+        ("GET", "/v1/houses/{key}/sweeps/latest", "require_token"),
         ("POST", "/v1/item-reference", "require_token"),
         ("GET", "/v1/houses/{key}/item-reference", "require_token"),
         ("POST", "/v1/account-state", "require_token"),

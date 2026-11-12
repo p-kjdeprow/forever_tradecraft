@@ -13,9 +13,8 @@ how many different keys compute at once: each computation is tens of seconds of 
 thread, and the route's threadpool and database pool are shared with scan ingest.  The cache is per
 process; the server runs one.  A failed computation is not cached and leaves no lock behind.
 
-Warming: ``service.warm`` computes the default advice into this cache.  Calling it right after a
-sweep upload is ingested (the scan-loop or ingest owner can wire that later) makes the first
-request after every sweep a hit.
+Warming: ``service.warm`` computes the default advice into this cache. The scan upload route calls
+it after each newly ingested sweep, making the first request after that sweep a cache hit.
 """
 
 from __future__ import annotations

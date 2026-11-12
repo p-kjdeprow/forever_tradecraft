@@ -7,7 +7,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from crowley.advisor import advise as real_advise
@@ -15,6 +15,7 @@ from crowley.advisor import service
 from crowley.advisor.cache import AdviceCache
 from crowley.advisor.model import OptionError
 from crowley.core.errors import MarketDataNotFound
+from crowley.server.config import ServerSettings, get_settings
 from crowley.server.deps import require_token
 from crowley.server.routes import advice as advice_route
 from tests.test_advisor import BUILD, HOUSE, SELLER, make_inputs, state_of
@@ -82,6 +83,7 @@ def harness(monkeypatch):
         return real_advise(state, config)
 
     monkeypatch.setattr(service, "latest_sweep", latest_sweep)
+    monkeypatch.setattr(advice_route, "latest_sweep", latest_sweep)
     monkeypatch.setattr(service, "load_market_state", load_market_state)
     monkeypatch.setattr(service, "advise", advise)
     monkeypatch.setattr(advice_route, "_house_id", lambda conn, key: h.houses.append(key))
@@ -186,6 +188,53 @@ def test_unknown_sweep_build_or_capture_is_404(harness):
     harness.fail_sweep = None
     harness.fail_load = MarketDataNotFound("no account capture for character 'Bob'")
     assert get(harness, character="Bob").status_code == 404
+
+
+def test_latest_sweep_route_returns_only_latest_metadata_and_uses_one_connection(harness):
+    response = harness.client.get(f"/v1/houses/{HOUSE}/sweeps/latest", params={"build": BUILD})
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "house": HOUSE,
+        "sweep_id": harness.sweep,
+        "finished_epoch": 1_000_000.0,
+        "client_build": BUILD,
+    }
+    assert harness.houses == [HOUSE]
+    assert harness.sweeps == [(HOUSE, BUILD, None)]
+    assert harness.pool.opened == 1 and harness.pool.open == 0
+    assert harness.loads == []
+
+
+def test_latest_sweep_route_maps_missing_sweep_house_errors_and_malformed_key(harness, monkeypatch):
+    harness.fail_sweep = MarketDataNotFound("no market sweep")
+    response = harness.client.get(f"/v1/houses/{HOUSE}/sweeps/latest")
+    assert response.status_code == 404 and response.json()["detail"] == "no market sweep"
+
+    def validate_house(conn, key):
+        if key == "malformed":
+            raise HTTPException(status_code=400, detail="bad house key")
+        if key == "unknown":
+            raise HTTPException(status_code=404, detail="unknown house")
+        return 1
+
+    monkeypatch.setattr(advice_route, "_house_id", validate_house)
+    malformed = harness.client.get("/v1/houses/malformed/sweeps/latest")
+    unknown = harness.client.get("/v1/houses/unknown/sweeps/latest")
+    assert malformed.status_code == 400
+    assert unknown.status_code == 404
+
+
+def test_latest_sweep_route_requires_authentication(harness, monkeypatch):
+    overrides = harness.client.app.dependency_overrides
+    overrides.pop(require_token)
+    monkeypatch.setitem(
+        overrides,
+        get_settings,
+        lambda: ServerSettings(database_url="postgresql://unused", api_token="test-token", host="test"),
+    )
+    response = harness.client.get(f"/v1/houses/{HOUSE}/sweeps/latest")
+    assert response.status_code == 401
+    assert harness.pool.opened == 0
 
 
 def test_unknown_profession_from_the_loader_is_400(harness):

@@ -23,6 +23,8 @@ class ServerSettings(BaseSettings):
     # Bind to the Tailscale address (or 0.0.0.0) when the game runs on another machine.
     host: str
     port: int = 8080
+    # Precompute default advice after each newly ingested sweep.
+    warm_advice: bool = True
 
 
 @lru_cache

@@ -173,20 +173,44 @@ uses the current lowest listing.
 - `python -m crowley.forecast validate --house KEY [--build] [--as-of] [--items]` prints the
   per-model table and the items where a challenger qualifies.
 
-### Dashboard advice view
+### Trading dashboard
 
-`/dashboard` has an **Advice** view next to Paper runs. The form sends one
-`GET /v1/houses/{key}/advice` request with every option, including `estimates`. Live mode is on by
-default: while Advice is open it polls `GET /v1/houses/{key}/sweeps/latest` every minute and loads
-advice when the sweep changes. Scan uploads warm default advice after a new sweep is ingested;
-the freshness line warns when the latest sweep is over 45 minutes old. The page shows four things:
+After the server rollout, open `/dashboard` on the loopback server, or forward it from a laptop with
+`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and browse to `http://127.0.0.1:18080/dashboard`. The latest-scan
+and trading-summary GETs are read-only and do not require an API token; write endpoints continue to require bearer
+authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tailoring 150, while allowing planning
+targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
-- the forecast summary;
-- the four sections, with the same titles and columns as the CLI;
-- each pathway's steps, details and forecast notes;
-- per-strategy exclusion counts.
+- latest scan time and planned / queried / successful counts;
+- up to ten positive-margin strategies, with batch quantity, reagent costs, list price, 12-hour deposit, net
+  proceeds and if-sold profit;
+- observed listing activity or an explicit unknown-turnover state, with reagent and profession-access details;
+- the assumed 10 g budget, recipe-ownership assumption and a link to Advanced research at `/dashboard/advanced`.
 
-Dashboard market, advice, and paper GETs are unauthenticated, so the browser does not need an API token. The
-server remains bound to loopback. For remote use, forward it over SSH with
-`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open `http://127.0.0.1:18080/dashboard` locally. Write endpoints
-continue to require bearer authentication.
+Ready-now positive-margin strategies with observed activity sort before unmeasured trials and marked leveling targets.
+Rows sharing a cooldown group are alternatives; their rates are not additive. Profits assume every listed unit sells
+and are not expected income. Observed listing depletion is not confirmed sales, and sale probability remains unknown.
+
+**Live source check, 2026-11-13.** The read-only summary for house `us-normal-alliance`, build `1.60.1.70938`,
+loaded sweep 583 (17:47:03 UTC; 484 planned, 484 queried, 484 successful) and ten rows in 5.756 s. This is the
+source summary calculation; HTTP availability and latency verification remain pending rollout. Potion of
+Predatory Senses showed 2 crafts / 2 units, 3,238 copper cost, 10,885 copper net proceeds if sold, 7,647 copper
+if-sold profit and 12.57 observed units/hour. Shadow Oil showed 4 crafts / 8 units, 8,237 copper cost,
+12,478 copper net proceeds, 4,241 copper if-sold profit and 49.17 observed units/hour. These are current-book
+margin and descriptive-depletion figures, not confirmed sales. The source response and check log are in
+`.archive/dashboard-trading-20261113/`.
+
+### Advanced advice view
+
+The prior research page remains available at `/dashboard/advanced`. Its **Advice** view sends one
+`GET /v1/houses/{key}/advice` request with every option, including `estimates`. Live mode polls
+`GET /v1/houses/{key}/sweeps/latest` every minute and loads advice when the sweep changes. Scan uploads warm default
+advice after a new sweep is ingested; the freshness line warns when the latest sweep is over 45 minutes old. It shows
+the forecast summary, the four CLI sections, pathway details and forecast notes, and per-strategy exclusion counts.
+
+The advice endpoint returned 200 after export 4 loaded; at sweep 546 (2026-11-13 08:22:10 UTC) it had 0 ranked and
+38 unmeasured pathways. Unmeasured profit/hour assumes P(sale)=1 and is an upper bound, not income. The prior
+interface filters professions but does not enforce the skill-225 planning ceiling. Default ranked crafting needs
+six usable hours of commodity demand and four independent two-hour sale trials; additional data alone does not solve
+grouped-gear sale identity. Matching-build research, current margins and early descriptive flow are in
+`.archive/advice-refresh-20261113/`.

@@ -1,14 +1,18 @@
 """Regression coverage for the server's public route table."""
 
 from collections.abc import Iterable
+from contextlib import nullcontext
+from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from fastapi.routing import APIRoute, _IncludedRouter
 from pydantic import ValidationError
 from starlette.routing import BaseRoute
 
 from crowley.server.app import app
 from crowley.server.deps import require_token
+from crowley.server.routes import dashboard as dashboard_routes
 from crowley.server.routes.addon import AddonDataRequest, AddonDataResponse
 
 EXPECTED_ROUTES = frozenset(
@@ -22,6 +26,7 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/v1/houses/{key}/items/{item_key}/volume", None),
         ("GET", "/v1/houses/{key}/advice", None),
         ("GET", "/v1/houses/{key}/sweeps/latest", None),
+        ("GET", "/v1/houses/{key}/trading-summary", None),
         ("POST", "/v1/item-reference", "require_token"),
         ("GET", "/v1/houses/{key}/item-reference", "require_token"),
         ("POST", "/v1/account-state", "require_token"),
@@ -34,6 +39,7 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/v1/paper/runs", None),
         ("GET", "/v1/paper/runs/{name}", None),
         ("GET", "/dashboard", None),
+        ("GET", "/dashboard/advanced", None),
     }
 )
 
@@ -69,3 +75,24 @@ def test_addon_data_contract_excludes_shopping_lists() -> None:
     }
     with pytest.raises(ValidationError, match="shoppingLists"):
         AddonDataRequest.model_validate({"shoppingLists": []})
+
+
+def test_dashboard_paths_and_summary_route_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
+    trading = dashboard_routes.dashboard()
+    advanced = dashboard_routes.advanced_dashboard()
+    assert trading.status_code == 200
+    assert "Top 10 crafting strategies" in trading.body.decode()
+    assert advanced.status_code == 200
+    assert "Paper runs" in advanced.body.decode()
+    assert trading.headers["content-security-policy"] == advanced.headers["content-security-policy"]
+
+    class Pool:
+        def connection(self):
+            return nullcontext(object())
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=Pool())))
+    monkeypatch.setattr(dashboard_routes, "load_trading_summary", lambda conn, key: {"house": key})
+    assert dashboard_routes.trading_summary("us-normal-alliance", request) == {"house": "us-normal-alliance"}
+    with pytest.raises(HTTPException) as invalid:
+        dashboard_routes.trading_summary("invalid-house", request)
+    assert invalid.value.status_code == 400

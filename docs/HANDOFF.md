@@ -141,26 +141,38 @@ targets that require leveling from 150; the planning ceiling does not change the
 recipes are owned and ignore recipe-acquisition costs. The 10 g starting budget is unconfirmed. Dandune is the scanner character
 on a different account; no trading-character, recipe or inventory capture establishes skills, recipe ownership or stock.
 
-Current-build Advice is available at `http://127.0.0.1:8080/dashboard` on this host. For remote browser access,
-forward the loopback listener with `ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open
-`http://127.0.0.1:18080/dashboard` locally. The
-dashboard's market, advice, and paper GET requests do not need an API token; write endpoints still require bearer
-authentication. Keep the server on its existing loopback binding. Select Advice, house `us-normal-alliance`,
-Alchemy and Tailoring, Crafting, Forecast and Live. The advice endpoint returned 200 after export 4 loaded; at
-sweep 546 (2026-11-13 08:22:10 UTC) it had 0 ranked and 38 unmeasured pathways.
-Unmeasured profit/hour assumes P(sale)=1 and is an upper bound, not income. The current interface filters professions
-but does not enforce the skill-225 planning ceiling. Default ranked crafting needs six usable hours of commodity
-demand and four independent two-hour sale trials; additional data alone does not solve grouped-gear sale identity.
-Matching-build research, current margins and early descriptive flow are in `.archive/advice-refresh-20261113/`.
+The new trading dashboard is implemented at `/dashboard` in the deployment candidate. After server rollout, open
+`http://127.0.0.1:8080/dashboard` on this host. For laptop access, forward the loopback listener with
+`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open `http://127.0.0.1:18080/dashboard` locally. Its
+latest-scan and trading-summary GETs are token-free and read-only; write endpoints still require bearer
+authentication. Keep the server on its existing loopback binding. The page
+defaults to house `us-normal-alliance`, shows scan status before strategy results, then up to ten positive-margin
+Alchemy 225 / Tailoring 150 strategies with a Tailoring planning cap of 225. It shows batch cost, if-sold net
+proceeds and profit, list price, observed market activity, reagents and access requirements. Ready-now strategies
+with observed activity rank before unmeasured trials and marked leveling targets. Shared cooldown rows are
+alternatives, not a combined portfolio forecast. The page links to the prior research UI at `/dashboard/advanced`.
+
+**Live read-only summary, 2026-11-13.** House `us-normal-alliance`, build `1.60.1.70938`, latest accepted sweep
+583 (17:47:03 UTC): 484 planned, 484 queried, 484 successful. The source summary calculation loaded ten strategies
+in 5.756 s; post-rollout HTTP verification remains pending.
+Potion of Predatory Senses (2 crafts / 2 units) showed 3,238 copper cost, 10,885 copper net proceeds if all
+outputs sell, 7,647 copper if-sold profit, and 12.57 observed listing-depletion units/hour. Shadow Oil (4 crafts /
+8 units) showed 8,237 copper cost, 12,478 copper net proceeds, 4,241 copper if-sold profit, and 49.17 observed
+units/hour. Listing depletion is not confirmed sales; sale probability stays unknown. The assumed 10 g budget,
+recipe ownership, and excluded acquisition/leveling costs are called out in the page. Source evidence is in
+`.archive/dashboard-trading-20261113/live-source-summary.json` and `live-source-check.log`.
 
 ## Open follow-ups
 
 - **Tailoring through 225:** fifteen additional eligible output IDs lack catalog coverage, including Runecloth,
   Brightcloth, Ghostweave and Earthenweave pieces. They are unknown price-discovery opportunities, not negative
-  margins; the current shortlist uses observed outputs only. The matching-build census records the gaps.
+  margins; the dashboard includes only outputs with usable market evidence. The matching-build census records the gaps.
 
-- **Scan catalog follow-up:** revision 6 has one accepted full 70938 sweep. Measure additional complete sweeps
-  before characterizing runtime. The six-sweep cold rotation provides periodic price discovery only and cannot supply
+- **Scan catalog follow-up:** the first qualifying full 70938 sweep was 538; the latest accepted sweep is 583, with
+  a multi-sweep history available for turnover analysis. At 18:28 UTC on 2026-11-13, `crowley-scan` had recovered
+  after desktop unlock and was alive, waiting/running a sweep without a fault; the first newly accepted post-unlock
+  sweep is still pending. Use accumulated accepted-sweep durations before claiming a current runtime p95. The
+  six-sweep cold rotation provides periodic price discovery only and cannot supply
   gap-free books with gaps of 21 minutes or less for P(sale). This first sweep did not query the three new Tailoring
   outputs, so their live eligibility remains unverified. Evaluating a selected eligible commodity with such evidence
   would require a separately reviewed promotion into a stable hot cohort; no promotion is included here. Grouped gear

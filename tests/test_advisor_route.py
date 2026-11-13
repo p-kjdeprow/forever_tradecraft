@@ -15,7 +15,6 @@ from crowley.advisor import service
 from crowley.advisor.cache import AdviceCache
 from crowley.advisor.model import OptionError
 from crowley.core.errors import MarketDataNotFound
-from crowley.server.config import ServerSettings, get_settings
 from crowley.server.deps import require_token
 from crowley.server.routes import advice as advice_route
 from tests.test_advisor import BUILD, HOUSE, SELLER, make_inputs, state_of
@@ -224,17 +223,17 @@ def test_latest_sweep_route_maps_missing_sweep_house_errors_and_malformed_key(ha
     assert unknown.status_code == 404
 
 
-def test_latest_sweep_route_requires_authentication(harness, monkeypatch):
-    overrides = harness.client.app.dependency_overrides
-    overrides.pop(require_token)
-    monkeypatch.setitem(
-        overrides,
-        get_settings,
-        lambda: ServerSettings(database_url="postgresql://unused", api_token="test-token", host="test"),
-    )
-    response = harness.client.get(f"/v1/houses/{HOUSE}/sweeps/latest")
-    assert response.status_code == 401
-    assert harness.pool.opened == 0
+def test_latest_sweep_route_is_public_and_does_not_load_advice(harness):
+    response = harness.client.get(f"/v1/houses/{HOUSE}/sweeps/latest", headers={"Authorization": ""})
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "house": HOUSE,
+        "sweep_id": harness.sweep,
+        "finished_epoch": 1_000_000.0,
+        "client_build": BUILD,
+    }
+    assert harness.pool.opened == 1
+    assert harness.loads == []
 
 
 def test_unknown_profession_from_the_loader_is_400(harness):

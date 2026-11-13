@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Crowley · Crafting board</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f5f2ea;
+      --panel: #fffefa;
+      --text: #24221e;
+      --muted: #676158;
+      --line: #d9d2c7;
+      --accent: #8a5a00;
+      --accent-soft: #f5e7c4;
+      --good: #176b3a;
+      --warn: #795500;
+      --bad: #a42e24;
+      --shadow: 0 2px 12px #3c2d1714;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #171614; --panel: #24221e; --text: #f2eee6; --muted: #bdb5a8;
+        --line: #4b463e; --accent: #e5b64e; --accent-soft: #58451f;
+        --good: #76d39c; --warn: #edc36b; --bad: #ff8d80; --shadow: 0 2px 12px #0005;
+      }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, sans-serif; }
+    header, main { max-width: 1180px; margin: 0 auto; padding: 1rem; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin-bottom: .15rem; font-size: clamp(1.45rem, 4vw, 2rem); }
+    h2 { margin-bottom: .2rem; font-size: 1.2rem; }
+    h3 { margin-bottom: .35rem; font-size: 1.05rem; }
+    p { margin-bottom: .45rem; }
+    a { color: var(--accent); font-weight: 650; }
+    .muted, small { color: var(--muted); }
+    .header-links { display: flex; align-items: center; gap: 1rem; white-space: nowrap; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: .7rem; box-shadow: var(--shadow); padding: 1rem; }
+    .scan-panel { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1.2rem; }
+    .scan-title { min-width: 14rem; }
+    .scan-title strong { display: block; }
+    .scan-counts { display: flex; flex-wrap: wrap; gap: .35rem .9rem; color: var(--muted); }
+    .scan-state { color: var(--muted); }
+    .scan-state.stale { color: var(--warn); font-weight: 700; }
+    .scan-state.error, .error { color: var(--bad); }
+    .scan-state.fresh { color: var(--good); }
+    .main-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin: 1.2rem 0 .65rem; }
+    .profile { color: var(--muted); text-align: right; }
+    .summary-note { color: var(--muted); margin: .3rem 0 .9rem; }
+    .status { min-height: 1.45rem; color: var(--muted); }
+    .status.error { font-weight: 650; }
+    .cards { display: grid; grid-template-columns: 1fr; gap: .75rem; }
+    .strategy { min-width: 0; }
+    .strategy-head { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+    .strategy-name { min-width: 0; }
+    .strategy-name h3 { overflow-wrap: anywhere; }
+    .rank { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: .25rem; }
+    .badge { display: inline-block; border-radius: 99px; padding: .1rem .5rem; margin: 0 .25rem .2rem 0; font-size: .78rem; font-weight: 700; white-space: nowrap; }
+    .badge.level { color: var(--warn); background: var(--accent-soft); }
+    .badge.ready { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
+    .numbers { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .6rem; margin: .75rem 0; }
+    .metric { min-width: 0; border-left: 2px solid var(--line); padding-left: .55rem; }
+    .metric-label { display: block; color: var(--muted); font-size: .8rem; }
+    .metric-value { display: block; font-size: 1.03rem; font-weight: 750; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+    .metric.profit .metric-value { color: var(--good); }
+    .evidence { color: var(--muted); }
+    .evidence strong { color: var(--text); }
+    details { border-top: 1px solid var(--line); padding-top: .55rem; margin-top: .6rem; }
+    summary { cursor: pointer; font-weight: 650; }
+    .detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; margin-top: .6rem; }
+    .detail-block { min-width: 0; }
+    .detail-block h4 { font-size: .83rem; margin: 0 0 .25rem; color: var(--muted); }
+    .detail-block ul { margin: 0; padding-left: 1.2rem; }
+    .detail-block li { margin: .15rem 0; overflow-wrap: anywhere; }
+    .empty, .loading { color: var(--muted); padding: 1rem 0; }
+    .notes { margin: 1rem 0; color: var(--muted); font-size: .9rem; }
+    .house-change { margin-top: 1rem; color: var(--muted); font-size: .9rem; }
+    .house-change summary { display: inline-block; }
+    .house-form { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .4rem; }
+    input, button { min-height: 2.3rem; border: 1px solid var(--line); border-radius: .4rem; padding: .35rem .6rem; font: inherit; background: var(--panel); color: var(--text); }
+    button { cursor: pointer; font-weight: 650; }
+    button:hover, button:focus-visible, input:focus-visible { border-color: var(--accent); }
+    .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+    @media (min-width: 760px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } .strategy:first-child { grid-column: 1 / -1; } }
+    @media (max-width: 760px) { .numbers { grid-template-columns: repeat(2, minmax(0, 1fr)); } .metric.profit { grid-column: span 2; } }
+    @media (max-width: 540px) {
+      header { align-items: flex-start; flex-direction: column; }
+      header, main { padding: .7rem; }
+      .header-links { white-space: normal; }
+      .main-heading { align-items: flex-start; flex-direction: column; gap: .25rem; }
+      .profile { text-align: left; }
+      .panel { padding: .75rem; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .strategy-head { flex-direction: column; gap: .25rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Crowley crafting board</h1>
+      <p class="muted">Current auction opportunities · read only</p>
+    </div>
+    <nav class="header-links" aria-label="Other dashboard views">
+      <a href="/dashboard/advanced">Advanced research &amp; paper runs</a>
+    </nav>
+  </header>
+  <main>
+    <section class="panel scan-panel" aria-labelledby="scan-heading">
+      <div class="scan-title">
+        <strong id="scan-heading">Latest scan</strong>
+        <time id="scan-time" datetime="">Loading latest scan…</time>
+        <div id="scan-age" class="scan-state" aria-live="polite"></div>
+      </div>
+      <div id="scan-counts" class="scan-counts" aria-label="Scan counts">
+        <span>Query counts load with market summary</span>
+      </div>
+    </section>
+
+    <div class="main-heading">
+      <div>
+        <h2>Top 10 crafting strategies</h2>
+        <p class="muted">Batches sized from observed market depth and the assumed 10 g budget.</p>
+      </div>
+      <div id="profile" class="profile">Alchemy 225 · Tailoring 150 (planning through 225) · 10 g assumed</div>
+    </div>
+    <p class="summary-note">If a listed batch sells at its target: proceeds are after the auction house cut; cost includes materials and a 12-hour deposit. Recipe and leveling costs are excluded.</p>
+    <div id="status" class="status" role="status" aria-live="polite">Loading market summary…</div>
+    <section id="opportunities" class="cards" aria-label="Crafting opportunities" aria-live="polite"></section>
+    <p id="notes" class="notes"></p>
+
+    <details class="house-change">
+      <summary>Change auction house</summary>
+      <form id="house-form" class="house-form">
+        <label class="visually-hidden" for="house-key">Auction house key</label>
+        <input id="house-key" name="house" type="text" value="us-normal-alliance" autocomplete="off" required aria-label="Auction house key">
+        <button type="submit">Load house</button>
+      </form>
+    </details>
+  </main>
+  <script>
+    "use strict";
+    /* TRADING PURE LOGIC START */
+    const DEFAULT_HOUSE = "us-normal-alliance";
+    const POLL_MS = 60_000;
+    const STALE_SECONDS = 45 * 60;
+    const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+    function objectValue(value, label) {
+      if (value === null || Array.isArray(value) || typeof value !== "object") throw new Error(`${label} must be an object`);
+      return value;
+    }
+    function integerValue(value, label, minimum = 0) {
+      if (!Number.isSafeInteger(value) || value < minimum) throw new Error(`${label} must be an integer >= ${minimum}`);
+      return value;
+    }
+    function exactRational(value, label = "money") {
+      if (typeof value !== "string" || !/^-?\d+(?:\/\d+)?$/.test(value)) throw new Error(`${label} must be an exact copper string`);
+      const [nText, dText = "1"] = value.split("/");
+      const numerator = BigInt(nText);
+      const denominator = BigInt(dText);
+      if (denominator <= 0n) throw new Error(`${label} denominator must be positive`);
+      return { numerator, denominator };
+    }
+    function formatCopper(value, rounding = "floor") {
+      const amount = typeof value === "string" ? exactRational(value) : value;
+      const numerator = amount.numerator;
+      const denominator = amount.denominator;
+      let wholeCopper = numerator / denominator;
+      const remainder = numerator % denominator;
+      if (remainder !== 0n) {
+        if (rounding === "ceil") {
+          if (numerator > 0n) wholeCopper += 1n;
+        } else if (numerator < 0n) wholeCopper -= 1n;
+      }
+      const negative = wholeCopper < 0n;
+      if (negative) wholeCopper = -wholeCopper;
+      const gold = wholeCopper / 10000n;
+      const silver = (wholeCopper % 10000n) / 100n;
+      const copper = wholeCopper % 100n;
+      const parts = [];
+      if (gold) parts.push(`${gold}g`);
+      if (silver) parts.push(`${silver}s`);
+      if (copper || (!gold && !silver)) parts.push(`${copper}c`);
+      return `${negative ? "−" : ""}${parts.join(" ")}`;
+    }
+    function validateLatest(value, expectedHouse) {
+      objectValue(value, "latest sweep");
+      if (value.house !== expectedHouse) throw new Error("latest sweep belongs to a different house");
+      if (typeof value.sweep_id !== "number") throw new Error("latest sweep.sweep_id is invalid");
+      integerValue(value.sweep_id, "latest sweep.sweep_id", 1);
+      if (typeof value.finished_epoch !== "number" || !Number.isFinite(value.finished_epoch) || value.finished_epoch < 0) throw new Error("latest sweep.finished_epoch is invalid");
+      if (!Number.isFinite(new Date(value.finished_epoch * 1000).getTime())) throw new Error("latest sweep.finished_epoch is invalid");
+      if (typeof value.client_build !== "string" || !value.client_build) throw new Error("latest sweep.client_build is invalid");
+      return { house: value.house, sweep_id: value.sweep_id, finished_epoch: value.finished_epoch, client_build: value.client_build };
+    }
+    function validateSummary(value, latest) {
+      objectValue(value, "trading summary");
+      if (value.house !== latest.house || value.client_build !== latest.client_build) throw new Error("trading summary belongs to a different house or build");
+      integerValue(value.sweep_id, "sweep_id", 1);
+      if (typeof value.finished_epoch !== "number" || !Number.isFinite(value.finished_epoch) || value.finished_epoch < latest.finished_epoch) throw new Error("trading summary is older than the latest scan");
+      if (value.sweep_id < latest.sweep_id || (value.sweep_id === latest.sweep_id && value.finished_epoch !== latest.finished_epoch)) throw new Error("trading summary does not match the latest scan");
+      const scan = objectValue(value.scan, "scan");
+      const planned = integerValue(scan.planned, "scan.planned");
+      const queried = integerValue(scan.queried, "scan.queried");
+      const successful = integerValue(scan.successful, "scan.successful");
+      if (queried > planned || successful > queried) throw new Error("scan counts are inconsistent");
+      const profile = objectValue(value.profile, "profile");
+      if (profile.alchemy !== 225 || profile.tailoring !== 150 || profile.tailoring_planning_cap !== 225 || profile.budget_copper !== 100000 || profile.recipes_assumed_owned !== true) throw new Error("trading summary profile does not match the dashboard profile");
+      if (!Array.isArray(value.opportunities)) throw new Error("opportunities must be an array");
+      const opportunities = value.opportunities.map((raw, index) => {
+        const item = objectValue(raw, `opportunities[${index}]`);
+        for (const key of ["spell_id", "item_id", "required_skill", "crafts", "quantity", "price_age_seconds", "cooldown_seconds"]) {
+          if (item[key] !== null) integerValue(item[key], `opportunities[${index}].${key}`);
+        }
+        if (typeof item.name !== "string" || !item.name || !["alchemy", "tailoring"].includes(item.profession) || typeof item.skill_note !== "string") throw new Error(`opportunities[${index}] has invalid identity`);
+        if (typeof item.needs_leveling !== "boolean") throw new Error(`opportunities[${index}].needs_leveling is invalid`);
+        if (item.cooldown_group != null && typeof item.cooldown_group !== "string") throw new Error(`opportunities[${index}].cooldown_group is invalid`);
+        const unitPrice = exactRational(item.unit_list_price, `opportunities[${index}].unit_list_price`);
+        const cost = exactRational(item.cost, `opportunities[${index}].cost`);
+        const proceeds = exactRational(item.sale_proceeds, `opportunities[${index}].sale_proceeds`);
+        const profit = exactRational(item.profit, `opportunities[${index}].profit`);
+        if (unitPrice.numerator < 0n || cost.numerator < 0n || proceeds.numerator < 0n || profit.numerator < 0n) throw new Error(`opportunities[${index}] contains negative trading amounts`);
+        if ((proceeds.numerator * cost.denominator - cost.numerator * proceeds.denominator) * profit.denominator !== profit.numerator * proceeds.denominator * cost.denominator) throw new Error(`opportunities[${index}].profit does not equal proceeds minus cost`);
+        if (item.market_units_per_hour !== null && (typeof item.market_units_per_hour !== "number" || !Number.isFinite(item.market_units_per_hour) || item.market_units_per_hour < 0)) throw new Error(`opportunities[${index}].market_units_per_hour is invalid`);
+        if (item.usable_hours !== null && (typeof item.usable_hours !== "number" || !Number.isFinite(item.usable_hours) || item.usable_hours < 0)) throw new Error(`opportunities[${index}].usable_hours is invalid`);
+        if (typeof item.volume_status !== "string" || typeof item.evidence_label !== "string") throw new Error(`opportunities[${index}] has invalid evidence`);
+        if (!Array.isArray(item.reagents)) throw new Error(`opportunities[${index}].reagents must be an array`);
+        for (const [reagentIndex, rawReagent] of item.reagents.entries()) {
+          const reagent = objectValue(rawReagent, `opportunities[${index}].reagents[${reagentIndex}]`);
+          if (typeof reagent.name !== "string" || !reagent.name || !["ah", "vendor"].includes(reagent.source)) throw new Error(`opportunities[${index}].reagents[${reagentIndex}] has invalid identity`);
+          integerValue(reagent.quantity, `opportunities[${index}].reagents[${reagentIndex}].quantity`, 1);
+          exactRational(reagent.cost, `opportunities[${index}].reagents[${reagentIndex}].cost`);
+          if (reagent.bundle_quantity != null) integerValue(reagent.bundle_quantity, `opportunities[${index}].reagents[${reagentIndex}].bundle_quantity`, 1);
+        }
+        objectValue(item.requirements, `opportunities[${index}].requirements`);
+        return item;
+      });
+      return { ...value, scan: { planned, queried, successful }, opportunities: opportunities.slice(0, 10) };
+    }
+    function scanAge(latest, nowEpoch = Date.now() / 1000) {
+      const seconds = Math.max(0, Math.floor(nowEpoch - latest.finished_epoch));
+      const minutes = Math.floor(seconds / 60);
+      const age = minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`;
+      return { age, stale: seconds > STALE_SECONDS };
+    }
+    /* TRADING PURE LOGIC END */
+
+    (() => {
+      const $ = (id) => document.getElementById(id);
+      const state = {
+        house: DEFAULT_HOUSE, latest: null, summary: null, latestInFlight: false, summaryInFlight: false,
+        generation: 0, summaryGeneration: 0, summaryRetryKey: null, priceAgeEntries: [], interval: null,
+      };
+      const el = (tag, text = "", className = "") => {
+        const node = document.createElement(tag);
+        if (text !== "") node.textContent = String(text);
+        if (className) node.className = className;
+        return node;
+      };
+      const append = (parent, ...children) => { for (const child of children) parent.appendChild(child); return parent; };
+      function setStatus(message, isError = false) {
+        $("status").textContent = message;
+        $("status").className = isError ? "status error" : "status";
+      }
+      function renderLatest(latest) {
+        state.latest = latest;
+        const time = $("scan-time");
+        const date = new Date(latest.finished_epoch * 1000);
+        time.dateTime = date.toISOString();
+        time.textContent = date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+        renderAge();
+      }
+      function renderAge() {
+        const node = $("scan-age");
+        if (!state.latest) return;
+        const age = scanAge(state.latest);
+        node.textContent = age.stale ? `Stale · ${age.age}. Scanner may be offline.` : `Sweep #${state.latest.sweep_id} · ${age.age}`;
+        node.className = age.stale ? "scan-state stale" : "scan-state fresh";
+      }
+      function updatePriceAges() {
+        const now = Date.now() / 1000;
+        for (const entry of state.priceAgeEntries) {
+          if (entry.ageAtScan === null) entry.node.textContent = "Price age unknown";
+          else {
+            const ageSeconds = Math.max(0, entry.ageAtScan + now - entry.finishedEpoch);
+            entry.node.textContent = `Price age ~${Math.floor(ageSeconds / 60)} min`;
+          }
+        }
+      }
+      function renderCounts(scan) {
+        const counts = $("scan-counts");
+        counts.replaceChildren();
+        append(counts,
+          el("span", `Planned ${scan.planned}`),
+          el("span", `Queried ${scan.queried}`),
+          el("span", `Successful ${scan.successful}`));
+      }
+      function metric(label, value, className = "") {
+        const box = el("div", "", `metric ${className}`.trim());
+        append(box, el("span", label, "metric-label"), el("span", value, "metric-value"));
+        return box;
+      }
+      function safeMoney(value, rounding = "floor") { return formatCopper(value, rounding); }
+      function requirementsText(requirements) {
+        const bits = [];
+        if (Array.isArray(requirements.tools) && requirements.tools.length) bits.push("Recipe-specific tools required — check recipe");
+        if (Array.isArray(requirements.tool_categories) && requirements.tool_categories.length) bits.push("Crafting station or category required — check recipe");
+        if (requirements.focus) bits.push("Crafting focus required — check recipe");
+        return bits.length ? bits : ["No additional access requirements reported"];
+      }
+      function cooldownText(item) {
+        if (!item.cooldown_seconds) return null;
+        const minutes = Math.ceil(item.cooldown_seconds / 60);
+        const days = Math.floor(minutes / (24 * 60));
+        const duration = days === 0 ? `${minutes} min` : `${days} d${minutes % (24 * 60) ? ` ${minutes % (24 * 60)} min` : ""}`;
+        return item.cooldown_group
+          ? `Cooldown: ${duration} · shared cooldown group: ${item.cooldown_group}`
+          : `Cooldown: ${duration}`;
+      }
+      function renderOpportunity(item, index, summaryFinishedEpoch) {
+        const card = el("article", "", "panel strategy");
+        const title = el("div", "", "strategy-head");
+        const name = el("div", "", "strategy-name");
+        const heading = el("h3");
+        append(heading, el("span", `#${index + 1}`, "rank"), document.createTextNode(item.name));
+        append(name, heading);
+        const profession = el("div");
+        append(profession,
+          el("span", item.profession, "badge neutral"),
+          el("span", item.skill_note, item.needs_leveling ? "badge level" : "badge ready"));
+        if (item.needs_leveling) append(profession, el("span", "Leveling target", "badge level"));
+        else append(profession, el("span", "Ready at current skill", "badge ready"));
+        append(title, name, profession);
+
+        const numbers = el("div", "", "numbers");
+        append(numbers,
+          metric("Make / list quantity", `${item.crafts} crafts · ${item.quantity} units`),
+          metric("Batch cost", safeMoney(item.cost, "ceil")),
+          metric("Sale proceeds", safeMoney(item.sale_proceeds, "floor")),
+          metric("Net profit if all sell", safeMoney(item.profit, "floor"), "profit"),
+          metric("List price each", safeMoney(item.unit_list_price)));
+
+        const evidence = el("p", "", "evidence");
+        if (item.volume_status === "observed_activity" && item.market_units_per_hour !== null) {
+          const usable = item.usable_hours === null ? "" : ` · ${item.usable_hours} usable h`;
+          const activity = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3, useGrouping: false }).format(item.market_units_per_hour);
+          append(evidence,
+            document.createTextNode("Market activity: "),
+            el("strong", `${activity} units/h`),
+            document.createTextNode(`${usable} · ${item.evidence_label}. Sales are unconfirmed.`));
+        } else {
+          append(evidence,
+            document.createTextNode("Market activity: "),
+            el("strong", "Turnover unknown"),
+            document.createTextNode(" · no sale-rate estimate. This is an if-sold margin, not a sales forecast."));
+        }
+        const priceAge = el("span", "", "price-age");
+        state.priceAgeEntries.push({ node: priceAge, ageAtScan: item.price_age_seconds, finishedEpoch: summaryFinishedEpoch });
+        append(evidence, document.createTextNode(" · "), priceAge);
+        updatePriceAges();
+
+        const details = el("details");
+        append(details, el("summary", "Reagents and access requirements"));
+        const grid = el("div", "", "detail-grid");
+        const reagents = el("section", "", "detail-block");
+        append(reagents, el("h4", "Reagents"));
+        const list = el("ul");
+        if (!item.reagents.length) append(list, el("li", "No reagents listed"));
+        for (const reagent of item.reagents) {
+          const source = reagent.source === "vendor" ? "vendor" : "auction house";
+          const bundle = source === "vendor" && reagent.bundle_quantity > reagent.quantity
+            ? `Need ${reagent.quantity} · buy ${reagent.bundle_quantity} vendor bundle`
+            : `×${reagent.quantity} · ${source}`;
+          append(list, el("li", `${reagent.name} · ${bundle} · ${safeMoney(reagent.cost, "ceil")}`));
+        }
+        append(reagents, list);
+        const access = el("section", "", "detail-block");
+        append(access, el("h4", "Access requirements"));
+        const accessList = el("ul");
+        for (const requirement of requirementsText(item.requirements)) append(accessList, el("li", requirement));
+        const cooldown = cooldownText(item);
+        if (cooldown) append(accessList, el("li", cooldown));
+        append(access, accessList);
+        append(grid, reagents, access);
+        append(details, grid);
+        append(card, title, numbers, evidence, details);
+        return card;
+      }
+      function renderSummary(summary) {
+        renderCounts(summary.scan);
+        state.priceAgeEntries = [];
+        const host = $("opportunities");
+        host.replaceChildren();
+        if (summary.opportunities.length === 0) {
+          host.appendChild(el("p", "No qualifying positive-margin opportunities were returned for this scan.", "panel empty"));
+          setStatus("No strategies to show for the latest scan.");
+        } else {
+          summary.opportunities.forEach((item, index) => host.appendChild(renderOpportunity(item, index, summary.finished_epoch)));
+          setStatus(`Showing ${summary.opportunities.length} of up to 10 qualifying strategies. Refreshes every 60 seconds when a new scan arrives.`);
+        }
+        $("notes").replaceChildren();
+        for (const note of summary.notes || []) $("notes").appendChild(el("span", note));
+        state.summary = summary;
+      }
+      async function getJson(path) {
+        const response = await fetch(path);
+        if (!response.ok) throw new Error(`Request failed (${response.status})`);
+        return response.json();
+      }
+      async function loadSummary(latest, generation) {
+        if (state.summaryInFlight || generation !== state.generation) return;
+        state.summaryInFlight = true;
+        const request = ++state.summaryGeneration;
+        setStatus("Loading crafting strategies for the latest scan…");
+        try {
+          const summary = validateSummary(await getJson(`/v1/houses/${encodeURIComponent(state.house)}/trading-summary`), latest);
+          if (generation !== state.generation || request !== state.summaryGeneration || !state.latest) return;
+          if (summary.sweep_id < state.latest.sweep_id) return;
+          if (summary.sweep_id > state.latest.sweep_id) renderLatest({ house: summary.house, sweep_id: summary.sweep_id, finished_epoch: summary.finished_epoch, client_build: summary.client_build });
+          renderSummary(summary);
+        } catch (error) {
+          if (generation !== state.generation || request !== state.summaryGeneration) return;
+          setStatus(`Could not load crafting strategies: ${error.message}`, true);
+          if (!state.summary) $("opportunities").replaceChildren(el("p", "The latest scan is available above. Strategy data will retry when the next scan is checked.", "panel empty"));
+        } finally {
+          state.summaryInFlight = false;
+          const current = state.latest;
+          const superseded = generation !== state.generation || !current || current.sweep_id !== latest.sweep_id || current.house !== latest.house;
+          if (superseded && current && current.house === state.house && (!state.summary || state.summary.sweep_id !== current.sweep_id)) {
+            const retryKey = `${current.house}:${current.client_build}:${current.sweep_id}`;
+            if (state.summaryRetryKey !== retryKey) {
+              state.summaryRetryKey = retryKey;
+              void loadSummary(current, state.generation);
+            }
+          }
+        }
+      }
+      async function pollLatest() {
+        if (state.latestInFlight) return;
+        state.latestInFlight = true;
+        const generation = state.generation;
+        const house = state.house;
+        try {
+          const latest = validateLatest(await getJson(`/v1/houses/${encodeURIComponent(house)}/sweeps/latest`), house);
+          if (generation !== state.generation || house !== state.house) return;
+          if (state.latest && state.latest.house === house && state.latest.client_build === latest.client_build &&
+            (latest.sweep_id < state.latest.sweep_id || (latest.sweep_id === state.latest.sweep_id && latest.finished_epoch < state.latest.finished_epoch))) return;
+          const changed = !state.latest || state.latest.sweep_id !== latest.sweep_id || state.latest.client_build !== latest.client_build;
+          renderLatest(latest);
+          if (changed) {
+            if (state.summaryInFlight) state.summaryGeneration += 1;
+            state.summary = null;
+            state.summaryRetryKey = null;
+            state.priceAgeEntries = [];
+            $("scan-counts").replaceChildren(el("span", "Query counts load with market summary"));
+            $("opportunities").replaceChildren(el("p", "Loading market data…", "panel loading"));
+            void loadSummary(latest, generation);
+          } else if (!state.summary || state.summary.sweep_id !== latest.sweep_id) {
+            void loadSummary(latest, generation);
+          }
+        } catch (error) {
+          if (generation !== state.generation) return;
+          $("scan-age").textContent = `Could not refresh scan: ${error.message}`;
+          $("scan-age").className = "scan-state error";
+          if (!state.latest) setStatus(`Could not load the latest scan: ${error.message}`, true);
+          else setStatus(`Scan refresh failed; showing the last loaded scan. ${error.message}`, true);
+        } finally {
+          state.latestInFlight = false;
+          if (generation !== state.generation) void pollLatest();
+        }
+      }
+      function changeHouse(value) {
+        const house = value.trim();
+        if (!house || !/^[a-z0-9-]+$/.test(house)) {
+          setStatus("Enter a house key using letters, numbers, and hyphens.", true);
+          return;
+        }
+        if (house === state.house) return;
+        state.generation += 1;
+        state.summaryGeneration += 1;
+        state.house = house;
+        state.latest = null;
+        state.summary = null;
+        state.summaryRetryKey = null;
+        state.priceAgeEntries = [];
+        $("scan-time").textContent = "Loading latest scan…";
+        $("scan-time").dateTime = "";
+        $("scan-age").textContent = "";
+        $("scan-age").className = "scan-state";
+        $("scan-counts").replaceChildren(el("span", "Query counts load with market summary"));
+        $("opportunities").replaceChildren(el("p", "Loading market data…", "panel loading"));
+        $("notes").replaceChildren();
+        setStatus(`Loading ${house}…`);
+        pollLatest();
+      }
+      $("house-form").addEventListener("submit", (event) => {
+        event.preventDefault();
+        changeHouse($("house-key").value);
+      });
+      $("house-key").value = DEFAULT_HOUSE;
+      $("opportunities").appendChild(el("p", "Loading market data…", "panel loading"));
+      pollLatest();
+      state.interval = window.setInterval(() => {
+        renderAge();
+        updatePriceAges();
+        pollLatest();
+      }, POLL_MS);
+      window.__crowleyTradingDashboardTest = { state, pollLatest, loadSummary, changeHouse, renderLatest, renderSummary, validateLatest, validateSummary };
+    })();
+  </script>
+</body>
+</html>

@@ -9,12 +9,13 @@ Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
 
 Make gold on the WoW Forever auction house with several independently profitable strategies:
 
-1. **Collect** the market: catalog revision 7 is deployed for client build 1.60.1.70938 with 806 active IDs
+1. **Collect** the market: revision 7 is the last deployed runtime plan for client build 1.60.1.70938 with 806 active IDs
    (488 core, 1 discovery and 317 cold), a 900 s cadence and 20 retained distinct unit-price levels per item;
    never mix houses or item identities (`itemKey`). Two full revision-7 sweeps now pass exact-set, successful-query,
    upload/ack-write and two-sweep cadence checks. Their 733 s and 626 s runtimes are two measurements, not a p95 or
    robust long-term guarantee. Twenty complete revision-6 sweeps (IDs 564–583) remain the broader historical runtime
-   baseline.
+   baseline. Revision 8 is prepared in source with all 806 active IDs (402 core, 0 discovery, 404 cold); it is
+   pending deployment and has no live qualification yet.
 2. **Model** it: demand, time-to-sale, price metrics, recipe economics from the client's own data.
 3. **Decide** with the trading engine (backtest, paper trading, queues).
 4. **Execute** through the guarded in-game addon executor (dry run unless doubly armed). No program drives the
@@ -36,6 +37,15 @@ Make gold on the WoW Forever auction house with several independently profitable
 ## Host state snapshot (2026-11-13)
 
 ### Scan catalog and runtime qualification
+
+**Revision 8 source candidate; deployment pending.** The source catalog, selected target and generated addon target
+now match candidate catalog hash `3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5` and plan hash
+`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. It preserves all 973 catalog entries and
+806 active IDs. The exact approved delta moves 87 hot IDs to cold, with 402 core, no discovery and 404 cold; no new
+exclusions are made. The 390 protected crafting IDs and 12 unresolved eligible dependencies remain hot. Six cold
+slices contain 68/68/67/67/67/67 items and plan 470/470/469/469/469/469 queries per sweep, 13.38% fewer on average
+than revision 7. Cadence, cap, slice count and depth remain unchanged. Local source checks passed; the candidate has
+not been deployed or runtime-qualified. The revision-7 receipts below document the last deployed runtime only.
 
 Revision 6 is the historical deployed baseline. It had 957 catalog entries and 790 active IDs (421 core, 1 discovery,
 368 cold), with a 900 s cadence, 750 s configured cap, six cold slices and retained depth 20. Its hashes were catalog

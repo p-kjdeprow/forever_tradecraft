@@ -1,15 +1,25 @@
 # Repeating scans: operator guide
 
+## Revision 8 source candidate (deployment pending)
+
+The source catalog and generated launch target are at revision 8; the last deployed and live-qualified runtime is
+still revision 7. Revision 8 preserves 806 active IDs with 402 core, no discovery and 404 cold. It moves 87 items
+from hot to cold, keeps the 390 known protected crafting IDs and 12 unresolved eligible dependencies hot, and adds
+no exclusions. The six cold slices contain 68/68/67/67/67/67 items, for 470/470/469/469/469/469 queries per
+sweep (13.38% fewer on average). Cadence, cap, slice count and retained depth are unchanged. The cost replay is an
+estimate, not a percentile; revision 8 has no live runtime measurements yet. Deployment is pending.
+
 `crowley-scan` (unit `crowley-scan.service`) is designed to keep WoW Forever in the world with the auction house open,
-so the addon's own 900 s timer can sweep its installed plan and the companion can upload each sweep. Revision 7 is
-deployed for measured native client build 1.60.1.70938: 488 core and 1 discovery item every sweep, plus one of six
+so the addon's own 900 s timer can sweep its installed plan and the companion can upload each sweep. The last
+deployed revision-7 plan is documented below as historical runtime proof for measured native client build
+1.60.1.70938: 488 core and 1 discovery item every sweep, plus one of six
 cold slices containing 52 or 53 items (806 active IDs total; 541 or 542 planned item queries per sweep). Package,
 generated addon target, server and companion `Data.lua` agree on catalog hash
 `06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e` and plan hash
 `49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`; the server is healthy on image
 `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`.
 
-At the current checkpoint both services are active, the revision-7 server is healthy, and the scanner has
+At the last verified revision-7 checkpoint both services were active, the revision-7 server was healthy, and the scanner had
 Stormwind/Dandune at the Auction House. Two full revision-7 sweeps passed exact-set and all-query-success checks,
 were saved and uploaded, and have independently captured acknowledgement writes. Sweep 586 (slice 3) ran
 2026-11-13 21:02:15–21:14:28 UTC (733 s); sweep 587 (slice 4) ran 21:17:15–21:27:41 UTC (626 s). Both used the

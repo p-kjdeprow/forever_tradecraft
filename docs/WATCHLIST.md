@@ -1,6 +1,23 @@
 # First run scan catalog
 
+## Revision 8 source candidate (deployment pending)
+
+The source catalog, selected target and generated addon target now contain the reviewed revision-8 candidate. Its
+catalog hash is `3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5`; its plan hash is
+`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. It preserves all 973 catalog entries and
+806 active IDs, with 402 core, no discovery pool and 404 cold. The 87 approved moves are hot-to-cold only; no item
+is newly excluded. The 390 known protected crafting IDs and 12 unresolved eligible dependencies remain hot.
+
+The candidate keeps the 900-second cadence, 750-second cap, six slices and price depth 20. Slice sizes are
+68/68/67/67/67/67, for 470/470/469/469/469/469 queries per sweep. That is 13.38% fewer queries on average than
+revision 7, while cold items remain in broad market discovery about every 90 minutes. Cost replays using sweeps
+586 and 587 estimate phase runtimes below the cap; these are scenario estimates, not percentiles or measured
+revision-8 runtimes. Local source checks passed. Deployment and revision-8 live qualification are pending.
+
 ## Revision 7 deployed plan (2026-11-13; two-sweep qualification complete)
+
+This is the last deployed runtime plan; its live receipts below are historical evidence for revision 7 and do not
+qualify revision 8.
 
 Catalog revision 7 is deployed for selected target build **1.60.1.70938**. The package, generated
 addon target, companion `Data.lua` and healthy server agree on the plan. The catalog contains

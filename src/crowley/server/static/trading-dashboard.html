@@ -103,7 +103,7 @@
   <header>
     <div>
       <h1>Crowley crafting board</h1>
-      <p class="muted">Current auction opportunities · read only</p>
+      <p class="muted">Positive observed turnover · read only</p>
     </div>
     <nav class="header-links" aria-label="Other dashboard views">
       <a href="/dashboard/advanced">Advanced research &amp; paper runs</a>
@@ -226,8 +226,6 @@
         const profit = exactRational(item.profit, `opportunities[${index}].profit`);
         if (unitPrice.numerator < 0n || cost.numerator < 0n || proceeds.numerator < 0n || profit.numerator < 0n) throw new Error(`opportunities[${index}] contains negative trading amounts`);
         if ((proceeds.numerator * cost.denominator - cost.numerator * proceeds.denominator) * profit.denominator !== profit.numerator * proceeds.denominator * cost.denominator) throw new Error(`opportunities[${index}].profit does not equal proceeds minus cost`);
-        if (item.market_units_per_hour !== null && (typeof item.market_units_per_hour !== "number" || !Number.isFinite(item.market_units_per_hour) || item.market_units_per_hour < 0)) throw new Error(`opportunities[${index}].market_units_per_hour is invalid`);
-        if (item.usable_hours !== null && (typeof item.usable_hours !== "number" || !Number.isFinite(item.usable_hours) || item.usable_hours < 0)) throw new Error(`opportunities[${index}].usable_hours is invalid`);
         if (typeof item.volume_status !== "string" || typeof item.evidence_label !== "string") throw new Error(`opportunities[${index}] has invalid evidence`);
         if (!Array.isArray(item.reagents)) throw new Error(`opportunities[${index}].reagents must be an array`);
         for (const [reagentIndex, rawReagent] of item.reagents.entries()) {
@@ -240,7 +238,12 @@
         objectValue(item.requirements, `opportunities[${index}].requirements`);
         return item;
       });
-      return { ...value, scan: { planned, queried, successful }, opportunities: opportunities.slice(0, 10) };
+      const measured = opportunities.filter((item) =>
+        item.volume_status === "observed_activity" &&
+        typeof item.market_units_per_hour === "number" && Number.isFinite(item.market_units_per_hour) && item.market_units_per_hour > 0 &&
+        typeof item.usable_hours === "number" && Number.isFinite(item.usable_hours) && item.usable_hours > 0
+      );
+      return { ...value, scan: { planned, queried, successful }, opportunities: measured.slice(0, 10) };
     }
     function scanAge(latest, nowEpoch = Date.now() / 1000) {
       const seconds = Math.max(0, Math.floor(nowEpoch - latest.finished_epoch));
@@ -346,19 +349,12 @@
           metric("List price each", safeMoney(item.unit_list_price)));
 
         const evidence = el("p", "", "evidence");
-        if (item.volume_status === "observed_activity" && item.market_units_per_hour !== null) {
-          const usable = item.usable_hours === null ? "" : ` · ${item.usable_hours} usable h`;
-          const activity = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3, useGrouping: false }).format(item.market_units_per_hour);
-          append(evidence,
-            document.createTextNode("Market activity: "),
-            el("strong", `${activity} units/h`),
-            document.createTextNode(`${usable} · ${item.evidence_label}. Sales are unconfirmed.`));
-        } else {
-          append(evidence,
-            document.createTextNode("Market activity: "),
-            el("strong", "Turnover unknown"),
-            document.createTextNode(" · no sale-rate estimate. This is an if-sold margin, not a sales forecast."));
-        }
+        const usable = ` · ${item.usable_hours} usable h`;
+        const activity = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3, useGrouping: false }).format(item.market_units_per_hour);
+        append(evidence,
+          document.createTextNode("Market activity: "),
+          el("strong", `${activity} units/h`),
+          document.createTextNode(`${usable} · ${item.evidence_label}. Sales are unconfirmed.`));
         const priceAge = el("span", "", "price-age");
         state.priceAgeEntries.push({ node: priceAge, ageAtScan: item.price_age_seconds, finishedEpoch: summaryFinishedEpoch });
         append(evidence, document.createTextNode(" · "), priceAge);
@@ -397,8 +393,8 @@
         const host = $("opportunities");
         host.replaceChildren();
         if (summary.opportunities.length === 0) {
-          host.appendChild(el("p", "No qualifying positive-margin opportunities were returned for this scan.", "panel empty"));
-          setStatus("No strategies to show for the latest scan.");
+          host.appendChild(el("p", "No profitable strategies currently meet the turnover requirements. Price-only opportunities are intentionally omitted; wait for complete scans with enough 2h/6h activity coverage.", "panel empty"));
+          setStatus("No profitable strategies meet the turnover requirements for the latest scan.");
         } else {
           summary.opportunities.forEach((item, index) => host.appendChild(renderOpportunity(item, index, summary.finished_epoch)));
           setStatus(`Showing ${summary.opportunities.length} of up to 10 qualifying strategies. Refreshes every 60 seconds when a new scan arrives.`);

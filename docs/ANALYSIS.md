@@ -182,14 +182,17 @@ authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tail
 targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
 - latest scan time and planned / queried / successful counts;
-- up to ten positive-margin strategies, with batch quantity, reagent costs, list price, 12-hour deposit, net
-  proceeds and if-sold profit;
-- observed listing activity or an explicit unknown-turnover state, with reagent and profession-access details;
+- up to ten profitable strategies only when qualified 2h/6h books show positive listing depletion, with batch
+  quantity, reagent costs, list price, 12-hour deposit, net proceeds and if-sold profit;
+- observed listing activity, reagent and profession-access details; unknown, zero, grouped, long-gap or
+  insufficient-coverage turnover is excluded from suggestions;
 - the assumed 10 g budget, recipe-ownership assumption and a link to Advanced research at `/dashboard/advanced`.
 
-Ready-now positive-margin strategies with observed activity sort before unmeasured trials and marked leveling targets.
-Rows sharing a cooldown group are alternatives; their rates are not additive. Profits assume every listed unit sells
-and are not expected income. Observed listing depletion is not confirmed sales, and sale probability remains unknown.
+Ready-now positive-margin strategies with observed activity sort before marked leveling targets. The empty state
+explains that no profitable strategies meet the turnover requirements and directs the user to wait for complete
+scans; the page does not suggest items from asking prices alone. Rows sharing a cooldown group are alternatives;
+their rates are not additive. Profits assume every listed unit sells and are not expected income. Observed listing
+depletion is not confirmed sales, and sale probability remains unknown.
 
 **Live HTTP check, 2026-11-13 18:33 UTC.** Deployed commit `a15d388` and image
 `e81b402cab34ef5e10bc8277877310463a7f6a7beba17f76a7f437a3d7ec8d1a` served the unauthenticated summary with

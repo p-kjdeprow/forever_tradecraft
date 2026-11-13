@@ -58,7 +58,8 @@ console.log(JSON.stringify({{
 
 def _item(index: int) -> dict:
     leveling = index == 1
-    observed = index == 0
+    unknown = index == 2
+    zero = index == 3
     return {
         "spell_id": 1250776 + index,
         "item_id": 123 + index,
@@ -73,16 +74,16 @@ def _item(index: int) -> dict:
         "cost": "6237/2" if index == 0 else "100",
         "sale_proceeds": "108851/10" if index == 0 else "200",
         "profit": "77666/10" if index == 0 else "100",
-        "market_units_per_hour": 12.57 if observed else None,
-        "volume_status": "observed_activity" if observed else "unknown",
-        "usable_hours": 5.25 if observed else None,
+        "market_units_per_hour": (12.57 if index == 0 else 750 if unknown else 0 if zero else 2.5),
+        "volume_status": "unknown" if unknown else "observed_activity",
+        "usable_hours": None if unknown else 5.25,
         "sale_probability": None,
-        "evidence_label": "Observed listing depletion; sales unconfirmed"
-        if observed
-        else "No usable activity evidence",
+        "evidence_label": "No usable activity evidence"
+        if unknown
+        else "Observed listing depletion; sales unconfirmed",
         "price_age_seconds": 60,
-        "cooldown_seconds": 3600 if index in (2, 3) else 0,
-        "cooldown_group": "transmute" if index in (2, 3) else None,
+        "cooldown_seconds": 3600 if index in (4, 5) else 0,
+        "cooldown_group": "transmute" if index in (4, 5) else None,
         "requirements": {
             "tools": ["RawToolId 5031"] if leveling else [],
             "tool_categories": ["CategoryId 2248"] if leveling else [],
@@ -141,6 +142,19 @@ def test_dashboard_loads_scan_first_caps_cards_and_refreshes_without_auth():
     summary3["opportunities"][0]["name"] = "Stale sweep only"
     summary4["opportunities"][0]["name"] = "Newest sweep"
     summary5["opportunities"][0]["name"] = "Latest summary wins"
+    empty_latest = {
+        "house": "other-house",
+        "sweep_id": 6,
+        "finished_epoch": 1_800_000_300,
+        "client_build": "1.60.1.70938",
+    }
+    empty_summary = _summary(6, 1_800_000_300, count=0)
+    empty_summary["house"] = "other-house"
+    no_coverage = _item(4)
+    no_coverage["usable_hours"] = None
+    nonfinite = _item(5)
+    nonfinite["market_units_per_hour"] = float("inf")
+    empty_summary["opportunities"] = [_item(2), _item(3), no_coverage, nonfinite]
     actual = _node(
         f"""
 const calls = [];
@@ -225,10 +239,21 @@ await delayedPoll;
 await settle();
 const latestRace = {{ summarySweep: scanAfterNewerSummary, finalSweep: dashboard.state.latest.sweep_id, age: nodes.get("scan-age").textContent, cards: nodes.get("opportunities").textContent }};
 global.fetch = () => Promise.resolve(reply({{}}, false, 404));
-dashboard.changeHouse("other-house");
+dashboard.changeHouse("bad-house");
 await settle();
 const error = {{ status: nodes.get("status").textContent, scanClass: nodes.get("scan-age").className }};
-console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep, priceAgeAfterClockAdvance, afterNewScan, retriedForNewest, raced, latestRace, error, intervalCallbackRegistered: typeof intervalCallback === "function" }}));
+global.fetch = (path) => Promise.resolve(reply(path.endsWith("/sweeps/latest") ? {json.dumps(empty_latest)} : {json.dumps(empty_summary)}));
+dashboard.changeHouse("other-house");
+await settle();
+const emptyTurnover = {{
+  scanTime: nodes.get("scan-time").textContent,
+  scanAge: nodes.get("scan-age").textContent,
+  counts: nodes.get("scan-counts").textContent,
+  cards: nodes.get("opportunities").textContent,
+  cardClass: nodes.get("opportunities").children[0]?.className,
+  status: nodes.get("status").textContent,
+}};
+console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep, priceAgeAfterClockAdvance, afterNewScan, retriedForNewest, raced, latestRace, error, emptyTurnover, intervalCallbackRegistered: typeof intervalCallback === "function" }}));
 }})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
 """
     )
@@ -251,7 +276,10 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep
     assert "77s 66c" in actual["rendered2"]["cards"]  # No decimal rounding can hide this profit.
     assert "12.6 units/h" in actual["rendered2"]["cards"]
     assert "Sales are unconfirmed" in actual["rendered2"]["cards"]
-    assert "Turnover unknown" in actual["rendered2"]["cards"]
+    assert "Turnover unknown" not in actual["rendered2"]["cards"]
+    assert "Item 11" in actual["rendered2"]["cards"]
+    assert "Item 2" not in actual["rendered2"]["cards"]
+    assert "Item 3" not in actual["rendered2"]["cards"]
     assert "Leveling target" in actual["rendered2"]["cards"]
     assert "Tailoring yellow by 205; check trainer before leveling" in actual["rendered2"]["cards"]
     assert "Recipe-specific tools required — check recipe" in actual["rendered2"]["cards"]
@@ -279,6 +307,16 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep
     assert "Latest summary wins" in actual["latestRace"]["cards"]
     assert actual["error"]["scanClass"] == "scan-state error"
     assert "404" in actual["error"]["status"]
+    assert actual["emptyTurnover"]["scanTime"]
+    assert "Sweep #6" in actual["emptyTurnover"]["scanAge"]
+    assert "Planned 484Queried 484Successful 483" in actual["emptyTurnover"]["counts"]
+    assert (
+        "No profitable strategies currently meet the turnover requirements"
+        in actual["emptyTurnover"]["cards"]
+    )
+    assert "Price-only opportunities are intentionally omitted" in actual["emptyTurnover"]["cards"]
+    assert actual["emptyTurnover"]["cardClass"] == "panel empty"
+    assert "meet the turnover requirements" in actual["emptyTurnover"]["status"]
     assert all(call.get("options") is None for call in actual["calls"])
 
 

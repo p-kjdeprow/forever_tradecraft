@@ -247,6 +247,7 @@ def test_cooldown_caps_ranking_flow_and_rows_expose_shared_group():
     assert rows[21]["cooldown_seconds"] == 3600
     assert rows[21]["cooldown_group"] == "shared transmute"
     assert any("share one timer" in note for note in result["notes"])
+    assert not any("unmeasured trials" in note for note in result["notes"])
 
 
 def test_tailoring_caps_distinguish_exact_rank_from_yellow_threshold():
@@ -283,7 +284,7 @@ def test_tailoring_caps_distinguish_exact_rank_from_yellow_threshold():
     assert 12 not in rows and 13 not in rows
 
 
-def test_long_gaps_and_grouped_item_books_leave_turnover_unknown():
+def test_long_gaps_and_grouped_item_books_are_excluded():
     recipe = _recipe(output_id=1000, reagent_id=2000)
     long_gap_inputs = _inputs(
         [recipe],
@@ -292,10 +293,7 @@ def test_long_gaps_and_grouped_item_books_leave_turnover_unknown():
         },
         facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
     )
-    long_gap = summary.build_trading_summary(long_gap_inputs)["opportunities"][0]
-    assert long_gap["market_units_per_hour"] is None
-    assert long_gap["sale_probability"] is None
-    assert long_gap["volume_status"] == "unknown"
+    assert summary.build_trading_summary(long_gap_inputs)["opportunities"] == []
 
     item_books = [_item_book(index, ASOF - 6 * 3600 + index * 900, grouped=True) for index in range(25)]
     grouped_inputs = _inputs(
@@ -303,10 +301,55 @@ def test_long_gaps_and_grouped_item_books_leave_turnover_unknown():
         item_books={1000: item_books},
         facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
     )
-    grouped = summary.build_trading_summary(grouped_inputs)["opportunities"][0]
-    assert grouped["market_units_per_hour"] is None
-    assert grouped["volume_status"] == "unknown"
-    assert grouped["sale_probability"] is None
+    assert summary.build_trading_summary(grouped_inputs)["opportunities"] == []
+
+
+def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
+    qualified_ids = range(1000, 1010)
+    unknown_ids = range(1010, 1022)
+    recipes = [
+        _recipe(spell_id=item_id, output_id=item_id, reagent_id=2000)
+        for item_id in (*qualified_ids, *unknown_ids)
+    ]
+    books = {item_id: _commodity_history(item_id, units_removed=1) for item_id in qualified_ids}
+    books.update(
+        {
+            item_id: [
+                Book(
+                    float(ASOF),
+                    [Group(f"high-ask-{item_id}", Fraction(1_000_000), 1, 1_000_000, 1)],
+                    None,
+                    item_id,
+                    583,
+                )
+            ]
+            for item_id in unknown_ids
+        }
+    )
+    facts = {item_id: ItemFacts(item_id, 7, None, None, 20, 2) for item_id in (*qualified_ids, *unknown_ids)}
+    facts[2000] = ItemFacts(2000, 1, 1, 1, 20, 0)
+
+    result = summary.build_trading_summary(_inputs(recipes, books=books, facts=facts))
+
+    assert len(result["opportunities"]) == 10
+    assert {row["item_id"] for row in result["opportunities"]} == set(qualified_ids)
+    assert all(row["volume_status"] == "observed_activity" for row in result["opportunities"])
+    assert all(row["market_units_per_hour"] > 0 for row in result["opportunities"])
+
+
+def test_complete_coverage_with_zero_depletion_is_excluded():
+    recipe = _recipe()
+    result = summary.build_trading_summary(
+        _inputs(
+            [recipe],
+            books={
+                1000: _commodity_history(1000, units_removed=0),
+            },
+            facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
+        )
+    )
+
+    assert result["opportunities"] == []
 
 
 def test_missing_output_or_reagent_prices_are_excluded_and_empty_summary_is_valid():

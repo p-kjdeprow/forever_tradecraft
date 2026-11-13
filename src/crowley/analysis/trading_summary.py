@@ -485,6 +485,8 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
         if output_fact is None or output_fact.bonding not in (0, 2, 3):
             continue
         activity = _activity(inputs, item_id, output_quote, list_price)
+        if activity.status != "observed_activity" or activity.rate is None or activity.rate <= 0:
+            continue
         result = _opportunity(inputs, recipe, eligibility, output_quote, activity, list_price)
         if result is None:
             continue
@@ -515,8 +517,9 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
             "Sale probability is unknown; grouped, stale, and long-gap evidence is excluded.",
             "Current listing targets undercut the lowest observed price by one copper. "
             "Tools, categories, and focus requirements are shown per recipe.",
-            "Ready-now positive-margin strategies with observed activity rank before unmeasured "
-            "trials and marked leveling targets; all skill planning stays within 225.",
+            "Only positive-margin opportunities with qualified, positive observed "
+            "listing depletion are shown; unknown or zero turnover is excluded. "
+            "All skill planning stays within 225.",
             "Recipes with the same cooldown group share one timer; rows are alternatives, not a "
             "combined portfolio forecast.",
         ],

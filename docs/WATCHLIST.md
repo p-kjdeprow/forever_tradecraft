@@ -1,14 +1,48 @@
 # First run scan catalog
 
-## Revision 6 source review and live qualification (2026-11-13)
+## Revision 7 source plan (prepared 2026-11-13; live verification pending)
 
-The reviewed repository source catalog is revision 6 for selected target build **1.60.1.70938**. It contains
+The source catalog is revision 7 for selected target build **1.60.1.70938**. It contains
+973 entries: 806 active (488 core, 1 discovery, 317 cold), 116 research and 51 excluded. The
+plan keeps the existing 900-second cadence, 750-second sweep cap, six cold slices and 20
+retained price levels. Each sweep plans 488 core + 1 discovery item and one cold slice of 52
+or 53 items, for 541–542 item queries. Its catalog hash is
+`06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e`; its plan hash is
+`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`.
+
+The matching export-4 census identifies 297 eligible fixed, client-fact tradeable Alchemy and
+Tailoring outputs through planning skill 225, plus 111 reagent graph IDs. Of the reagents, 91
+eligible auction-house inputs are already hot, 19 vendor-cost inputs remain excluded, and
+Bind-on-Pickup reagent 213378 is excluded. Revision 7 promotes all 165 existing cold outputs in this known-eligible set to core and adds
+the 15 previously missing outputs from export 4. Those 15 additions have client-facts status `ok`
+and bonding code 2 (Bind on Equip); live auction-house eligibility and sale activity remain
+unverified. Current margin was not used as an eligibility filter. Six further Alchemy outputs
+(9154, 9155, 9233, 12190, 17967 and 18294) were promoted for research coverage, and Gurubashi Mojo
+Madness (19931) was added as a seventh; their exported learning rank is unknown, so none of these
+seven is claimed craftable by skill 225. The five already-hot skill-unknown Alchemy outputs remain
+hot. All 12 skill-unknown outputs with known tradeable facts and their AH dependencies are protected
+from the capacity demotions.
+
+To keep the larger hot cohort within scan capacity, 120 hot items outside the protected output
+and reagent graphs move to cold. They remain active for periodic price discovery; this is a capacity
+rebalance, not a claim that those items are permanently unprofitable. The source change is not
+yet deployed, and no revision-7 sweep has been accepted.
+
+The capacity estimate replays each of 20 complete matching-build baseline sweeps (database
+sweeps 564–583) against all six revision-7 cold slices. The worst replay estimate is 690.5 s
+using median per-item query cost and 697.79 s under mean-cost sensitivity, below the 750 s cap.
+This is an estimate, not a measured revision-7 runtime; accepted full sweeps and two-sweep
+promotion verification remain pending.
+
+### Revision 6 deployed baseline and live qualification (2026-11-13)
+
+The deployed revision 6 baseline was for selected target build **1.60.1.70938**. It contained
 957 entries: 790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. The active
 plan keeps the existing 900-second cadence, 750-second sweep cap, six cold slices and 20 retained
 price levels. Each sweep plans 421 core + 1 discovery item and one cold slice of 61 or 62 items,
-for 483–484 planned item queries. The current source catalog hash is
+for 483–484 planned item queries. Revision 6 had catalog hash
 `082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147`; the current source plan hash
-is `d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`.
+was `d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`.
 
 The revision moves 57 hot recipe teaching items from discovery to cold. Their exact IDs are:
 
@@ -23,25 +57,24 @@ The revision moves 57 hot recipe teaching items from discovery to cold. Their ex
 
 Separately, Small Glowing Shard (11138) moves from core to cold.
 
-This keeps all 297 hot Alchemy/Tailoring recipe reagent/output IDs at their existing hot tier;
-the full client-export graph contains 829 such IDs. All existing active IDs and price history remain.
-The teaching items and 11138 stay active for periodic cold price coverage. No items are promoted
-or removed. Copper, tin, iron, silver, gold and Truesilver ores, tin bars, coal, Lesser Astral
-Essence and the existing Bow of Searing Arrows remain hot under their prior policies; the 115
-other-profession recipe-linked items also remain hot.
+This retained the revision-6 hot Alchemy/Tailoring IDs at their prior tiers before the matching
+export-4 skill-225 eligibility census. All active IDs and price history remained. The teaching
+items and 11138 stayed active for periodic cold price coverage. No items were promoted or
+removed in revision 6. Copper, tin, iron, silver, gold and Truesilver ores, tin bars, coal, Lesser Astral
+Essence and the existing Bow of Searing Arrows remained hot under their prior revision-6 policies;
+the 115 other-profession recipe-linked items also remained hot in revision 6.
 
-Three export-3 verified Tailoring outputs are admitted to cold for price discovery: **279943
+Three export-3 verified Tailoring outputs were admitted to cold for price discovery in revision 6: **279943
 Spinning Wheel**, **279972 Faction Banner**, and **279973 Faction Banner**. Their exact item facts
 come from client build 1.60.1.70888, report status `ok` and bonding code 0, and each has a fixed
 Tailoring output link. The selected target pin is now 1.60.1.70938 from a measured native frame;
 its matching recipe export is now loaded as export 4. This does not relabel the older admission
 facts. Catalog tradeability is client-marked only; live Auction House eligibility, turnover and
-profitability remain unverified. No BoP or unknown-fact item is admitted. Rich Purple Silk Shirt
-(4335) and Phoenix Bindings (210781) remain cold. Bow of Searing Arrows (2825) remains hot in
-discovery at its existing tier; this revision makes no gear promotion because its demand evidence
-is sparse.
+profitability remain unverified. No BoP or unknown-fact item is admitted. In revision 6 Rich
+Purple Silk Shirt (4335) and Phoenix Bindings (210781) were cold; revision 7 promotes both.
+Bow of Searing Arrows (2825) remains hot in discovery at its existing tier.
 
-The approved source hashes above are deployed to the package, generated addon target, healthy server and companion
+The revision-6 approved source hashes above are deployed to the package, generated addon target, healthy server and companion
 `Data.lua`; all use build 1.60.1.70938 and plan hash
 `d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`. The first full accepted sweep was
 `us-normal-alliance-1794550375-Dandune-3791` (database sweep 538), cold slice 3, on 2026-11-13. It ran from
@@ -50,12 +83,14 @@ priced items. Its exact item set matched the planned core, discovery and slice-3
 and its UID was written to `Data.lua` acknowledgements. Client-loaded ACK was not independently verified; no reload
 was forced. Private verification receipt: `.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
 
-The observed 635 seconds is one full sweep, not a p95. Separately, scaling the historical 24-sweep p95 of 652 seconds
-by planned query count projects 593.3 seconds p95, 58.7 seconds lower, and about 1,148 fewer item queries over 24
-sweeps. That remains an estimate; response latency, GUI waits, retries, slice ordering and failures can change runtime.
-The first sweep's slice 3 contained none of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction Banner,
-so that sweep did not establish their live Auction House eligibility, turnover or profitability. Export 4 for build
-70938 is now available for analysis; these admission entries retain their 1.60.1.70888 export-3 provenance.
+The observed 635 seconds was one full sweep, not a p95. At the initial revision-6 review, scaling a historical
+24-sweep p95 of 652 seconds projected 593.3 seconds p95; that estimate was superseded for revision-7 planning by
+the 20-sweep replay above. Response latency, GUI waits, retries, slice ordering and failures can still change runtime.
+The first revision-6 sweep's slice 3 contained none of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction
+Banner, so that sweep did not establish their live Auction House eligibility, turnover or profitability. Export 4 for
+build 70938 is now available; the three revision-6 utility admissions retain their original
+1.60.1.70888 export-3 provenance, while revision-7 promotion decisions use matching export-4
+evidence.
 
 The user reports Alchemy skill 225 and Tailoring skill 150. Evaluate both professions through skill 225, including
 Tailoring leveling targets above the current 150. Assume all recipes are known and ignore recipe-acquisition costs.
@@ -126,11 +161,10 @@ armor piece, crafted leveling item or world drop.
   vendor arbitrage is impossible.
 
 `core` contains the production inputs, intermediates and selected useful outputs scanned every
-sweep. `discovery` is also scanned every sweep; revision 6 has one discovery item, Bow of Searing
-Arrows (2825). The recipe-teaching items moved in revision 6 are in `cold`, not `discovery`.
-`cold` rotates through six slices, scanning one slice per sweep for periodic price coverage.
-The revision 6 plan has 421 core items, 1 discovery item and 368 cold items, with slices of 61
-or 62 items. Use category, profession and tag views to review memberships; do not maintain
+sweep. `discovery` is also scanned every sweep; revision 7 has one discovery item, Bow of Searing
+Arrows (2825). `cold` rotates through six slices, scanning one slice per sweep for periodic price
+coverage. The revision 7 plan has 488 core items, 1 discovery item and 317 cold items, with
+slices of 52 or 53 items. Use category, profession and tag views to review memberships; do not maintain
 separate hand-edited copies of the item list.
 
 Scan watchlists describe what to observe; they are not a generic market-inventory list.

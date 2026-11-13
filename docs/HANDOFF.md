@@ -11,8 +11,8 @@ Make gold on the WoW Forever auction house with several independently profitable
 
 1. **Collect** the market: catalog revision 6 is deployed for client build 1.60.1.70938 with 790 active IDs
    (421 core, 1 discovery and 368 cold), a 900 s cadence and 20 retained distinct unit-price levels per item;
-   never mix houses or item identities (`itemKey`). Its first complete 70938 sweep was accepted, uploaded and
-   acknowledged in `Data.lua`; gather more sweeps before treating one run as a runtime distribution.
+   never mix houses or item identities (`itemKey`). Twenty recent complete revision-6 sweeps (IDs 564–583) now
+   provide a measured runtime baseline. Revision-7 source is prepared and needs live verification after cutover.
 2. **Model** it: demand, time-to-sale, price metrics, recipe economics from the client's own data.
 3. **Decide** with the trading engine (backtest, paper trading, queues).
 4. **Execute** through the guarded in-game addon executor (dry run unless doubly armed). No program drives the
@@ -49,13 +49,28 @@ planned set, with 483 `query.kind=queried`, 483 `reason_code=ok` and 418 priced 
 acknowledgement is written to `Data.lua`. Client-loaded ACK was not independently verified; no reload was forced.
 None of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction Banner was in slice 3, so their live Auction
 House eligibility, turnover and profitability are unverified. Client export 4 for build 1.60.1.70938 was loaded on
-2026-11-13 at 08:26:38 UTC, with 2,282 recipes and 4,556 item facts. Historical admission records retain their
-build-1.60.1.70888 export-3 provenance. The private acceptance receipt is
+2026-11-13 at 08:26:38 UTC, with 2,282 recipes and 4,556 item facts. The three revision-6 utility admissions
+retain their original build-1.60.1.70888 export-3 provenance, while revision-7 promotion decisions use matching
+export-4 evidence. The private acceptance receipt is
 `.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
 
-The 635 s duration is one measured sweep, not a p95. A separate linear item-count projection from the historical
-24-sweep p95 of 652 s estimates 593.3 s p95 (58.7 s lower, about 1,148 fewer queries across 24 sweeps); response
-latency and GUI waits may change actual runtime. More complete sweeps are needed to characterize runtime.
+Catalog revision 7 is now prepared in source but is not deployed. The export-4 skill-225 census covers 297 eligible
+fixed, client-fact tradeable Alchemy/Tailoring outputs and 111 reagent graph IDs: 91 eligible auction-house inputs
+are already hot, 19 vendor-cost inputs remain excluded, and bind-on-pickup reagent 213378 is excluded. Revision 7
+moves all 165 eligible cold outputs to core, adds the 15 missing outputs with export-4 status `ok`/bonding code 2, and
+includes six further cold Alchemy outputs plus new output 19931 for research coverage with unknown learning rank;
+these seven are not asserted craftable by skill 225. Five already-hot skill-unknown outputs remain hot. All 12
+skill-unknown outputs with known tradeable facts and their AH dependencies are protected. Revision 7 moves 120 hot
+IDs outside the protected graphs to cold while keeping them active. The resulting source has 806 active IDs (488
+core, 1 discovery, 317 cold), 541–542 planned queries per sweep, and hashes recorded in [WATCHLIST](WATCHLIST.md).
+The 20-baseline/six-slice runtime replay estimates a worst case of 690.5 s at median per-item query cost and 697.79 s
+under mean-cost sensitivity; this is not measured revision-7 runtime. Live eligibility of new outputs and accepted
+revision-7 sweeps remain to be verified. The cold-tier moves preserve observation history and do not claim the
+affected items are permanently unprofitable.
+
+The first 635 s duration is one measured sweep, not a p95. Twenty later complete revision-6 sweeps (IDs 564–583)
+provide the baseline used for the revision-7 replay estimate above. That replay is not a measured new-plan runtime;
+response latency, GUI waits and query mix can change the result. Measure accepted full revision-7 sweeps after cutover.
 
 - WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70938,
   interface 16001, house `us-normal-alliance` ([LAUNCH_TARGET](LAUNCH_TARGET.md)). The prior source pin was
@@ -168,20 +183,21 @@ Source evidence remains in `.archive/dashboard-trading-20261113/live-source-summ
 
 ## Open follow-ups
 
-- **Tailoring through 225:** fifteen additional eligible output IDs lack catalog coverage, including Runecloth,
-  Brightcloth, Ghostweave and Earthenweave pieces. They are unknown price-discovery opportunities, not negative
-  margins; the dashboard includes only outputs with usable market evidence. The matching-build census records the gaps.
+- **Tailoring through 225:** revision 7 source now covers all 297 eligible fixed, tradeable outputs from export 4,
+including the 15 previously missing Runecloth, Brightcloth, Ghostweave and Earthenweave pieces. All 165 eligible
+cold outputs move to core; the 91 auction-house reagent inputs are already hot. Seven additional skill-unknown
+Alchemy outputs are included for research coverage, not asserted craftable by skill 225; five such outputs were
+already hot. The 120 capacity demotions exclude the complete set of 12 known-fact skill-unknown outputs and their
+AH dependencies. This is source-only until deployment.
+The new items are unmeasured opportunities, not negative margins; live auction eligibility and sale activity remain
+unverified.
 
-- **Scan catalog follow-up:** the first qualifying full 70938 sweep was 538; the latest accepted sweep is 583, with
-  a multi-sweep history available for turnover analysis. By 18:33 UTC on 2026-11-13, `crowley-scan` had recovered
-  after desktop unlock, scan and companion services were active, and a new scan was running; no post-unlock sweep
-  had yet been accepted. Use accumulated accepted-sweep durations before claiming a current runtime p95. The
-  six-sweep cold rotation provides periodic price discovery only and cannot supply
-  gap-free books with gaps of 21 minutes or less for P(sale). This first sweep did not query the three new Tailoring
-  outputs, so their live eligibility remains unverified. Evaluating a selected eligible commodity with such evidence
-  would require a separately reviewed promotion into a stable hot cohort; no promotion is included here. Grouped gear
-  needs own-sale trials. Keep cadence, slice rotation and protocol unchanged unless a separately reviewed change is
-  needed; a dynamic scheduler is not part of this catalog rebalance.
+- **Scan catalog follow-up:** revision 6 has 20 recent complete 70938 baseline sweeps (IDs 564–583); use them only as
+runtime evidence for the old plan. Revision 7 is source-only pending cutover. After deployment, verify an accepted
+complete sweep with the exact new hot and selected cold IDs, then verify promoted IDs in two consecutive new-plan
+sweeps with actual query timestamps. The six-sweep cold rotation still provides periodic price discovery only and
+cannot supply gap-free books with gaps of 21 minutes or less for P(sale). Grouped gear needs own-sale trials. Keep
+cadence, slice rotation and protocol unchanged; a dynamic scheduler is not part of this catalog rebalance.
 - **Addon trim (phase 3) deferred:** remove the movement, hover and unused executor snapshot fields from Agent
   telemetry, which needs the addon producer and the decoder schema (`gui/frames.py`) bumped together. `Queue.lua`
   and the companion's execution/probe upload and queue fetch stay by owner decision.

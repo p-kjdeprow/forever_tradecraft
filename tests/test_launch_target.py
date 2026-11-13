@@ -52,9 +52,13 @@ def test_selected_target_is_identity_only_and_plan_is_cached(
     assert not hasattr(target, "installation")
     assert not hasattr(target, "game_root")
     assert not hasattr(target, "wine_prefix")
-    assert len(canonical_plan(target)["itemIDs"]) == 790
-    assert len(canonical_plan(target)["pools"]["cold"]) == 368
-    assert canonical_plan(target) is canonical_plan(target)
+    plan = canonical_plan(target)
+    assert plan["revision"] == 7
+    assert len(plan["itemIDs"]) == 806
+    assert len(plan["pools"]["core"]) == 488
+    assert len(plan["pools"]["discovery"]) == 1
+    assert len(plan["pools"]["cold"]) == 317
+    assert canonical_plan(target) is plan
     assert target.full_build == packaged_catalog.client_build
 
 

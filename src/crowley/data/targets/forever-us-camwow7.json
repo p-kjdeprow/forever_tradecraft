@@ -20,7 +20,7 @@
   },
   "scan": {
     "catalogId": "first-run",
-    "catalogRevision": 6,
+    "catalogRevision": 7,
     "cadenceSeconds": 900,
     "sweepCapSeconds": 750,
     "coldSlices": 6,

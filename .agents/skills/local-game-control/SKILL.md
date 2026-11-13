@@ -47,10 +47,14 @@ trading, account changes or unrelated display changes.
   outcome is uncertain, leave the loop stopped and diagnose; do not retry or kill.
 - `Observer._sample` timestamps before screenshot capture. Require a newly decoded current-call frame within the
   installed `STALE_FRAME_S` using its original timestamps, and refresh window focus and presence after capture. Treat
-  the status file as a heartbeat; never retimestamp a cached frame.
+  the status file as a heartbeat; never retimestamp a cached frame. Finish blocking database/upload checks before the
+  final capture and post-capture ownership/focus/presence checks; do not insert them between those checks and input.
 - Client-data export requires a finalized `DBCache.bin` matching the target build. A window-manager close may leave
   only a temporary cache; use a separately approved guarded normal `/quit` when needed, never rename or edit the
   cache to fit validation. Resume normal collection before the offline export.
+
+- For a hot-cohort promotion, verify each promoted ID was actually queried in two consecutive accepted full sweeps
+  and compare query timestamps with the configured cadence. Plan membership alone does not establish live cadence.
 
 ## Make input observable
 

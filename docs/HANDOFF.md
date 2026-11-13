@@ -1,6 +1,6 @@
 # Forever Tradecraft handoff
 
-Updated 2026-11-12. Current state, rules, decisions and open follow-ups. History lives in git
+Updated 2026-11-13. Current state, rules, decisions and open follow-ups. History lives in git
 (tag `pre-simplify` is the last commit with the old session stack).
 Technical reference: [ARCHITECTURE.md](ARCHITECTURE.md) (including the client assumptions table).
 Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
@@ -9,10 +9,10 @@ Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
 
 Make gold on the WoW Forever auction house with several independently profitable strategies:
 
-1. **Collect** the market: the reviewed repository source target is catalog revision 6 with 790 active IDs
-   (421 core, 1 discovery and 368 cold), at a 900 s cadence and 20 retained distinct unit-price levels per item;
-   never mix houses or item identities (`itemKey`). Revision 6 is deployed under the prior 1.60.1.70888 pin; the
-   1.60.1.70938 source pin awaits rollout and a full accepted/acknowledged sweep.
+1. **Collect** the market: catalog revision 6 is deployed for client build 1.60.1.70938 with 790 active IDs
+   (421 core, 1 discovery and 368 cold), a 900 s cadence and 20 retained distinct unit-price levels per item;
+   never mix houses or item identities (`itemKey`). Its first complete 70938 sweep was accepted, uploaded and
+   acknowledged in `Data.lua`; gather more sweeps before treating one run as a runtime distribution.
 2. **Model** it: demand, time-to-sale, price metrics, recipe economics from the client's own data.
 3. **Decide** with the trading engine (backtest, paper trading, queues).
 4. **Execute** through the guarded in-game addon executor (dry run unless doubly armed). No program drives the
@@ -31,40 +31,36 @@ Make gold on the WoW Forever auction house with several independently profitable
   `$XDG_CONFIG_HOME/crowley/secrets.env`. Stage explicit files only; never `git add .`.
 - Origin: https://github.com/p-kjdeprow/forever_tradecraft.
 
-## Host state snapshot (2026-11-09)
+## Host state snapshot (2026-11-13)
 
-### Scan catalog source review (2026-11-12; pending rollout)
+### Scan catalog and runtime qualification
 
-The worktree source catalog is revision 6 and now pins the selected target to client build 1.60.1.70938. The catalog has 957 entries,
-790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. Every sweep plans 422 hot items and one
-of six cold slices of 61 or 62 items, or 483–484 planned queries. Cadence remains 900 s, the cap 750 s, coldSlices 6
-and retained depth 20. All 297 hot Alchemy/Tailoring output and reagent IDs are preserved. Fifty-seven hot recipe
-teaching items and 11138 Small Glowing Shard move to cold; 279943 Spinning Wheel and 279972/279973 Faction Banners
-are added to cold for price discovery using export-3 client facts from build 1.60.1.70888. Their live Auction House
-eligibility, turnover and profitability remain unverified. No item is promoted or removed. The 70938 pin is based on
-the measured native client frame; a 70938 recipe export has not been loaded, and entry evidence retains its original
-build provenance.
+Revision 6 has 957 entries: 790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. Each sweep
+plans the 422 core/discovery IDs plus one of six cold slices of 61 or 62 IDs (483–484 total); cadence is 900 s,
+configured cap 750 s and retained depth 20. The selected target is client build 1.60.1.70938/interface 16001,
+house `us-normal-alliance`. The deployed catalog hash is
+`082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147`; package, generated addon target, healthy
+server and companion `Data.lua` agree on plan hash
+`d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`.
 
-A linear planned-query estimate from the observed 652 s p95 over 24 sweeps projects 593.3 s p95, saving 58.7 s and
-about 1,148 item queries per 24 sweeps. This estimate is not an operational measurement. Revision 6 is deployed in
-the package, server and companion `Data.lua` under the prior 1.60.1.70888 pin and plan hash
-`3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`. The restarted native client frame reports
-build 1.60.1.70938/interface 16001, so the scan loop faults on the build mismatch. The repository correction to pin
-70938 produces catalog hash
-`082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147` and plan hash
-`d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`, pending review and rollout. The scan service
-has been stopped while the client remains in its build-faulted boot; no rollback, close, or install followed the
-mismatch. No accepted or acknowledged 70938 sweep exists yet. Verify the installed plan and measure new full sweeps
-before treating this estimate or the new build as qualified runtime behavior.
+The first accepted full sweep was UID `us-normal-alliance-1794550375-Dandune-3791` (database sweep 538), cold slice
+3. Its actual database interval was 2026-11-13 06:12:55–06:23:30 UTC (635 s); the 483-ID set matched the exact
+planned set, with 483 `query.kind=queried`, 483 `reason_code=ok` and 418 priced items. It is saved, uploaded and its
+acknowledgement is written to `Data.lua`. Client-loaded ACK was not independently verified; no reload was forced.
+None of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction Banner was in slice 3, so their live Auction
+House eligibility, turnover and profitability are unverified. No 70938 recipe export has been loaded; the three
+entries retain their build-1.60.1.70888 export-3 evidence provenance. The private acceptance receipt is
+`.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
 
-- WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70938 (measured from the
-  restarted native frame on 2026-11-12), interface 16001, house `us-normal-alliance`
-  ([LAUNCH_TARGET](LAUNCH_TARGET.md)). The prior source pin was 1.60.1.70888, re-pinned 2026-11-11 after the
-  2026-11-10 patch from 70862.
-- **Stopped:** `crowley-scan.service`; the client remains running in the build-faulted boot. `crowley-companion.service`
-  remains active. The installed package, server plan and companion `Data.lua` still agree on revision 6, old pin
-  1.60.1.70888 and plan hash `3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`.
-  Docker `crowley-server-1` and `crowley-db-1` are up; migrations 001-012 ship in the package.
+The 635 s duration is one measured sweep, not a p95. A separate linear item-count projection from the historical
+24-sweep p95 of 652 s estimates 593.3 s p95 (58.7 s lower, about 1,148 fewer queries across 24 sweeps); response
+latency and GUI waits may change actual runtime. More complete sweeps are needed to characterize runtime.
+
+- WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70938,
+  interface 16001, house `us-normal-alliance` ([LAUNCH_TARGET](LAUNCH_TARGET.md)). The prior source pin was
+  1.60.1.70888, re-pinned 2026-11-11 after the 2026-11-10 patch from 70862.
+- **Active:** `crowley-scan.service` and `crowley-companion.service`; the server is healthy and the database is up.
+  The accepted sweep's ACK is written in `Data.lua`; client-side ACK load was not independently verified.
 - **Disabled:** `crowley-health.timer`, `crowley-market-backup.timer`, `crowley-paper-trading.timer`.
 - The old beta data (house `beta-normal-alliance`) is retained in the database and under
   `~/.local/state/crowley/market-backups`.
@@ -139,15 +135,19 @@ two primary professions, so the portfolio must be cut to two; provisional replay
 This is beta evidence, not a forecast for the launch economy. Station, tool, category and focus requirements are
 enforced in strategy and execution; empty capabilities mean unavailable.
 
+The user's reported planning skills are Alchemy 225 and Tailoring 150. Assume all recipes are owned and ignore
+recipe-acquisition costs for this scenario. The 10 g starting budget is unconfirmed. Dandune is the scanner character
+on a different account; no trading-character, recipe or inventory capture establishes skills, recipe ownership or stock.
+
 ## Open follow-ups
 
-- **Scan catalog follow-up:** the reviewed repository revision 6 already uses a cold tier: 421 core and 1 discovery
-  item each sweep plus one of six cold slices. It is pending rollout and has not been live-verified. After rollout,
-  measure complete-sweep runtime and coverage. Cold scans provide periodic price discovery only; their six-sweep
-  rotation cannot supply gap-free books with gaps of 21 minutes or less for P(sale). Evaluating a selected eligible
-  commodity with that evidence would require a separately reviewed promotion into a stable hot cohort; no promotion is
-  included here. Grouped gear instead needs own-sale trials. Keep cadence, slice rotation and protocol unchanged unless
-  a separately reviewed change is needed; a dynamic scheduler is not part of this catalog rebalance.
+- **Scan catalog follow-up:** revision 6 has one accepted full 70938 sweep. Measure additional complete sweeps
+  before characterizing runtime. The six-sweep cold rotation provides periodic price discovery only and cannot supply
+  gap-free books with gaps of 21 minutes or less for P(sale). This first sweep did not query the three new Tailoring
+  outputs, so their live eligibility remains unverified. Evaluating a selected eligible commodity with such evidence
+  would require a separately reviewed promotion into a stable hot cohort; no promotion is included here. Grouped gear
+  needs own-sale trials. Keep cadence, slice rotation and protocol unchanged unless a separately reviewed change is
+  needed; a dynamic scheduler is not part of this catalog rebalance.
 - **Addon trim (phase 3) deferred:** remove the movement, hover and unused executor snapshot fields from Agent
   telemetry, which needs the addon producer and the decoder schema (`gui/frames.py`) bumped together. `Queue.lua`
   and the companion's execution/probe upload and queue fetch stay by owner decision.

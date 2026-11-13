@@ -87,6 +87,8 @@ client-reachable behavior.
   database for schema-changing tests; never point them at persistent Crowley data.
   Restore any companion service deliberately paused during a failed-upload loop
   after deploying the reviewed correction.
+- When running checks through an absolute environment Python, include that environment's `bin` and the directory
+  containing `uv` in `PATH`; packaging and typing checks resolve `uv` and `pyright` by name.
 
 Update the relevant existing skill when live evidence disproves guidance; keep incident dumps and transient client
 facts in the handoff.

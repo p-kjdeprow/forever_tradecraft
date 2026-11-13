@@ -35,6 +35,20 @@ trading, account changes or unrelated display changes.
 - Wine identity channels differ: `/proc/<pid>/exe` is the Linux loader, `comm` is the Windows program. Windows
   argv0 uses Windows path semantics.
 
+## Plan and build cutovers
+
+- Before staging a client update, compare the active `.build.info` product version, the running HUD build and the
+  packaged target. A warm client can stay on its old build after the files on disk change; a clean relaunch activates
+  the update.
+- For a reviewed plan cutover, verify the old sweep was saved, uploaded and ACKed, then stop the loop. Hold the GUI
+  lease across fresh frame, disk and server checks, post-capture process/window/focus/presence checks, one normal
+  window-manager close and exact process exit. Release the lease before installing. A reviewed helper can carry a
+  narrow idle window directly through close when model delay could consume its safety margin. If close fails or its
+  outcome is uncertain, leave the loop stopped and diagnose; do not retry or kill.
+- `Observer._sample` timestamps before screenshot capture. Require a newly decoded current-call frame within the
+  installed `STALE_FRAME_S` using its original timestamps, and refresh window focus and presence after capture. Treat
+  the status file as a heartbeat; never retimestamp a cached frame.
+
 ## Make input observable
 
 - Exit code zero from an input tool proves dispatch, not effect. Read the result from a fresh HUD frame
@@ -57,7 +71,7 @@ trading, account changes or unrelated display changes.
 
 Distinguish command submission, an in-game message, saved output (SavedVariables), server ingestion and the loaded
 acknowledgement, and report the stages actually verified. Check status and actual start time before forcing another
-scan; the 600 s sweep cap is a maximum, not a wait. Before interpreting payload shapes or depth coverage read
+scan; the configured sweep cap is a maximum, not a wait. Before interpreting payload shapes or depth coverage read
 [crowley-client-contracts](../crowley-client-contracts/SKILL.md).
 
 Keep this skill short: correct it when an observed mistake reveals a reusable lesson, and leave out incident logs,

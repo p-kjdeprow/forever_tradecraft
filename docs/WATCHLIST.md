@@ -1,6 +1,6 @@
 # First run scan catalog
 
-## Revision 6 source review (2026-11-12; 70938 target-pin rollout pending)
+## Revision 6 source review and live qualification (2026-11-13)
 
 The reviewed repository source catalog is revision 6 for selected target build **1.60.1.70938**. It contains
 957 entries: 790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. The active
@@ -41,15 +41,25 @@ profitability remain unverified. No BoP or unknown-fact item is admitted. Rich P
 discovery at its existing tier; this revision makes no gear promotion because its demand evidence
 is sparse.
 
-Using the 24-sweep observed p95 of 652 seconds as a linear item-count baseline, the new plan
-projects 593.3 seconds p95, a 58.7-second saving and about 1,148 fewer item queries over 24 sweeps.
-This is an estimate, not a live result; response latency, GUI waits, retries, slice ordering and
-scan failures can change runtime. Revision 6's catalog and pools are deployed under the prior
-1.60.1.70888 client pin and plan hash
-`3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`. The 1.60.1.70938 target-pin
-correction represented by the source hashes above is pending review and deployment. No full sweep
-under build 70938 has been accepted and acknowledged, so new-build scan qualification remains
-pending.
+The approved source hashes above are deployed to the package, generated addon target, healthy server and companion
+`Data.lua`; all use build 1.60.1.70938 and plan hash
+`d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`. The first full accepted sweep was
+`us-normal-alliance-1794550375-Dandune-3791` (database sweep 538), cold slice 3, on 2026-11-13. It ran from
+06:12:55 to 06:23:30 UTC (635 seconds): 483 declared IDs, 483 `query.kind=queried`, 483 `reason_code=ok`, and 418
+priced items. Its exact item set matched the planned core, discovery and slice-3 set. The sweep was saved, uploaded,
+and its UID was written to `Data.lua` acknowledgements. Client-loaded ACK was not independently verified; no reload
+was forced. Private verification receipt: `.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
+
+The observed 635 seconds is one full sweep, not a p95. Separately, scaling the historical 24-sweep p95 of 652 seconds
+by planned query count projects 593.3 seconds p95, 58.7 seconds lower, and about 1,148 fewer item queries over 24
+sweeps. That remains an estimate; response latency, GUI waits, retries, slice ordering and failures can change runtime.
+The first sweep's slice 3 contained none of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction Banner,
+so their live Auction House eligibility, turnover and profitability remain unverified. The 70938 recipe export has
+not been loaded; these entries retain their 1.60.1.70888 export-3 evidence provenance.
+
+The user reports Alchemy skill 225 and Tailoring skill 150 for the planning profile. Assume all recipes are known
+and ignore recipe-acquisition costs. A 10 g starting budget is unconfirmed. Dandune is the scanner character on a
+different account; no trading-character, recipe or inventory capture establishes recipe ownership or stock.
 
 
 Crowley's first selective scan will use the item catalog in

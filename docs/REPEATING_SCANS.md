@@ -2,13 +2,22 @@
 
 `crowley-scan` (unit `crowley-scan.service`) keeps WoW Forever in the world with the auction house open, so the
 addon's own 900 s timer sweeps its installed scan plan and gets each sweep to the server. The reviewed repository
-source is catalog revision 6: 421 core and 1 discovery item every sweep, plus one of six cold slices containing 61
-or 62 items (790 active IDs total; 483 or 484 planned item queries per sweep). Revision 6 has not been deployed or
-live-verified; the installed addon/server agreement must be checked during rollout. Its estimated p95 is 593.3 s,
+source is catalog revision 6, now pinned to measured native client build 1.60.1.70938: 421 core and 1 discovery item
+every sweep, plus one of six cold slices containing 61 or 62 items (790 active IDs total; 483 or 484 planned item
+queries per sweep). Revision 6 is deployed to the package, server and companion `Data.lua` under the prior 70888
+build pin and plan hash `3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`. The restarted client
+frame reports 70938/interface 16001 and the scan loop faults on the build mismatch. The scan service is stopped while
+the client remains in its faulted boot; the companion remains active. The source pin correction produces catalog
+hash `082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147` and plan hash
+`d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`, pending review and rollout. No accepted or
+acknowledged 70938 sweep exists yet, and no 70938 recipe export has been loaded. Its estimated p95 is 593.3 s,
 58.7 s below the 652 s observed baseline, assuming runtime scales linearly with item-query count. This is a projection,
-not a measured result. It leaves the existing 900 s cadence, 750 s cap, and six-slice policy unchanged. It recovers
-from crashes, disconnects, maintenance and reboots without an operator. Design: [ARCHITECTURE](ARCHITECTURE.md). Host
-setup: [GAME_SETUP](GAME_SETUP.md). Current state: [HANDOFF](HANDOFF.md).
+not a measured result. The repository plan leaves the existing 900 s cadence, 750 s cap, and six-slice policy
+unchanged. The ordinary scheduled-state cutover boundary below cannot be met by this build-faulted boot; follow the
+reviewed rollout instructions for its owned-client closure. Treat 70938 as qualified only after a full sweep is
+accepted and its acknowledgement is written. The loop recovers from crashes, disconnects, maintenance and reboots
+without an operator. Design: [ARCHITECTURE](ARCHITECTURE.md). Host setup: [GAME_SETUP](GAME_SETUP.md). Current state:
+[HANDOFF](HANDOFF.md).
 
 ## What it does each cycle
 

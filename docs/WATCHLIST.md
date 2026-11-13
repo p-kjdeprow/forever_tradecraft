@@ -1,14 +1,14 @@
 # First run scan catalog
 
-## Revision 6 source review (2026-11-12; rollout pending)
+## Revision 6 source review (2026-11-12; 70938 target-pin rollout pending)
 
-The reviewed repository source catalog is revision 6 for client build **1.60.1.70888**. It contains
+The reviewed repository source catalog is revision 6 for selected target build **1.60.1.70938**. It contains
 957 entries: 790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. The active
 plan keeps the existing 900-second cadence, 750-second sweep cap, six cold slices and 20 retained
 price levels. Each sweep plans 421 core + 1 discovery item and one cold slice of 61 or 62 items,
-for 483–484 planned item queries. The catalog hash is
-`595c7b35509710c1cdd22fa383ada7bd407c3dec0528a9df14a9e607424d921d`; the selected target plan
-hash is `3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`.
+for 483–484 planned item queries. The current source catalog hash is
+`082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147`; the current source plan hash
+is `d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`.
 
 The revision moves 57 hot recipe teaching items from discovery to cold. Their exact IDs are:
 
@@ -32,17 +32,24 @@ other-profession recipe-linked items also remain hot.
 
 Three export-3 verified Tailoring outputs are admitted to cold for price discovery: **279943
 Spinning Wheel**, **279972 Faction Banner**, and **279973 Faction Banner**. Their exact item facts
-report status `ok` and bonding code 0, and each has a fixed Tailoring output link. Catalog
-tradeability is client-marked only; live Auction House eligibility, turnover and profitability
-remain unverified. No BoP or unknown-fact item is admitted. Rich Purple Silk Shirt (4335) and
-Phoenix Bindings (210781) remain cold. Bow of Searing Arrows (2825) remains hot in discovery at
-its existing tier; this revision makes no gear promotion because its demand evidence is sparse.
+come from client build 1.60.1.70888, report status `ok` and bonding code 0, and each has a fixed
+Tailoring output link. The selected target pin is now 1.60.1.70938 from a measured native frame;
+its recipe export has not been loaded. Updating the target pin does not relabel these older entry
+facts. Catalog tradeability is client-marked only; live Auction House eligibility, turnover and
+profitability remain unverified. No BoP or unknown-fact item is admitted. Rich Purple Silk Shirt
+(4335) and Phoenix Bindings (210781) remain cold. Bow of Searing Arrows (2825) remains hot in
+discovery at its existing tier; this revision makes no gear promotion because its demand evidence
+is sparse.
 
 Using the 24-sweep observed p95 of 652 seconds as a linear item-count baseline, the new plan
 projects 593.3 seconds p95, a 58.7-second saving and about 1,148 fewer item queries over 24 sweeps.
 This is an estimate, not a live result; response latency, GUI waits, retries, slice ordering and
-scan failures can change runtime. Revision 6 is repository source state only and has not been
-deployed or live-verified.
+scan failures can change runtime. Revision 6's catalog and pools are deployed under the prior
+1.60.1.70888 client pin and plan hash
+`3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`. The 1.60.1.70938 target-pin
+correction represented by the source hashes above is pending review and deployment. No full sweep
+under build 70938 has been accepted and acknowledged, so new-build scan qualification remains
+pending.
 
 
 Crowley's first selective scan will use the item catalog in

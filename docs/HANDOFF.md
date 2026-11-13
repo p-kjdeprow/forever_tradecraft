@@ -11,7 +11,8 @@ Make gold on the WoW Forever auction house with several independently profitable
 
 1. **Collect** the market: the reviewed repository source target is catalog revision 6 with 790 active IDs
    (421 core, 1 discovery and 368 cold), at a 900 s cadence and 20 retained distinct unit-price levels per item;
-   never mix houses or item identities (`itemKey`). Revision 6 is not deployed or live-verified.
+   never mix houses or item identities (`itemKey`). Revision 6 is deployed under the prior 1.60.1.70888 pin; the
+   1.60.1.70938 source pin awaits rollout and a full accepted/acknowledged sweep.
 2. **Model** it: demand, time-to-sale, price metrics, recipe economics from the client's own data.
 3. **Decide** with the trading engine (backtest, paper trading, queues).
 4. **Execute** through the guarded in-game addon executor (dry run unless doubly armed). No program drives the
@@ -34,22 +35,36 @@ Make gold on the WoW Forever auction house with several independently profitable
 
 ### Scan catalog source review (2026-11-12; pending rollout)
 
-The worktree source catalog and selected target are revision 6 for build 1.60.1.70888. The catalog has 957 entries,
+The worktree source catalog is revision 6 and now pins the selected target to client build 1.60.1.70938. The catalog has 957 entries,
 790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. Every sweep plans 422 hot items and one
 of six cold slices of 61 or 62 items, or 483–484 planned queries. Cadence remains 900 s, the cap 750 s, coldSlices 6
 and retained depth 20. All 297 hot Alchemy/Tailoring output and reagent IDs are preserved. Fifty-seven hot recipe
 teaching items and 11138 Small Glowing Shard move to cold; 279943 Spinning Wheel and 279972/279973 Faction Banners
-are added to cold from export-3 client facts for price discovery. Their live Auction House eligibility, turnover and
-profitability remain unverified. No item is promoted or removed.
+are added to cold for price discovery using export-3 client facts from build 1.60.1.70888. Their live Auction House
+eligibility, turnover and profitability remain unverified. No item is promoted or removed. The 70938 pin is based on
+the measured native client frame; a 70938 recipe export has not been loaded, and entry evidence retains its original
+build provenance.
 
 A linear planned-query estimate from the observed 652 s p95 over 24 sweeps projects 593.3 s p95, saving 58.7 s and
-about 1,148 item queries per 24 sweeps. This estimate is not an operational measurement. The source revision has not
-been deployed; verify the installed plan and measure new full sweeps before treating it as current runtime behavior.
+about 1,148 item queries per 24 sweeps. This estimate is not an operational measurement. Revision 6 is deployed in
+the package, server and companion `Data.lua` under the prior 1.60.1.70888 pin and plan hash
+`3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`. The restarted native client frame reports
+build 1.60.1.70938/interface 16001, so the scan loop faults on the build mismatch. The repository correction to pin
+70938 produces catalog hash
+`082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147` and plan hash
+`d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`, pending review and rollout. The scan service
+has been stopped while the client remains in its build-faulted boot; no rollback, close, or install followed the
+mismatch. No accepted or acknowledged 70938 sweep exists yet. Verify the installed plan and measure new full sweeps
+before treating this estimate or the new build as qualified runtime behavior.
 
-- WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70888 (re-pinned 2026-11-11 after the 2026-11-10 patch from 70862), interface
-  16001, house `us-normal-alliance` ([LAUNCH_TARGET](LAUNCH_TARGET.md)).
-- **Running:** `crowley-scan.service` (the only game-facing process) and `crowley-companion.service`, both
-  enabled. Docker `crowley-server-1` and `crowley-db-1` up; migrations 001-012 ship in the package.
+- WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70938 (measured from the
+  restarted native frame on 2026-11-12), interface 16001, house `us-normal-alliance`
+  ([LAUNCH_TARGET](LAUNCH_TARGET.md)). The prior source pin was 1.60.1.70888, re-pinned 2026-11-11 after the
+  2026-11-10 patch from 70862.
+- **Stopped:** `crowley-scan.service`; the client remains running in the build-faulted boot. `crowley-companion.service`
+  remains active. The installed package, server plan and companion `Data.lua` still agree on revision 6, old pin
+  1.60.1.70888 and plan hash `3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`.
+  Docker `crowley-server-1` and `crowley-db-1` are up; migrations 001-012 ship in the package.
 - **Disabled:** `crowley-health.timer`, `crowley-market-backup.timer`, `crowley-paper-trading.timer`.
 - The old beta data (house `beta-normal-alliance`) is retained in the database and under
   `~/.local/state/crowley/market-backups`.
@@ -140,4 +155,4 @@ enforced in strategy and execution; empty capabilities mean unavailable.
   (backups were disabled during the cutover).
 - **Executor driver:** nothing automates the in-game executor button or mailbox trips now. Reintroducing it
   needs a design that obeys the click rules in `CLAUDE.md` and the small-loop rule.
-- **Launch target:** route provenance is `unmeasured on client build 70888`; routes are not shipped.
+- **Launch target:** route provenance is `unmeasured on client build 70938`; routes are not shipped.

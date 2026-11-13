@@ -11,8 +11,10 @@ server, and companion `Data.lua` agree on build 70938/interface 16001 and this p
 `us-normal-alliance-1794550375-Dandune-3791` (database sweep 538), used cold slice 3 and ran 2026-11-13 06:12:55–
 06:23:30 UTC (635 seconds). Its exact 483-ID set matched the plan; all 483 had `query.kind=queried` and
 `reason_code=ok`, with 418 priced items. It was saved and uploaded, and its acknowledgement was written to
-`Data.lua`. Client-loaded ACK was not independently verified; no reload was forced. No 70938 recipe export
-has been loaded. Private receipt: `.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
+`Data.lua`. Client-loaded ACK was not independently verified; no reload was forced. Matching recipe export 4 for
+build 70938 was loaded on 2026-11-13 after a separate guarded normal quit finalized the client cache; normal scanning
+resumed before offline export. Advice now reads matching-build facts. Private first-sweep receipt:
+`.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
 
 The 635-second result is one measured sweep, not a p95. Separately, scaling the historical 24-sweep observed p95 of
 652 seconds by planned query count projects 593.3 seconds p95, 58.7 seconds lower. This is an estimate, not measured

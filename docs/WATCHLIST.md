@@ -34,7 +34,7 @@ Three export-3 verified Tailoring outputs are admitted to cold for price discove
 Spinning Wheel**, **279972 Faction Banner**, and **279973 Faction Banner**. Their exact item facts
 come from client build 1.60.1.70888, report status `ok` and bonding code 0, and each has a fixed
 Tailoring output link. The selected target pin is now 1.60.1.70938 from a measured native frame;
-its recipe export has not been loaded. Updating the target pin does not relabel these older entry
+its matching recipe export is now loaded as export 4. This does not relabel the older admission
 facts. Catalog tradeability is client-marked only; live Auction House eligibility, turnover and
 profitability remain unverified. No BoP or unknown-fact item is admitted. Rich Purple Silk Shirt
 (4335) and Phoenix Bindings (210781) remain cold. Bow of Searing Arrows (2825) remains hot in
@@ -54,8 +54,8 @@ The observed 635 seconds is one full sweep, not a p95. Separately, scaling the h
 by planned query count projects 593.3 seconds p95, 58.7 seconds lower, and about 1,148 fewer item queries over 24
 sweeps. That remains an estimate; response latency, GUI waits, retries, slice ordering and failures can change runtime.
 The first sweep's slice 3 contained none of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction Banner,
-so their live Auction House eligibility, turnover and profitability remain unverified. The 70938 recipe export has
-not been loaded; these entries retain their 1.60.1.70888 export-3 evidence provenance.
+so that sweep did not establish their live Auction House eligibility, turnover or profitability. Export 4 for build
+70938 is now available for analysis; these admission entries retain their 1.60.1.70888 export-3 provenance.
 
 The user reports Alchemy skill 225 and Tailoring skill 150. Evaluate both professions through skill 225, including
 Tailoring leveling targets above the current 150. Assume all recipes are known and ignore recipe-acquisition costs.

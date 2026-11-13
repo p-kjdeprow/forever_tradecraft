@@ -48,8 +48,9 @@ The first accepted full sweep was UID `us-normal-alliance-1794550375-Dandune-379
 planned set, with 483 `query.kind=queried`, 483 `reason_code=ok` and 418 priced items. It is saved, uploaded and its
 acknowledgement is written to `Data.lua`. Client-loaded ACK was not independently verified; no reload was forced.
 None of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction Banner was in slice 3, so their live Auction
-House eligibility, turnover and profitability are unverified. No 70938 recipe export has been loaded; the three
-entries retain their build-1.60.1.70888 export-3 evidence provenance. The private acceptance receipt is
+House eligibility, turnover and profitability are unverified. Client export 4 for build 1.60.1.70938 was loaded on
+2026-11-13 at 08:26:38 UTC, with 2,282 recipes and 4,556 item facts. Historical admission records retain their
+build-1.60.1.70888 export-3 provenance. The private acceptance receipt is
 `.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
 
 The 635 s duration is one measured sweep, not a p95. A separate linear item-count projection from the historical
@@ -140,7 +141,19 @@ targets that require leveling from 150; the planning ceiling does not change the
 recipes are owned and ignore recipe-acquisition costs. The 10 g starting budget is unconfirmed. Dandune is the scanner character
 on a different account; no trading-character, recipe or inventory capture establishes skills, recipe ownership or stock.
 
+Current-build Advice is available at `http://127.0.0.1:8080/dashboard` on this host. Select Advice, house
+`us-normal-alliance`, Alchemy and Tailoring, Crafting, Forecast and Live. The authenticated endpoint returned 200
+after export 4 loaded; at sweep 546 (2026-11-13 08:22:10 UTC) it had 0 ranked and 38 unmeasured pathways.
+Unmeasured profit/hour assumes P(sale)=1 and is an upper bound, not income. The current interface filters professions
+but does not enforce the skill-225 planning ceiling. Default ranked crafting needs six usable hours of commodity
+demand and four independent two-hour sale trials; additional data alone does not solve grouped-gear sale identity.
+Matching-build research, current margins and early descriptive flow are in `.archive/advice-refresh-20261113/`.
+
 ## Open follow-ups
+
+- **Tailoring through 225:** fifteen additional eligible output IDs lack catalog coverage, including Runecloth,
+  Brightcloth, Ghostweave and Earthenweave pieces. They are unknown price-discovery opportunities, not negative
+  margins; the current shortlist uses observed outputs only. The matching-build census records the gaps.
 
 - **Scan catalog follow-up:** revision 6 has one accepted full 70938 sweep. Measure additional complete sweeps
   before characterizing runtime. The six-sweep cold rotation provides periodic price discovery only and cannot supply

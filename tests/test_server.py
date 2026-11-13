@@ -977,7 +977,16 @@ def test_v1_and_malformed_v2_are_rejected(client):
     bad = scan("bad", "horde")
     bad["numRows"] = 2
     assert client.post("/v1/scans", json=bad).status_code == 422
-    assert client.get("/v1/houses", headers={"Authorization": "Bearer nope"}).status_code == 401
+    assert client.get("/v1/houses", headers={"Authorization": ""}).status_code == 200
+    assert client.get("/v1/houses", headers={"Authorization": "Bearer nope"}).status_code == 200
+    for path in (
+        "/v1/houses/eu-normal-alliance/latest",
+        "/v1/houses/eu-normal-alliance/items/123/history",
+        "/v1/houses/eu-normal-alliance/items/123/volume",
+        "/v1/houses/eu-normal-alliance/advice",
+        "/v1/houses/eu-normal-alliance/sweeps/latest",
+    ):
+        assert client.get(path, headers={"Authorization": ""}).status_code == 404
     assert client.get("/v1/houses/us-normal-orcs/latest").status_code == 400
 
 
@@ -1668,9 +1677,10 @@ def test_paper_run_api_and_dashboard(client):
             )
 
     try:
-        unauthorized = client.get("/v1/paper/runs", headers={"Authorization": ""})
-        assert unauthorized.status_code == 401
-        assert client.get(f"/v1/paper/runs/{run_name}", headers={"Authorization": ""}).status_code == 401
+        listing_without_credentials = client.get("/v1/paper/runs", headers={"Authorization": ""})
+        assert listing_without_credentials.status_code == 200, listing_without_credentials.text
+        detail_without_credentials = client.get(f"/v1/paper/runs/{run_name}", headers={"Authorization": ""})
+        assert detail_without_credentials.status_code == 200, detail_without_credentials.text
 
         listing = client.get("/v1/paper/runs")
         assert listing.status_code == 200, listing.text

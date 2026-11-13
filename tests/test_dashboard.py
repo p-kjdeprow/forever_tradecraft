@@ -159,7 +159,7 @@ class FakeNode {{
   querySelector(selector) {{ return this[selector === "tbody" ? "tbody" : selector === "tfoot" ? "tfoot" : "queryChild"]; }}
 }}
 const nodes = new Map();
-for (const id of ["token-form", "forget-token", "token", "status", "run-select", "dashboard-content", "run-meta", "chart", "sparks", "decisions-empty", "pending-content", "paper-view-button", "advice-view-button", "paper-view", "advice-view", "paper-controls", "advice-form", "advice-live", "advice-house", "advice-character", "advice-profit-gold", "advice-profit-silver", "advice-profit-copper", "advice-min-volume", "advice-share", "advice-horizon", "advice-price-basis", "advice-estimates", "advice-limit", "advice-meta", "advice-freshness", "advice-results", "advice-strategy-summary"]) nodes.set(id, new FakeNode(id));
+for (const id of ["status", "run-select", "dashboard-content", "run-meta", "chart", "sparks", "decisions-empty", "pending-content", "paper-view-button", "advice-view-button", "paper-view", "advice-view", "paper-controls", "advice-form", "advice-live", "advice-house", "advice-character", "advice-profit-gold", "advice-profit-silver", "advice-profit-copper", "advice-min-volume", "advice-share", "advice-horizon", "advice-price-basis", "advice-estimates", "advice-limit", "advice-meta", "advice-freshness", "advice-results", "advice-strategy-summary"]) nodes.set(id, new FakeNode(id));
 const adviceDefaults = {{ "advice-profit-gold": "0", "advice-profit-silver": "0", "advice-profit-copper": "0", "advice-min-volume": "0", "advice-share": "10", "advice-horizon": "2", "advice-price-basis": "lowest", "advice-estimates": "forecast", "advice-limit": "25" }};
 for (const [id, value] of Object.entries(adviceDefaults)) nodes.get(id).value = value;
 const checkedInputs = {{ profession: ["alchemy", "engineering", "tailoring"], strategy: ["crafting", "recipe_purchase", "flip", "raw_materials", "vendor_arbitrage"] }};
@@ -178,8 +178,9 @@ global.document = {{
 }};
 const storage = new Map();
 global.localStorage = {{ getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, String(value)), removeItem: (key) => storage.delete(key) }};
+global.emit = (value) => console.log(JSON.stringify(value));
 const intervals = [];
-global.window = {{ prompt: () => "", setInterval: (fn, ms) => {{ const id = intervals.length + 1; intervals.push({{ id, fn, ms, active: true }}); return id; }}, clearInterval: (id) => {{ const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; }} }};
+global.window = {{ setInterval: (fn, ms) => {{ const id = intervals.length + 1; intervals.push({{ id, fn, ms, active: true }}); return id; }}, clearInterval: (id) => {{ const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; }} }};
 global.fetch = () => {{ throw new Error("fetch should not run in this rendering test"); }};
 {_full_script()}
 const detail = {json.dumps(detail)};
@@ -209,10 +210,6 @@ emit({{
 def test_real_rendering_and_error_path_use_a_fake_dom():
     detail = _detail()
     script = _fake_dom_script(detail)
-    script = script.replace(
-        'global.window = { prompt: () => "", setInterval: (fn, ms) => { const id = intervals.length + 1; intervals.push({ id, fn, ms, active: true }); return id; }, clearInterval: (id) => { const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; } };',
-        'global.window = { prompt: () => "", setInterval: (fn, ms) => { const id = intervals.length + 1; intervals.push({ id, fn, ms, active: true }); return id; }, clearInterval: (id) => { const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; } };\nfunction emit(value) { console.log(JSON.stringify(value)); }',
-    )
     actual = _node(script)
     assert actual["valid"] is True
     assert "alpha" in actual["validRows"] and "beta" in actual["validRows"]
@@ -223,6 +220,35 @@ def test_real_rendering_and_error_path_use_a_fake_dom():
     assert actual["malformedStatusIsError"] is True
     assert "exact copper string" in actual["malformedStatus"]
     assert actual["malformedRows"] == ""
+
+
+def test_dashboard_starts_without_credentials_in_paper_and_advice_views():
+    html = DASHBOARD.read_text(encoding="utf-8")
+    for obsolete_ui in ("API token", "Save token", "Forget token", "window.prompt", "Authorization"):
+        assert obsolete_ui not in html
+
+    fetch_stub = 'global.fetch = () => { throw new Error("fetch should not run in this rendering test"); };'
+    for view, expected_path in (("paper", "/v1/paper/runs"), ("advice", "/v1/houses")):
+        script = _fake_dom_script(_detail()).split("\nconst detail = ", 1)[0]
+        script = script.replace(
+            fetch_stub,
+            "const fetchCalls = []; const fetchOptions = []; let promptCalls = 0; "
+            "global.fetch = (path, options) => { fetchCalls.push(path); fetchOptions.push(options ?? null); "
+            "return new Promise(() => {}); }; "
+            "global.window.prompt = () => { promptCalls += 1; return 'unexpected'; }; "
+            "storage.set('crowley.paperDashboard.apiToken', 'legacy-test-token'); "
+            f"storage.set('crowley.paperDashboard.view', {json.dumps(view)});",
+        )
+        script += """
+const dashboard = window.__crowleyDashboardTest;
+emit({ fetchCalls, fetchOptions, promptCalls, legacyTokenRemains: storage.has("crowley.paperDashboard.apiToken"), hasTokenState: Object.hasOwn(dashboard.state, "token") });
+"""
+        actual = _node(script)
+        assert actual["fetchCalls"] == [expected_path]
+        assert actual["fetchOptions"] == [None]
+        assert actual["promptCalls"] == 0
+        assert actual["legacyTokenRemains"] is False
+        assert actual["hasTokenState"] is False
 
 
 def _advice_payload() -> dict:
@@ -413,10 +439,6 @@ def test_advice_query_and_money_validation():
 
 def test_advice_house_defaults_remember_and_persist_selection():
     script = _fake_dom_script(_detail()).split("\nconst detail = ", 1)[0]
-    script = script.replace(
-        'global.window = { prompt: () => "", setInterval: (fn, ms) => { const id = intervals.length + 1; intervals.push({ id, fn, ms, active: true }); return id; }, clearInterval: (id) => { const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; } };',
-        'global.window = { prompt: () => "", setInterval: (fn, ms) => { const id = intervals.length + 1; intervals.push({ id, fn, ms, active: true }); return id; }, clearInterval: (id) => { const timer = intervals.find((item) => item.id === id); if (timer) timer.active = false; } };\nfunction emit(value) { console.log(JSON.stringify(value)); }',
-    )
     script += """
 const dashboard = window.__crowleyDashboardTest;
 const houseKey = "crowley.paperDashboard.adviceHouse";
@@ -465,13 +487,14 @@ def test_view_switch_scheduler_polls_live_advice_only_while_visible():
         "const fetchCalls = []; const fetchWaiters = []; global.fetch = (path) => { fetchCalls.push(path); return new Promise((resolve) => fetchWaiters.push({ path, resolve })); };",
     )
     script += """
+fetchCalls.length = 0;
+fetchWaiters.length = 0;
 const response = (body, status = 200) => ({ ok: status === 200, status, json: async () => body });
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
 const active = () => intervals.filter((timer) => timer.active).map((timer) => timer.ms);
 const initial = active();
-dashboard.state.token = "token";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceHouses = [{ key: "test-house" }];
 nodes.get("advice-house").value = "test-house";
@@ -610,7 +633,6 @@ const response = (body) => ({ ok: true, status: 200, json: async () => body });
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
-dashboard.state.token = "token";
 dashboard.state.view = "advice";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceHouses = [{ key: "test-house" }];
@@ -626,7 +648,7 @@ dashboard.pollLatestSweep();
 await settle();
 fetchWaiters.shift().resolve(response({ house: "test-house", sweep_id: 42, finished_epoch: 1800000000, client_build: "1.60.1.70862" }));
 await settle();
-emit({ fetchCalls, adviceCalls: fetchCalls.filter((path) => path.includes("/advice?")), renderedSweep: dashboard.state.adviceRenderedSweepId, freshness: nodes.get("advice-freshness").textContent });
+emit({ fetchCalls, fetchOptions, adviceCalls: fetchCalls.filter((path) => path.includes("/advice?")), renderedSweep: dashboard.state.adviceRenderedSweepId, freshness: nodes.get("advice-freshness").textContent });
 """
         )
     )
@@ -634,6 +656,7 @@ emit({ fetchCalls, adviceCalls: fetchCalls.filter((path) => path.includes("/advi
         "/v1/houses/test-house/sweeps/latest",
         "/v1/houses/test-house/sweeps/latest",
     ]
+    assert actual["fetchOptions"] == [None, None, None]
     assert len(actual["adviceCalls"]) == 1
     assert actual["renderedSweep"] == "42"
     assert "Latest sweep #42 finished" in actual["freshness"]
@@ -647,7 +670,6 @@ const response = (body) => ({ ok: true, status: 200, json: async () => body });
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
-dashboard.state.token = "token";
 dashboard.state.view = "advice";
 dashboard.state.adviceRenderedHouse = "test-house";
 dashboard.state.adviceRenderedSweepId = "42";
@@ -688,7 +710,6 @@ const response = (body) => ({ ok: true, status: 200, json: async () => body });
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
-dashboard.state.token = "token";
 dashboard.state.view = "advice";
 dashboard.state.adviceHousesLoaded = true;
 nodes.get("advice-house").value = "old-house";
@@ -718,7 +739,6 @@ const response = (body, status = 200) => ({ ok: status === 200, status, json: as
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
-dashboard.state.token = "token";
 dashboard.state.view = "advice";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceRenderedHouse = "house-a";
@@ -759,7 +779,6 @@ const response = (body) => ({ ok: true, status: 200, json: async () => body });
 const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
-dashboard.state.token = "token";
 dashboard.state.view = "advice";
 dashboard.state.adviceHousesLoaded = true;
 nodes.get("advice-house").value = "test-house";
@@ -784,8 +803,9 @@ def _controlled_advice_script(body: str) -> str:
     script = _fake_dom_script(_detail()).split("\nconst detail = ", 1)[0]
     script = script.replace(
         'global.fetch = () => { throw new Error("fetch should not run in this rendering test"); };',
-        "const fetchCalls = []; const fetchWaiters = []; global.fetch = (path) => { fetchCalls.push(path); return new Promise((resolve) => fetchWaiters.push({ path, resolve })); };",
+        "const fetchCalls = []; const fetchOptions = []; const fetchWaiters = []; global.fetch = (path, options) => { fetchCalls.push(path); fetchOptions.push(options ?? null); return new Promise((resolve) => fetchWaiters.push({ path, resolve })); };",
     )
+    script += "\nfetchCalls.length = 0; fetchOptions.length = 0; fetchWaiters.length = 0;"
     return script + "\n" + body.replace("__ADVICE_PAYLOAD__", json.dumps(_advice_payload()))
 
 
@@ -798,7 +818,6 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); a
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
 const options = { house: "test-house", character: "", professions: ["alchemy"], strategies: ["crafting"], minProfitGold: "0", minProfitSilver: "0", minProfitCopper: "0", minVolume: "0", share: "10", horizonHours: "2", priceBasis: "lowest", limit: "25" };
-dashboard.state.token = "token";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceHouses = [{ key: "test-house" }];
 dashboard.state.adviceOptions = options;
@@ -838,7 +857,6 @@ const settle = async () => { await Promise.resolve(); await Promise.resolve(); a
 const emit = (value) => console.log(JSON.stringify(value));
 const dashboard = window.__crowleyDashboardTest;
 const options = { house: "test-house", character: "", professions: ["alchemy"], strategies: ["crafting"], minProfitGold: "0", minProfitSilver: "0", minProfitCopper: "0", minVolume: "0", share: "10", horizonHours: "2", priceBasis: "lowest", limit: "25" };
-dashboard.state.token = "token";
 dashboard.state.adviceHousesLoaded = true;
 dashboard.state.adviceHouses = [{ key: "test-house" }];
 dashboard.state.adviceOptions = options;
@@ -862,40 +880,5 @@ emit({ fetchCalls, statusDuring, statusBeforeStaleResolve, statusAfter: nodes.ge
     assert actual["statusDuring"] == "Computing advice…"
     assert actual["statusBeforeStaleResolve"] == "Computing advice…"
     assert actual["statusAfter"] == "Advice ready — choose options and request advice."
-    assert actual["renderedSections"] == 0
-    assert actual["inFlight"] is False
-
-
-def test_forget_token_invalidates_advice_request_and_preserves_token_status():
-    actual = _node(
-        _controlled_advice_script(
-            """
-const response = (body) => ({ ok: true, status: 200, json: async () => body });
-const settle = async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); };
-const emit = (value) => console.log(JSON.stringify(value));
-const dashboard = window.__crowleyDashboardTest;
-const options = { house: "test-house", character: "", professions: ["alchemy"], strategies: ["crafting"], minProfitGold: "0", minProfitSilver: "0", minProfitCopper: "0", minVolume: "0", share: "10", horizonHours: "2", priceBasis: "lowest", limit: "25" };
-dashboard.state.token = "token";
-dashboard.state.adviceHousesLoaded = true;
-dashboard.state.adviceHouses = [{ key: "test-house" }];
-dashboard.state.adviceOptions = options;
-nodes.get("advice-house").value = "test-house";
-nodes.get("advice-live").checked = false;
-dashboard.switchView("advice", false);
-dashboard.refreshAdvice(options);
-await settle();
-const adviceRequest = fetchWaiters.shift();
-nodes.get("forget-token").listeners.click();
-const statusAfterForget = nodes.get("status").textContent;
-adviceRequest.resolve(response(__ADVICE_PAYLOAD__));
-await settle();
-emit({ fetchCalls, statusAfterForget, statusAfter: nodes.get("status").textContent, token: dashboard.state.token, renderedSections: nodes.get("advice-results").children.length, inFlight: dashboard.state.adviceInFlight });
-"""
-        )
-    )
-    assert len(actual["fetchCalls"]) == 1
-    assert actual["statusAfterForget"] == "Token forgotten. Enter it to begin."
-    assert actual["statusAfter"] == "Token forgotten. Enter it to begin."
-    assert actual["token"] == ""
     assert actual["renderedSections"] == 0
     assert actual["inFlight"] is False

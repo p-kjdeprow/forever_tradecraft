@@ -17,7 +17,6 @@ from crowley.store.houses import list_houses as store_list_houses
 from crowley.store.sweeps import item_history_rows, volume_rows
 from crowley.store.sweeps import latest_prices as store_latest_prices
 
-from ..deps import Authed
 from ._shared import _house_id
 
 router = APIRouter()
@@ -30,13 +29,13 @@ def _base_item_id(item_key: str) -> int:
     return int(match.group(1))
 
 
-@router.get("/v1/houses", dependencies=[Authed])
+@router.get("/v1/houses")
 def list_houses(request: Request) -> list[dict[str, Any]]:
     with request.app.state.pool.connection() as conn:
         return store_list_houses(conn)
 
 
-@router.get("/v1/houses/{key}/latest", dependencies=[Authed])
+@router.get("/v1/houses/{key}/latest")
 def latest_prices(
     key: str,
     request: Request,
@@ -60,7 +59,7 @@ def latest_prices(
     }
 
 
-@router.get("/v1/houses/{key}/items/{item_key}/history", dependencies=[Authed])
+@router.get("/v1/houses/{key}/items/{item_key}/history")
 def item_history(
     key: str, item_key: str, request: Request, days: int = Query(default=7, le=365)
 ) -> dict[str, Any]:
@@ -82,7 +81,7 @@ def item_history(
     }
 
 
-@router.get("/v1/houses/{key}/items/{item_key}/volume", dependencies=[Authed])
+@router.get("/v1/houses/{key}/items/{item_key}/volume")
 def item_volume(
     key: str,
     item_key: str,

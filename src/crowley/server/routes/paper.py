@@ -8,8 +8,6 @@ from fastapi import APIRouter, HTTPException, Request
 from crowley.store.paper import list_paper_runs as store_list_paper_runs
 from crowley.store.paper import paper_run_detail
 
-from ..deps import Authed
-
 router = APIRouter()
 
 
@@ -67,14 +65,14 @@ def _paper_run_payload(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-@router.get("/v1/paper/runs", dependencies=[Authed])
+@router.get("/v1/paper/runs")
 def list_paper_runs(request: Request) -> list[dict[str, Any]]:
     with request.app.state.pool.connection() as conn:
         rows = store_list_paper_runs(conn)
     return [_paper_run_payload(row) for row in rows]
 
 
-@router.get("/v1/paper/runs/{name}", dependencies=[Authed])
+@router.get("/v1/paper/runs/{name}")
 def paper_run(name: str, request: Request) -> dict[str, Any]:
     with request.app.state.pool.connection() as conn:
         with conn.transaction():

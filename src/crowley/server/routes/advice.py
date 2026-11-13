@@ -11,7 +11,6 @@ from crowley.advisor.service import ADVICE_CACHE, cached_advice, make_config
 from crowley.analysis.rank import latest_sweep, parse_as_of
 from crowley.core.errors import MarketDataNotFound
 
-from ..deps import Authed
 from ._shared import _house_id
 
 router = APIRouter()
@@ -26,7 +25,7 @@ def _as_of(text: str | None) -> datetime | None:
         raise OptionError(str(exc)) from exc
 
 
-@router.get("/v1/houses/{key}/advice", dependencies=[Authed])
+@router.get("/v1/houses/{key}/advice")
 def advice(
     key: str,
     request: Request,
@@ -92,7 +91,7 @@ def advice(
     return plain(advice_payload(result.advice, result.names, limit, exclusions))
 
 
-@router.get("/v1/houses/{key}/sweeps/latest", dependencies=[Authed])
+@router.get("/v1/houses/{key}/sweeps/latest")
 def latest_house_sweep(key: str, request: Request, build: str | None = None) -> dict[str, Any]:
     """Return the latest sweep identity and finish time without computing advice."""
 

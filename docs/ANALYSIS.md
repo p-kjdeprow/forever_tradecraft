@@ -180,7 +180,13 @@ uses the current lowest listing.
 default: while Advice is open it polls `GET /v1/houses/{key}/sweeps/latest` every minute and loads
 advice when the sweep changes. Scan uploads warm default advice after a new sweep is ingested;
 the freshness line warns when the latest sweep is over 45 minutes old. The page shows four things:
+
 - the forecast summary;
 - the four sections, with the same titles and columns as the CLI;
 - each pathway's steps, details and forecast notes;
 - per-strategy exclusion counts.
+
+Dashboard market, advice, and paper GETs are unauthenticated, so the browser does not need an API token. The
+server remains bound to loopback. For remote use, forward it over SSH with
+`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open `http://127.0.0.1:18080/dashboard` locally. Write endpoints
+continue to require bearer authentication.

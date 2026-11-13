@@ -61,8 +61,6 @@
     .toolbar select { min-width: min(28rem, 100%); }
     .view-switch { display: flex; gap: .35rem; flex-wrap: wrap; }
     .view-switch button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
-    .token-form { display: flex; flex-wrap: wrap; align-items: end; gap: .5rem; width: 100%; }
-    .token-form label { display: grid; gap: .2rem; flex: 1 1 18rem; }
     input, select, button {
       min-height: 2.35rem;
       border: 1px solid var(--line);
@@ -159,22 +157,15 @@
     <div class="view-switch" aria-label="Dashboard view">
       <button id="paper-view-button" type="button" aria-pressed="true">Paper runs</button>
       <button id="advice-view-button" type="button" aria-pressed="false">Advice</button>
-      <button id="forget-token" type="button">Forget token</button>
     </div>
   </header>
   <main>
     <section class="toolbar" aria-label="Dashboard controls">
-      <form id="token-form" class="token-form">
-        <label for="token">API token
-          <input id="token" name="token" type="password" autocomplete="off" spellcheck="false">
-        </label>
-        <button class="primary" type="submit">Save token</button>
-      </form>
       <span id="paper-controls">
         <label for="run-select">Run</label>
         <select id="run-select" aria-label="Paper run"></select>
       </span>
-      <span id="status" class="status" role="status" aria-live="polite">Enter an API token to begin.</span>
+      <span id="status" class="status" role="status" aria-live="polite">Loading…</span>
     </section>
 
     <div id="paper-view">
@@ -922,18 +913,15 @@
     /* DASHBOARD PURE LOGIC END */
     (() => {
       "use strict";
-      const TOKEN_KEY = "crowley.paperDashboard.apiToken";
       const VIEW_KEY = "crowley.paperDashboard.view";
       const LIVE_KEY = "crowley.paperDashboard.live";
       const ADVICE_HOUSE_KEY = "crowley.paperDashboard.adviceHouse";
-      const state = { token: "", noTokenStatus: "Enter an API token to begin.", runs: [], detail: null, selected: "", view: "paper", viewGeneration: 0, requestGeneration: 0, pollGeneration: 0, adviceRequestGeneration: null, adviceOptions: null, adviceInFlight: false, pollInFlight: false, adviceRenderedHouse: null, adviceRenderedSweepId: null, latestSweep: null, adviceHouses: [], adviceHousesLoaded: false, adviceHousesPromise: null };
+      try { localStorage.removeItem("crowley.paperDashboard.apiToken"); } catch (_) { /* A private browsing context may deny storage. */ }
+      const state = { runs: [], detail: null, selected: "", view: "paper", viewGeneration: 0, requestGeneration: 0, pollGeneration: 0, adviceRequestGeneration: null, adviceOptions: null, adviceInFlight: false, pollInFlight: false, adviceRenderedHouse: null, adviceRenderedSweepId: null, latestSweep: null, adviceHouses: [], adviceHousesLoaded: false, adviceHousesPromise: null };
       let refreshTimer = null;
       let advicePollTimer = null;
       const $ = (id) => document.getElementById(id);
 
-      function storedToken() {
-        try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (_) { return ""; }
-      }
       function storedLive() {
         try {
           const live = localStorage.getItem(LIVE_KEY);
@@ -964,10 +952,10 @@
         stopAdvicePollTimer();
       }
       function pollingEnabled() {
-        return state.view === "advice" && $("advice-live").checked && Boolean(state.token) && Boolean($("advice-house").value);
+        return state.view === "advice" && $("advice-live").checked && Boolean($("advice-house").value);
       }
-      function pollIsCurrent(generation, house, token) {
-        return state.pollGeneration === generation && state.view === "advice" && $("advice-live").checked && state.token === token && $("advice-house").value === house;
+      function pollIsCurrent(generation, house) {
+        return state.pollGeneration === generation && state.view === "advice" && $("advice-live").checked && $("advice-house").value === house;
       }
       function saveView(view) {
         try { localStorage.setItem(VIEW_KEY, view); } catch (_) { /* A private browsing context may deny storage. */ }
@@ -977,17 +965,6 @@
       }
       function saveAdviceHouse(value) {
         try { localStorage.setItem(ADVICE_HOUSE_KEY, value); } catch (_) { /* A private browsing context may deny storage. */ }
-      }
-      function saveToken(value) {
-        state.token = value.trim();
-        invalidateRequests();
-        bumpPollGeneration();
-        state.noTokenStatus = state.token ? "Enter an API token to begin." : "Token forgotten. Enter it to begin.";
-        try {
-          if (state.token) localStorage.setItem(TOKEN_KEY, state.token);
-          else localStorage.removeItem(TOKEN_KEY);
-        } catch (_) { /* A private browsing context may deny storage. */ }
-        $("token").value = state.token;
       }
       function esc(value) {
         const node = document.createElement("span");
@@ -1009,7 +986,6 @@
         $("status").classList.toggle("error", error);
       }
       function currentAdviceStatus() {
-        if (!state.token) return state.noTokenStatus;
         if (!state.adviceHousesLoaded) return "Loading advice houses…";
         return state.adviceHouses.length ? "Advice ready — choose options and request advice." : "No houses found.";
       }
@@ -1029,11 +1005,10 @@
         clearAdviceFreshness();
       }
       async function getJSON(path, includeDetail = false) {
-        const response = await fetch(path, { headers: { Authorization: `Bearer ${state.token}` } });
+        const response = await fetch(path);
         if (!response.ok) {
           let body = null;
           try { body = await response.json(); } catch (_) { /* Some proxies return an empty error body. */ }
-          if (response.status === 401) throw new Error("The API token was rejected.");
           if (includeDetail && (response.status === 400 || response.status === 404) && body && typeof body.detail !== "undefined") throw new Error(String(body.detail));
           throw new Error(`Request failed (${response.status}).`);
         }
@@ -1305,7 +1280,7 @@
         }
       }
       async function loadAdviceHouses() {
-        if (!state.token || state.adviceHousesLoaded) return;
+        if (state.adviceHousesLoaded) return;
         if (state.adviceHousesPromise) return state.adviceHousesPromise;
         const viewGeneration = state.viewGeneration;
         const isCurrent = () => state.view === "advice" && state.viewGeneration === viewGeneration;
@@ -1324,7 +1299,7 @@
             if (isCurrent() && !state.adviceInFlight) setStatus(error.message, true);
           } finally {
             state.adviceHousesPromise = null;
-            if (state.token && state.view === "advice" && state.viewGeneration !== viewGeneration && !state.adviceHousesLoaded) void loadAdviceHouses();
+            if (state.view === "advice" && state.viewGeneration !== viewGeneration && !state.adviceHousesLoaded) void loadAdviceHouses();
           }
         })();
         return state.adviceHousesPromise;
@@ -1354,10 +1329,6 @@
       }
       async function refreshAdvice(options = state.adviceOptions) {
         if (state.view !== "advice") return;
-        if (!state.token) {
-          setStatus(currentAdviceStatus());
-          return;
-        }
         if (state.adviceInFlight) {
           setStatus("Advice is already computing…");
           return;
@@ -1414,17 +1385,15 @@
         if (!pollingEnabled() || state.pollInFlight) return;
         const generation = state.pollGeneration;
         const house = $("advice-house").value;
-        const token = state.token;
-        const isCurrent = () => pollIsCurrent(generation, house, token);
+        const isCurrent = () => pollIsCurrent(generation, house);
         state.pollInFlight = true;
         try {
-          const response = await fetch(`/v1/houses/${encodeURIComponent(house)}/sweeps/latest`, { headers: { Authorization: `Bearer ${token}` } });
+          const response = await fetch(`/v1/houses/${encodeURIComponent(house)}/sweeps/latest`);
           if (!isCurrent()) return;
           if (!response.ok) {
             let body = null;
             try { body = await response.json(); } catch (_) { /* Some proxies return an empty error body. */ }
             if (!isCurrent()) return;
-            if (response.status === 401) throw new Error("The API token was rejected.");
             if ((response.status === 400 || response.status === 404) && body && typeof body.detail !== "undefined") throw new Error(String(body.detail));
             throw new Error(`Request failed (${response.status}).`);
           }
@@ -1474,11 +1443,6 @@
       }
       async function refresh() {
         if (state.view !== "paper") return;
-        if (!state.token) {
-          $("dashboard-content").hidden = true;
-          setStatus(state.noTokenStatus);
-          return;
-        }
         const viewGeneration = state.viewGeneration;
         const requestGeneration = ++state.requestGeneration;
         const isCurrent = () => requestIsCurrent("paper", viewGeneration, requestGeneration);
@@ -1505,35 +1469,6 @@
           }
         }
       }
-      $("token-form").addEventListener("submit", (event) => {
-        event.preventDefault();
-        saveToken($("token").value);
-        state.adviceHousesLoaded = false;
-        state.adviceHouses = [];
-        renderAdviceHouses([]);
-        if (state.view === "advice") void loadAdviceHouses();
-        else void refresh();
-      });
-      $("forget-token").addEventListener("click", () => {
-        saveToken("");
-        state.adviceInFlight = false;
-        state.runs = [];
-        state.selected = "";
-        state.adviceOptions = null;
-        state.adviceHousesLoaded = false;
-        state.adviceHouses = [];
-        state.adviceRenderedHouse = null;
-        state.adviceRenderedSweepId = null;
-        state.latestSweep = null;
-        renderRunOptions();
-        renderAdviceHouses([]);
-        clearAdviceFreshness();
-        $("advice-results").replaceChildren();
-        $("advice-strategy-summary").replaceChildren();
-        $("dashboard-content").hidden = true;
-        setStatus("Token forgotten. Enter it to begin.");
-        $("token").focus();
-      });
       $("run-select").addEventListener("change", () => { state.selected = $("run-select").value; void refresh(); });
       $("paper-view-button").addEventListener("click", () => switchView("paper"));
       $("advice-view-button").addEventListener("click", () => switchView("advice"));
@@ -1552,13 +1487,7 @@
         formatAdviceCopper, validateAdvicePayload, buildAdviceModel, describeAdviceStep, switchView,
         validateLatestSweep, advicePollStep, freshnessModel, pollLatestSweep, refreshAdvice, scheduleRefresh, readAdviceOptions, state,
       };
-      state.token = storedToken();
-      $("token").value = state.token;
       $("advice-live").checked = storedLive();
-      if (!state.token) {
-        const entered = window.prompt("Enter the Crowley API token");
-        if (entered) saveToken(entered);
-      }
       renderRunOptions();
       switchView(storedView(), false);
       if (state.view === "paper") void refresh();

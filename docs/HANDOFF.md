@@ -141,9 +141,13 @@ targets that require leveling from 150; the planning ceiling does not change the
 recipes are owned and ignore recipe-acquisition costs. The 10 g starting budget is unconfirmed. Dandune is the scanner character
 on a different account; no trading-character, recipe or inventory capture establishes skills, recipe ownership or stock.
 
-Current-build Advice is available at `http://127.0.0.1:8080/dashboard` on this host. Select Advice, house
-`us-normal-alliance`, Alchemy and Tailoring, Crafting, Forecast and Live. The authenticated endpoint returned 200
-after export 4 loaded; at sweep 546 (2026-11-13 08:22:10 UTC) it had 0 ranked and 38 unmeasured pathways.
+Current-build Advice is available at `http://127.0.0.1:8080/dashboard` on this host. For remote browser access,
+forward the loopback listener with `ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open
+`http://127.0.0.1:18080/dashboard` locally. The
+dashboard's market, advice, and paper GET requests do not need an API token; write endpoints still require bearer
+authentication. Keep the server on its existing loopback binding. Select Advice, house `us-normal-alliance`,
+Alchemy and Tailoring, Crafting, Forecast and Live. The advice endpoint returned 200 after export 4 loaded; at
+sweep 546 (2026-11-13 08:22:10 UTC) it had 0 ranked and 38 unmeasured pathways.
 Unmeasured profit/hour assumes P(sale)=1 and is an upper bound, not income. The current interface filters professions
 but does not enforce the skill-225 planning ceiling. Default ranked crafting needs six usable hours of commodity
 demand and four independent two-hour sale trials; additional data alone does not solve grouped-gear sale identity.

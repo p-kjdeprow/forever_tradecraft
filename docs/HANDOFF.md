@@ -135,8 +135,9 @@ two primary professions, so the portfolio must be cut to two; provisional replay
 This is beta evidence, not a forecast for the launch economy. Station, tool, category and focus requirements are
 enforced in strategy and execution; empty capabilities mean unavailable.
 
-The user's reported planning skills are Alchemy 225 and Tailoring 150. Assume all recipes are owned and ignore
-recipe-acquisition costs for this scenario. The 10 g starting budget is unconfirmed. Dandune is the scanner character
+The user reports Alchemy 225 and Tailoring 150. Evaluate both professions through skill 225, including Tailoring
+targets that require leveling from 150; the planning ceiling does not change the reported current skill. Assume all
+recipes are owned and ignore recipe-acquisition costs. The 10 g starting budget is unconfirmed. Dandune is the scanner character
 on a different account; no trading-character, recipe or inventory capture establishes skills, recipe ownership or stock.
 
 ## Open follow-ups

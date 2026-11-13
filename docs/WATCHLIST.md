@@ -57,8 +57,9 @@ The first sweep's slice 3 contained none of 279943 Spinning Wheel, 279972 Factio
 so their live Auction House eligibility, turnover and profitability remain unverified. The 70938 recipe export has
 not been loaded; these entries retain their 1.60.1.70888 export-3 evidence provenance.
 
-The user reports Alchemy skill 225 and Tailoring skill 150 for the planning profile. Assume all recipes are known
-and ignore recipe-acquisition costs. A 10 g starting budget is unconfirmed. Dandune is the scanner character on a
+The user reports Alchemy skill 225 and Tailoring skill 150. Evaluate both professions through skill 225, including
+Tailoring leveling targets above the current 150. Assume all recipes are known and ignore recipe-acquisition costs.
+A 10 g starting budget is unconfirmed. Dandune is the scanner character on a
 different account; no trading-character, recipe or inventory capture establishes recipe ownership or stock.
 
 

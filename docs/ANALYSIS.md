@@ -175,7 +175,7 @@ uses the current lowest listing.
 
 ### Trading dashboard
 
-After the server rollout, open `/dashboard` on the loopback server, or forward it from a laptop with
+Open deployed `/dashboard` on the loopback server, or forward it from a laptop with
 `ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and browse to `http://127.0.0.1:18080/dashboard`. The latest-scan
 and trading-summary GETs are read-only and do not require an API token; write endpoints continue to require bearer
 authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tailoring 150, while allowing planning
@@ -191,14 +191,17 @@ Ready-now positive-margin strategies with observed activity sort before unmeasur
 Rows sharing a cooldown group are alternatives; their rates are not additive. Profits assume every listed unit sells
 and are not expected income. Observed listing depletion is not confirmed sales, and sale probability remains unknown.
 
-**Live source check, 2026-11-13.** The read-only summary for house `us-normal-alliance`, build `1.60.1.70938`,
-loaded sweep 583 (17:47:03 UTC; 484 planned, 484 queried, 484 successful) and ten rows in 5.756 s. This is the
-source summary calculation; HTTP availability and latency verification remain pending rollout. Potion of
+**Live HTTP check, 2026-11-13 18:33 UTC.** Deployed commit `a15d388` and image
+`e81b402cab34ef5e10bc8277877310463a7f6a7beba17f76a7f437a3d7ec8d1a` served the unauthenticated summary with
+HTTP 200, ten rows, and an 8.03 s response. It reported house `us-normal-alliance`, build `1.60.1.70938`, latest
+accepted sweep 583 (17:47:03 UTC; 484 planned, 484 queried, 484 successful). Profile, assumed budget and
+cost/proceeds/profit arithmetic were checked. Both dashboard pages returned HTTP 200; an unauthenticated protected
+queue write returned 401. The server stayed loopback-only and scan/companion services were active. Potion of
 Predatory Senses showed 2 crafts / 2 units, 3,238 copper cost, 10,885 copper net proceeds if sold, 7,647 copper
 if-sold profit and 12.57 observed units/hour. Shadow Oil showed 4 crafts / 8 units, 8,237 copper cost,
 12,478 copper net proceeds, 4,241 copper if-sold profit and 49.17 observed units/hour. These are current-book
-margin and descriptive-depletion figures, not confirmed sales. The source response and check log are in
-`.archive/dashboard-trading-20261113/`.
+margin and descriptive-depletion figures, not confirmed sales. At verification time a post-unlock scan was running,
+but sweep 583 remained the latest accepted sweep. Source details are in `.archive/dashboard-trading-20261113/`.
 
 ### Advanced advice view
 

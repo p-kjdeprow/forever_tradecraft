@@ -1,41 +1,48 @@
 # Repeating scans: operator guide
 
-`crowley-scan` (unit `crowley-scan.service`) keeps WoW Forever in the world with the auction house open, so the
-addon's own 900 s timer sweeps its installed scan plan and gets each sweep to the server. Source catalog revision 7
-is prepared for measured native client build 1.60.1.70938: 488 core and 1 discovery item every sweep, plus one of six
-cold slices containing 52 or 53 items (806 active IDs total; 541 or 542 planned item queries per sweep). Its catalog
-hash is `06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e` and plan hash is
-`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`. Revision 7 is source-only until the reviewed
-cutover is completed; the currently deployed install remains revision 6. The deployed revision 6 plan has catalog hash
-`082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147` and plan hash
-`d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`; package, generated addon target, healthy
-server, and companion `Data.lua` agree on build 70938/interface 16001 and this plan. The first accepted full sweep,
-`us-normal-alliance-1794550375-Dandune-3791` (database sweep 538), used cold slice 3 and ran 2026-11-13 06:12:55–
-06:23:30 UTC (635 seconds). Its exact 483-ID set matched the plan; all 483 had `query.kind=queried` and
-`reason_code=ok`, with 418 priced items. It was saved and uploaded, and its acknowledgement was written to
-`Data.lua`. Client-loaded ACK was not independently verified; no reload was forced. Matching recipe export 4 for
-build 70938 was loaded on 2026-11-13 after a separate guarded normal quit finalized the client cache; normal scanning
-resumed before offline export. Advice now reads matching-build facts. Private first-sweep receipt:
-`.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
+`crowley-scan` (unit `crowley-scan.service`) is designed to keep WoW Forever in the world with the auction house open,
+so the addon's own 900 s timer can sweep its installed plan and the companion can upload each sweep. Revision 7 is
+deployed for measured native client build 1.60.1.70938: 488 core and 1 discovery item every sweep, plus one of six
+cold slices containing 52 or 53 items (806 active IDs total; 541 or 542 planned item queries per sweep). Package,
+generated addon target, server and companion `Data.lua` agree on catalog hash
+`06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e` and plan hash
+`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`; the server is healthy on image
+`5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`.
+
+At the current checkpoint both services are active, the revision-7 server is healthy, and the scanner has
+Stormwind/Dandune at the Auction House. Two full revision-7 sweeps passed exact-set and all-query-success checks,
+were saved and uploaded, and have independently captured acknowledgement writes. Sweep 586 (slice 3) ran
+2026-11-13 21:02:15–21:14:28 UTC (733 s); sweep 587 (slice 4) ran 21:17:15–21:27:41 UTC (626 s). Both used the
+full 542-item planned set for build 70938/interface 16001, house `us-normal-alliance`, plan hash
+`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`; each had 542 observed, queried and `ok`
+items. Each included successful queries for all 187 new hot IDs. Starts were exactly 900 s apart. Across all 489
+hot IDs, query gaps were 793–899 s (median 882 s), within the 21-minute evidence limit; individual item query gaps
+are not all exactly 900 s. Client-loaded acknowledgement was not independently verified; no extra reload was forced
+solely to verify it.
+These two runtimes do not establish a p95 or a robust long-term runtime. Empty price results do not establish
+listings, sales or profit. Private receipts are listed in [HANDOFF](HANDOFF.md).
 
 Revision 7 completes the export-4 fixed, client-fact tradeable Alchemy/Tailoring output graph through planning skill
-225: all 165 cold outputs in that known-eligible set move to core and 15 missing outputs are added. Of 111 reagent
-graph IDs, 91 eligible auction-house inputs are already hot, 19 vendor-cost inputs remain excluded, and
-Bind-on-Pickup reagent 213378 is excluded. Six additional cold Alchemy outputs and one new output are included
-for research coverage with unknown learning rank; they are not asserted to be craftable by skill 225. Five
-already-hot skill-unknown outputs remain hot, and all 12 known-fact skill-unknown outputs plus their AH
-dependencies are protected. To fit the selected graph, 120 hot IDs outside the protected output and reagent graphs
-move to cold and remain active. A replay of 20 complete matching-build sweeps (database IDs 564–583) across all six
-new cold slices estimates a worst runtime of 690.5 s using median query cost and 697.79 s under mean-cost sensitivity.
-These are estimates; no revision-7 sweep has been accepted yet.
+225. The export-4 census uses 2,282 recipes and 4,556 item facts. All 297 eligible outputs and 91 eligible AH
+reagent inputs are protected hot; of 111 reagent graph IDs, 19 vendor-cost inputs remain excluded and
+Bind-on-Pickup reagent 213378 is excluded. The Alchemy census accounts for all 196 recipes: 99 known-eligible
+recipes (94 fixed tradeable outputs hot, four without sufficient output item facts, and one Philosopher's Stone
+output that is Bind-on-Pickup), 74 above skill 225, and 23 with unknown skill requirements. The 44 AH reagents
+belong to the known-eligible Alchemy graph. Separately, 12 known-tradeable skill-unknown Alchemy outputs and their
+dependencies remain hot for research. The revision delta has 171
+cold-to-hot promotions, 16 additions, and 120 capacity moves from hot to cold; all moved IDs remain active.
+The seven unknown-rank outputs are research coverage and are not asserted craftable by skill 225.
 
-The first 635-second result is one measured sweep, not a p95. Twenty later complete revision-6 sweeps (database
-IDs 564–583) provide the baseline for the revision-7 capacity replay above. That replay is an estimate, not measured
-revision-7 runtime. The plan keeps the 900-second cadence, configured sweep cap, and six-slice policy.
-Cold items recur periodically; this sweep's slice 3 did not query 279943, 279972 or 279973, so their live Auction
-House eligibility remains unverified. The loop recovers from crashes, disconnects, maintenance and reboots without
-an operator. Design: [ARCHITECTURE](ARCHITECTURE.md). Host setup: [GAME_SETUP](GAME_SETUP.md). Current state:
-[HANDOFF](HANDOFF.md).
+A replay of 20 complete matching-build revision-6 sweeps (database IDs 564–583) across all six revision-7 cold
+slices estimates a worst runtime of 690.5 s using median query cost and 697.79 s under mean-cost sensitivity. These
+are estimates separate from the two measured revision-7 runtimes above; those two samples are not a p95. The first
+revision-6 accepted sweep, UID
+`us-normal-alliance-1794550375-Dandune-3791` (database sweep 538), used slice 3 and took 635 seconds; that single
+measurement is not a p95 and did not query 279943, 279972 or 279973. Historical revision-6 receipt:
+`.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`. Revision-7 exact-set, successful query coverage
+for the two full sampled sweeps and two-sweep cadence check passed; live listings, sales and profit remain unknown
+for unpriced observations and unlisted items. Design: [ARCHITECTURE](ARCHITECTURE.md). Host setup:
+[GAME_SETUP](GAME_SETUP.md). Current state: [HANDOFF](HANDOFF.md).
 
 ## What it does each cycle
 

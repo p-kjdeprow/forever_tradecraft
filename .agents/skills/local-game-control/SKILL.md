@@ -64,6 +64,8 @@ trading, account changes or unrelated display changes.
 - Do not replay an action because its first frame lags.
 - A GNOME system modal can dim the HUD and ignore Xwayland input. A disconnected login screen keeps the same Wine
   identity; read the screen, not just the process.
+- Recheck the current PID and screen after a user returns or restores the game. An earlier login or ruleset screen
+  does not describe a replacement process; retire recovery authorizations bound to the old process.
 
 ## Recover without widening the task
 
@@ -73,6 +75,9 @@ trading, account changes or unrelated display changes.
 - A disconnect or maintenance needs nothing from you: the loop relaunches (15 min apart, then hourly). Stop it only
   if a human needs the desktop.
 - Honor the latest user instruction. A stop ends input immediately, including cleanup.
+- Stopping the scan unit during a relaunch does not cancel its launcher child. Before manual input, prove that
+  child has ended or quiesce only the exact recorded control-child group under the GUI lease, with the game and
+  Battle.net outside that group. Never infer exclusive GUI ownership from the inactive unit alone.
 
 ## Report
 

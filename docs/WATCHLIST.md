@@ -1,48 +1,69 @@
 # First run scan catalog
 
-## Revision 7 source plan (prepared 2026-11-13; live verification pending)
+## Revision 7 deployed plan (2026-11-13; two-sweep qualification complete)
 
-The source catalog is revision 7 for selected target build **1.60.1.70938**. It contains
+Catalog revision 7 is deployed for selected target build **1.60.1.70938**. The package, generated
+addon target, companion `Data.lua` and healthy server agree on the plan. The catalog contains
 973 entries: 806 active (488 core, 1 discovery, 317 cold), 116 research and 51 excluded. The
 plan keeps the existing 900-second cadence, 750-second sweep cap, six cold slices and 20
 retained price levels. Each sweep plans 488 core + 1 discovery item and one cold slice of 52
 or 53 items, for 541–542 item queries. Its catalog hash is
 `06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e`; its plan hash is
-`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`.
+`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`. The deployed server
+image is `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`.
 
-The matching export-4 census identifies 297 eligible fixed, client-fact tradeable Alchemy and
-Tailoring outputs through planning skill 225, plus 111 reagent graph IDs. Of the reagents, 91
-eligible auction-house inputs are already hot, 19 vendor-cost inputs remain excluded, and
-Bind-on-Pickup reagent 213378 is excluded. Revision 7 promotes all 165 existing cold outputs in this known-eligible set to core and adds
+The matching export-4 census uses 2,282 recipes and 4,556 item facts. It identifies 297 eligible
+fixed, client-fact tradeable Alchemy and Tailoring outputs through planning skill 225, plus 111
+reagent graph IDs. All 297 outputs and 91 eligible auction-house reagent inputs are protected in
+the hot graph; no eligible AH input is missing. Nineteen vendor-cost inputs remain excluded, and
+Bind-on-Pickup reagent 213378 is excluded. Revision 7 promotes all 165 existing cold outputs in
+this known-eligible set to core and adds
 the 15 previously missing outputs from export 4. Those 15 additions have client-facts status `ok`
-and bonding code 2 (Bind on Equip); live auction-house eligibility and sale activity remain
-unverified. Current margin was not used as an eligibility filter. Six further Alchemy outputs
+and bonding code 2 (Bind on Equip); successful live query coverage is verified in sweeps 586–587,
+but empty price results do not establish available listings, sales or profit. Current margin was
+not used as an eligibility filter. Six further Alchemy outputs
 (9154, 9155, 9233, 12190, 17967 and 18294) were promoted for research coverage, and Gurubashi Mojo
 Madness (19931) was added as a seventh; their exported learning rank is unknown, so none of these
 seven is claimed craftable by skill 225. The five already-hot skill-unknown Alchemy outputs remain
 hot. All 12 skill-unknown outputs with known tradeable facts and their AH dependencies are protected
 from the capacity demotions.
 
-To keep the larger hot cohort within scan capacity, 120 hot items outside the protected output
+The Alchemy census accounts for all 196 recipes: 99 known-eligible recipes (94 fixed tradeable
+outputs hot, four without sufficient output item facts, and one Philosopher's Stone output that is
+Bind-on-Pickup), 74 recipes above skill 225, and 23 recipes with unknown skill requirements. The
+known-eligible Alchemy graph's 44 auction-house reagents are hot. Separately, 12 skill-unknown
+Alchemy outputs with known tradeable facts, plus their dependencies, remain hot for research.
+
+The catalog delta contains 171 cold-to-hot promotions, 16 new entries and 120 capacity moves from
+hot to cold. To keep the larger hot cohort within scan capacity, 120 hot items outside the protected output
 and reagent graphs move to cold. They remain active for periodic price discovery; this is a capacity
-rebalance, not a claim that those items are permanently unprofitable. The source change is not
-yet deployed, and no revision-7 sweep has been accepted.
+rebalance, not a claim that those items are permanently unprofitable. Both services are active, the
+revision-7 server is healthy, and the scanner has Stormwind/Dandune at the Auction House. Two full
+revision-7 sweeps passed exact-set and all-query-success checks, were saved and uploaded, and have
+independently captured acknowledgement writes. Sweeps 586 and 587 took 733 s and 626 s; they are
+two measurements, not a p95 or a long-term runtime guarantee. All 489 hot IDs appeared and queried
+successfully in both sweeps. Their query gaps were 793–899 s (median 882 s); sweep starts were
+exactly 900 s apart. Client-loaded acknowledgement was not independently verified; no extra
+reload was forced solely to verify it. Private proof receipts are listed in [HANDOFF](HANDOFF.md).
 
 The capacity estimate replays each of 20 complete matching-build baseline sweeps (database
 sweeps 564–583) against all six revision-7 cold slices. The worst replay estimate is 690.5 s
 using median per-item query cost and 697.79 s under mean-cost sensitivity, below the 750 s cap.
-This is an estimate, not a measured revision-7 runtime; accepted full sweeps and two-sweep
-promotion verification remain pending.
+This is a replay estimate, distinct from the two measured revision-7 sweeps above. The 733 s first
+revision-7 sweep was 17 s below the configured 750 s cap; the second took 626 s. Two samples do not
+establish a p95 or robust long-term runtime. Exact planned-set execution, successful queries for
+all 489 hot IDs, and two-sweep cadence verification are complete; live listings, sales and profit
+remain unknown where observations contain no priced items.
 
-### Revision 6 deployed baseline and live qualification (2026-11-13)
+### Historical revision 6 deployment baseline and live qualification (2026-11-13)
 
 The deployed revision 6 baseline was for selected target build **1.60.1.70938**. It contained
 957 entries: 790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. The active
 plan keeps the existing 900-second cadence, 750-second sweep cap, six cold slices and 20 retained
 price levels. Each sweep plans 421 core + 1 discovery item and one cold slice of 61 or 62 items,
 for 483–484 planned item queries. Revision 6 had catalog hash
-`082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147`; the current source plan hash
-was `d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`.
+`082e567cf1c41e53306118cb0ad8cfbcd61b829e1861f9f076feafe5d5292147` and plan hash
+`d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`; revision 7 supersedes it.
 
 The revision moves 57 hot recipe teaching items from discovery to cold. Their exact IDs are:
 
@@ -74,8 +95,8 @@ profitability remain unverified. No BoP or unknown-fact item is admitted. In rev
 Purple Silk Shirt (4335) and Phoenix Bindings (210781) were cold; revision 7 promotes both.
 Bow of Searing Arrows (2825) remains hot in discovery at its existing tier.
 
-The revision-6 approved source hashes above are deployed to the package, generated addon target, healthy server and companion
-`Data.lua`; all use build 1.60.1.70938 and plan hash
+During revision 6, its approved hashes were deployed to the package, generated addon target, healthy server and companion
+`Data.lua`; all used build 1.60.1.70938 and plan hash
 `d6465ae2b812f307ca9fe0c7cf2838325fe5454d0f86346691f148e856ecf5a9`. The first full accepted sweep was
 `us-normal-alliance-1794550375-Dandune-3791` (database sweep 538), cold slice 3, on 2026-11-13. It ran from
 06:12:55 to 06:23:30 UTC (635 seconds): 483 declared IDs, 483 `query.kind=queried`, 483 `reason_code=ok`, and 418

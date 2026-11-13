@@ -1,5 +1,50 @@
 # First run scan catalog
 
+## Revision 6 source review (2026-11-12; rollout pending)
+
+The reviewed repository source catalog is revision 6 for client build **1.60.1.70888**. It contains
+957 entries: 790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. The active
+plan keeps the existing 900-second cadence, 750-second sweep cap, six cold slices and 20 retained
+price levels. Each sweep plans 421 core + 1 discovery item and one cold slice of 61 or 62 items,
+for 483–484 planned item queries. The catalog hash is
+`595c7b35509710c1cdd22fa383ada7bd407c3dec0528a9df14a9e607424d921d`; the selected target plan
+hash is `3dae1cfa594c49add613df4f7c7f8abdc4c79cdacc0c54b29a7856b4b91d1aa6`.
+
+The revision moves 57 hot recipe teaching items from discovery to cold. Their exact IDs are:
+
+```text
+2555, 3395, 3830, 4292, 4416, 5484, 5642, 5775, 6044, 6211, 6326, 6328,
+6663, 6716, 7976, 9295, 9298, 9304, 10644, 12958, 13477, 13486, 13487,
+13488, 13489, 13490, 13491, 13494, 13495, 13496, 13497, 13499, 13519,
+14468, 14499, 14510, 16111, 16113, 21099, 21219, 22307, 22308, 250380,
+250382, 250977, 250982, 250983, 250989, 252783, 252784, 252811, 252812,
+252942, 253665, 253668, 255723, 255725
+```
+
+Separately, Small Glowing Shard (11138) moves from core to cold.
+
+This keeps all 297 hot Alchemy/Tailoring recipe reagent/output IDs at their existing hot tier;
+the full client-export graph contains 829 such IDs. All existing active IDs and price history remain.
+The teaching items and 11138 stay active for periodic cold price coverage. No items are promoted
+or removed. Copper, tin, iron, silver, gold and Truesilver ores, tin bars, coal, Lesser Astral
+Essence and the existing Bow of Searing Arrows remain hot under their prior policies; the 115
+other-profession recipe-linked items also remain hot.
+
+Three export-3 verified Tailoring outputs are admitted to cold for price discovery: **279943
+Spinning Wheel**, **279972 Faction Banner**, and **279973 Faction Banner**. Their exact item facts
+report status `ok` and bonding code 0, and each has a fixed Tailoring output link. Catalog
+tradeability is client-marked only; live Auction House eligibility, turnover and profitability
+remain unverified. No BoP or unknown-fact item is admitted. Rich Purple Silk Shirt (4335) and
+Phoenix Bindings (210781) remain cold. Bow of Searing Arrows (2825) remains hot in discovery at
+its existing tier; this revision makes no gear promotion because its demand evidence is sparse.
+
+Using the 24-sweep observed p95 of 652 seconds as a linear item-count baseline, the new plan
+projects 593.3 seconds p95, a 58.7-second saving and about 1,148 fewer item queries over 24 sweeps.
+This is an estimate, not a live result; response latency, GUI waits, retries, slice ordering and
+scan failures can change runtime. Revision 6 is repository source state only and has not been
+deployed or live-verified.
+
+
 Crowley's first selective scan will use the item catalog in
 [`src/crowley/data/first_run.json`](../src/crowley/data/first_run.json). Every item has one
 entry keyed by its numeric item ID, with category, profession memberships, roles, inclusion
@@ -12,7 +57,7 @@ travels unchanged through every sweep, so delayed uploads remain valid after a l
 revision. `initial_price_levels = 20` is the retained unit-price depth; a query that proves a
 higher witness is explicitly `bounded`, never a whole-market statistic.
 
-## Revision 2 adoption note (2026-10-16)
+## Historical revision 2 adoption note (2026-10-16)
 
 Revision 2 pins client build **1.60.1.70450** while preserving the exact 544-item catalog,
 428 active IDs, 352 core IDs, 76 discovery IDs, retained depth 20, cadence 900 seconds and
@@ -22,7 +67,7 @@ format 2. The reviewed catalog hash is
 release identity for parent-coordinated publication; it does not claim live scanner qualification.
 The original revision 1 / 70425 release artifacts and the initial 70374 evidence remain preserved.
 
-## Initial coverage
+## Initial coverage (historical revision 1)
 
 Revision 1 contains 544 distinct item IDs: 428 active, 74 under research and 42 excluded.
 The active set has 352 core items and 76 discovery items. Categories are disjoint; profession
@@ -62,10 +107,12 @@ armor piece, crafted leveling item or world drop.
   recipe costing. This does not establish that all vendor stock is unlimited or that
   vendor arbitrage is impossible.
 
-`core` contains production inputs, intermediates and selected useful outputs. `discovery`
-contains recipe unlocks and the two named world drops. The first-run plan includes both
-pools. Lower-frequency discovery scans are a future scheduling change, not implemented
-behavior. Use category, profession and tag views to review memberships; do not maintain
+`core` contains the production inputs, intermediates and selected useful outputs scanned every
+sweep. `discovery` is also scanned every sweep; revision 6 has one discovery item, Bow of Searing
+Arrows (2825). The recipe-teaching items moved in revision 6 are in `cold`, not `discovery`.
+`cold` rotates through six slices, scanning one slice per sweep for periodic price coverage.
+The revision 6 plan has 421 core items, 1 discovery item and 368 cold items, with slices of 61
+or 62 items. Use category, profession and tag views to review memberships; do not maintain
 separate hand-edited copies of the item list.
 
 Scan watchlists describe what to observe; they are not a generic market-inventory list.
@@ -125,17 +172,19 @@ forgets the revision bump. Commits and pushes still require the user's instructi
 ## Delivery to the addon
 
 The JSON is packaged with Python and the server validates it at startup. The authenticated
-`GET /v1/scan-plan` endpoint returns the active IDs, core/discovery memberships, revision,
+`GET /v1/scan-plan` endpoint returns the active IDs, core/discovery/cold memberships, revision,
 content hash, target client build and intended initial depth. `POST /v1/addon-data` includes
-the same object as `scanPlan`. The companion already serializes it into
-`Crowley_Data/Data.lua`; WoW reads that file on the next login or `/reload`.
+the same object as `scanPlan`. The companion serializes it into `Crowley_Data/Data.lua`. For a
+plan change, follow the safe stop/close/install/relaunch sequence in
+[REPEATING_SCANS](REPEATING_SCANS.md); do not treat an in-place `/reload` as a cutover procedure.
 
-The plan body contains exactly schema version 2, `id`, revision, catalog hash, target client
-build, 900-second cadence, initial levels, sorted IDs and the two pool partitions. Its
+The plan body contains schema version 2, `id`, revision, catalog hash, target client build,
+900-second cadence, configured `coldSlices`, initial levels, sorted IDs, and the `core`,
+`discovery`, and `cold` pool partitions. Its
 canonical compact JSON receives a SHA-256 `planHash`; `planJSON` and `planHash` are both
-returned by `GET /v1/scan-plan` and `POST /v1/addon-data`. Deploy a reviewed package and
-restart the server to change the shipped plan; let the companion write Data.lua, then
-`/reload`. Do not edit generated Data.lua or maintain a second Lua item list.
+returned by `GET /v1/scan-plan` and `POST /v1/addon-data`. Change the shipped plan only through
+the reviewed rollout procedure in [REPEATING_SCANS](REPEATING_SCANS.md). Do not edit generated
+Data.lua or maintain a second Lua item list.
 
 An observation has one object entry per planned ID. It records query bounds, full/bounded/
 incomplete/unqueried coverage, source completeness, rational cutoff and higher-price witness,
@@ -150,8 +199,8 @@ Six unacknowledged sweeps are retained without eviction; collection pauses until
 companion uploads them and a subsequent reload loads acknowledgements. The first reload
 writes SavedVariables and uploads; a second reload is needed to prune and resume.
 
-The Lua harness measured a representative full 428-item payload with one retained row per
-item and one-second response cadence: 359,943 decoded JSON bytes, 16,960 raw-deflate bytes,
+A historical Lua harness run measured a representative 428-item payload with one retained row
+per item and one-second response cadence: 359,943 decoded JSON bytes, 16,960 raw-deflate bytes,
 and 22,616 base64 characters. That run exercises retained item identity, owner and time
 fields, and the real 100-message rolling throttle; it is a payload-size sample, not a
 guarantee for every live sweep. More rows, links, variants, and owner names increase the
@@ -160,8 +209,8 @@ size, so verify capacity with real beta captures before relying on the six-sweep
 Missing observations are never interpreted as zero supply, and bounded depth is never
 reported as whole-market supply or a median. Preserve item variants when querying equipment.
 Targeted query sorting, pagination, throttle limits, metadata freshness and event payloads
-require build-specific live evidence. The first retained build70450 sweep queried all428
-items with407full/21bounded observations and2183positive-price rows; this validates that
+require build-specific live evidence. A historical retained beta build70450 sweep queried 428
+items with 407 full, 21 bounded observations and 2,183 positive-price rows; this validates that
 run, rather than every possible item variant or future client build.
 
 ## Recipe knowledge

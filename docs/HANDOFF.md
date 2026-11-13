@@ -1,6 +1,6 @@
 # Forever Tradecraft handoff
 
-Updated 2026-11-09. Current state, rules, decisions and open follow-ups. History lives in git
+Updated 2026-11-12. Current state, rules, decisions and open follow-ups. History lives in git
 (tag `pre-simplify` is the last commit with the old session stack).
 Technical reference: [ARCHITECTURE.md](ARCHITECTURE.md) (including the client assumptions table).
 Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
@@ -9,8 +9,9 @@ Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
 
 Make gold on the WoW Forever auction house with several independently profitable strategies:
 
-1. **Collect** the market: a 428-item scan plan every 900 s, cheapest 20 distinct unit-price levels per item,
-   never mixing houses or item identities (`itemKey`).
+1. **Collect** the market: the reviewed repository source target is catalog revision 6 with 790 active IDs
+   (421 core, 1 discovery and 368 cold), at a 900 s cadence and 20 retained distinct unit-price levels per item;
+   never mix houses or item identities (`itemKey`). Revision 6 is not deployed or live-verified.
 2. **Model** it: demand, time-to-sale, price metrics, recipe economics from the client's own data.
 3. **Decide** with the trading engine (backtest, paper trading, queues).
 4. **Execute** through the guarded in-game addon executor (dry run unless doubly armed). No program drives the
@@ -29,7 +30,21 @@ Make gold on the WoW Forever auction house with several independently profitable
   `$XDG_CONFIG_HOME/crowley/secrets.env`. Stage explicit files only; never `git add .`.
 - Origin: https://github.com/p-kjdeprow/forever_tradecraft.
 
-## Current state (2026-11-09)
+## Host state snapshot (2026-11-09)
+
+### Scan catalog source review (2026-11-12; pending rollout)
+
+The worktree source catalog and selected target are revision 6 for build 1.60.1.70888. The catalog has 957 entries,
+790 active (421 core, 1 discovery, 368 cold), 116 research and 51 excluded. Every sweep plans 422 hot items and one
+of six cold slices of 61 or 62 items, or 483–484 planned queries. Cadence remains 900 s, the cap 750 s, coldSlices 6
+and retained depth 20. All 297 hot Alchemy/Tailoring output and reagent IDs are preserved. Fifty-seven hot recipe
+teaching items and 11138 Small Glowing Shard move to cold; 279943 Spinning Wheel and 279972/279973 Faction Banners
+are added to cold from export-3 client facts for price discovery. Their live Auction House eligibility, turnover and
+profitability remain unverified. No item is promoted or removed.
+
+A linear planned-query estimate from the observed 652 s p95 over 24 sweeps projects 593.3 s p95, saving 58.7 s and
+about 1,148 item queries per 24 sweeps. This estimate is not an operational measurement. The source revision has not
+been deployed; verify the installed plan and measure new full sweeps before treating it as current runtime behavior.
 
 - WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70888 (re-pinned 2026-11-11 after the 2026-11-10 patch from 70862), interface
   16001, house `us-normal-alliance` ([LAUNCH_TARGET](LAUNCH_TARGET.md)).
@@ -111,10 +126,13 @@ enforced in strategy and execution; empty capabilities mean unavailable.
 
 ## Open follow-ups
 
-- **Tiered scanning** (proposed by the analysis session): a hot tier of about 350 items every sweep plus 1/N of a
-  rotating cold tier, so recipe outputs can be priced inside the 750 s sweep cap (the flat plan is limited to about
-  430 items at 1.0-1.31 s each). It needs an addon plan and server validation change, after the loop is stable.
-  A gap-free cadence comes first: P(sale) evidence only counts books with gaps of 21 minutes or less.
+- **Scan catalog follow-up:** the reviewed repository revision 6 already uses a cold tier: 421 core and 1 discovery
+  item each sweep plus one of six cold slices. It is pending rollout and has not been live-verified. After rollout,
+  measure complete-sweep runtime and coverage. Cold scans provide periodic price discovery only; their six-sweep
+  rotation cannot supply gap-free books with gaps of 21 minutes or less for P(sale). Evaluating a selected eligible
+  commodity with that evidence would require a separately reviewed promotion into a stable hot cohort; no promotion is
+  included here. Grouped gear instead needs own-sale trials. Keep cadence, slice rotation and protocol unchanged unless
+  a separately reviewed change is needed; a dynamic scheduler is not part of this catalog rebalance.
 - **Addon trim (phase 3) deferred:** remove the movement, hover and unused executor snapshot fields from Agent
   telemetry, which needs the addon producer and the decoder schema (`gui/frames.py`) bumped together. `Queue.lua`
   and the companion's execution/probe upload and queue fetch stay by owner decision.

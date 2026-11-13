@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = ROOT / "tools" / "generate_launch_target.py"
 TARGET_PATH = ROOT / "src" / "crowley" / "data" / "targets" / "verified-beta.json"
 CATALOG_PATH = ROOT / "src" / "crowley" / "data" / "first_run.json"
+BETA_CATALOG_PATH = ROOT / "tests" / "fixtures" / "catalogs" / "verified-beta.json"
 
 
 def test_selected_target_is_identity_only_and_plan_is_cached(
@@ -51,8 +52,8 @@ def test_selected_target_is_identity_only_and_plan_is_cached(
     assert not hasattr(target, "installation")
     assert not hasattr(target, "game_root")
     assert not hasattr(target, "wine_prefix")
-    assert len(canonical_plan(target)["itemIDs"]) == 787
-    assert len(canonical_plan(target)["pools"]["cold"]) == 307
+    assert len(canonical_plan(target)["itemIDs"]) == 790
+    assert len(canonical_plan(target)["pools"]["cold"]) == 368
     assert canonical_plan(target) is canonical_plan(target)
     assert target.full_build == packaged_catalog.client_build
 
@@ -118,11 +119,6 @@ def test_target_contract_rejects_unknown_or_inconsistent_values(
         load_game_target(path)
 
 
-def _without_cold(catalog_value: dict) -> None:
-    """The verified-beta target has coldSlices 0, so its generator world is the catalog without cold items."""
-    catalog_value["items"] = [item for item in catalog_value["items"] if item["pool"] != "cold"]
-
-
 def _copy_generator_trees(root: Path) -> None:
     for relative in ("addon/Crowley/Crowley.toc", "addon/Crowley_Data/Crowley_Data.toc"):
         destination = root / relative
@@ -161,11 +157,7 @@ def test_generator_writes_target_catalog_lua_and_tocs_without_toml_staging(tmp_p
     target = tmp_path / "verified-beta.json"
     catalog = tmp_path / "first_run.json"
     shutil.copy2(TARGET_PATH, target)
-    shutil.copy2(ROOT / "src/crowley/data/first_run.json", catalog)
-    catalog_value = json.loads(catalog.read_text(encoding="utf-8"))
-    catalog_value["client_build"] = "1.60.1.70450"
-    _without_cold(catalog_value)
-    catalog.write_text(json.dumps(catalog_value), encoding="utf-8")
+    shutil.copy2(BETA_CATALOG_PATH, catalog)
     result = subprocess.run(
         [
             sys.executable,
@@ -194,9 +186,7 @@ def test_generator_writes_target_catalog_lua_and_tocs_without_toml_staging(tmp_p
 
 def test_generator_rebinds_catalog_for_an_alternate_target(tmp_path: Path) -> None:
     _copy_generator_trees(tmp_path)
-    catalog_value = json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
-    catalog_value["client_build"] = "1.60.1.70450"
-    _without_cold(catalog_value)
+    catalog_value = json.loads(BETA_CATALOG_PATH.read_text(encoding="utf-8"))
     catalog_value["items"][0]["status"] = "research"
     catalog = tmp_path / "first_run.json"
     catalog.write_text(json.dumps(catalog_value), encoding="utf-8")
@@ -252,11 +242,7 @@ def test_generator_check_mode_never_writes_missing_artifacts(tmp_path: Path) -> 
     target = tmp_path / "verified-beta.json"
     catalog = tmp_path / "first_run.json"
     shutil.copy2(TARGET_PATH, target)
-    shutil.copy2(CATALOG_PATH, catalog)
-    catalog_value = json.loads(catalog.read_text(encoding="utf-8"))
-    catalog_value["client_build"] = "1.60.1.70450"
-    _without_cold(catalog_value)
-    catalog.write_text(json.dumps(catalog_value), encoding="utf-8")
+    shutil.copy2(BETA_CATALOG_PATH, catalog)
 
     result = subprocess.run(
         [

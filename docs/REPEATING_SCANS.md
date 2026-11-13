@@ -1,9 +1,14 @@
 # Repeating scans: operator guide
 
 `crowley-scan` (unit `crowley-scan.service`) keeps WoW Forever in the world with the auction house open, so the
-addon's own 900 s timer sweeps the scan plan (480 hot items every sweep plus one of six cold slices of 51 or 52 items, 787 in the plan, catalog revision 5), and gets each sweep to the server. It recovers from crashes,
-disconnects, maintenance and reboots without an operator. Design: [ARCHITECTURE](ARCHITECTURE.md). Host setup:
-[GAME_SETUP](GAME_SETUP.md). Current state: [HANDOFF](HANDOFF.md).
+addon's own 900 s timer sweeps its installed scan plan and gets each sweep to the server. The reviewed repository
+source is catalog revision 6: 421 core and 1 discovery item every sweep, plus one of six cold slices containing 61
+or 62 items (790 active IDs total; 483 or 484 planned item queries per sweep). Revision 6 has not been deployed or
+live-verified; the installed addon/server agreement must be checked during rollout. Its estimated p95 is 593.3 s,
+58.7 s below the 652 s observed baseline, assuming runtime scales linearly with item-query count. This is a projection,
+not a measured result. It leaves the existing 900 s cadence, 750 s cap, and six-slice policy unchanged. It recovers
+from crashes, disconnects, maintenance and reboots without an operator. Design: [ARCHITECTURE](ARCHITECTURE.md). Host
+setup: [GAME_SETUP](GAME_SETUP.md). Current state: [HANDOFF](HANDOFF.md).
 
 ## What it does each cycle
 
@@ -92,22 +97,66 @@ systemctl --user start crowley-scan       # takes seconds; nothing to reconcile
 systemctl --user disable --now crowley-scan
 ```
 
-Before stopping for a long time, let one save-reload and ack-reload finish so SavedVariables are clean. To go back
-to the old session stack, reinstall the tag `pre-simplify` (`git show pre-simplify`); it is not supported otherwise.
+For an ordinary long stop, let the normal save/upload/ack cycle finish first. A scan-plan change has a stricter
+procedure below because the running loop's protocol contract is pinned to its startup plan. To go back to the old
+session stack, reinstall the tag `pre-simplify` (`git show pre-simplify`); it is not supported otherwise.
 
 ## Changing the scan plan
 
-The plan lives in three places that must agree: the installed package (`first_run.json`, target JSON and the
-addon's `GeneratedTarget.lua`), the server image (it serves the canonical plan that the companion writes into
-`Crowley_Data/Data.lua`), and the client's loaded addon data. A plan with cold items needs `scan.coldSlices` set in the target JSON (positive exactly when cold items
-exist; the generator and `scan_plan` reject a mismatch), which changes `planHash`. Deploy in this order, right
-after an upload:
+A plan change updates several identities together: the installed package and generated addon target, the server's
+canonical plan, the companion's `Crowley_Data/Data.lua`, and the plan loaded by the client. The scan loop pins its
+protocol contract at startup, including expected plan counts. If an old loop sees a new plan frame, it may reject the
+frame before it can report a useful hash mismatch. Do not use an in-place reload or wait for an old-loop
+`pin_mismatch` receipt to bridge a plan change.
 
-1. `uv tool install --force --reinstall --link-mode copy .` and `crowley-ops install --game-root ...`.
-2. `crowley-ops image build --source "$PWD"`, then the compose `up -d` from the README (recreates the server).
-3. `systemctl --user restart crowley-companion` and wait until `Data.lua` carries the new `planHash`.
-4. `systemctl --user restart crowley-scan`, then make the client reload: the loop's next save flush does it, or
-   end the client and let the loop relaunch it.
+Use the approved landed commit, full plan hash, and Sol READY review. Prebuild while normal scanning continues:
+build the base rollback wheel, the approved new wheel, and the new server image into temporary locations; retain the
+old server image ID and rollback artifacts. Do not mutate installed files or restart services during prebuild.
 
-If the client loads before step 3, the addon refuses the old plan and frames stop decoding; one more `/reload`
-(or relaunch) after step 3 fixes it.
+At an ordinary old-plan boundary, use `systemctl --user is-active crowley-scan crowley-companion`,
+`crowley-scan status`, `crowley-scan presence-ok`, and `crowley-ops doctor` to verify a fresh healthy status with
+`action=wait`, empty detail, `chat_active=false`, the auction house open, `phase=scheduled`, at least 90 seconds
+before `due_at`, no blocking UI or chat, no human hold, and no command transaction in progress or open/type/submit
+journal step. Confirm that `last_saved_uid` is persisted and accepted by the server as a complete old-plan sweep with
+its expected item set and successful observations. Confirm every pending UID is uploaded and appears in `Data.lua`'s
+`ackedScans`.
+One or two already uploaded and acknowledged pending sweeps are normal; do not require `pending_count=0`.
+
+Stop only the scan loop and confirm it is inactive and `crowley-scan presence-ok` succeeds. Then acquire and hold
+the GUI lease nonblocking across the remaining old-client checks, close and exit:
+
+```sh
+exec {gui_fd}>>"$XDG_RUNTIME_DIR/crowley/gui.lock"
+flock -n "$gui_fd" || { exec {gui_fd}>&-; exit 1; }
+trap 'flock -u "$gui_fd"; exec {gui_fd}>&-' EXIT
+```
+
+With the old package still installed, take a fresh read-only observation using its old protocol contract. Require a
+frame received within the last three seconds; the old plan hash, build and interface; the expected character, realm,
+faction and house; `phase=scheduled` with at least 90 seconds before `due_at`; the auction house open; no blocking UI
+or chat; a valid focused window at the expected size and origin; human idle; and exactly one owned game process
+and window. Verify ownership using the configured matcher (uid, Windows argv0 `Wow.exe`, and configured
+`WINEPREFIX`). Under that same held lease, send one normal window-manager close to the exact verified window
+(`wmctrl -ic <verified-XID>`). Wait a bounded interval for that exact process and window to exit. Do not use a kill
+fallback, broad process matching, or another GUI owner. If any check or clean close fails, abort without changing the
+installed package, addon, server or companion state.
+
+Only after the old client has exited may the approved installation begin:
+
+1. Install the approved package and addon while `crowley-scan` remains stopped. Check the installed target revision,
+   full plan hash, client build and interface against the approved values.
+2. Deploy the approved server image/package and wait for a healthy server. Check the in-container canonical plan's
+   full hash and revision. Restart only `crowley-companion`; wait for a fresh successful addon-data write and check
+   that `Data.lua`'s plan hash matches the server.
+3. Confirm package, installed `GeneratedTarget.lua`, server and companion `Data.lua` all agree on the approved full
+   hash. Confirm the old client remains exited, then start `crowley-scan`. Let its normal launcher relaunch the
+   existing client; do not start a second client or manually reload.
+4. Require fresh status without faults and verify one newly accepted full sweep under the approved hash and build.
+   Its exact item-ID set must equal the approved hot IDs plus that sweep's cold slice, and every observation must be
+   successful. Verify the companion uploaded it and `Data.lua` acknowledges its UID. Record the sweep ID, slice,
+   elapsed time, item/ok counts and full plan hash. Treat client ACK load/prune as optional evidence only if a later
+   natural reload exposes it; do not force another reload or wait an extra cadence for that receipt.
+
+If an execution check fails, keep the scanner stopped after the client closes and follow the approved rollback
+procedure; never mix old and new plan files. The detailed preflight and command-level receipts are in the local
+`.archive/scan-rebalance-20261112/OPS_PLAN.md`.

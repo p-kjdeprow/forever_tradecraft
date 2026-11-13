@@ -43,6 +43,7 @@ def _pin_fixture_target() -> None:
     global _FIXTURE_CATALOG, _REAL_LOAD_CATALOG, _REAL_SELECTED_TARGET
 
     from crowley.core import game_target, watchlist
+    from crowley.core.watchlist import Catalog
 
     _REAL_SELECTED_TARGET = game_target.selected_target
     _REAL_LOAD_CATALOG = watchlist.load_catalog
@@ -50,15 +51,9 @@ def _pin_fixture_target() -> None:
     game_target.packaged_game_target.cache_clear()
     game_target.canonical_plan.cache_clear()
 
-    # The fixture target has coldSlices 0, so its world is the shipped catalog without the cold pool.
-    real = _REAL_LOAD_CATALOG(enforce_target=False)
-    _FIXTURE_CATALOG = real.model_copy(
-        update={
-            "client_build": _fixture_target().full_build,
-            "reviewed_on": "2026-10-16",
-            "items": [item for item in real.items if item.pool != "cold"],
-        }
-    )
+    fixture_path = Path(__file__).parent / "fixtures" / "catalogs" / "verified-beta.json"
+    _FIXTURE_CATALOG = Catalog.model_validate_json(fixture_path.read_text(encoding="utf-8"))
+    _fixture_target().validate_catalog(_FIXTURE_CATALOG)
     game_target.selected_target = _fixture_target
     game_target.packaged_game_target = _fixture_target
     watchlist.load_catalog = _fixture_load_catalog

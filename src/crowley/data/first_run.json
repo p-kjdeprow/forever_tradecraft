@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "id": "first-run",
-  "revision": 5,
+  "revision": 6,
   "client_build": "1.60.1.70888",
-  "reviewed_on": "2026-11-10",
+  "reviewed_on": "2026-11-12",
   "initial_price_levels": 20,
   "items": [
     {
@@ -1199,7 +1199,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -2825,7 +2825,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -3475,7 +3475,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -4205,7 +4205,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -6428,7 +6428,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -6713,7 +6713,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -6991,7 +6991,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -7162,7 +7162,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -7403,7 +7403,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -7600,7 +7600,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -8052,7 +8052,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -8078,7 +8078,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -8542,7 +8542,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -8616,7 +8616,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -10325,7 +10325,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -11564,7 +11564,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -11588,7 +11588,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -11637,7 +11637,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13454,7 +13454,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13897,7 +13897,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "core",
+      "pool": "cold",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15033,7 +15033,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15719,7 +15719,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15839,7 +15839,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15863,7 +15863,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15887,7 +15887,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15911,7 +15911,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15935,7 +15935,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15960,7 +15960,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Unlocks Elixir of the Mongoose; requires Alchemy 280.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15983,7 +15983,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -16007,7 +16007,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -16031,7 +16031,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -16055,7 +16055,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -16079,7 +16079,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -16257,7 +16257,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Unlocks Flask of the Titans; requires Alchemy 300 and an alchemy lab to craft.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -16974,7 +16974,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -16998,7 +16998,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -17023,7 +17023,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Unlocks a bag recipe using Mooncloth and other high-skill inputs; requires Tailoring 300 and a loom.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -17479,7 +17479,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -17505,7 +17505,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -18760,7 +18760,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -18863,7 +18863,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -19564,7 +19564,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -19589,7 +19589,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -21339,7 +21339,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -21365,7 +21365,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -21958,7 +21958,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -21984,7 +21984,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22010,7 +22010,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22036,7 +22036,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22343,7 +22343,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22368,7 +22368,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22419,7 +22419,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22444,7 +22444,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22540,7 +22540,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22588,7 +22588,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22636,7 +22636,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -23070,7 +23070,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -23094,7 +23094,7 @@
         "recipe"
       ],
       "status": "active",
-      "pool": "discovery",
+      "pool": "cold",
       "reason": "Observe the acquisition price of a recipe for a selected craft; availability and unlock access need live verification.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -24222,6 +24222,29 @@
       ]
     },
     {
+      "item_id": 279943,
+      "name": "Spinning Wheel",
+      "category": "utility",
+      "tags": [
+        "cold-tier"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "cold",
+      "reason": "Cold-tier price discovery: export 3 build 1.60.1.70888 identifies this exact Tailoring output at yellow 140, within current skill 150; client Item facts show bonding=0. Catalog tradeability is client-marked only and live AH eligibility remains unverified.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/279943"
+      ]
+    },
+    {
       "item_id": 279949,
       "name": "Repair Bot",
       "category": "consumables",
@@ -24316,6 +24339,52 @@
       "source_urls": [
         "https://bindonforever.com/item/279970",
         "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 279972,
+      "name": "Faction Banner",
+      "category": "utility",
+      "tags": [
+        "cold-tier"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "cold",
+      "reason": "Cold-tier price discovery: export 3 build 1.60.1.70888 identifies this exact Tailoring output at yellow 20, within current skill 150; client Item facts show bonding=0. Catalog tradeability is client-marked only and live AH eligibility remains unverified.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/279972"
+      ]
+    },
+    {
+      "item_id": 279973,
+      "name": "Faction Banner",
+      "category": "utility",
+      "tags": [
+        "cold-tier"
+      ],
+      "professions": [
+        "tailoring"
+      ],
+      "roles": [
+        "output"
+      ],
+      "status": "active",
+      "pool": "cold",
+      "reason": "Cold-tier price discovery: export 3 build 1.60.1.70888 identifies this exact Tailoring output at yellow 20, within current skill 150; client Item facts show bonding=0. Catalog tradeability is client-marked only and live AH eligibility remains unverified.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/279973"
       ]
     },
     {

@@ -9,13 +9,12 @@ Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
 
 Make gold on the WoW Forever auction house with several independently profitable strategies:
 
-1. **Collect** the market: revision 7 is the last deployed runtime plan for client build 1.60.1.70938 with 806 active IDs
-   (488 core, 1 discovery and 317 cold), a 900 s cadence and 20 retained distinct unit-price levels per item;
-   never mix houses or item identities (`itemKey`). Two full revision-7 sweeps now pass exact-set, successful-query,
-   upload/ack-write and two-sweep cadence checks. Their 733 s and 626 s runtimes are two measurements, not a p95 or
-   robust long-term guarantee. Twenty complete revision-6 sweeps (IDs 564–583) remain the broader historical runtime
-   baseline. Revision 8 is prepared in source with all 806 active IDs (402 core, 0 discovery, 404 cold); it is
-   pending deployment and has no live qualification yet.
+1. **Collect** the market: revision 8 is deployed for client build 1.60.1.70938 with 806 active IDs (402 core,
+   no discovery, 404 cold), a 900 s cadence and 20 retained distinct unit-price levels per item; never mix houses or
+   item identities (`itemKey`). Two consecutive full sweeps passed exact-set and successful-query checks in 626 s
+   and 560 s, with starts 900 s apart and all 402 hot-item query gaps between 833 and 899 s (median 883). These two
+   runtimes are measurements, not a p95. Revision-7's two
+   completed sweeps (733 s and 626 s) and twenty revision-6 sweeps (IDs 564–583) are historical runtime evidence.
 2. **Model** it: demand, time-to-sale, price metrics, recipe economics from the client's own data.
 3. **Decide** with the trading engine (backtest, paper trading, queues).
 4. **Execute** through the guarded in-game addon executor (dry run unless doubly armed). No program drives the
@@ -38,14 +37,26 @@ Make gold on the WoW Forever auction house with several independently profitable
 
 ### Scan catalog and runtime qualification
 
-**Revision 8 source candidate; deployment pending.** The source catalog, selected target and generated addon target
-now match candidate catalog hash `3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5` and plan hash
-`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. It preserves all 973 catalog entries and
-806 active IDs. The exact approved delta moves 87 hot IDs to cold, with 402 core, no discovery and 404 cold; no new
-exclusions are made. The 390 protected crafting IDs and 12 unresolved eligible dependencies remain hot. Six cold
-slices contain 68/68/67/67/67/67 items and plan 470/470/469/469/469/469 queries per sweep, 13.38% fewer on average
-than revision 7. Cadence, cap, slice count and depth remain unchanged. Local source checks passed; the candidate has
-not been deployed or runtime-qualified. The revision-7 receipts below document the last deployed runtime only.
+**Revision 8 deployed; two-sweep qualification complete.** Source commit `fb36408`, package, generated
+target, server and companion `Data.lua` agree on catalog hash
+`3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5` and plan hash
+`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. The server image is
+`cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`. Revision 8 preserves 973 catalog entries and
+806 active IDs; its exact delta moves 87 hot IDs to cold, with 402 core, no discovery and 404 cold, and makes no new
+exclusions. It retains 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
+dependencies. Cold slices have
+68/68/67/67/67/67 items and plan 470/470/469/469/469/469 queries per sweep, 13.38% fewer on average than revision
+7. Cadence, 750 s cap, slice count and depth are unchanged.
+
+Two consecutive full revision-8 sweeps passed. Sweep 591 (slice 2, UID `us-normal-alliance-1794608359-Dandune-8967`)
+ran 2026-11-13 22:19:19–22:29:45 UTC (626 s); sweep 592 (slice 3, UID `us-normal-alliance-1794609259-Dandune-7251`)
+ran 22:34:19–22:43:39 UTC (560 s). Each matched the exact 469-item set; all 469 were observed, queried and `ok`,
+including all 402 hot IDs. There were 395 and 400 priced items. Both sweeps were saved and uploaded, with
+acknowledgements written. Starts were 900 s apart; all 402 hot-item query gaps were 833–899 s (median 883), so
+individual gaps are not exactly 900 s. Client-loaded ACK was not independently verified; no extra reload was forced.
+Priced rows do not establish sales or profit. These two runtimes are measurements, not a p95. Receipts:
+`.archive/scan-slimming-20261113/ops/parent-sweep-591.json`, `parent-sweep-592.json` and
+`parent-two-sweep-proof.json`.
 
 Revision 6 is the historical deployed baseline. It had 957 catalog entries and 790 active IDs (421 core, 1 discovery,
 368 cold), with a 900 s cadence, 750 s configured cap, six cold slices and retained depth 20. Its hashes were catalog
@@ -60,11 +71,12 @@ None of 279943 Spinning Wheel, 279972 Faction Banner or 279973 Faction Banner wa
 turnover and profitability for those items remain unverified. Private historical receipt:
 `.archive/scan-rebalance-20261112/run/parent-first70938-sweep.json`.
 
-Revision 7 is deployed. Package, generated addon target, server and companion `Data.lua` agree on revision 7, catalog
-hash `06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e` and plan hash
+Revision 7 was deployed before revision 8. The following revision-7 hashes and receipts are historical. Package,
+generated addon target, server and companion `Data.lua` agreed on revision 7, catalog hash
+`06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e` and plan hash
 `49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05` for build 1.60.1.70938/interface 16001 and
-house `us-normal-alliance`. The active plan has 806 IDs (488 core, 1 discovery and 317 cold), 489 hot IDs, 541–542
-planned queries per 900 s sweep, a 750 s cap, six slices and depth 20. The current server image is
+house `us-normal-alliance`. The revision-7 plan then had 806 IDs (488 core, 1 discovery and 317 cold), 489 hot IDs, 541–542
+planned queries per 900 s sweep, a 750 s cap, six slices and depth 20. The revision-7 server image was
 `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`.
 
 The export-4 census uses 2,282 recipes and 4,556 item facts. Its skill-225 set covers 297 eligible fixed,
@@ -92,16 +104,22 @@ available listings, sales or profit.
 Private proof receipts: `.archive/tailoring-hotfix-20261113/ops/parent-sweep-586.json`,
 `parent-sweep-587.json`, `parent-two-sweep-proof.json` and `parent-all-hot-cadence-proof.json`.
 
-At the current checkpoint, both services are active. The scanner has Stormwind/Dandune at the Auction House. The two
-full sampled sweeps passed planned-set, successful-query, upload/ack-write and cadence checks. Current successful
-query coverage is verified; live listings, sales and profit remain unverified for unpriced or unlisted items.
+At the revision-7 checkpoint, both services were active and the scanner was at the Auction House. Sweeps 586 and 587
+passed planned-set, successful-query, upload/ack-write and cadence checks. Their successful query coverage is
+historical; live listings, sales and profit remain unverified for unpriced or unlisted items.
+
+Revision-8 receipts `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`, `parent-sweep-592.json` and
+`parent-two-sweep-proof.json` record two accepted full sweeps and cadence verification. The 395 and 400 priced
+observations are price coverage, not confirmed sales or profit; the client-loaded acknowledgement is not
+independently verified.
 
 - WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70938,
   interface 16001, house `us-normal-alliance` ([LAUNCH_TARGET](LAUNCH_TARGET.md)). The prior source pin was
   1.60.1.70888, re-pinned 2026-11-11 after the 2026-11-10 patch from 70862.
-- **Active:** `crowley-scan.service` and `crowley-companion.service`; the revision-7 server is healthy and the database
-  is up. Stormwind/Dandune is at the Auction House. Sweeps 586 and 587 are saved and uploaded, with acknowledgement
-  writes captured; client-loaded ACK was not independently verified.
+- **Active:** `crowley-scan.service` and `crowley-companion.service`; the revision-8 server is healthy and the database
+  is up. The scanner is at the Auction House. Revision-8 sweeps 591 and 592 are saved and uploaded, with
+  acknowledgements written; starts were 900 s apart and all 402 hot-item gaps were 833–899 s (median 883).
+  Client-loaded ACK is not independently verified.
 - **Disabled:** `crowley-health.timer`, `crowley-market-backup.timer`, `crowley-paper-trading.timer`.
 - The old beta data (house `beta-normal-alliance`) is retained in the database and under
   `~/.local/state/crowley/market-backups`.
@@ -186,8 +204,10 @@ The trading dashboard is deployed at `/dashboard` on the healthy loopback server
 `ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open `http://127.0.0.1:18080/dashboard` locally. Its
 latest-scan and trading-summary GETs are token-free and read-only; write endpoints still require bearer
 authentication. Keep the server on its existing loopback binding. The page defaults to house `us-normal-alliance`
-and shows scan status before strategy results. The deployed strict observed-turnover gate (server source commit
-`58a8206`, image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`) excludes UNKNOWN-turnover
+and shows scan status before strategy results. The strict observed-turnover gate was introduced with server source
+commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`) and is preserved in
+deployed revision 8 (source commit `fb36408`, image
+`cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`). It excludes UNKNOWN-turnover
 and zero-observed-activity rows. Candidate recipes are selected dynamically; there is no five-recipe whitelist.
 Qualification requires 70% valid interval coverage in both 2-hour and 6-hour windows; the 6-hour threshold means
 4.2 hours of valid coverage, not a guaranteed ETA. The page reports observed listing depletion, not confirmed sales.
@@ -195,9 +215,13 @@ Strategy rows show batch cost, if-sold net proceeds and profit, list price, obse
 requirements. Shared cooldown rows are alternatives, not a combined portfolio forecast. The page links to the prior
 research UI at `/dashboard/advanced`.
 
-**Recorded live check, 2026-11-13 21:29:47 UTC.** The strict-gate summary returned HTTP 200 and zero qualified
+**Revision-8 live dashboard check, after sweep 591.** The strict-gate summary returned HTTP 200 and zero qualified
 opportunities. This is an evidence-coverage result, not evidence of zero market supply, sales or profit. Proof:
-`.archive/tailoring-hotfix-20261113/ops/parent-final-live-summary.json`.
+`.archive/scan-slimming-20261113/ops/parent-dashboard-check.json`. The strategy profile and positive-known-turnover
+gate were preserved.
+
+**Historical live check, 2026-11-13 21:29:47 UTC.** The pre-revision-8 strict-gate summary also returned HTTP 200
+and zero qualified opportunities. Proof: `.archive/tailoring-hotfix-20261113/ops/parent-final-live-summary.json`.
 
 **Historical dashboard HTTP verification, 2026-11-13 18:33 UTC.** This predates revision 7 and the strict turnover
 gate. It used deployed commit `a15d388` (image
@@ -225,12 +249,11 @@ already hot. The 120 capacity demotions exclude the complete set of 12 known-fac
 AH dependencies. The new items are unmeasured opportunities, not negative margins; live auction eligibility and
 sale activity remain unverified.
 
-- **Scan catalog follow-up:** two full revision-7 sweeps verify exact planned sets, successful queries for all 489
-hot IDs (including all 187 new hot IDs), upload/ack-write receipts and the 900 s sweep-start cadence. Continue
-monitoring later sweeps to measure runtime variation; these two samples are not a p95. The six-sweep cold rotation
-provides periodic price discovery only and cannot supply gap-free books with gaps of 21 minutes or less for P(sale).
-Empty price results do not establish available supply or sales. Grouped gear needs own-sale trials. Keep cadence,
-slice rotation and protocol unchanged; a dynamic scheduler is not part of this catalog rebalance.
+- **Scan catalog follow-up:** revision-7 sweeps 586–587 are historical. Revision-8 sweeps 591–592 passed the exact
+  planned set with all 402 hot IDs queried successfully; starts were 900 s apart, and observed hot-item gaps were
+  833–899 s (median 883). These two samples do not establish a p95; continue monitoring runtime variation. The
+  six-sweep cold rotation provides periodic discovery, not gap-free books for P(sale).
+Empty price results do not establish available supply; priced observations do not establish sales or profit. Grouped gear needs own-sale trials.
 - **Addon trim (phase 3) deferred:** remove the movement, hover and unused executor snapshot fields from Agent
   telemetry, which needs the addon producer and the decoder schema (`gui/frames.py`) bumped together. `Queue.lua`
   and the companion's execution/probe upload and queue fetch stay by owner decision.

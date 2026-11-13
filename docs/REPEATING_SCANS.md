@@ -1,17 +1,30 @@
 # Repeating scans: operator guide
 
-## Revision 8 source candidate (deployment pending)
+## Revision 8 deployed (two-sweep qualification complete)
 
-The source catalog and generated launch target are at revision 8; the last deployed and live-qualified runtime is
-still revision 7. Revision 8 preserves 806 active IDs with 402 core, no discovery and 404 cold. It moves 87 items
-from hot to cold, keeps the 390 known protected crafting IDs and 12 unresolved eligible dependencies hot, and adds
-no exclusions. The six cold slices contain 68/68/67/67/67/67 items, for 470/470/469/469/469/469 queries per
-sweep (13.38% fewer on average). Cadence, cap, slice count and retained depth are unchanged. The cost replay is an
-estimate, not a percentile; revision 8 has no live runtime measurements yet. Deployment is pending.
+Revision 8 is deployed on image `sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`;
+source commit `fb36408` and package, generated target, server and companion `Data.lua` agree on revision 8 and plan
+hash `fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473` for build 70938/interface 16001,
+house `us-normal-alliance`. The plan has 806 active IDs (402 core, 0 discovery, 404 cold), with 390 hot IDs in the
+known and uncertain-rank crafting graphs plus 12 additional unresolved dependencies. It moves 87 IDs from hot to
+cold without exclusions.
+Cadence is 900 s, cap 750 s, depth 20, with six cold slices of 68/68/67/67/67/67 (470/470/469/469/469/469
+queries per sweep; 13.38% fewer on average than revision 7). Cold coverage remains broad but slower, about every
+90 minutes.
+
+Two consecutive full sweeps passed. Sweep 591 (slice 2, UID `us-normal-alliance-1794608359-Dandune-8967`) ran
+2026-11-13 22:19:19–22:29:45 UTC (626 s); sweep 592 (slice 3, UID `us-normal-alliance-1794609259-Dandune-7251`)
+ran 22:34:19–22:43:39 UTC (560 s). Each matched all 469 planned IDs; all were observed, queried and `ok`, including
+all 402 hot IDs. They had 395 and 400 priced items and were saved, uploaded and acknowledged. Starts were 900 s
+apart; observed gaps for all 402 hot IDs were 833–899 s (median 883), so individual item gaps are not exactly 900 s.
+The client-loaded ACK was not independently verified; no extra reload was forced. Priced results do not establish
+sales or profit. These two runtimes are measurements, not a p95. Receipts:
+`.archive/scan-slimming-20261113/ops/parent-sweep-591.json`, `parent-sweep-592.json` and
+`parent-two-sweep-proof.json`.
 
 `crowley-scan` (unit `crowley-scan.service`) is designed to keep WoW Forever in the world with the auction house open,
-so the addon's own 900 s timer can sweep its installed plan and the companion can upload each sweep. The last
-deployed revision-7 plan is documented below as historical runtime proof for measured native client build
+so the addon's own 900 s timer can sweep its installed plan and the companion can upload each sweep. The revision-7
+plan below is historical runtime proof for measured native client build
 1.60.1.70938: 488 core and 1 discovery item every sweep, plus one of six
 cold slices containing 52 or 53 items (806 active IDs total; 541 or 542 planned item queries per sweep). Package,
 generated addon target, server and companion `Data.lua` agree on catalog hash

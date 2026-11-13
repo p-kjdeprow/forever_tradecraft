@@ -1,33 +1,48 @@
 # First run scan catalog
 
-## Revision 8 source candidate (deployment pending)
+## Revision 8 deployed plan (two-sweep qualification complete)
 
-The source catalog, selected target and generated addon target now contain the reviewed revision-8 candidate. Its
-catalog hash is `3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5`; its plan hash is
+Revision 8 is deployed for build **1.60.1.70938** and house `us-normal-alliance`. The catalog hash is
+`3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5`; the plan hash is
 `fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. It preserves all 973 catalog entries and
-806 active IDs, with 402 core, no discovery pool and 404 cold. The 87 approved moves are hot-to-cold only; no item
-is newly excluded. The 390 known protected crafting IDs and 12 unresolved eligible dependencies remain hot.
+806 active IDs: 402 core, no discovery pool, and 404 cold. The approved delta moves 87 hot items to cold, adds no
+exclusions, and retains 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
+dependencies. Source commit
+`fb36408`, package, generated target, server and companion `Data.lua` agree on revision 8; server image is
+`cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`.
 
-The candidate keeps the 900-second cadence, 750-second cap, six slices and price depth 20. Slice sizes are
-68/68/67/67/67/67, for 470/470/469/469/469/469 queries per sweep. That is 13.38% fewer queries on average than
-revision 7, while cold items remain in broad market discovery about every 90 minutes. Cost replays using sweeps
-586 and 587 estimate phase runtimes below the cap; these are scenario estimates, not percentiles or measured
-revision-8 runtimes. Local source checks passed. Deployment and revision-8 live qualification are pending.
+The 12 retained dependency IDs are **118, 2842, 7069, 7971, 9262, 11082, 11175, 11178, 13926, 213369, 215430,
+249427**. The production eligibility check links them to recipes, but related outputs are Bind-on-Pickup or have
+missing client facts; vendor-sale and disenchant value remain unresolved. They remain hot pending that evidence, not because profitability
+has been established.
 
-## Revision 7 deployed plan (2026-11-13; two-sweep qualification complete)
+Cadence remains 900 seconds, the cap 750 seconds, slice count six and price depth 20. Cold slices contain
+68/68/67/67/67/67 items and sweep query counts are 470/470/469/469/469/469, averaging 13.38% fewer queries than
+revision 7. Cold items remain in broad market discovery about every 90 minutes.
 
-This is the last deployed runtime plan; its live receipts below are historical evidence for revision 7 and do not
-qualify revision 8.
+Two consecutive full revision-8 sweeps passed. Sweep 591 (slice 2, UID
+`us-normal-alliance-1794608359-Dandune-8967`) ran 2026-11-13 22:19:19–22:29:45 UTC (626 seconds); sweep 592
+(slice 3, UID `us-normal-alliance-1794609259-Dandune-7251`) ran 22:34:19–22:43:39 UTC (560 seconds). Each matched
+the exact 469-item plan; all 469 were observed, queried and `ok`, including all 402 hot IDs. Both were saved and
+uploaded, with acknowledgements written; 395 and 400 items had prices. Starts were 900 seconds apart. All 402 hot
+item query gaps were 833–899 seconds (median 883); individual gaps are not exactly 900 seconds. The client-loaded
+ACK was not independently verified, and no extra reload was forced. Priced items do not establish sales or profit.
+These two runtimes are measurements, not a p95. Receipts: `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`,
+`parent-sweep-592.json`, and `parent-two-sweep-proof.json`.
 
-Catalog revision 7 is deployed for selected target build **1.60.1.70938**. The package, generated
-addon target, companion `Data.lua` and healthy server agree on the plan. The catalog contains
-973 entries: 806 active (488 core, 1 discovery, 317 cold), 116 research and 51 excluded. The
+## Historical revision 7 deployed plan (2026-11-13; two-sweep qualification complete)
+
+The following records are revision-7 deployment and live evidence; they do not qualify revision 8.
+
+Revision 7 was deployed before revision 8; the following package and live-run details are historical.
+At that checkpoint the package, generated addon target, companion `Data.lua` and healthy server agreed on the plan.
+The catalog contained 973 entries: 806 active (488 core, 1 discovery, 317 cold), 116 research and 51 excluded. The
 plan keeps the existing 900-second cadence, 750-second sweep cap, six cold slices and 20
 retained price levels. Each sweep plans 488 core + 1 discovery item and one cold slice of 52
 or 53 items, for 541–542 item queries. Its catalog hash is
 `06bfde47588c8eab8a5a51bb46891828c4e5f32f03427782549827071050ca8e`; its plan hash is
-`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`. The deployed server
-image is `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`.
+`49f26420e3f174abfade44e63a212189bef2b2e8009e785974cb10d176ec8b05`. The revision-7 server image was
+`5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`.
 
 The matching export-4 census uses 2,282 recipes and 4,556 item facts. It identifies 297 eligible
 fixed, client-fact tradeable Alchemy and Tailoring outputs through planning skill 225, plus 111
@@ -51,11 +66,11 @@ Bind-on-Pickup), 74 recipes above skill 225, and 23 recipes with unknown skill r
 known-eligible Alchemy graph's 44 auction-house reagents are hot. Separately, 12 skill-unknown
 Alchemy outputs with known tradeable facts, plus their dependencies, remain hot for research.
 
-The catalog delta contains 171 cold-to-hot promotions, 16 new entries and 120 capacity moves from
+The revision-7 catalog delta contained 171 cold-to-hot promotions, 16 new entries and 120 capacity moves from
 hot to cold. To keep the larger hot cohort within scan capacity, 120 hot items outside the protected output
-and reagent graphs move to cold. They remain active for periodic price discovery; this is a capacity
-rebalance, not a claim that those items are permanently unprofitable. Both services are active, the
-revision-7 server is healthy, and the scanner has Stormwind/Dandune at the Auction House. Two full
+and reagent graphs moved to cold. They remained active for periodic price discovery; this was a capacity
+rebalance, not a claim that those items are permanently unprofitable. At the revision-7 checkpoint both services
+were active, the revision-7 server was healthy, and the scanner was at the Auction House. Two full
 revision-7 sweeps passed exact-set and all-query-success checks, were saved and uploaded, and have
 independently captured acknowledgement writes. Sweeps 586 and 587 took 733 s and 626 s; they are
 two measurements, not a p95 or a long-term runtime guarantee. All 489 hot IDs appeared and queried

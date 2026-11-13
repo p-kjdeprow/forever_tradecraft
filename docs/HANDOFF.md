@@ -205,15 +205,19 @@ The trading dashboard is deployed at `/dashboard` on the healthy loopback server
 latest-scan and trading-summary GETs are token-free and read-only; write endpoints still require bearer
 authentication. Keep the server on its existing loopback binding. The page defaults to house `us-normal-alliance`
 and shows scan status before strategy results. The strict observed-turnover gate was introduced with server source
-commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`) and is preserved in
-deployed revision 8 (source commit `fb36408`, image
-`cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`). It excludes UNKNOWN-turnover
-and zero-observed-activity rows. Candidate recipes are selected dynamically; there is no five-recipe whitelist.
-Qualification requires 70% valid interval coverage in both 2-hour and 6-hour windows; the 6-hour threshold means
-4.2 hours of valid coverage, not a guaranteed ETA. The page reports observed listing depletion, not confirmed sales.
-Strategy rows show batch cost, if-sold net proceeds and profit, list price, observed activity, reagents and access
-requirements. Shared cooldown rows are alternatives, not a combined portfolio forecast. The page links to the prior
-research UI at `/dashboard/advanced`.
+commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`); deployed revision 8
+(source commit `fb36408`, image `cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`) preserves that
+observed-turnover policy. The source-stage daily-turnover correction replaces the former fixed 2-hour/6-hour gate
+with positive listing depletion measured over a rolling 24-hour window; server rollout is pending. It sums usable
+interval hours rather than treating missing time as zero. Each endpoint pair uses the larger cadence recorded in
+its immutable sweep plans (base cadence for hot items, multiplied by `coldSlices` for cold items), with a 1.4
+tolerance; both endpoints must be inside the window. Missing plan metadata, grouped/reposted/expired or otherwise
+unusable intervals do not count. There is no full-day or 70% coverage minimum; positive evidence with short measured
+history can qualify, while unknown and zero activity remain excluded before the top ten. Candidate recipes remain
+dynamic; there is no five-recipe whitelist. The page reports observed listing depletion, not confirmed sales.
+Strategy rows show batch cost, if-sold net proceeds and profit, list price, activity rate plus measured hours and
+interval count, reagents and access requirements. Shared cooldown rows are alternatives, not a combined portfolio
+forecast. The page links to the prior research UI at `/dashboard/advanced`.
 
 **Revision-8 live dashboard check, after sweep 591.** The strict-gate summary returned HTTP 200 and zero qualified
 opportunities. This is an evidence-coverage result, not evidence of zero market supply, sales or profit. Proof:

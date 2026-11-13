@@ -181,18 +181,29 @@ and trading-summary GETs are read-only and do not require an API token; write en
 authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tailoring 150, while allowing planning
 targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
+The 24-hour turnover behavior below is source-stage documentation; it becomes live after the server-only rollout is
+verified. Until then, the deployed image still uses its prior fixed-window gate.
+
 - latest scan time and planned / queried / successful counts;
-- up to ten profitable strategies only when qualified 2h/6h books show positive listing depletion, with batch
+- up to ten profitable strategies only when positive listing depletion is observed in usable intervals in the rolling
+  24-hour window, with the rate divided by summed usable hours rather than the full day; batch
   quantity, reagent costs, list price, 12-hour deposit, net proceeds and if-sold profit;
-- observed listing activity, reagent and profession-access details; unknown, zero, grouped, long-gap or
-  insufficient-coverage turnover is excluded from suggestions;
+- the measured hours and interval count behind the 24-hour rate, plus reagent and profession-access details;
+  unknown, zero, grouped, expired/reposted, out-of-scope or over-gap evidence is excluded;
 - the assumed 10 g budget, recipe-ownership assumption and a link to Advanced research at `/dashboard/advanced`.
 
+Each interval uses the immutable plan recorded for both endpoint sweeps. The allowed gap is 1.4 times the larger
+scheduled interval: base cadence for hot items and base cadence times `coldSlices` when an endpoint's plan places
+the item in the cold pool. Both observations must fall inside the 24-hour window; a missing historical plan is an
+error, and a multi-hour gap beyond the recorded schedule is not treated as evidence. There is no full-day minimum
+or fixed 70% coverage threshold. Positive activity with less than six hours of measured data can qualify; zero or
+unknown evidence is removed before the top ten.
+
 Ready-now positive-margin strategies with observed activity sort before marked leveling targets. The empty state
-explains that no profitable strategies meet the turnover requirements and directs the user to wait for complete
-scans; the page does not suggest items from asking prices alone. Rows sharing a cooldown group are alternatives;
-their rates are not additive. Profits assume every listed unit sells and are not expected income. Observed listing
-depletion is not confirmed sales, and sale probability remains unknown.
+explains that no profitable strategies currently have positive observed activity. The page does not suggest items
+from asking prices alone. Rows sharing a cooldown group are alternatives; their rates are not additive. Profits
+assume every listed unit sells and are not expected income. Observed listing depletion is not confirmed sales, and
+sale probability remains unknown.
 
 **Live HTTP check, 2026-11-13 18:33 UTC.** Deployed commit `a15d388` and image
 `e81b402cab34ef5e10bc8277877310463a7f6a7beba17f76a7f437a3d7ec8d1a` served the unauthenticated summary with

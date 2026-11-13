@@ -7,6 +7,7 @@ and leaves turnover unknown when the interval evidence is incomplete.
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -32,9 +33,8 @@ TAILORING_PLANNING_CAP = 225
 BUDGET_COPPER = 100_000
 SHARE = Fraction(1, 10)
 PRICE_MAX_AGE_SECONDS = 3 * 60 * 60
-MAX_EVIDENCE_GAP_SECONDS = 1_260
-WINDOWS_HOURS = (2, 6)
-WINDOW_COVERAGE = Fraction(7, 10)
+ACTIVITY_WINDOW_HOURS = 24
+ACTIVITY_WINDOW_SECONDS = ACTIVITY_WINDOW_HOURS * 3600
 LISTING_HOURS = 12
 MAX_CRAFTS = 5
 PROFILE_KEY = ("alchemy", ALCHEMY_SKILL, "tailoring", TAILORING_SKILL, TAILORING_PLANNING_CAP, BUDGET_COPPER)
@@ -53,8 +53,21 @@ class TradingSummaryInputs:
     facts: Mapping[int, ItemFacts]
     commodity_books: Mapping[int, Sequence[Book]]
     item_books: Mapping[int, Sequence[ItemBook]]
+    sweep_plans: Mapping[int, SweepSamplingPlan]
     names: Mapping[int, str]
     rules: AuctionHouseRules
+
+
+@dataclass(frozen=True)
+class SweepSamplingPlan:
+    """Immutable per-sweep cadence policy needed to compare its observations."""
+
+    cadence_seconds: int
+    cold_slices: int
+    cold_item_ids: frozenset[int]
+
+    def interval_seconds(self, item_id: int) -> int:
+        return self.cadence_seconds * (self.cold_slices if item_id in self.cold_item_ids else 1)
 
 
 @dataclass(frozen=True)
@@ -71,6 +84,7 @@ class _Quote:
 class _Activity:
     rate: Fraction | None
     usable_hours: float | None
+    usable_intervals: int
     status: str
     label: str
 
@@ -181,90 +195,92 @@ def _buy_reagent(
     return None
 
 
+def _max_pair_gap(inputs: TradingSummaryInputs, item_id: int, left: Any, right: Any) -> float:
+    """Use the larger immutable endpoint sampling cadence with 40% scheduling tolerance."""
+
+    intervals = []
+    for book in (left, right):
+        sweep_id = book.sweep_id
+        if type(sweep_id) is not int or sweep_id <= 0:
+            raise ValueError(f"item {item_id}: observation has no valid sweep ID")
+        plan = inputs.sweep_plans.get(sweep_id)
+        if plan is None:
+            raise ValueError(f"sweep {sweep_id}: historical sampling plan is unavailable")
+        intervals.append(plan.interval_seconds(item_id))
+    return max(intervals) * 7 / 5
+
+
 def _commodity_activity(
-    books: Sequence[Book], target_price: int, finished_epoch: int
-) -> tuple[tuple[int, float], tuple[int, float]]:
-    intervals = valid_intervals(books)
-    measured: list[tuple[int, float]] = []
-    for hours in WINDOWS_HOURS:
-        start = finished_epoch - hours * 3600
-        units = 0
-        covered_seconds = 0.0
-        for interval in intervals:
-            if interval is None or interval.before.t < start or interval.after.t > finished_epoch:
-                continue
-            if interval.ceiling is not None and target_price > interval.ceiling:
-                continue
-            if interval.walk.reached_ceiling:
-                continue
-            covered_seconds += interval.dt
-            units += sum(count for price, count in interval.walk.consumed if price > target_price)
-        measured.append((units, covered_seconds))
-    return measured[0], measured[1]
+    inputs: TradingSummaryInputs, item_id: int, books: Sequence[Book], target_price: int
+) -> tuple[int, float, int]:
+    start = inputs.finished_epoch - ACTIVITY_WINDOW_SECONDS
+    units = 0
+    covered_seconds = 0.0
+    interval_count = 0
+    for before, after in zip(books, books[1:], strict=False):
+        # Do not infer where depletion occurred for an interval crossing the window edge.
+        if before.t < start or after.t > inputs.finished_epoch:
+            continue
+        interval = valid_intervals((before, after), max_gap=_max_pair_gap(inputs, item_id, before, after))[0]
+        if interval is None or (interval.ceiling is not None and target_price > interval.ceiling):
+            continue
+        if interval.walk.reached_ceiling:
+            continue
+        covered_seconds += interval.dt
+        units += sum(count for price, count in interval.walk.consumed if price > target_price)
+        interval_count += 1
+    return units, covered_seconds, interval_count
 
 
 def _item_activity(
-    books: Sequence[ItemBook], item_key: str, target_price: int, finished_epoch: int
-) -> tuple[tuple[int, float], tuple[int, float]]:
-    intervals = item_intervals(books, item_key)
-    measured: list[tuple[int, float]] = []
-    for hours in WINDOWS_HOURS:
-        start = finished_epoch - hours * 3600
-        units = 0
-        covered_seconds = 0.0
-        for interval in intervals:
-            if (
-                interval is None
-                or interval.dt > MAX_EVIDENCE_GAP_SECONDS
-                or interval.before.t < start
-                or interval.after.t > finished_epoch
-            ):
-                continue
-            covered_seconds += interval.dt
-            units += sum(count for price, count in interval.consumed if price > target_price)
-        measured.append((units, covered_seconds))
-    return measured[0], measured[1]
+    inputs: TradingSummaryInputs, item_id: int, books: Sequence[ItemBook], item_key: str, target_price: int
+) -> tuple[int, float, int]:
+    start = inputs.finished_epoch - ACTIVITY_WINDOW_SECONDS
+    units = 0
+    covered_seconds = 0.0
+    interval_count = 0
+    for before, after in zip(books, books[1:], strict=False):
+        if before.t < start or after.t > inputs.finished_epoch:
+            continue
+        max_interval_seconds = math.ceil(_max_pair_gap(inputs, item_id, before, after))
+        # The larger cadence only adjusts the gap limit; item_intervals still rejects plan changes.
+        interval = item_intervals((before, after), item_key, max_interval_seconds=max_interval_seconds)[0]
+        if interval is None:
+            continue
+        covered_seconds += interval.dt
+        units += sum(count for price, count in interval.consumed if price > target_price)
+        interval_count += 1
+    return units, covered_seconds, interval_count
 
 
 def _activity(inputs: TradingSummaryInputs, item_id: int, quote: _Quote, target_price: int) -> _Activity:
     if quote.kind == "commodity":
-        windows = _commodity_activity(inputs.commodity_books[item_id], target_price, inputs.finished_epoch)
+        units, covered_seconds, interval_count = _commodity_activity(
+            inputs, item_id, inputs.commodity_books[item_id], target_price
+        )
     else:
         assert quote.item_key is not None
-        books = inputs.item_books[item_id]
-        windows = _item_activity(books, quote.item_key, target_price, inputs.finished_epoch)
-    rates: list[Fraction] = []
-    coverage_hours: list[float] = []
-    qualified = True
-    any_units = False
-    for (units, covered_seconds), hours in zip(windows, WINDOWS_HOURS, strict=True):
-        coverage_hours.append(covered_seconds / 3600)
-        required = float(WINDOW_COVERAGE * hours * 3600)
-        if covered_seconds < required:
-            qualified = False
-        if covered_seconds > 0:
-            rates.append(Fraction(units * 3600, 1) / Fraction(str(covered_seconds)))
-        else:
-            rates.append(Fraction(0))
-        any_units = any_units or units > 0
-    usable_hours = min(coverage_hours) if max(coverage_hours) > 0 else None
-    if not qualified:
-        return _Activity(
-            None, usable_hours, "unknown", "Insufficient 2h/6h interval coverage; turnover unknown"
+        units, covered_seconds, interval_count = _item_activity(
+            inputs, item_id, inputs.item_books[item_id], quote.item_key, target_price
         )
-    conservative = min(rates)
-    if any_units and conservative > 0:
+    usable_hours = covered_seconds / 3600 if covered_seconds > 0 else None
+    if covered_seconds <= 0:
+        return _Activity(None, None, 0, "unknown", "No usable interval evidence in the 24-hour window")
+    if units > 0:
+        rate = Fraction(units * 3600, 1) / Fraction(str(covered_seconds))
         return _Activity(
-            conservative,
+            rate,
             usable_hours,
+            interval_count,
             "observed_activity",
-            "Observed listing depletion; sales unconfirmed",
+            "Observed listing depletion in the 24-hour window; sales unconfirmed",
         )
     return _Activity(
         Fraction(0),
         usable_hours,
+        interval_count,
         "observed_no_depletion",
-        "Qualified books showed no bottom-walk depletion; sales unconfirmed",
+        "Usable 24-hour books showed no bottom-walk depletion; sales unconfirmed",
     )
 
 
@@ -439,6 +455,7 @@ def _opportunity(
         "market_units_per_hour": None if activity.rate is None else round(float(activity.rate), 2),
         "volume_status": activity.status,
         "usable_hours": activity.usable_hours,
+        "usable_intervals": activity.usable_intervals,
         "sale_probability": None,
         "evidence_label": activity.label,
         "price_age_seconds": max(0, math.floor(inputs.finished_epoch - output_quote.observed_at)),
@@ -499,6 +516,7 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
         "client_build": inputs.client_build,
         "sweep_id": inputs.sweep_id,
         "finished_epoch": inputs.finished_epoch,
+        "activity_window_hours": ACTIVITY_WINDOW_HOURS,
         "scan": dict(inputs.scan),
         "profile": {
             "alchemy": ALCHEMY_SKILL,
@@ -513,17 +531,82 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
             "recipe acquisition and leveling costs are excluded.",
             "Cost includes reagent purchases and a full 12-hour listing deposit. "
             "Sale proceeds deduct the house cut; profit assumes every listed output sells.",
-            "Market activity is observed listing depletion, not confirmed sales. "
-            "Sale probability is unknown; grouped, stale, and long-gap evidence is excluded.",
+            "Market activity is observed listing depletion across usable intervals in "
+            "the rolling 24-hour window; the rate divides by measured usable hours, "
+            "not the full day, and is not confirmed sales. Sale probability is unknown; "
+            "grouped, stale, and historically unsupported intervals are excluded.",
             "Current listing targets undercut the lowest observed price by one copper. "
             "Tools, categories, and focus requirements are shown per recipe.",
-            "Only positive-margin opportunities with qualified, positive observed "
-            "listing depletion are shown; unknown or zero turnover is excluded. "
+            "Only positive-margin opportunities with positive observed listing depletion "
+            "and usable 24-hour evidence "
+            "are shown; unknown or zero activity is excluded. "
             "All skill planning stays within 225.",
+            "Batch sizing and ranking assume a 10% share of observed market activity; "
+            "this is not a personal sales forecast.",
             "Recipes with the same cooldown group share one timer; rows are alternatives, not a "
             "combined portfolio forecast.",
         ],
     }
+
+
+def _sampling_plan(plan_body: Any, sweep_id: int) -> SweepSamplingPlan:
+    if isinstance(plan_body, str):
+        try:
+            plan_body = json.loads(plan_body)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"sweep {sweep_id}: historical plan is not valid JSON") from exc
+    if not isinstance(plan_body, Mapping) or plan_body.get("schemaVersion") != 2:
+        raise ValueError(f"sweep {sweep_id}: historical plan is not format 2")
+    cadence = plan_body.get("cadenceSeconds")
+    cold_slices = plan_body.get("coldSlices")
+    pools = plan_body.get("pools")
+    if type(cadence) is not int or cadence <= 0:
+        raise ValueError(f"sweep {sweep_id}: historical plan has invalid cadenceSeconds")
+    if type(cold_slices) is not int or cold_slices < 0:
+        raise ValueError(f"sweep {sweep_id}: historical plan has invalid coldSlices")
+    if not isinstance(pools, Mapping) or not isinstance(pools.get("cold"), list):
+        raise ValueError(f"sweep {sweep_id}: historical plan has no cold item pool")
+    cold_values = pools["cold"]
+    if any(type(item_id) is not int or item_id <= 0 for item_id in cold_values):
+        raise ValueError(f"sweep {sweep_id}: historical cold pool contains an invalid item ID")
+    if len(cold_values) != len(set(cold_values)):
+        raise ValueError(f"sweep {sweep_id}: historical cold pool contains duplicate item IDs")
+    if bool(cold_slices) != bool(cold_values) or cold_slices > len(cold_values):
+        raise ValueError(f"sweep {sweep_id}: historical cold pool disagrees with coldSlices")
+    return SweepSamplingPlan(cadence, cold_slices, frozenset(cold_values))
+
+
+def _load_sweep_sampling_plans(
+    conn: Any, house_key: str, client_build: str, sweep_ids: set[int]
+) -> dict[int, SweepSamplingPlan]:
+    """Read each sampled sweep's immutable cadence and cold-pool membership."""
+
+    if not sweep_ids:
+        return {}
+    rows = conn.execute(
+        """
+        SELECT ms.id, ms.plan_hash, mp.plan_body
+        FROM market_sweeps AS ms
+        JOIN houses AS h ON h.id = ms.house_id
+        LEFT JOIN market_plans AS mp ON mp.plan_hash = ms.plan_hash
+        WHERE h.key = %s
+          AND ms.client_version || '.' || ms.client_build = %s
+          AND ms.id = ANY(%s)
+        """,
+        (house_key, client_build, sorted(sweep_ids)),
+    ).fetchall()
+    plans: dict[int, SweepSamplingPlan] = {}
+    for raw_sweep_id, plan_hash, plan_body in rows:
+        sweep_id = int(raw_sweep_id)
+        if not plan_hash or plan_body is None:
+            raise ValueError(f"sweep {sweep_id}: historical sampling plan is unavailable")
+        if sweep_id in plans:
+            raise ValueError(f"sweep {sweep_id}: duplicate historical sampling metadata")
+        plans[sweep_id] = _sampling_plan(plan_body, sweep_id)
+    if plans.keys() != sweep_ids:
+        missing = sorted(sweep_ids - plans.keys())
+        raise ValueError(f"historical sampling metadata is missing for sweeps {missing}")
+    return plans
 
 
 def _load_summary_in_snapshot(conn: Any, inputs: tuple[str, str, int, int, dict[str, int]]) -> dict[str, Any]:
@@ -531,7 +614,7 @@ def _load_summary_in_snapshot(conn: Any, inputs: tuple[str, str, int, int, dict[
     facts, recipes_all = load_client_data(conn, house_key, build)
     recipes = tuple(recipe for recipe in recipes_all if recipe.professions & {"alchemy", "tailoring"})
     item_ids = sorted({item_id for recipe in recipes for item_id, _ in (*recipe.outputs, *recipe.reagents)})
-    start_t = max(0, finished_epoch - 7 * 3600)
+    start_t = max(0, finished_epoch - ACTIVITY_WINDOW_SECONDS)
     commodity_books = load_commodity_books(
         conn,
         house_key,
@@ -547,6 +630,13 @@ def _load_summary_in_snapshot(conn: Any, inputs: tuple[str, str, int, int, dict[
         start_t=start_t,
         end_t=finished_epoch,
     )
+    sweep_ids = {
+        int(book.sweep_id)
+        for histories in (*commodity_books.values(), *item_books.values())
+        for book in histories
+        if type(book.sweep_id) is int
+    }
+    sweep_plans = _load_sweep_sampling_plans(conn, house_key, build, sweep_ids)
     names = item_names(conn, build, item_ids)
     return build_trading_summary(
         TradingSummaryInputs(
@@ -559,6 +649,7 @@ def _load_summary_in_snapshot(conn: Any, inputs: tuple[str, str, int, int, dict[
             facts=facts,
             commodity_books=commodity_books,
             item_books=item_books,
+            sweep_plans=sweep_plans,
             names=names,
             rules=rules_for_house(House.parse(house_key)),
         )
@@ -612,6 +703,7 @@ def load_trading_summary(conn: Any, house_key: str) -> dict[str, Any]:
 
 
 __all__ = [
+    "SweepSamplingPlan",
     "TradingSummaryInputs",
     "build_trading_summary",
     "exact_money",

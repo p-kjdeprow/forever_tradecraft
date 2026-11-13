@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from fractions import Fraction
 
+import pytest
+
 from crowley.analysis import trading_summary as summary
 from crowley.analysis.books import Book, Group
 from crowley.analysis.item_books import Auction, ItemBook
@@ -73,14 +75,48 @@ def _commodity_history(
     return books
 
 
+def _commodity_points(
+    item_id: int,
+    points: list[tuple[int, int]],
+    *,
+    ceiling: Fraction | None = None,
+) -> list[Book]:
+    """Build exact-price fixture books from (epoch offset, remaining quantity) pairs."""
+
+    return [
+        Book(
+            float(ASOF + offset),
+            [Group("level", Fraction(100), quantity, 100_000, 1)],
+            ceiling,
+            item_id,
+            index + 1,
+        )
+        for index, (offset, quantity) in enumerate(points)
+    ]
+
+
 def _inputs(
     recipes: tuple[Recipe, ...] | list[Recipe],
     *,
     books: dict[int, list[Book]] | None = None,
     facts: dict[int, ItemFacts] | None = None,
     item_books: dict[int, list[ItemBook]] | None = None,
+    sweep_plans: dict[int, summary.SweepSamplingPlan] | None = None,
     names: dict[int, str] | None = None,
 ) -> summary.TradingSummaryInputs:
+    book_map = books or {}
+    item_book_map = item_books or {}
+    fixture_sweep_ids = {
+        int(book.sweep_id)
+        for histories in (*book_map.values(), *item_book_map.values())
+        for book in histories
+        if type(book.sweep_id) is int
+    }
+    fixture_plans = (
+        {sweep_id: summary.SweepSamplingPlan(900, 0, frozenset()) for sweep_id in fixture_sweep_ids}
+        if sweep_plans is None
+        else sweep_plans
+    )
     return summary.TradingSummaryInputs(
         house=HOUSE,
         client_build=BUILD,
@@ -89,8 +125,9 @@ def _inputs(
         scan={"planned": 484, "queried": 484, "successful": 483},
         recipes=recipes,
         facts=facts or {},
-        commodity_books=books or {},
-        item_books=item_books or {},
+        commodity_books=book_map,
+        item_books=item_book_map,
+        sweep_plans=fixture_plans,
         names=names or {},
         rules=rules_for_house(House.parse(HOUSE)),
     )
@@ -134,8 +171,12 @@ def _wire_item_row(
     return auction, row
 
 
-def _item_book(index: int, at: int, *, grouped: bool = False, key: str = "1000") -> ItemBook:
+def _item_book(
+    index: int, at: int, *, grouped: bool = False, key: str = "1000", quantity: int = 1
+) -> ItemBook:
     auction, row = _wire_item_row(index + 1, 100, owner=None if grouped else "seller", key=key)
+    row["quantity"] = quantity
+    auction = Auction(auction.result_id, auction.unit, quantity, auction.item_key, auction.owner, auction.own)
     record = {
         "observation": {
             "kind": "item",
@@ -168,7 +209,8 @@ def test_batch_economics_use_whole_vendor_bundles_and_per_stack_fees():
         names={1000: "Output", 2000: "Vendor reagent"},
     )
 
-    row = summary.build_trading_summary(inputs)["opportunities"][0]
+    result = summary.build_trading_summary(inputs)
+    row = result["opportunities"][0]
 
     assert row["crafts"] == 2
     assert row["quantity"] == 8
@@ -191,6 +233,7 @@ def test_batch_economics_use_whole_vendor_bundles_and_per_stack_fees():
     assert row["market_units_per_hour"] == 40
     assert row["sale_probability"] is None
     assert row["volume_status"] == "observed_activity"
+    assert any("assume a 10% share of observed market activity" in note for note in result["notes"])
 
 
 def test_vendor_only_reagent_needs_no_auction_book():
@@ -337,7 +380,7 @@ def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
     assert all(row["market_units_per_hour"] > 0 for row in result["opportunities"])
 
 
-def test_complete_coverage_with_zero_depletion_is_excluded():
+def test_usable_24h_history_with_zero_depletion_is_excluded():
     recipe = _recipe()
     result = summary.build_trading_summary(
         _inputs(
@@ -350,6 +393,164 @@ def test_complete_coverage_with_zero_depletion_is_excluded():
     )
 
     assert result["opportunities"] == []
+
+
+def test_short_positive_history_after_six_hours_qualifies_without_filling_missing_time():
+    recipe = _recipe()
+    points = [(-26 * 3600, 2_000), (-26 * 3600 + 900, 1_000), (-10 * 3600, 100)]
+    points.extend((-10 * 3600 + step * 900, 100 - step * 5) for step in range(1, 5))
+    points.extend([(0, 80), (900, 0)])
+    books = _commodity_points(1000, points)
+
+    row = summary.build_trading_summary(
+        _inputs([recipe], books={1000: books}, facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1))
+    )["opportunities"][0]
+
+    assert row["market_units_per_hour"] == 20
+    assert row["usable_hours"] == 1
+    assert row["usable_intervals"] == 4
+    assert row["volume_status"] == "observed_activity"
+
+
+def test_activity_rate_weights_depletion_by_usable_interval_hours():
+    books = _commodity_points(1000, [(-2_100, 100), (-1_200, 90), (0, 60)])
+    row = summary.build_trading_summary(
+        _inputs([_recipe()], books={1000: books}, facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1))
+    )["opportunities"][0]
+
+    assert row["market_units_per_hour"] == 68.57
+    assert row["usable_intervals"] == 2
+    assert row["usable_hours"] == 2_100 / 3_600
+
+
+def test_cold_commodity_observations_use_their_recorded_schedule_and_pool_transition():
+    books = _commodity_points(1000, [(-5_400, 100), (0, 90)])
+    plans = {
+        1: summary.SweepSamplingPlan(900, 0, frozenset()),
+        2: summary.SweepSamplingPlan(900, 6, frozenset({1000})),
+    }
+    row = summary.build_trading_summary(
+        _inputs(
+            [_recipe()],
+            books={1000: books},
+            sweep_plans=plans,
+            facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
+        )
+    )["opportunities"][0]
+
+    assert row["market_units_per_hour"] == 6.67
+    assert row["usable_hours"] == 1.5
+    assert row["usable_intervals"] == 1
+
+
+def test_cold_item_books_qualify_but_hot_gaps_and_multi_hour_outages_do_not():
+    recipe = _recipe()
+    cold_plans = {
+        1: summary.SweepSamplingPlan(900, 6, frozenset({1000})),
+        2: summary.SweepSamplingPlan(900, 6, frozenset({1000})),
+    }
+    cold_books = [_item_book(0, ASOF - 5_400, quantity=2), _item_book(1, ASOF, quantity=1)]
+    cold = summary.build_trading_summary(
+        _inputs(
+            [recipe],
+            item_books={1000: cold_books},
+            sweep_plans=cold_plans,
+            facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
+        )
+    )["opportunities"][0]
+    assert cold["volume_status"] == "observed_activity"
+    assert cold["usable_hours"] == 1.5
+
+    hot_books = _commodity_points(1000, [(-5_400, 100), (0, 90)])
+    hot = summary._activity(
+        _inputs([recipe], books={1000: hot_books}),
+        1000,
+        summary._latest_quote(_inputs([recipe], books={1000: hot_books}), 1000),
+        99,
+    )
+    assert hot.status == "unknown"
+
+    outage_books = _commodity_points(1000, [(-4 * 3600, 100), (0, 90)])
+    outage_inputs = _inputs(
+        [recipe],
+        books={1000: outage_books},
+        sweep_plans={
+            1: summary.SweepSamplingPlan(900, 6, frozenset({1000})),
+            2: summary.SweepSamplingPlan(900, 6, frozenset({1000})),
+        },
+    )
+    outage_quote = summary._latest_quote(outage_inputs, 1000)
+    assert outage_quote is not None
+    assert summary._activity(outage_inputs, 1000, outage_quote, 99).status == "unknown"
+
+
+def test_commodity_ceiling_and_item_expiry_repost_rules_remain_conservative():
+    bounded = _commodity_points(1000, [(-900, 100), (0, 90)], ceiling=Fraction(90))
+    bounded_inputs = _inputs([_recipe()], books={1000: bounded})
+    bounded_quote = summary._latest_quote(bounded_inputs, 1000)
+    assert bounded_quote is not None
+    assert summary._activity(bounded_inputs, 1000, bounded_quote, 99).status == "unknown"
+
+    expiry_books = [_item_book(0, ASOF - 900, quantity=2), _item_book(1, ASOF, quantity=1)]
+    expiry_books[0].record["observation"]["rows"][0]["timeLeft"] = {
+        "kind": "band",
+        "minimumSeconds": 100,
+        "maximumSeconds": 101,
+    }
+    expiry_inputs = _inputs([_recipe()], item_books={1000: expiry_books})
+    expiry_quote = summary._latest_quote(expiry_inputs, 1000)
+    assert expiry_quote is not None
+    assert summary._activity(expiry_inputs, 1000, expiry_quote, 99).status == "observed_no_depletion"
+
+    repost_books = [_item_book(0, ASOF - 900, quantity=2), _item_book(1, ASOF, quantity=1)]
+    repost_books[1].auctions += (Auction(99, Fraction(101), 1, "1000", "seller", False),)
+    repost_books[1].record["observation"]["rows"].append(_wire_item_row(99, 101)[1])
+    repost_inputs = _inputs([_recipe()], item_books={1000: repost_books})
+    repost_quote = summary._latest_quote(repost_inputs, 1000)
+    assert repost_quote is not None
+    assert summary._activity(repost_inputs, 1000, repost_quote, 99).status == "observed_no_depletion"
+
+
+def test_missing_historical_plan_fails_loudly_for_candidate_interval():
+    books = _commodity_points(1000, [(-900, 100), (0, 90)])
+    inputs = _inputs([_recipe()], books={1000: books}, sweep_plans={})
+    quote = summary._latest_quote(inputs, 1000)
+    assert quote is not None
+
+    with pytest.raises(ValueError, match="historical sampling plan is unavailable"):
+        summary._activity(inputs, 1000, quote, 99)
+
+
+def test_sampling_plan_loader_reads_immutable_cold_metadata_and_rejects_missing_rows():
+    plan_body = {
+        "schemaVersion": 2,
+        "cadenceSeconds": 900,
+        "coldSlices": 6,
+        "pools": {"cold": [1000, 1001, 1002, 1003, 1004, 1005]},
+    }
+
+    class FakeConnection:
+        def __init__(self, rows):
+            self.rows = rows
+            self.parameters = None
+
+        def execute(self, query, parameters):
+            assert "market_plans" in query and "ms.plan_hash" in query
+            self.parameters = parameters
+            return self
+
+        def fetchall(self):
+            return self.rows
+
+    conn = FakeConnection([(77, "a" * 64, plan_body)])
+    plans = summary._load_sweep_sampling_plans(conn, HOUSE, BUILD, {77})
+
+    assert conn.parameters == (HOUSE, BUILD, [77])
+    assert plans == {77: summary.SweepSamplingPlan(900, 6, frozenset({1000, 1001, 1002, 1003, 1004, 1005}))}
+
+    missing = FakeConnection([])
+    with pytest.raises(ValueError, match="metadata is missing for sweeps"):
+        summary._load_sweep_sampling_plans(missing, HOUSE, BUILD, {77})
 
 
 def test_missing_output_or_reagent_prices_are_excluded_and_empty_summary_is_valid():
@@ -381,9 +582,22 @@ def test_summary_loader_uses_fact_recipe_loader_return_order(monkeypatch):
     recipe = _recipe(reagent_quantity=2)
     facts = _facts(reagent_vendor_size=3, reagent_vendor_price=20)
     books = {1000: _commodity_history(1000)}
+    commodity_loads = []
+
+    def load_books(*args, **kwargs):
+        commodity_loads.append(kwargs)
+        return books
+
     monkeypatch.setattr(summary, "load_client_data", lambda conn, house, build: (facts, (recipe,)))
-    monkeypatch.setattr(summary, "load_commodity_books", lambda *args, **kwargs: books)
+    monkeypatch.setattr(summary, "load_commodity_books", load_books)
     monkeypatch.setattr(summary, "load_item_books", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        summary,
+        "_load_sweep_sampling_plans",
+        lambda conn, house, build, sweep_ids: {
+            sweep_id: summary.SweepSamplingPlan(900, 0, frozenset()) for sweep_id in sweep_ids
+        },
+    )
     monkeypatch.setattr(summary, "item_names", lambda *args, **kwargs: {1000: "Output"})
 
     result = summary._load_summary_in_snapshot(
@@ -393,3 +607,4 @@ def test_summary_loader_uses_fact_recipe_loader_return_order(monkeypatch):
 
     assert result["opportunities"][0]["reagents"][0]["cost"] == "80"
     assert result["scan"] == {"planned": 484, "queried": 484, "successful": 483}
+    assert commodity_loads[0]["start_t"] == ASOF - 24 * 3600

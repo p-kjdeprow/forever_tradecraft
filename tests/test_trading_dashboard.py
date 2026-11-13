@@ -77,6 +77,7 @@ def _item(index: int) -> dict:
         "market_units_per_hour": (12.57 if index == 0 else 750 if unknown else 0 if zero else 2.5),
         "volume_status": "unknown" if unknown else "observed_activity",
         "usable_hours": None if unknown else 5.25,
+        "usable_intervals": None if unknown else 8,
         "sale_probability": None,
         "evidence_label": "No usable activity evidence"
         if unknown
@@ -112,6 +113,7 @@ def _summary(sweep_id: int, finished_epoch: int, count: int = 12) -> dict:
         "client_build": "1.60.1.70938",
         "sweep_id": sweep_id,
         "finished_epoch": finished_epoch,
+        "activity_window_hours": 24,
         "scan": {"planned": 484, "queried": 484, "successful": 483},
         "profile": {
             "alchemy": 225,
@@ -275,6 +277,8 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep
     assert "Net profit if all sell" in actual["rendered2"]["cards"]
     assert "77s 66c" in actual["rendered2"]["cards"]  # No decimal rounding can hide this profit.
     assert "12.6 units/h" in actual["rendered2"]["cards"]
+    assert "24h observed activity" in actual["rendered2"]["cards"]
+    assert "5.25 usable h across 8 intervals" in actual["rendered2"]["cards"]
     assert "Sales are unconfirmed" in actual["rendered2"]["cards"]
     assert "Turnover unknown" not in actual["rendered2"]["cards"]
     assert "Item 11" in actual["rendered2"]["cards"]
@@ -312,11 +316,11 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep
     assert "Planned 484Queried 484Successful 483" in actual["emptyTurnover"]["counts"]
     assert (
         "No profitable strategies currently meet the turnover requirements"
-        in actual["emptyTurnover"]["cards"]
+        not in actual["emptyTurnover"]["cards"]
     )
-    assert "Price-only opportunities are intentionally omitted" in actual["emptyTurnover"]["cards"]
+    assert "positive observed activity in the 24-hour window" in actual["emptyTurnover"]["cards"]
     assert actual["emptyTurnover"]["cardClass"] == "panel empty"
-    assert "meet the turnover requirements" in actual["emptyTurnover"]["status"]
+    assert "positive observed activity" in actual["emptyTurnover"]["status"]
     assert all(call.get("options") is None for call in actual["calls"])
 
 

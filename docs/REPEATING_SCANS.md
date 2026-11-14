@@ -2,17 +2,21 @@
 
 ## Revision 8 deployed (two-sweep qualification complete)
 
-Revision 8 is deployed on image `sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`;
-source commit `fb36408` and package, generated target, server and companion `Data.lua` agree on revision 8 and plan
-hash `fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473` for build 70938/interface 16001,
-house `us-normal-alliance`. The plan has 806 active IDs (402 core, 0 discovery, 404 cold), with 390 hot IDs in the
+Revision 8 scan plan was introduced by source commit `fb36408`; the installed scanner package, generated target and
+companion `Data.lua` remain on plan hash
+`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473` for build 70938/interface 16001, house
+`us-normal-alliance`. The current HTTP analysis server runs source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb`
+on image `sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and serves this same plan. The
+plan has 806 active IDs (402 core, 0 discovery, 404 cold), with 390 hot IDs in the
 known and uncertain-rank crafting graphs plus 12 additional unresolved dependencies. It moves 87 IDs from hot to
 cold without exclusions.
 Cadence is 900 s, cap 750 s, depth 20, with six cold slices of 68/68/67/67/67/67 (470/470/469/469/469/469
 queries per sweep; 13.38% fewer on average than revision 7). Cold coverage remains broad but slower, about every
 90 minutes.
 
-Two consecutive full sweeps passed. Sweep 591 (slice 2, UID `us-normal-alliance-1794608359-Dandune-8967`) ran
+Two consecutive full sweeps passed under the previous HTTP server image
+`sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`; the scan plan and collector were
+unchanged by the later server-only analysis update. Sweep 591 (slice 2, UID `us-normal-alliance-1794608359-Dandune-8967`) ran
 2026-11-13 22:19:19–22:29:45 UTC (626 s); sweep 592 (slice 3, UID `us-normal-alliance-1794609259-Dandune-7251`)
 ran 22:34:19–22:43:39 UTC (560 s). Each matched all 469 planned IDs; all were observed, queried and `ok`, including
 all 402 hot IDs. They had 395 and 400 priced items and were saved, uploaded and acknowledged. Starts were 900 s

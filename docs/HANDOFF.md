@@ -37,18 +37,21 @@ Make gold on the WoW Forever auction house with several independently profitable
 
 ### Scan catalog and runtime qualification
 
-**Revision 8 deployed; two-sweep qualification complete.** Source commit `fb36408`, package, generated
-target, server and companion `Data.lua` agree on catalog hash
+**Revision 8 scan plan deployed; two-sweep qualification complete.** The installed scanner package, generated
+target and companion `Data.lua` remain on catalog hash
 `3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5` and plan hash
-`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. The server image is
-`cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`. Revision 8 preserves 973 catalog entries and
+`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`, introduced by source commit `fb36408`.
+The current HTTP analysis server runs source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and serves that same plan. Revision 8
+preserves 973 catalog entries and
 806 active IDs; its exact delta moves 87 hot IDs to cold, with 402 core, no discovery and 404 cold, and makes no new
 exclusions. It retains 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
 dependencies. Cold slices have
 68/68/67/67/67/67 items and plan 470/470/469/469/469/469 queries per sweep, 13.38% fewer on average than revision
 7. Cadence, 750 s cap, slice count and depth are unchanged.
 
-Two consecutive full revision-8 sweeps passed. Sweep 591 (slice 2, UID `us-normal-alliance-1794608359-Dandune-8967`)
+Two consecutive full revision-8 sweeps passed under the prior server image
+`sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`. Sweep 591 (slice 2, UID `us-normal-alliance-1794608359-Dandune-8967`)
 ran 2026-11-13 22:19:19–22:29:45 UTC (626 s); sweep 592 (slice 3, UID `us-normal-alliance-1794609259-Dandune-7251`)
 ran 22:34:19–22:43:39 UTC (560 s). Each matched the exact 469-item set; all 469 were observed, queried and `ok`,
 including all 402 hot IDs. There were 395 and 400 priced items. Both sweeps were saved and uploaded, with
@@ -206,23 +209,35 @@ latest-scan and trading-summary GETs are token-free and read-only; write endpoin
 authentication. Keep the server on its existing loopback binding. The page defaults to house `us-normal-alliance`
 and shows scan status before strategy results. The strict observed-turnover gate was introduced with server source
 commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`); deployed revision 8
-(source commit `fb36408`, image `cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`) preserves that
-observed-turnover policy. The source-stage daily-turnover correction replaces the former fixed 2-hour/6-hour gate
-with positive listing depletion measured over a rolling 24-hour window; server rollout is pending. It sums usable
-interval hours rather than treating missing time as zero. Each endpoint pair uses the larger cadence recorded in
-its immutable sweep plans (base cadence for hot items, multiplied by `coldSlices` for cold items), with a 1.4
-tolerance; both endpoints must be inside the window. Missing plan metadata, grouped/reposted/expired or otherwise
-unusable intervals do not count. There is no full-day or 70% coverage minimum; positive evidence with short measured
-history can qualify, while unknown and zero activity remain excluded before the top ten. Candidate recipes remain
-dynamic; there is no five-recipe whitelist. The page reports observed listing depletion, not confirmed sales.
-Strategy rows show batch cost, if-sold net proceeds and profit, list price, activity rate plus measured hours and
-interval count, reagents and access requirements. Shared cooldown rows are alternatives, not a combined portfolio
-forecast. The page links to the prior research UI at `/dashboard/advanced`.
+preserved the positive observed-turnover policy. The current server uses source commit
+`a0c533c9fd9846fef4d8bb680b510825bfff75cb`, image
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738`, and a rolling 24-hour observed-activity
+window instead of the former fixed 2-hour/6-hour gate. It sums usable interval hours rather than treating missing
+time as zero. Each pair uses the larger cadence recorded in its immutable sweep plans (base cadence for hot items,
+multiplied by `coldSlices` for cold items), with 1.4 tolerance; both endpoints must be inside the window. Missing or
+invalid plan metadata is an API error. Existing ceiling, expiry and grouped-scope exclusions remain; item-kind
+comparisons also retain their plan-change, repost and owner-continuity guards. The wider cadence does not bypass them.
+There is no full-day or 70% coverage minimum; positive evidence with short measured history can qualify,
+while unknown and zero activity remain excluded before the top ten. Candidate recipes remain dynamic; there is no
+five-recipe whitelist. The page reports observed listing depletion, not confirmed sales. Strategy rows show batch
+cost, if-sold net proceeds and profit, list price, activity rate plus measured hours and interval count, reagents and
+access requirements. Shared cooldown rows are alternatives, not a combined portfolio forecast. The page links to
+the prior research UI at `/dashboard/advanced`.
 
-**Revision-8 live dashboard check, after sweep 591.** The strict-gate summary returned HTTP 200 and zero qualified
-opportunities. This is an evidence-coverage result, not evidence of zero market supply, sales or profit. Proof:
-`.archive/scan-slimming-20261113/ops/parent-dashboard-check.json`. The strategy profile and positive-known-turnover
-gate were preserved.
+**Current 24-hour dashboard check, sweep 597.** The API returned HTTP 200 with ten positive known-activity rows;
+the page showed the 24-hour window, measured hours and interval counts. The profile remained Alchemy 225 / Tailoring
+150 (planning through 225), assumed 10 g and assumed recipe ownership. Shadow Oil showed 51.36 observed units/hour
+over 14.0175 usable hours / 56 intervals, with 9,886 copper batch cost, 15,456 copper net proceeds if all sell and
+5,570 copper if-sold profit. Frost Oil and Goblin Rocket Fuel also showed positive activity, at 20.62 and 13.44
+units/hour. Cold-pool audit IDs 2770, 2771 and Thorium Ore 10620 each had positive usable evidence including one
+interval longer than the hot-item limit, admitted by their recorded cold cadence. These are observed listing
+depletions and if-sold economics, not confirmed sales or a sale-probability forecast. Proof:
+`.archive/daily-turnover-20261113/ops/parent-live-api-proof.json`,
+`parent-live-activity-audit.json` and `parent-artifact-verification.json`.
+
+**Historical strict-gate check, after sweep 591.** The previous server image returned HTTP 200 and zero qualified
+opportunities under its fixed-window gate. This was an evidence-coverage result, not evidence of zero market supply,
+sales or profit. Proof: `.archive/scan-slimming-20261113/ops/parent-dashboard-check.json`.
 
 **Historical live check, 2026-11-13 21:29:47 UTC.** The pre-revision-8 strict-gate summary also returned HTTP 200
 and zero qualified opportunities. Proof: `.archive/tailoring-hotfix-20261113/ops/parent-final-live-summary.json`.

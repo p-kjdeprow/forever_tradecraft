@@ -181,8 +181,10 @@ and trading-summary GETs are read-only and do not require an API token; write en
 authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tailoring 150, while allowing planning
 targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
-The 24-hour turnover behavior below is source-stage documentation; it becomes live after the server-only rollout is
-verified. Until then, the deployed image still uses its prior fixed-window gate.
+The dashboard now uses a rolling 24-hour observed-activity window. The server runs source commit
+`a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738`; the client scan plan and installed addon
+remain revision 8.
 
 - latest scan time and planned / queried / successful counts;
 - up to ten profitable strategies only when positive listing depletion is observed in usable intervals in the rolling
@@ -194,10 +196,11 @@ verified. Until then, the deployed image still uses its prior fixed-window gate.
 
 Each interval uses the immutable plan recorded for both endpoint sweeps. The allowed gap is 1.4 times the larger
 scheduled interval: base cadence for hot items and base cadence times `coldSlices` when an endpoint's plan places
-the item in the cold pool. Both observations must fall inside the 24-hour window; a missing historical plan is an
-error, and a multi-hour gap beyond the recorded schedule is not treated as evidence. There is no full-day minimum
-or fixed 70% coverage threshold. Positive activity with less than six hours of measured data can qualify; zero or
-unknown evidence is removed before the top ten.
+the item in the cold pool. Both observations must fall inside the 24-hour window. Missing or invalid historical plan
+metadata is an API error; item-kind comparisons also retain their existing plan-change guard. A multi-hour gap beyond
+the recorded schedule is not treated as evidence. There is no full-day minimum or fixed 70% coverage threshold.
+Positive activity with less than six hours of measured data can qualify; zero or unknown evidence is removed before
+the top ten.
 
 Ready-now positive-margin strategies with observed activity sort before marked leveling targets. The empty state
 explains that no profitable strategies currently have positive observed activity. The page does not suggest items
@@ -205,7 +208,19 @@ from asking prices alone. Rows sharing a cooldown group are alternatives; their 
 assume every listed unit sells and are not expected income. Observed listing depletion is not confirmed sales, and
 sale probability remains unknown.
 
-**Live HTTP check, 2026-11-13 18:33 UTC.** Deployed commit `a15d388` and image
+**Current live HTTP check, sweep 597.** Source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` and image
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` returned HTTP 200 for house
+`us-normal-alliance`, build `1.60.1.70938`, with a 24-hour activity window and ten positive known-activity rows. The
+profile remained Alchemy 225 / Tailoring 150, planning through Tailoring 225, with the assumed 10 g budget and
+recipe ownership. Shadow Oil showed 51.36 observed units/hour across 14.0175 usable hours and 56 intervals; batch
+cost was 9,886 copper, net proceeds if all sell were 15,456 copper, and if-sold profit was 5,570 copper. Frost Oil
+and Goblin Rocket Fuel also had positive observed activity (20.62 and 13.44 units/hour). A read-only audit found
+positive usable cold-pool evidence for IDs 2770, 2771 and Thorium Ore 10620, each including one accepted interval
+longer than the hot-item limit under the recorded cold cadence. These are observed listing depletions and current
+book economics, not confirmed sales or a sale-probability forecast. Proof: `.archive/daily-turnover-20261113/ops/parent-live-api-proof.json`,
+`parent-live-activity-audit.json` and `parent-artifact-verification.json`.
+
+**Historical live HTTP check, 2026-11-13 18:33 UTC.** Deployed commit `a15d388` and image
 `e81b402cab34ef5e10bc8277877310463a7f6a7beba17f76a7f437a3d7ec8d1a` served the unauthenticated summary with
 HTTP 200, ten rows, and an 8.03 s response. It reported house `us-normal-alliance`, build `1.60.1.70938`, latest
 accepted sweep 583 (17:47:03 UTC; 484 planned, 484 queried, 484 successful). Profile, assumed budget and

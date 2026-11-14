@@ -7,9 +7,10 @@ Revision 8 is deployed for build **1.60.1.70938** and house `us-normal-alliance`
 `fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. It preserves all 973 catalog entries and
 806 active IDs: 402 core, no discovery pool, and 404 cold. The approved delta moves 87 hot items to cold, adds no
 exclusions, and retains 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
-dependencies. Source commit
-`fb36408`, package, generated target, server and companion `Data.lua` agree on revision 8; server image is
-`cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`.
+dependencies. Source commit `fb36408` introduced revision 8; the installed scanner package, generated target and
+companion `Data.lua` remain on its catalog and plan hashes. The current HTTP analysis server runs source commit
+`a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and serves the same revision-8 plan.
 
 The 12 retained dependency IDs are **118, 2842, 7069, 7971, 9262, 11082, 11175, 11178, 13926, 213369, 215430,
 249427**. The production eligibility check links them to recipes, but related outputs are Bind-on-Pickup or have
@@ -20,7 +21,9 @@ Cadence remains 900 seconds, the cap 750 seconds, slice count six and price dept
 68/68/67/67/67/67 items and sweep query counts are 470/470/469/469/469/469, averaging 13.38% fewer queries than
 revision 7. Cold items remain in broad market discovery about every 90 minutes.
 
-Two consecutive full revision-8 sweeps passed. Sweep 591 (slice 2, UID
+Two consecutive full revision-8 sweeps passed under the previous HTTP server image
+`sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`; the scan plan and collector were not
+changed by the later server-only analysis update. Sweep 591 (slice 2, UID
 `us-normal-alliance-1794608359-Dandune-8967`) ran 2026-11-13 22:19:19–22:29:45 UTC (626 seconds); sweep 592
 (slice 3, UID `us-normal-alliance-1794609259-Dandune-7251`) ran 22:34:19–22:43:39 UTC (560 seconds). Each matched
 the exact 469-item plan; all 469 were observed, queried and `ok`, including all 402 hot IDs. Both were saved and

@@ -33,6 +33,28 @@ ACK was not independently verified, and no extra reload was forced. Priced items
 These two runtimes are measurements, not a p95. Receipts: `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`,
 `parent-sweep-592.json`, and `parent-two-sweep-proof.json`.
 
+## Revision 9 source candidate (pending review and rollout)
+
+The source candidate adds one known-tradeable core item, recipe 288206, **Recipe: Draught of Water Walking**, while
+preserving all 973 existing catalog rows and all 806 existing active IDs, memberships, statuses and evidence. The
+candidate has 974 rows and 807 active IDs (403 core, no discovery and 404 cold). Its catalog hash is
+`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`; its plan hash is
+`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The six cold slices remain
+68/68/67/67/67/67 items, for 471/471/470/470/470/470 planned queries. Cadence 900 seconds, cap 750 seconds, six
+slices and 20 retained price levels are unchanged. Until the approved cutover, revision 8 above remains deployed.
+
+The candidate dashboard watch samples the recipe each sweep. A low-price alert requires a fresh successful current
+price no greater than 70% of the median of at least six prior priced observations from the preceding 24 hours; the
+current observation is excluded. Price history is not established yet, so the panel must report history warming
+until those observations exist. Failed, missing, empty and stale queries have separate states; a stale observation
+cannot alert. Export-4 facts show status ok, no binding, class 9/subclass 6 and Alchemy 180 for recipe 288206. A
+read-only source check at sweep 685 found no successful recipe query and zero prior priced observations. In that
+check potion 8827 had a 1 g 28 s lowest ask and 64 retained units. Potion 8827 remains core. Its source-stage
+same-house book snapshot showed 212 observed depleted units
+over 23.776 usable hours in 24 hours and 13 over 5.749 usable hours in six hours. These are listing changes, not
+confirmed sales; whole-listing disappearance is ambiguous. The initial 1–2 unit batch is qualitative guidance, not
+a throughput or sales guarantee. The new endpoint and panel remain source candidate until rollout and live proof.
+
 ## Historical revision 7 deployed plan (2026-11-13; two-sweep qualification complete)
 
 The following records are revision-7 deployment and live evidence; they do not qualify revision 8.

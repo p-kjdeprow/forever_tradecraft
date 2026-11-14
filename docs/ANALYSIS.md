@@ -232,6 +232,27 @@ if-sold profit and 12.57 observed units/hour. Shadow Oil showed 4 crafts / 8 uni
 margin and descriptive-depletion figures, not confirmed sales. At verification time a post-unlock scan was running,
 but sweep 583 remained the latest accepted sweep. Source details are in `.archive/dashboard-trading-20261113/`.
 
+#### Water-walking watch (source stage; deployment pending)
+
+The dashboard recipe watch uses the token-free, read-only
+`GET /v1/houses/{key}/recipe-watch` response, pinned to the latest sweep for that house and client build. It watches
+Recipe: Draught of Water Walking (item 288206) and its finished potion (item 8827), reading only those item IDs.
+Recipe history follows the observation's recorded auction kind (item or commodity); it does not mix book types or
+item-key variants.
+
+A low-price alert requires a current successful priced recipe observation no older than 30 minutes and at least six
+previous successful priced observations from distinct sweeps in the preceding 24 hours. The baseline is their exact
+copper median; the current offer triggers at or below 70% of that median and is excluded from the baseline. Missing,
+unqueried or failed latest recipe observations never fall back to an older offer. The panel exposes awaiting-scan,
+query-failed, not-listed, building-history, normal-price, low-price and stale states.
+
+Potion metrics use same-house/build commodity books over rolling 24-hour and recent 6-hour windows. They report
+observed bottom-walk depletion, split between persistent-group partial reductions and whole-group disappearances,
+with actual usable interval hours and counts. Recorded per-sweep cadence, price ceilings, expiry handling and the
+existing gap rule are retained. Depletion is unconfirmed sales; disappearances remain ambiguous, confirmed sales
+are null, and the suggested one-to-two potion pilot is qualitative. These source-stage metrics do not change the
+main strategy ranking or turnover model.
+
 ### Advanced advice view
 
 The prior research page remains available at `/dashboard/advanced`. Its **Advice** view sends one

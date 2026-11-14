@@ -27,6 +27,7 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/v1/houses/{key}/advice", None),
         ("GET", "/v1/houses/{key}/sweeps/latest", None),
         ("GET", "/v1/houses/{key}/trading-summary", None),
+        ("GET", "/v1/houses/{key}/recipe-watch", None),
         ("POST", "/v1/item-reference", "require_token"),
         ("GET", "/v1/houses/{key}/item-reference", "require_token"),
         ("POST", "/v1/account-state", "require_token"),
@@ -96,3 +97,25 @@ def test_dashboard_paths_and_summary_route_behavior(monkeypatch: pytest.MonkeyPa
     with pytest.raises(HTTPException) as invalid:
         dashboard_routes.trading_summary("invalid-house", request)
     assert invalid.value.status_code == 400
+
+
+def test_recipe_watch_route_is_read_only_public_get(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Pool:
+        def connection(self):
+            return nullcontext(object())
+
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=Pool())))
+    payload = {"watch_id": "draught-of-water-walking", "house": "us-normal-alliance"}
+    monkeypatch.setattr(dashboard_routes, "load_recipe_watch", lambda conn, key: payload)
+    assert dashboard_routes.recipe_watch("us-normal-alliance", request) == payload
+    with pytest.raises(HTTPException) as invalid:
+        dashboard_routes.recipe_watch("invalid-house", request)
+    assert invalid.value.status_code == 400
+
+    def missing(conn, key):
+        raise dashboard_routes.MarketDataNotFound("no market sweep")
+
+    monkeypatch.setattr(dashboard_routes, "load_recipe_watch", missing)
+    with pytest.raises(HTTPException) as absent:
+        dashboard_routes.recipe_watch("us-normal-alliance", request)
+    assert absent.value.status_code == 404

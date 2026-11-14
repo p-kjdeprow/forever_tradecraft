@@ -53,9 +53,9 @@ def test_selected_target_is_identity_only_and_plan_is_cached(
     assert not hasattr(target, "game_root")
     assert not hasattr(target, "wine_prefix")
     plan = canonical_plan(target)
-    assert plan["revision"] == 8
-    assert len(plan["itemIDs"]) == 806
-    assert len(plan["pools"]["core"]) == 402
+    assert plan["revision"] == 9
+    assert len(plan["itemIDs"]) == 807
+    assert len(plan["pools"]["core"]) == 403
     assert len(plan["pools"]["discovery"]) == 0
     assert len(plan["pools"]["cold"]) == 404
     assert canonical_plan(target) is plan

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any, NamedTuple
@@ -306,6 +306,7 @@ def load_commodity_books(
     start_t: int | None = None,
     end_t: int | None = None,
     client_build: str | None = None,
+    item_ids: Sequence[int] | None = None,
 ) -> dict[int, list[Book]]:
     """Load corrected commodity observations for one house and optional replay window."""
 
@@ -317,6 +318,10 @@ def load_commodity_books(
         raise ValueError("commodity book start_t cannot exceed end_t")
     if client_build is not None and (not client_build or "." not in client_build):
         raise ValueError("commodity book client_build must be a full client build")
+    if item_ids is not None and any(type(item_id) is not int or item_id <= 0 for item_id in item_ids):
+        raise ValueError("commodity book item_ids must contain positive integers")
+    if item_ids is not None and not item_ids:
+        return {}
 
     books: dict[int, list[Book]] = defaultdict(list)
     with conn.transaction():
@@ -343,6 +348,9 @@ def load_commodity_books(
         if client_build is not None:
             conditions.append("ms.client_version || '.' || ms.client_build = %s")
             parameters.append(client_build)
+        if item_ids is not None:
+            conditions.append("mo.item_id = ANY(%s)")
+            parameters.append(list(item_ids))
         rows = conn.execute(
             f"""
             SELECT ms.id, ms.started_at, mo.item_id, mo.kind, mo.coverage,

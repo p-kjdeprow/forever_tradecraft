@@ -48,6 +48,20 @@
     .scan-state.stale { color: var(--warn); font-weight: 700; }
     .scan-state.error, .error { color: var(--bad); }
     .scan-state.fresh { color: var(--good); }
+    .recipe-watch { margin: 1rem 0; }
+    .recipe-watch-head { display: flex; align-items: start; justify-content: space-between; gap: 1rem; }
+    .recipe-watch-head h2 { margin-bottom: .2rem; }
+    .watch-state { color: var(--muted); }
+    .watch-state.error { color: var(--bad); font-weight: 650; }
+    .watch-alert { margin: .6rem 0; border-left: 4px solid var(--line); border-radius: .3rem; padding: .55rem .75rem; background: color-mix(in srgb, var(--line) 18%, transparent); }
+    .watch-alert.low { border-color: var(--good); color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); font-weight: 750; }
+    .watch-alert.error { border-color: var(--bad); color: var(--bad); }
+    .recipe-watch-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; margin-top: .5rem; }
+    .watch-block { min-width: 0; border-top: 1px solid var(--line); padding-top: .6rem; }
+    .watch-block h3 { margin-bottom: .35rem; }
+    .watch-detail { margin: .2rem 0; color: var(--muted); overflow-wrap: anywhere; }
+    .watch-detail strong { color: var(--text); }
+    .watch-notes { margin: .7rem 0 0; color: var(--muted); font-size: .9rem; }
     .main-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin: 1.2rem 0 .65rem; }
     .profile { color: var(--muted); text-align: right; }
     .summary-note { color: var(--muted); margin: .3rem 0 .9rem; }
@@ -96,7 +110,9 @@
       .panel { padding: .75rem; }
       .detail-grid { grid-template-columns: 1fr; }
       .strategy-head { flex-direction: column; gap: .25rem; }
+      .recipe-watch-head { flex-direction: column; gap: .25rem; }
     }
+    @media (max-width: 760px) { .recipe-watch-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -119,6 +135,20 @@
       <div id="scan-counts" class="scan-counts" aria-label="Scan counts">
         <span>Query counts load with market summary</span>
       </div>
+    </section>
+
+    <section class="panel recipe-watch" aria-labelledby="recipe-watch-heading">
+      <div class="recipe-watch-head">
+        <div>
+          <h2 id="recipe-watch-heading">Recipe: Draught of Water Walking</h2>
+          <p id="recipe-watch-state" class="watch-state" role="status" aria-live="polite">Loading recipe watch…</p>
+        </div>
+        <div id="recipe-watch-alert" class="watch-alert" role="status" aria-live="polite">No price alert yet.</div>
+      </div>
+      <div id="recipe-watch-content" class="recipe-watch-grid">
+        <p class="loading">Loading the independent recipe and potion watch…</p>
+      </div>
+      <p id="recipe-watch-notes" class="watch-notes">The recipe is sampled every 15 minutes. A price alert requires at least six prior priced observations in the previous 24 hours; the current observation is excluded from its baseline.</p>
     </section>
 
     <div class="main-heading">
@@ -255,6 +285,89 @@
       const age = minutes < 1 ? "just now" : minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`;
       return { age, stale: seconds > STALE_SECONDS };
     }
+    function nullableEpoch(value, label) {
+      if (value === null) return null;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`${label} must be a nonnegative epoch or null`);
+      return value;
+    }
+    function nullableMoney(value, label) {
+      if (value === null) return null;
+      const amount = exactRational(value, label);
+      if (amount.numerator < 0n) throw new Error(`${label} cannot be negative`);
+      return value;
+    }
+    function nullableCount(value, label) {
+      return value === null ? null : integerValue(value, label);
+    }
+    function nullableNonnegativeNumber(value, label) {
+      if (value === null) return null;
+      if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`${label} must be a nonnegative number or null`);
+      return value;
+    }
+    function validateDemandWindow(value, expectedHours, label) {
+      objectValue(value, label);
+      if (value.window_hours !== expectedHours) throw new Error(`${label}.window_hours is invalid`);
+      const observed = integerValue(value.observed_units, `${label}.observed_units`);
+      const partial = integerValue(value.partial_units, `${label}.partial_units`);
+      const disappearance = integerValue(value.disappearance_units, `${label}.disappearance_units`);
+      const usableIntervals = integerValue(value.usable_intervals, `${label}.usable_intervals`);
+      const usableHours = nullableNonnegativeNumber(value.usable_hours, `${label}.usable_hours`);
+      const rate = nullableNonnegativeNumber(value.units_per_hour, `${label}.units_per_hour`);
+      if (partial + disappearance !== observed) throw new Error(`${label} depletion totals are inconsistent`);
+      if (usableIntervals === 0 && (usableHours !== null || rate !== null)) throw new Error(`${label} without intervals cannot report measured hours or rate`);
+      if (usableIntervals > 0 && (usableHours === null || usableHours <= 0 || rate === null)) throw new Error(`${label} with intervals needs measured hours and rate`);
+      return { window_hours: expectedHours, observed_units: observed, partial_units: partial, disappearance_units: disappearance, usable_hours: usableHours, units_per_hour: rate, usable_intervals: usableIntervals };
+    }
+    function validateRecipeWatch(value, expectedHouse, nowEpoch = Date.now() / 1000) {
+      objectValue(value, "recipe watch");
+      if (value.watch_id !== "draught-of-water-walking" || value.house !== expectedHouse) throw new Error("recipe watch belongs to a different house or watch");
+      if (value.client_build !== "1.60.1.70938") throw new Error("recipe watch belongs to a different client build");
+      integerValue(value.as_of_sweep, "recipe watch.as_of_sweep");
+      if (typeof value.as_of_epoch !== "number" || !Number.isFinite(value.as_of_epoch) || value.as_of_epoch < 0) throw new Error("recipe watch.as_of_epoch is invalid");
+      const recipe = objectValue(value.recipe, "recipe");
+      if (recipe.item_id !== 288206 || recipe.name !== "Recipe: Draught of Water Walking" || recipe.required_alchemy !== 180) throw new Error("recipe watch recipe identity is invalid");
+      const statuses = ["awaiting_scan", "query_failed", "not_listed", "building_history", "normal_price", "low_price", "stale"];
+      if (!statuses.includes(recipe.status)) throw new Error("recipe watch recipe status is invalid");
+      const observedAt = nullableEpoch(recipe.observed_at, "recipe.observed_at");
+      const querySweepId = nullableCount(recipe.query_sweep_id, "recipe.query_sweep_id");
+      if (querySweepId !== null && querySweepId < 1) throw new Error("recipe.query_sweep_id must be positive");
+      const currentPrice = nullableMoney(recipe.current_price, "recipe.current_price");
+      const baselineMedian = nullableMoney(recipe.baseline_median, "recipe.baseline_median");
+      const thresholdPrice = nullableMoney(recipe.threshold_price, "recipe.threshold_price");
+      const baselineObservations = integerValue(recipe.baseline_observations, "recipe.baseline_observations");
+      if (recipe.minimum_baseline_observations !== 6 || recipe.baseline_window_hours !== 24 || recipe.discount_fraction !== 0.3 || recipe.freshness_max_seconds !== 1800) throw new Error("recipe watch price policy is invalid");
+      if (typeof recipe.alert !== "boolean") throw new Error("recipe.alert must be boolean");
+      const listingQuantity = nullableCount(recipe.listing_quantity, "recipe.listing_quantity");
+      const hasFreshnessBoundedPrice = ["building_history", "normal_price", "low_price"].includes(recipe.status) && currentPrice !== null && observedAt !== null;
+      const timedOut = hasFreshnessBoundedPrice && nowEpoch - observedAt > recipe.freshness_max_seconds;
+      const status = recipe.status === "stale" || timedOut ? "stale" : recipe.status;
+      if ((recipe.status === "low_price") !== recipe.alert) throw new Error("recipe alert is inconsistent with its status");
+      if (recipe.alert && (currentPrice === null || baselineMedian === null || thresholdPrice === null || baselineObservations < recipe.minimum_baseline_observations || observedAt === null)) throw new Error("recipe alert is missing its price evidence");
+      if (recipe.alert) {
+        const current = exactRational(currentPrice, "recipe.current_price");
+        const median = exactRational(baselineMedian, "recipe.baseline_median");
+        const threshold = exactRational(thresholdPrice, "recipe.threshold_price");
+        if (current.numerator * threshold.denominator > threshold.numerator * current.denominator ||
+          threshold.numerator * median.denominator * 10n !== median.numerator * 7n * threshold.denominator) {
+          throw new Error("recipe alert does not meet the exact 70% price threshold");
+        }
+      }
+      const potion = objectValue(value.potion, "potion");
+      if (potion.item_id !== 8827 || potion.name !== "Draught of Water Walking") throw new Error("recipe watch potion identity is invalid");
+      const potionObservedAt = nullableEpoch(potion.observed_at, "potion.observed_at");
+      const lowestPrice = nullableMoney(potion.lowest_price, "potion.lowest_price");
+      const retainedSupply = nullableCount(potion.retained_supply, "potion.retained_supply");
+      if (potion.confirmed_sales !== null) throw new Error("potion.confirmed_sales must remain unknown");
+      if (!Array.isArray(potion.pilot_batch_units) || potion.pilot_batch_units.length !== 2 || potion.pilot_batch_units[0] !== 1 || potion.pilot_batch_units[1] !== 2) throw new Error("potion pilot batch guidance is invalid");
+      const notes = value.notes;
+      if (!Array.isArray(notes) || notes.some((note) => typeof note !== "string")) throw new Error("recipe watch notes must be strings");
+      return {
+        ...value,
+        recipe: { ...recipe, observed_at: observedAt, query_sweep_id: querySweepId, current_price: currentPrice, baseline_median: baselineMedian, threshold_price: thresholdPrice, baseline_observations: baselineObservations, listing_quantity: listingQuantity, status, alert: status === "low_price" && recipe.alert },
+        potion: { ...potion, observed_at: potionObservedAt, lowest_price: lowestPrice, retained_supply: retainedSupply, daily: validateDemandWindow(potion.daily, 24, "potion.daily"), recent: validateDemandWindow(potion.recent, 6, "potion.recent") },
+        notes: [...notes],
+      };
+    }
     /* TRADING PURE LOGIC END */
 
     (() => {
@@ -262,6 +375,7 @@
       const state = {
         house: DEFAULT_HOUSE, latest: null, summary: null, latestInFlight: false, summaryInFlight: false,
         generation: 0, summaryGeneration: 0, summaryRetryKey: null, priceAgeEntries: [], interval: null,
+        watch: null, watchInFlight: false, watchGeneration: 0,
       };
       const el = (tag, text = "", className = "") => {
         const node = document.createElement(tag);
@@ -407,6 +521,128 @@
         for (const note of summary.notes || []) $("notes").appendChild(el("span", note));
         state.summary = summary;
       }
+      function watchDetail(label, value) {
+        const row = el("p", "", "watch-detail");
+        append(row, el("strong", `${label}: `), document.createTextNode(String(value)));
+        return row;
+      }
+      function watchNumber(value, digits = 2) {
+        return new Intl.NumberFormat(undefined, { maximumFractionDigits: digits, useGrouping: false }).format(value);
+      }
+      function watchTime(epoch) {
+        return epoch === null ? "Not observed" : new Date(epoch * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+      }
+      function recipeStatusText(recipe) {
+        switch (recipe.status) {
+          case "awaiting_scan": return "Awaiting a successful recipe query in a scan.";
+          case "query_failed": return "The latest recipe query failed; an older price is not reused as current.";
+          case "not_listed": return "The recipe query succeeded and found no listing.";
+          case "building_history": return `Price history is warming: ${recipe.baseline_observations} of ${recipe.minimum_baseline_observations} prior priced observations.`;
+          case "normal_price": return "Current price is above the 70% alert threshold.";
+          case "low_price": return "Current price is at or below 70% of the prior 24-hour median.";
+          case "stale": return "The last priced observation is over 30 minutes old; alert is suppressed.";
+          default: return "Recipe watch status unavailable.";
+        }
+      }
+      function renderDemandWindow(label, window) {
+        const section = el("section", "", "watch-block");
+        append(section, el("h3", `${label} observed depletion`));
+        if (window.usable_intervals === 0) {
+          append(section,
+            el("p", `No usable observation intervals; ${window.observed_units} depleted units observed, hourly rate unavailable.`, "watch-detail"),
+            watchDetail("Usable intervals", "0"));
+        } else {
+          append(section,
+            el("p", `${window.observed_units} units across ${watchNumber(window.usable_hours)} usable hours and ${window.usable_intervals} intervals · ${watchNumber(window.units_per_hour)} units/hour.`, "watch-detail"));
+        }
+        append(section,
+          watchDetail("Quantity reductions in continuing listings", `${window.partial_units} units`),
+          watchDetail("Whole listings disappeared", `${window.disappearance_units} units`));
+        return section;
+      }
+      function renderWatch(watch) {
+        state.watch = watch;
+        const recipe = watch.recipe;
+        const houseState = $("recipe-watch-state");
+        houseState.className = "watch-state";
+        houseState.textContent = `${watch.house} · ${recipeStatusText(recipe)} Updated ${watchTime(watch.as_of_epoch)}.`;
+        const alert = $("recipe-watch-alert");
+        alert.className = recipe.alert ? "watch-alert low" : "watch-alert";
+        if (recipe.alert) {
+          alert.textContent = `LOW PRICE · ${safeMoney(recipe.current_price)} current; threshold ${safeMoney(recipe.threshold_price)} from ${safeMoney(recipe.baseline_median)} median.`;
+        } else if (recipe.status === "stale") {
+          alert.textContent = "Alert suppressed · price observation is stale.";
+        } else if (recipe.status === "building_history") {
+          alert.textContent = `No alert · need ${Math.max(0, recipe.minimum_baseline_observations - recipe.baseline_observations)} more prior priced observations.`;
+        } else if (recipe.status === "query_failed" || recipe.status === "awaiting_scan") {
+          alert.textContent = "No current price available.";
+        } else if (recipe.status === "not_listed") {
+          alert.textContent = "No listing found in the successful recipe query.";
+        } else {
+          alert.textContent = "No price alert.";
+        }
+
+        const content = $("recipe-watch-content");
+        content.replaceChildren();
+        const recipeBlock = el("section", "", "watch-block");
+        append(recipeBlock, el("h3", "Recipe price · Alchemy 180"));
+        const hasCurrent = !["awaiting_scan", "query_failed", "not_listed"].includes(recipe.status) && recipe.current_price !== null;
+        append(recipeBlock,
+          watchDetail(recipe.status === "stale" ? "Last observed listing price" : "Current listing price", hasCurrent ? safeMoney(recipe.current_price) : "Unavailable"),
+          watchDetail("Prior 24-hour median", recipe.baseline_median === null ? "Building or unavailable" : safeMoney(recipe.baseline_median)),
+          watchDetail("70% threshold", recipe.threshold_price === null ? "Unavailable" : safeMoney(recipe.threshold_price)),
+          watchDetail("Prior priced observations", `${recipe.baseline_observations} / ${recipe.minimum_baseline_observations}`),
+          watchDetail("Listing quantity", recipe.listing_quantity === null ? "Unavailable" : recipe.listing_quantity),
+          watchDetail("Query completed", watchTime(recipe.observed_at)));
+
+        const potionBlock = el("section", "", "watch-block");
+        append(potionBlock, el("h3", "Draught of Water Walking · item 8827"),
+          watchDetail("Lowest observed ask", watch.potion.lowest_price === null ? "Unavailable" : safeMoney(watch.potion.lowest_price)),
+          watchDetail("Retained supply", watch.potion.retained_supply === null ? "Unavailable" : `${watch.potion.retained_supply} units`),
+          watchDetail("Latest potion observation", watchTime(watch.potion.observed_at)));
+        const demand = el("div", "", "recipe-watch-grid");
+        append(demand, renderDemandWindow("24-hour", watch.potion.daily), renderDemandWindow("Recent 6-hour", watch.potion.recent));
+        append(potionBlock, demand, watchDetail("Confirmed sales", "Unknown"), watchDetail("Pilot batch", "1–2 units; personal sales are unmeasured."));
+        append(content, recipeBlock, potionBlock);
+        const notes = $("recipe-watch-notes");
+        notes.replaceChildren();
+        const caveat = "Observed listing depletion is not confirmed sales; whole-listing disappearance is ambiguous.";
+        append(notes, document.createTextNode(`${caveat} `));
+        for (const note of watch.notes) append(notes, document.createTextNode(`${note} `));
+      }
+      function expireCachedRecipeAlert(nowEpoch = Date.now() / 1000) {
+        const recipe = state.watch?.recipe;
+        if (!recipe?.alert || recipe.observed_at === null || nowEpoch - recipe.observed_at <= recipe.freshness_max_seconds) return;
+        renderWatch({ ...state.watch, recipe: { ...recipe, status: "stale", alert: false } });
+      }
+      function showWatchLoading() {
+        $("recipe-watch-state").className = "watch-state";
+        $("recipe-watch-state").textContent = `Loading ${state.house}'s independent recipe and potion watch…`;
+        $("recipe-watch-alert").className = "watch-alert";
+        $("recipe-watch-alert").textContent = "No price alert yet.";
+        $("recipe-watch-content").replaceChildren(el("p", "Loading the independent recipe and potion watch…", "loading"));
+      }
+      async function pollRecipeWatch() {
+        if (state.watchInFlight) return;
+        state.watchInFlight = true;
+        const generation = state.generation;
+        const house = state.house;
+        const request = ++state.watchGeneration;
+        try {
+          const watch = validateRecipeWatch(await getJson(`/v1/houses/${encodeURIComponent(house)}/recipe-watch`), house);
+          if (generation !== state.generation || request !== state.watchGeneration || house !== state.house) return;
+          renderWatch(watch);
+        } catch (error) {
+          if (generation !== state.generation || request !== state.watchGeneration || house !== state.house) return;
+          $("recipe-watch-state").className = "watch-state error";
+          $("recipe-watch-state").textContent = `Could not load the independent watch: ${error.message}`;
+          $("recipe-watch-alert").className = "watch-alert error";
+          $("recipe-watch-alert").textContent = "Recipe and potion watch unavailable.";
+          $("recipe-watch-content").replaceChildren(el("p", "The market summary remains available; this watch will retry independently.", "watch-detail"));
+        } finally {
+          if (request === state.watchGeneration) state.watchInFlight = false;
+        }
+      }
       async function getJson(path) {
         const response = await fetch(path);
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
@@ -488,6 +724,9 @@
         state.summary = null;
         state.summaryRetryKey = null;
         state.priceAgeEntries = [];
+        state.watchGeneration += 1;
+        state.watchInFlight = false;
+        state.watch = null;
         $("scan-time").textContent = "Loading latest scan…";
         $("scan-time").dateTime = "";
         $("scan-age").textContent = "";
@@ -495,8 +734,10 @@
         $("scan-counts").replaceChildren(el("span", "Query counts load with market summary"));
         $("opportunities").replaceChildren(el("p", "Loading market data…", "panel loading"));
         $("notes").replaceChildren();
+        showWatchLoading();
         setStatus(`Loading ${house}…`);
         pollLatest();
+        pollRecipeWatch();
       }
       $("house-form").addEventListener("submit", (event) => {
         event.preventDefault();
@@ -505,12 +746,15 @@
       $("house-key").value = DEFAULT_HOUSE;
       $("opportunities").appendChild(el("p", "Loading market data…", "panel loading"));
       pollLatest();
+      pollRecipeWatch();
       state.interval = window.setInterval(() => {
+        expireCachedRecipeAlert();
         renderAge();
         updatePriceAges();
         pollLatest();
+        pollRecipeWatch();
       }, POLL_MS);
-      window.__crowleyTradingDashboardTest = { state, pollLatest, loadSummary, changeHouse, renderLatest, renderSummary, validateLatest, validateSummary };
+      window.__crowleyTradingDashboardTest = { state, pollLatest, pollRecipeWatch, loadSummary, changeHouse, renderLatest, renderSummary, expireCachedRecipeAlert, validateLatest, validateSummary, validateRecipeWatch };
     })();
   </script>
 </body>

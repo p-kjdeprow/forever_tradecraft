@@ -26,6 +26,23 @@ sales or profit. These two runtimes are measurements, not a p95. Receipts:
 `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`, `parent-sweep-592.json` and
 `parent-two-sweep-proof.json`.
 
+## Revision 9 source candidate (pending rollout)
+
+The source candidate adds tradeable Alchemy recipe 288206 to the core catalog and samples it in every sweep. The
+catalog is revision 9 with 974 rows / 807 active IDs (403 core, no discovery, 404 cold); catalog hash
+`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`, plan hash
+`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. Existing IDs and memberships are preserved.
+Cold slices remain 68/68/67/67/67/67 with 471/471/470/470/470/470 planned item queries. The 900 s cadence,
+750 s cap, six slices and 20-level depth do not change. Revision 8 remains installed until the reviewed cutover.
+
+The pending read-only dashboard endpoint reports recipe 288206 against prior successful distinct-sweep prices in
+the preceding 24 hours. A price alert requires at least six prior prices, excludes the current observation from the
+median and requires the fresh current price to be at or below 70% of that median. Missing scans, failed queries,
+successful empty results, warming history and stale observations are distinct states; a stale result cannot alert.
+This does not add input, a second client or an item-specific scan timer: the existing collector continues its normal
+900 s sweeps. Potion 8827 remains frequent; its listing-depletion measurements are described in [WATCHLIST](WATCHLIST.md)
+and must not be treated as confirmed sales.
+
 `crowley-scan` (unit `crowley-scan.service`) is designed to keep WoW Forever in the world with the auction house open,
 so the addon's own 900 s timer can sweep its installed plan and the companion can upload each sweep. The revision-7
 plan below is historical runtime proof for measured native client build

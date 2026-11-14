@@ -1,6 +1,6 @@
 # Forever Tradecraft handoff
 
-Updated 2026-11-13. Current state, rules, decisions and open follow-ups. History lives in git
+Updated 2026-11-14. Current state, rules, decisions and open follow-ups. History lives in git
 (tag `pre-simplify` is the last commit with the old session stack).
 Technical reference: [ARCHITECTURE.md](ARCHITECTURE.md) (including the client assumptions table).
 Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
@@ -60,6 +60,28 @@ individual gaps are not exactly 900 s. Client-loaded ACK was not independently v
 Priced rows do not establish sales or profit. These two runtimes are measurements, not a p95. Receipts:
 `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`, `parent-sweep-592.json` and
 `parent-two-sweep-proof.json`.
+
+### Revision 9 source candidate (pending review and rollout)
+
+The source tree now contains a candidate catalog and dashboard watch; the host remains on revision 8 and image
+`3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` until rollout. The candidate adds only known-
+tradeable Alchemy recipe 288206 while preserving all 973 existing rows and 806 existing active memberships. It has
+974 catalog entries / 807 active IDs (403 core, 0 discovery, 404 cold), catalog hash
+`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac` and plan hash
+`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The six cold slices are 68/68/67/67/67/67,
+with 471/471/470/470/470/470 planned queries. Cadence 900 s, cap 750 s, slice count six and price depth 20 are
+unchanged. Generated addon data and server routes are still awaiting parent review and live cutover.
+
+The read-only price watch checks a successful current recipe price against the median of at least six previous priced
+distinct sweeps in the preceding 24 hours; the current observation is excluded and an alert requires at most 70% of
+that median. Its current source-stage status is `awaiting_scan` with zero prior priced samples. It must not use the
+native BuyPrice or potion price as a substitute; missing, failed, empty and stale observations remain distinct.
+Potion 8827 remains core. A source-stage read-only snapshot observed a 1 g 28 s lowest ask and 64 retained units;
+24-hour listing depletion was 212 units (29 quantity reductions in continuing listings, 183 whole listings
+disappeared) over 23.776 usable hours, and recent six-hour depletion was 13 units (all quantity reductions in
+continuing listings) over 5.749 usable hours. Those rates are 8.92 and 2.26 units/hour. Listing changes are not
+confirmed sales; whole-listing disappearance is ambiguous. Confirmed sales remain unknown, and a 1–2 unit pilot is
+qualitative guidance, not a guarantee.
 
 Revision 6 is the historical deployed baseline. It had 957 catalog entries and 790 active IDs (421 core, 1 discovery,
 368 cold), with a 900 s cadence, 750 s configured cap, six cold slices and retained depth 20. Its hashes were catalog

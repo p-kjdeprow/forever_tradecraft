@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "id": "first-run",
-  "revision": 8,
+  "revision": 9,
   "client_build": "1.60.1.70938",
-  "reviewed_on": "2026-11-13",
+  "reviewed_on": "2026-11-14",
   "initial_price_levels": 20,
   "items": [
     {
@@ -24843,6 +24843,30 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/279990",
+        "https://bindonforever.com/professions/alchemy"
+      ]
+    },
+    {
+      "item_id": 288206,
+      "name": "Recipe: Draught of Water Walking",
+      "category": "recipes",
+      "tags": [
+        "recipe-unlock"
+      ],
+      "professions": [
+        "alchemy"
+      ],
+      "roles": [
+        "recipe"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Watch this known-tradeable Alchemy recipe in every sweep for a dashboard price alert against its prior 24-hour priced-observation median; current auction supply and price history are unverified.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://bindonforever.com/item/288206",
         "https://bindonforever.com/professions/alchemy"
       ]
     }

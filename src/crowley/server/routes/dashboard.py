@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import HTMLResponse
 
+from crowley.analysis.recipe_watch import load_recipe_watch
 from crowley.analysis.trading_summary import load_trading_summary
 from crowley.core.errors import MarketDataNotFound
 from crowley.core.house import House
@@ -45,5 +46,18 @@ def trading_summary(key: str, request: Request) -> dict:
     try:
         with request.app.state.pool.connection() as conn:
             return load_trading_summary(conn, key)
+    except MarketDataNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/v1/houses/{key}/recipe-watch")
+def recipe_watch(key: str, request: Request) -> dict:
+    try:
+        House.parse(key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        with request.app.state.pool.connection() as conn:
+            return load_recipe_watch(conn, key)
     except MarketDataNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc

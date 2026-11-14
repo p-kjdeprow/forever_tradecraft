@@ -26,6 +26,8 @@ trading, account changes or unrelated display changes.
 
 ## Environment
 
+- Derive the server address, addon-data path and container names from installed configuration and the package-owned
+  Compose project. Do not treat a failed check against guessed defaults as a deployment fault.
 - A worker shell may lack the graphical environment. Take `DISPLAY` and `XAUTHORITY` from the graphical session or
   `host.toml`; do not dump the whole environment. `CROWLEY_WINE` is in `secrets.env`.
 - Use current screenshot dimensions and visible controls; coordinates from another resolution or window position

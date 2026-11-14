@@ -9,12 +9,13 @@ Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
 
 Make gold on the WoW Forever auction house with several independently profitable strategies:
 
-1. **Collect** the market: revision 8 is deployed for client build 1.60.1.70938 with 806 active IDs (402 core,
+1. **Collect** the market: revision 9 is deployed for client build 1.60.1.70938 with 807 active IDs (403 core,
    no discovery, 404 cold), a 900 s cadence and 20 retained distinct unit-price levels per item; never mix houses or
-   item identities (`itemKey`). Two consecutive full sweeps passed exact-set and successful-query checks in 626 s
-   and 560 s, with starts 900 s apart and all 402 hot-item query gaps between 833 and 899 s (median 883). These two
-   runtimes are measurements, not a p95. Revision-7's two
-   completed sweeps (733 s and 626 s) and twenty revision-6 sweeps (IDs 564–583) are historical runtime evidence.
+   item identities (`itemKey`). Two consecutive full revision-9 sweeps matched all 470 planned IDs and queried them
+   successfully, including all 403 hot IDs and recipe 288206. They ran in 612 s and 550 s, with starts 900 s apart;
+   all hot-item query gaps were 834–900 s (median 884). Both were saved/uploaded with ACKs written. Client-loaded
+   ACK was not independently verified. Two runtimes are measurements, not a p95. Revision-8/7/6 evidence below is
+   historical.
 2. **Model** it: demand, time-to-sale, price metrics, recipe economics from the client's own data.
 3. **Decide** with the trading engine (backtest, paper trading, queues).
 4. **Execute** through the guarded in-game addon executor (dry run unless doubly armed). No program drives the
@@ -33,22 +34,54 @@ Make gold on the WoW Forever auction house with several independently profitable
   `$XDG_CONFIG_HOME/crowley/secrets.env`. Stage explicit files only; never `git add .`.
 - Origin: https://github.com/p-kjdeprow/forever_tradecraft.
 
-## Host state snapshot (2026-11-13)
+## Host state snapshot (2026-11-14)
 
-### Scan catalog and runtime qualification
+### Revision 9 deployed scan plan; two-sweep cadence qualification passed
 
-**Revision 8 scan plan deployed; two-sweep qualification complete.** The installed scanner package, generated
-target and companion `Data.lua` remain on catalog hash
+Revision 9 is deployed for client build 1.60.1.70938 and house `us-normal-alliance`. Source commit
+`df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
+`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`. Package, generated target, server and
+`Data.lua` agree on revision 9, catalog hash `0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`
+and plan hash `9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. It has 974 entries and 807 active
+IDs (403 core, no discovery, 404 cold); all 973 previous entries and all 806 previous active memberships are
+preserved. Slices remain 68/68/67/67/67/67, with 471/471/470/470/470/470 planned queries. Cadence is 900 s, cap
+750 s and depth 20, unchanged from revision 8.
+
+Sweeps 688 (`us-normal-alliance-1794696666-Dandune-0251`, slice 3) and 689
+(`us-normal-alliance-1794697566-Dandune-4211`, slice 4) each matched the exact 470-item set; all were observed,
+queried and `ok`, including all 403 hot IDs and recipe 288206. They ran in 612 s and 550 s, started 900 s apart,
+and had per-hot-item query gaps of 834–900 s (median 884). Both were saved/uploaded and their ACKs were written;
+client-loaded ACK was not independently verified. Two runtime samples do not establish a p95. The two-sweep proof is
+`.archive/water-walking-alert-20261114/ops/parent-two-sweep-proof.json`.
+
+The token-free, read-only recipe watch is live at `/v1/houses/{key}/recipe-watch` and on `/dashboard`. Final HTTP
+verification returned 200 for both and validated the served page against the reviewed wheel and actual JSON
+(`.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json`). Native evidence confirms recipe 288206
+was an item-kind, full, source-complete `ok` query with two rows
+(`.archive/water-walking-alert-20261114/ops/parent-native-recipe-first-proof.json`). Sweep 689 showed the recipe at
+500,800 copper (50 g 8 s), quantity 2, with `building_history` at 1 of 6 prior priced observations and no alert.
+This observed ask is not a bargain conclusion. Potion 8827 was 11,500 copper with retained supply 54. Its daily
+depletion was 232 units (27 partial reductions, 205 whole-group disappearances) over 23.331 usable hours (9.94
+observed units/hour). The recent six-hour view recorded 9 partial reductions over 5.332 usable hours and 22
+ambiguous whole-group disappearances (31 observed depletion units total); these are listing changes, not confirmed
+purchases.
+Confirmed sales remain null, and the suggested 1–2 potion pilot is qualitative. The earlier sweep-687 response was
+before the recipe's first query and is historical (`.archive/water-walking-alert-20261114/ops/parent-live-http-initial-proof.json`).
+
+### Historical revision 8 scan plan; two-sweep qualification complete
+
+At that checkpoint the installed scanner
+package, generated target and companion `Data.lua` were on catalog hash
 `3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5` and plan hash
 `fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`, introduced by source commit `fb36408`.
-The current HTTP analysis server runs source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
-`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and serves that same plan. Revision 8
-preserves 973 catalog entries and
-806 active IDs; its exact delta moves 87 hot IDs to cold, with 402 core, no discovery and 404 cold, and makes no new
-exclusions. It retains 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
-dependencies. Cold slices have
+The HTTP analysis server at that checkpoint ran source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and served that same plan. Revision 8
+preserved 973 catalog entries and
+806 active IDs; its exact delta moved 87 hot IDs to cold, with 402 core, no discovery and 404 cold, and made no new
+exclusions. It retained 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
+dependencies. Cold slices had
 68/68/67/67/67/67 items and plan 470/470/469/469/469/469 queries per sweep, 13.38% fewer on average than revision
-7. Cadence, 750 s cap, slice count and depth are unchanged.
+7. Cadence, 750 s cap, slice count and depth were unchanged at that checkpoint.
 
 Two consecutive full revision-8 sweeps passed under the prior server image
 `sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`. Sweep 591 (slice 2, UID `us-normal-alliance-1794608359-Dandune-8967`)
@@ -60,28 +93,6 @@ individual gaps are not exactly 900 s. Client-loaded ACK was not independently v
 Priced rows do not establish sales or profit. These two runtimes are measurements, not a p95. Receipts:
 `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`, `parent-sweep-592.json` and
 `parent-two-sweep-proof.json`.
-
-### Revision 9 source candidate (pending review and rollout)
-
-The source tree now contains a candidate catalog and dashboard watch; the host remains on revision 8 and image
-`3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` until rollout. The candidate adds only known-
-tradeable Alchemy recipe 288206 while preserving all 973 existing rows and 806 existing active memberships. It has
-974 catalog entries / 807 active IDs (403 core, 0 discovery, 404 cold), catalog hash
-`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac` and plan hash
-`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The six cold slices are 68/68/67/67/67/67,
-with 471/471/470/470/470/470 planned queries. Cadence 900 s, cap 750 s, slice count six and price depth 20 are
-unchanged. Generated addon data and server routes are still awaiting parent review and live cutover.
-
-The read-only price watch checks a successful current recipe price against the median of at least six previous priced
-distinct sweeps in the preceding 24 hours; the current observation is excluded and an alert requires at most 70% of
-that median. Its current source-stage status is `awaiting_scan` with zero prior priced samples. It must not use the
-native BuyPrice or potion price as a substitute; missing, failed, empty and stale observations remain distinct.
-Potion 8827 remains core. A source-stage read-only snapshot observed a 1 g 28 s lowest ask and 64 retained units;
-24-hour listing depletion was 212 units (29 quantity reductions in continuing listings, 183 whole listings
-disappeared) over 23.776 usable hours, and recent six-hour depletion was 13 units (all quantity reductions in
-continuing listings) over 5.749 usable hours. Those rates are 8.92 and 2.26 units/hour. Listing changes are not
-confirmed sales; whole-listing disappearance is ambiguous. Confirmed sales remain unknown, and a 1–2 unit pilot is
-qualitative guidance, not a guarantee.
 
 Revision 6 is the historical deployed baseline. It had 957 catalog entries and 790 active IDs (421 core, 1 discovery,
 368 cold), with a 900 s cadence, 750 s configured cap, six cold slices and retained depth 20. Its hashes were catalog
@@ -141,10 +152,9 @@ independently verified.
 - WoW Forever launched 2026-11-04. Selected target `forever-us-camwow7`, client build 1.60.1.70938,
   interface 16001, house `us-normal-alliance` ([LAUNCH_TARGET](LAUNCH_TARGET.md)). The prior source pin was
   1.60.1.70888, re-pinned 2026-11-11 after the 2026-11-10 patch from 70862.
-- **Active:** `crowley-scan.service` and `crowley-companion.service`; the revision-8 server is healthy and the database
-  is up. The scanner is at the Auction House. Revision-8 sweeps 591 and 592 are saved and uploaded, with
-  acknowledgements written; starts were 900 s apart and all 402 hot-item gaps were 833–899 s (median 883).
-  Client-loaded ACK is not independently verified.
+- **Active:** `crowley-scan.service` and `crowley-companion.service`; the revision-9 server is healthy and the database
+  is up. Two full revision-9 sweeps passed exact-set, all-query-success and cadence checks. Both were saved and uploaded
+  with ACKs written; client-loaded ACK is not independently verified.
 - **Disabled:** `crowley-health.timer`, `crowley-market-backup.timer`, `crowley-paper-trading.timer`.
 - The old beta data (house `beta-normal-alliance`) is retained in the database and under
   `~/.local/state/crowley/market-backups`.
@@ -227,13 +237,13 @@ on a different account; no trading-character, recipe or inventory capture establ
 The trading dashboard is deployed at `/dashboard` on the healthy loopback server. Open
 `http://127.0.0.1:8080/dashboard` on this host. For laptop access, forward the loopback listener with
 `ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open `http://127.0.0.1:18080/dashboard` locally. Its
-latest-scan and trading-summary GETs are token-free and read-only; write endpoints still require bearer
+latest-scan, trading-summary and recipe-watch GETs are token-free and read-only; write endpoints still require bearer
 authentication. Keep the server on its existing loopback binding. The page defaults to house `us-normal-alliance`
 and shows scan status before strategy results. The strict observed-turnover gate was introduced with server source
-commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`); deployed revision 8
+commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`); deployed revision 9
 preserved the positive observed-turnover policy. The current server uses source commit
-`a0c533c9fd9846fef4d8bb680b510825bfff75cb`, image
-`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738`, and a rolling 24-hour observed-activity
+`df71fa2ac81d73353fc988ca19e9ba3510235b16`, image
+`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`, and a rolling 24-hour observed-activity
 window instead of the former fixed 2-hour/6-hour gate. It sums usable interval hours rather than treating missing
 time as zero. Each pair uses the larger cadence recorded in its immutable sweep plans (base cadence for hot items,
 multiplied by `coldSlices` for cold items), with 1.4 tolerance; both endpoints must be inside the window. Missing or
@@ -246,7 +256,7 @@ cost, if-sold net proceeds and profit, list price, activity rate plus measured h
 access requirements. Shared cooldown rows are alternatives, not a combined portfolio forecast. The page links to
 the prior research UI at `/dashboard/advanced`.
 
-**Current 24-hour dashboard check, sweep 597.** The API returned HTTP 200 with ten positive known-activity rows;
+**Historical 24-hour dashboard check, sweep 597.** The API returned HTTP 200 with ten positive known-activity rows;
 the page showed the 24-hour window, measured hours and interval counts. The profile remained Alchemy 225 / Tailoring
 150 (planning through 225), assumed 10 g and assumed recipe ownership. Shadow Oil showed 51.36 observed units/hour
 over 14.0175 usable hours / 56 intervals, with 9,886 copper batch cost, 15,456 copper net proceeds if all sell and

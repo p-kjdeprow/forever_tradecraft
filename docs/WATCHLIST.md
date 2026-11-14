@@ -1,25 +1,61 @@
 # First run scan catalog
 
-## Revision 8 deployed plan (two-sweep qualification complete)
+## Revision 9 deployed plan (two-sweep cadence qualification passed)
 
-Revision 8 is deployed for build **1.60.1.70938** and house `us-normal-alliance`. The catalog hash is
+Revision 9 adds recipe 288206, **Recipe: Draught of Water Walking**, as one known-tradeable core ID. It preserves all
+973 existing catalog rows and all 806 existing active memberships, statuses and evidence. The deployed catalog has
+974 rows and 807 active IDs (403 core, no discovery and 404 cold). Catalog hash:
+`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`; plan hash:
+`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. Cold slices remain 68/68/67/67/67/67,
+with 471/471/470/470/470/470 planned queries. Cadence is 900 seconds, cap 750 seconds, six slices and 20 retained
+price levels. Source commit `df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
+`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`.
+
+Two consecutive full revision-9 sweeps passed exact-set, all-query-success and cadence checks. Sweep 688
+(`us-normal-alliance-1794696666-Dandune-0251`, slice 3) and sweep 689
+(`us-normal-alliance-1794697566-Dandune-4211`, slice 4) each queried all 470 planned IDs successfully, including all
+403 hot IDs and recipe 288206. They ran in 612 and 550 seconds, started 900 seconds apart, and were saved/uploaded
+with ACKs written. All hot-item query gaps were 834–900 seconds (median 884). Client-loaded ACK was not independently
+verified; two runtime samples are not a p95. Receipts: `.archive/water-walking-alert-20261114/ops/parent-sweep-688.json`,
+`parent-sweep-689.json` and `parent-two-sweep-proof.json`.
+
+The token-free read-only watch and independent `/dashboard` panel passed final HTTP and served-JavaScript validation
+in `.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json` (HTTP 200; 0.896 seconds). The served HTML
+matched the reviewed wheel and its actual JSON passed the served page's validation. Native receipt
+`parent-native-recipe-first-proof.json` confirms the recipe observation was item-kind, full, source-complete and `ok`
+with two rows (`.archive/water-walking-alert-20261114/ops/parent-native-recipe-first-proof.json`). Sweep 689 showed an
+ask of 500,800 copper (50 g 8 s), quantity 2, with `building_history` at 1/6 prior
+priced observations and no alert. This observed ask is not a bargain finding. Alerts require six successful distinct-
+sweep prices in the previous 24 hours and a fresh current price at or below 70% of their exact median; missing,
+failed, empty, warming and stale states remain distinct, and an older quote cannot alert after a failed or stale query.
+
+Potion 8827 had an 11,500-copper lowest ask and retained supply of 54. Its rolling 24-hour book showed 232 depletion
+units (27 partial reductions and 205 whole-group disappearances) over 23.331 usable hours (9.94 observed units/hour).
+The recent six-hour view showed 31 units over 5.332 usable hours, comprising 9 partial reductions and 22 ambiguous
+disappearances. These listing changes are not confirmed purchases; confirmed sales remain null. The 1–2 unit pilot is
+qualitative guidance, not a throughput or sales guarantee. The earlier pre-query response pinned to sweep 687 is
+historical (`.archive/water-walking-alert-20261114/ops/parent-live-http-initial-proof.json`).
+
+## Historical revision 8 deployed plan (two-sweep qualification complete)
+
+Revision 8 was deployed for build **1.60.1.70938** and house `us-normal-alliance`. The catalog hash is
 `3e40d87ecee894e1f5c8d1cc46620b56660bbb9d0c73ec96f10322c086669dc5`; the plan hash is
-`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. It preserves all 973 catalog entries and
-806 active IDs: 402 core, no discovery pool, and 404 cold. The approved delta moves 87 hot items to cold, adds no
-exclusions, and retains 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
+`fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473`. It preserved all 973 catalog entries and
+806 active IDs: 402 core, no discovery pool, and 404 cold. The approved delta moved 87 hot items to cold, added no
+exclusions, and retained 390 hot IDs in the known and uncertain-rank crafting graphs plus 12 additional unresolved
 dependencies. Source commit `fb36408` introduced revision 8; the installed scanner package, generated target and
-companion `Data.lua` remain on its catalog and plan hashes. The current HTTP analysis server runs source commit
+companion `Data.lua` remained on its catalog and plan hashes. The HTTP analysis server at that checkpoint ran source commit
 `a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
-`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and serves the same revision-8 plan.
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and served revision 8 at that checkpoint.
 
 The 12 retained dependency IDs are **118, 2842, 7069, 7971, 9262, 11082, 11175, 11178, 13926, 213369, 215430,
 249427**. The production eligibility check links them to recipes, but related outputs are Bind-on-Pickup or have
 missing client facts; vendor-sale and disenchant value remain unresolved. They remain hot pending that evidence, not because profitability
 has been established.
 
-Cadence remains 900 seconds, the cap 750 seconds, slice count six and price depth 20. Cold slices contain
+Cadence was 900 seconds, the cap 750 seconds, slice count six and price depth 20. Cold slices contained
 68/68/67/67/67/67 items and sweep query counts are 470/470/469/469/469/469, averaging 13.38% fewer queries than
-revision 7. Cold items remain in broad market discovery about every 90 minutes.
+revision 7. Cold items remained in broad market discovery about every 90 minutes.
 
 Two consecutive full revision-8 sweeps passed under the previous HTTP server image
 `sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`; the scan plan and collector were not
@@ -33,31 +69,9 @@ ACK was not independently verified, and no extra reload was forced. Priced items
 These two runtimes are measurements, not a p95. Receipts: `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`,
 `parent-sweep-592.json`, and `parent-two-sweep-proof.json`.
 
-## Revision 9 source candidate (pending review and rollout)
-
-The source candidate adds one known-tradeable core item, recipe 288206, **Recipe: Draught of Water Walking**, while
-preserving all 973 existing catalog rows and all 806 existing active IDs, memberships, statuses and evidence. The
-candidate has 974 rows and 807 active IDs (403 core, no discovery and 404 cold). Its catalog hash is
-`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`; its plan hash is
-`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The six cold slices remain
-68/68/67/67/67/67 items, for 471/471/470/470/470/470 planned queries. Cadence 900 seconds, cap 750 seconds, six
-slices and 20 retained price levels are unchanged. Until the approved cutover, revision 8 above remains deployed.
-
-The candidate dashboard watch samples the recipe each sweep. A low-price alert requires a fresh successful current
-price no greater than 70% of the median of at least six prior priced observations from the preceding 24 hours; the
-current observation is excluded. Price history is not established yet, so the panel must report history warming
-until those observations exist. Failed, missing, empty and stale queries have separate states; a stale observation
-cannot alert. Export-4 facts show status ok, no binding, class 9/subclass 6 and Alchemy 180 for recipe 288206. A
-read-only source check at sweep 685 found no successful recipe query and zero prior priced observations. In that
-check potion 8827 had a 1 g 28 s lowest ask and 64 retained units. Potion 8827 remains core. Its source-stage
-same-house book snapshot showed 212 observed depleted units
-over 23.776 usable hours in 24 hours and 13 over 5.749 usable hours in six hours. These are listing changes, not
-confirmed sales; whole-listing disappearance is ambiguous. The initial 1–2 unit batch is qualitative guidance, not
-a throughput or sales guarantee. The new endpoint and panel remain source candidate until rollout and live proof.
-
 ## Historical revision 7 deployed plan (2026-11-13; two-sweep qualification complete)
 
-The following records are revision-7 deployment and live evidence; they do not qualify revision 8.
+The following records are revision-7 deployment and live evidence; they do not qualify revision 8 or revision 9.
 
 Revision 7 was deployed before revision 8; the following package and live-run details are historical.
 At that checkpoint the package, generated addon target, companion `Data.lua` and healthy server agreed on the plan.

@@ -1,18 +1,51 @@
 # Repeating scans: operator guide
 
-## Revision 8 deployed (two-sweep qualification complete)
+## Revision 9 deployed (two-sweep cadence qualification passed)
 
-Revision 8 scan plan was introduced by source commit `fb36408`; the installed scanner package, generated target and
-companion `Data.lua` remain on plan hash
+Revision 9 adds tradeable Alchemy recipe 288206 to the core catalog and samples it in each normal sweep. The installed
+package, generated target, server and `Data.lua` agree on catalog hash
+`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac` and plan hash
+`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164` for build 1.60.1.70938 and house
+`us-normal-alliance`. Source commit `df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
+`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`. The catalog has 974 rows / 807 active
+IDs (403 core, no discovery, 404 cold), preserving all 973 prior rows and 806 prior active memberships. Cold slices
+remain 68/68/67/67/67/67 with 471/471/470/470/470/470 planned item queries; cadence 900 s, cap 750 s, six slices
+and depth 20 are unchanged.
+
+Two consecutive full revision-9 sweeps passed. Sweep 688 (`us-normal-alliance-1794696666-Dandune-0251`, slice 3)
+and sweep 689 (`us-normal-alliance-1794697566-Dandune-4211`, slice 4) each matched all 470 planned IDs and had 470
+successful queries, including all 403 hot IDs and recipe 288206. They ran in 612 s and 550 s, started 900 s apart,
+and were saved/uploaded with ACKs written. Per-hot-item query gaps were 834–900 s (median 884). Client-loaded ACK
+was not independently verified. Two runtime samples are not a p95. Both services were active and the doctor check
+passed. Receipts: `.archive/water-walking-alert-20261114/ops/parent-sweep-688.json`, `parent-sweep-689.json` and
+`parent-two-sweep-proof.json`.
+
+The read-only recipe watch is live at `/v1/houses/{key}/recipe-watch` and the independent panel is on `/dashboard`.
+Final HTTP verification returned 200; the served page matched the reviewed wheel and its actual JSON passed the served
+JavaScript validation (`.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json`). The sweep-689 recipe
+ask was 500,800 copper (50 g 8 s), quantity 2, with `building_history` at 1/6 prior prices and no alert. This is an
+observed ask, not a bargain conclusion. Native evidence confirms item-kind, full, source-complete `ok` coverage with
+two rows (`.archive/water-walking-alert-20261114/ops/parent-native-recipe-first-proof.json`). Potion 8827 had an
+11,500-copper lowest ask and retained supply
+54. Its 24-hour book showed 232 depletion units (27 partial reductions, 205 whole-group disappearances) over 23.331
+usable hours (9.94 observed units/hour). The recent six-hour book showed 31 units over 5.332 usable hours: 9 partial
+reductions and 22 ambiguous disappearances. That is not a confirmed purchase rate. Confirmed sales remain null; the
+suggested 1–2 unit pilot is qualitative guidance. Initial sweep-687 page state is historical and predates the recipe's
+first query (`parent-live-http-initial-proof.json`).
+
+## Historical revision 8 deployed (two-sweep qualification complete)
+
+Revision 8 scan plan was introduced by source commit `fb36408`; at that checkpoint the installed scanner package,
+generated target and companion `Data.lua` were on plan hash
 `fa2230b79abfc38a1bf05d1428cc069b4f6969845848888c6e0e3d95aa93f473` for build 70938/interface 16001, house
-`us-normal-alliance`. The current HTTP analysis server runs source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb`
-on image `sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and serves this same plan. The
-plan has 806 active IDs (402 core, 0 discovery, 404 cold), with 390 hot IDs in the
-known and uncertain-rank crafting graphs plus 12 additional unresolved dependencies. It moves 87 IDs from hot to
+`us-normal-alliance`. The HTTP analysis server at that checkpoint ran source commit
+`a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
+`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` and served this same plan. The
+plan had 806 active IDs (402 core, 0 discovery, 404 cold), with 390 hot IDs in the
+known and uncertain-rank crafting graphs plus 12 additional unresolved dependencies. It moved 87 IDs from hot to
 cold without exclusions.
-Cadence is 900 s, cap 750 s, depth 20, with six cold slices of 68/68/67/67/67/67 (470/470/469/469/469/469
-queries per sweep; 13.38% fewer on average than revision 7). Cold coverage remains broad but slower, about every
-90 minutes.
+Cadence was 900 s, cap 750 s, depth 20, with six cold slices of 68/68/67/67/67/67 (470/470/469/469/469/469
+queries per sweep; 13.38% fewer on average than revision 7). Cold coverage was broad but slower, about every 90 minutes.
 
 Two consecutive full sweeps passed under the previous HTTP server image
 `sha256:cf20118a09e422a0ac86ab140ced6607b554d53816a7246461343be152a8a772`; the scan plan and collector were
@@ -26,22 +59,6 @@ sales or profit. These two runtimes are measurements, not a p95. Receipts:
 `.archive/scan-slimming-20261113/ops/parent-sweep-591.json`, `parent-sweep-592.json` and
 `parent-two-sweep-proof.json`.
 
-## Revision 9 source candidate (pending rollout)
-
-The source candidate adds tradeable Alchemy recipe 288206 to the core catalog and samples it in every sweep. The
-catalog is revision 9 with 974 rows / 807 active IDs (403 core, no discovery, 404 cold); catalog hash
-`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`, plan hash
-`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. Existing IDs and memberships are preserved.
-Cold slices remain 68/68/67/67/67/67 with 471/471/470/470/470/470 planned item queries. The 900 s cadence,
-750 s cap, six slices and 20-level depth do not change. Revision 8 remains installed until the reviewed cutover.
-
-The pending read-only dashboard endpoint reports recipe 288206 against prior successful distinct-sweep prices in
-the preceding 24 hours. A price alert requires at least six prior prices, excludes the current observation from the
-median and requires the fresh current price to be at or below 70% of that median. Missing scans, failed queries,
-successful empty results, warming history and stale observations are distinct states; a stale result cannot alert.
-This does not add input, a second client or an item-specific scan timer: the existing collector continues its normal
-900 s sweeps. Potion 8827 remains frequent; its listing-depletion measurements are described in [WATCHLIST](WATCHLIST.md)
-and must not be treated as confirmed sales.
 
 `crowley-scan` (unit `crowley-scan.service`) is designed to keep WoW Forever in the world with the auction house open,
 so the addon's own 900 s timer can sweep its installed plan and the companion can upload each sweep. The revision-7

@@ -181,10 +181,10 @@ and trading-summary GETs are read-only and do not require an API token; write en
 authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tailoring 150, while allowing planning
 targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
-The dashboard now uses a rolling 24-hour observed-activity window. The server runs source commit
-`a0c533c9fd9846fef4d8bb680b510825bfff75cb` on image
-`sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738`; the client scan plan and installed addon
-remain revision 8.
+The dashboard now uses a rolling 24-hour observed-activity window. The deployed server runs source commit
+`df71fa2ac81d73353fc988ca19e9ba3510235b16` on image
+`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; the installed client scan plan and
+addon are revision 9.
 
 - latest scan time and planned / queried / successful counts;
 - up to ten profitable strategies only when positive listing depletion is observed in usable intervals in the rolling
@@ -208,7 +208,7 @@ from asking prices alone. Rows sharing a cooldown group are alternatives; their 
 assume every listed unit sells and are not expected income. Observed listing depletion is not confirmed sales, and
 sale probability remains unknown.
 
-**Current live HTTP check, sweep 597.** Source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` and image
+**Historical live HTTP check, sweep 597.** Source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` and image
 `sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` returned HTTP 200 for house
 `us-normal-alliance`, build `1.60.1.70938`, with a 24-hour activity window and ten positive known-activity rows. The
 profile remained Alchemy 225 / Tailoring 150, planning through Tailoring 225, with the assumed 10 g budget and
@@ -232,26 +232,40 @@ if-sold profit and 12.57 observed units/hour. Shadow Oil showed 4 crafts / 8 uni
 margin and descriptive-depletion figures, not confirmed sales. At verification time a post-unlock scan was running,
 but sweep 583 remained the latest accepted sweep. Source details are in `.archive/dashboard-trading-20261113/`.
 
-#### Water-walking watch (source stage; deployment pending)
+#### Water-walking watch (deployed; two-sweep cadence qualification passed)
 
-The dashboard recipe watch uses the token-free, read-only
-`GET /v1/houses/{key}/recipe-watch` response, pinned to the latest sweep for that house and client build. It watches
-Recipe: Draught of Water Walking (item 288206) and its finished potion (item 8827), reading only those item IDs.
-Recipe history follows the observation's recorded auction kind (item or commodity); it does not mix book types or
-item-key variants.
+The token-free, read-only `GET /v1/houses/{key}/recipe-watch` endpoint is live with the `/dashboard` panel. The final
+HTTP proof returned 200 in 0.896 s, matched the served dashboard to the reviewed wheel and validated the actual API
+JSON with the served JavaScript (`.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json`). Source commit
+`df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
+`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; package, server, generated target and
+`Data.lua` agree on revision 9. Both services were active and the doctor check passed.
 
-A low-price alert requires a current successful priced recipe observation no older than 30 minutes and at least six
-previous successful priced observations from distinct sweeps in the preceding 24 hours. The baseline is their exact
-copper median; the current offer triggers at or below 70% of that median and is excluded from the baseline. Missing,
-unqueried or failed latest recipe observations never fall back to an older offer. The panel exposes awaiting-scan,
-query-failed, not-listed, building-history, normal-price, low-price and stale states.
+Sweeps 688 and 689 each matched all 470 planned IDs and queried all successfully, including all 403 hot IDs and recipe
+288206. Their runtimes were 612 and 550 seconds; starts were 900 seconds apart and per-hot-item query gaps were
+834–900 seconds (median 884). Both were saved/uploaded and ACKs were written. Client-loaded ACK was not independently
+verified. Two runtime samples are not a p95. Receipts: `.archive/water-walking-alert-20261114/ops/parent-sweep-688.json`,
+`parent-sweep-689.json` and `parent-two-sweep-proof.json`.
 
-Potion metrics use same-house/build commodity books over rolling 24-hour and recent 6-hour windows. They report
-observed bottom-walk depletion, split between persistent-group partial reductions and whole-group disappearances,
-with actual usable interval hours and counts. Recorded per-sweep cadence, price ceilings, expiry handling and the
-existing gap rule are retained. Depletion is unconfirmed sales; disappearances remain ambiguous, confirmed sales
-are null, and the suggested one-to-two potion pilot is qualitative. These source-stage metrics do not change the
-main strategy ranking or turnover model.
+The sweep-689 recipe was listed at 500,800 copper (50 g 8 s), quantity 2, with `building_history` at 1/6 prior priced
+observations and no alert. Native evidence confirms item-kind, full, source-complete `ok` coverage with two rows
+(`parent-native-recipe-first-proof.json`). This observed ask is not a bargain conclusion. Potion 8827 was 11,500 copper
+with retained supply 54. Its 24-hour book showed 232 depletion units (27 partial reductions, 205 whole-group
+disappearances) over 23.331 usable hours (9.94 observed units/hour). The recent six-hour book showed 31 units over
+5.332 usable hours: 9 partial reductions and 22 ambiguous disappearances. These are listing changes, not confirmed
+purchases; confirmed sales remain null, and the 1–2 unit pilot remains qualitative. Sweep-687's pre-query page state,
+where recipe 288206 had `awaiting_scan` and no history, is historical (`parent-live-http-initial-proof.json`).
+
+Recipe alerts require a current successful priced observation no older than 30 minutes and at least six previous
+priced observations from distinct sweeps in the preceding 24 hours. The exact copper median excludes the current
+offer; an alert triggers at or below 70% of that median. Missing, unqueried or failed latest recipe queries never fall
+back to an older offer. Recipe observations follow their recorded item or commodity kind and never mix item-key
+variants. Potion demand retains recorded cadence, price ceilings, expiry handling and gap rules; confirmed sales stay
+null and the one-to-two potion pilot remains qualitative.
+
+The main strategy summary's first request timed out after 40 seconds, then recovered with HTTP 200, ten positive
+known-activity rows and a 0.013-second response. The canceled query-performance proposal was not applied. This watch
+does not change the main strategy ranking or turnover model.
 
 ### Advanced advice view
 

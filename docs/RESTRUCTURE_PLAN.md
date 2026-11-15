@@ -142,15 +142,17 @@ database, package, lint, and type checks pass.
 
 ## Phase 2 restructure into independent components
 
-Use one repository with three functional distributions and a small shared contract distribution.
+Use one repository with three functional distributions and a small shared distribution.
 Scanner and automation are independently installable; market analysis is separated so a server
 does not install desktop control and a desktop controller does not install the database stack.
-The contract library contains only types, validation, serialization rules, and protocol versions.
-It has no GUI, filesystem discovery, network, database, or scheduler behavior.
+The contract modules contain only types, validation, serialization rules, and protocol versions.
+The shared distribution also owns the existing target/catalog metadata and private filesystem
+helpers used by multiple components. Keeping these named modules together avoids duplicating those
+helpers or adding another foundation package. It has no GUI input, network, database, or scheduler.
 
 | Distribution | Responsibility | Dependencies and exclusions |
 |---|---|---|
-| `crowley-contracts` | Canonical item and house identity; scan, action, result, and arbitration wire contracts | Small pure library; generated Lua constraints come from the same source |
+| `crowley-common` | Canonical identity and wire contracts; shared target metadata and existing filesystem helpers | Contract validation stays pure; generated Lua constraints come from the same source |
 | `crowley-market` | Ingestion, storage, retained analysis, main dashboard, recipe watch, server health, backup/restore | Contracts and server dependencies; no automation or scanner implementation imports |
 | `crowley-scanner` | Scanner addon, installed scan plan, SavedVariables transport, upload and ACK handling, collector status | Contracts and transport dependencies; no keyboard, pointer, launcher, movement, or executor implementation |
 | `crowley-automation` | Game ownership, launch, observation, input, routine execution, and later trading actions | Contracts and desktop dependencies; no market database, scan catalog, analytics, or scanner implementation dependency |
@@ -160,7 +162,7 @@ Start with this ownership structure and add submodules only for actual responsib
 
 ```text
 packages/
-  contracts/src/crowley_contracts/
+  common/src/crowley_common/
   market/src/crowley_market/
     domain/ application/ adapters/ entrypoints/
   scanner/src/crowley_scanner/

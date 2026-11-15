@@ -26,7 +26,7 @@ Preserve active dashboard semantics, including exact turnover floor and gap rule
 
 ### Addon and observation cleanup
 
-Own addon/Crowley/, addon/Crowley_Automation/ (new), addon/Crowley_Host/ (new),
+Own addon/Crowley/, addon/Crowley_Data/, addon/Crowley_Automation/ (new), addon/Crowley_Host/ (new),
 src/crowley/gui/frames.py, src/crowley/scan/, tools/generate_launch_target.py,
 tests/test_addon.py, tests/test_executor.py, tests/wow_harness.py,
 tests/test_gui_frames.py, tests/test_scan*.py, tests/test_cold_tier.py,
@@ -72,3 +72,35 @@ Loop until substantive findings are resolved; do not invent extra features durin
 5. Full retained tests, lint, typing and artifact checks pass on main; temporary artifacts are removed.
 
 Live qualification requiring specific real-gold operations remains separate from code completion.
+
+## Implementation checkpoint
+
+- Main contains the approved planning commit. Application cleanup is still uncommitted until the
+  coordinated producer/consumer batch is complete. No changes have been deployed or pushed.
+- Original uncommitted turnover code/UI/test changes are preserved in the working cleanup.
+- market_cleanup is Luna. Its cleanup passed independent Sol market_review after restoring retained
+  item-book and real loader DB tests. It now owns the fresh automation foundation per RESTRUCTURE_API.
+- transport_cleanup is Luna. Its cleanup passed independent Sol transport_review. It now prepares
+  new common/market/scanner packages per RESTRUCTURE_API without changing original source paths.
+- addon_cleanup is Luna and still owns the original addon/frames/scan/harness rewrite. It must finish
+  and pass independent Sol review before the package/resource handoff and old import switch.
+- market_review and transport_review are read-only Sol workers available for subsequent rounds.
+- Parent removed orphan core account/reference/queue modules, volume API-only reporting/projection
+  helpers and store readers, unused domain/typed-clock/procfs scaffolding, paper deployment/CLI
+  metadata, and abandoned screenshot tooling. Preserved active volume comparison behavior/tests.
+- Parent ops integration handles the second canvas, separate addon resource roots, no Queue.lua,
+  and removal of paper units. Existing backup type errors were corrected without behavior changes.
+- Parent independent checks: market retained suite 83 passed; restored item-book suite 58 passed;
+  actual item-book loader DB 1 passed; volume/summary/watch 69 passed; transport suite 65 passed and
+  14 DB skips; ops backup 109 passed and 1 skipped; install/doctor 46 passed; migrations on disposable
+  Timescale 13 passed. Server DB suite 13 passed, with one cross-addon test blocked on the harness
+  rewrite at that point. Re-run after addon work completes.
+- The pre-existing old test worktree and its test cache were removed; main is the only worktree.
+  A parent-owned disposable tmpfs Timescale test container is active for DB qualification; discover
+  its published port with docker rather than using the production database, and remove it afterward.
+- Root package metadata, old-to-new import switch, source removal, docs refresh, baseline ratchets,
+  final artifact tests, native automation adapters, movement, and live dry-run qualification remain.
+
+Scanner standalone configuration will be its own strict scanner.toml [scanner] with game_root,
+wtf_account, character, server_url, poll_seconds, and refresh_minutes. Character preserves the
+existing state directory layout. Host installation renders this from its master host contract.

@@ -6,13 +6,14 @@ Revision 9 adds tradeable Alchemy recipe 288206 to the core catalog and samples 
 package, generated target, server and `Data.lua` agree on catalog hash
 `0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac` and plan hash
 `9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164` for build 1.60.1.70938 and house
-`us-normal-alliance`. Source commit `df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
-`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`. The catalog has 974 rows / 807 active
+`us-normal-alliance`. The initial revision-9 server deployment used source `df71fa2ac81d73353fc988ca19e9ba3510235b16`
+on image `sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; it was later updated server-only.
+See [HANDOFF](HANDOFF.md) for the current HTTP server identity. The catalog has 974 rows / 807 active
 IDs (403 core, no discovery, 404 cold), preserving all 973 prior rows and 806 prior active memberships. Cold slices
 remain 68/68/67/67/67/67 with 471/471/470/470/470/470 planned item queries; cadence 900 s, cap 750 s, six slices
 and depth 20 are unchanged.
 
-Two consecutive full revision-9 sweeps passed. Sweep 688 (`us-normal-alliance-1794696666-Dandune-0251`, slice 3)
+Historical collector qualification: two consecutive full revision-9 sweeps passed. Sweep 688 (`us-normal-alliance-1794696666-Dandune-0251`, slice 3)
 and sweep 689 (`us-normal-alliance-1794697566-Dandune-4211`, slice 4) each matched all 470 planned IDs and had 470
 successful queries, including all 403 hot IDs and recipe 288206. They ran in 612 s and 550 s, started 900 s apart,
 and were saved/uploaded with ACKs written. Per-hot-item query gaps were 834–900 s (median 884). Client-loaded ACK

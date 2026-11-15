@@ -38,25 +38,30 @@ Make gold on the WoW Forever auction house with several independently profitable
 
 ### Revision 9 deployed scan plan; two-sweep cadence qualification passed
 
-Revision 9 is deployed for client build 1.60.1.70938 and house `us-normal-alliance`. Source commit
-`df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
-`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`. Package, generated target, server and
-`Data.lua` agree on revision 9, catalog hash `0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`
-and plan hash `9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. It has 974 entries and 807 active
+Revision 9 remains the installed collector plan for client build 1.60.1.70938 and house `us-normal-alliance`. The
+installed scanner package, generated addon target and `Data.lua` agree on catalog hash
+`0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac` and plan hash
+`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The current HTTP server is source commit
+`be96ac3d8908beb8f3137f35f0c4ae6dc156498d` on image
+`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`; this server-only release followed the
+initial revision-9 server on `df71fa2` / `sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`.
+The collector plan and addon remain revision 9. The catalog has 974 entries and 807 active
 IDs (403 core, no discovery, 404 cold); all 973 previous entries and all 806 previous active memberships are
 preserved. Slices remain 68/68/67/67/67/67, with 471/471/470/470/470/470 planned queries. Cadence is 900 s, cap
 750 s and depth 20, unchanged from revision 8.
 
-Sweeps 688 (`us-normal-alliance-1794696666-Dandune-0251`, slice 3) and 689
-(`us-normal-alliance-1794697566-Dandune-4211`, slice 4) each matched the exact 470-item set; all were observed,
+Historical revision-9 collector qualification is recorded by sweeps 688
+(`us-normal-alliance-1794696666-Dandune-0251`, slice 3) and 689
+(`us-normal-alliance-1794697566-Dandune-4211`, slice 4). Each matched the exact 470-item set; all were observed,
 queried and `ok`, including all 403 hot IDs and recipe 288206. They ran in 612 s and 550 s, started 900 s apart,
 and had per-hot-item query gaps of 834–900 s (median 884). Both were saved/uploaded and their ACKs were written;
 client-loaded ACK was not independently verified. Two runtime samples do not establish a p95. The two-sweep proof is
-`.archive/water-walking-alert-20261114/ops/parent-two-sweep-proof.json`.
+`.archive/water-walking-alert-20261114/ops/parent-two-sweep-proof.json`. The later server-only release did not change
+the native plan or scanner/addon.
 
-The token-free, read-only recipe watch is live at `/v1/houses/{key}/recipe-watch` and on `/dashboard`. Final HTTP
-verification returned 200 for both and validated the served page against the reviewed wheel and actual JSON
-(`.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json`). Native evidence confirms recipe 288206
+The token-free, read-only recipe watch is live at `/v1/houses/{key}/recipe-watch` and on `/dashboard`. Its initial
+revision-9 HTTP validation and the sweep-689 recipe/potion measurements below are historical evidence from the first
+server image; the current server's HTTP checks are recorded under Trading dashboard. Native evidence confirms recipe 288206
 was an item-kind, full, source-complete `ok` query with two rows
 (`.archive/water-walking-alert-20261114/ops/parent-native-recipe-first-proof.json`). Sweep 689 showed the recipe at
 500,800 copper (50 g 8 s), quantity 2, with `building_history` at 1 of 6 prior priced observations and no alert.
@@ -242,8 +247,8 @@ authentication. Keep the server on its existing loopback binding. The page defau
 and shows scan status before strategy results. The strict observed-turnover gate was introduced with server source
 commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`); deployed revision 9
 preserved the positive observed-turnover policy. The current server uses source commit
-`df71fa2ac81d73353fc988ca19e9ba3510235b16`, image
-`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`, and a rolling 24-hour observed-activity
+`be96ac3d8908beb8f3137f35f0c4ae6dc156498d`, image
+`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`, and a rolling 24-hour observed-activity
 window instead of the former fixed 2-hour/6-hour gate. It sums usable interval hours rather than treating missing
 time as zero. Each pair uses the larger cadence recorded in its immutable sweep plans (base cadence for hot items,
 multiplied by `coldSlices` for cold items), with 1.4 tolerance; both endpoints must be inside the window. Missing or
@@ -255,6 +260,30 @@ five-recipe whitelist. The page reports observed listing depletion, not confirme
 cost, if-sold net proceeds and profit, list price, activity rate plus measured hours and interval count, reagents and
 access requirements. Shared cooldown rows are alternatives, not a combined portfolio forecast. The page links to
 the prior research UI at `/dashboard/advanced`.
+
+The browser saves the last successful, validated recommendations by house, client build and profile, and restores
+that matching snapshot before a network response. It keeps recommendations visible through a new scan, loading,
+refresh failure or timeout; the source sweep/time and advancing quote age remain visible. A valid successful empty
+response replaces the saved snapshot, and recommendations from a different house, build or profile are not mixed.
+Latest scan status remains separate from the saved recommendation snapshot.
+The summary request timeout is 60 seconds and latest-scan polling has a 30-second timeout; recipe-watch polling
+remains independent. Each
+newly created scan queues a main-summary warm before optional advanced-advice warming. Duplicate uploads do not queue
+work, and a logged warm failure does not affect upload or prevent advice warming.
+
+**Current live dashboard verification.** The deployed server returned HTTP 200 with ten positive known-activity rows
+for sweep 705. The first uncached request took 47.487 s and a repeat cache hit took 0.006 s. Served HTML matched the
+wheel; a Node check restored ten cached cards before the network response and preserved them through a controlled
+refresh failure. Recipe watch returned HTTP 200. The server-only deployment left the database container and
+scanner/companion processes unchanged and preserved the native revision-9 plan. Proof:
+`.archive/strategy-retention-20261114/ops/parent-live-proof.json`,
+`server-only-deploy-proof.json` and `parent-artifact-proof.json`.
+
+The SQL profile on pinned sweep 703 covered 608,951 rows: removing the global sort reduced that query from 3,554 ms
+with a 634,440 KiB temporary disk sort to 378 ms without temporary I/O. The full uncached summary improved from
+48.235 s to 45.599 s in a fresh-process comparison, with an exactly equal response. The item-book query improvement
+does not make the whole calculation 9× faster. Proofs: `parent-query-proof.json` and
+`parent-full-summary-proof.json` in `.archive/strategy-retention-20261114/`.
 
 **Historical 24-hour dashboard check, sweep 597.** The API returned HTTP 200 with ten positive known-activity rows;
 the page showed the 24-hour window, measured hours and interval counts. The profile remained Alchemy 225 / Tailoring

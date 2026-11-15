@@ -181,10 +181,10 @@ and trading-summary GETs are read-only and do not require an API token; write en
 authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tailoring 150, while allowing planning
 targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
-The dashboard now uses a rolling 24-hour observed-activity window. The deployed server runs source commit
-`df71fa2ac81d73353fc988ca19e9ba3510235b16` on image
-`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; the installed client scan plan and
-addon are revision 9.
+The dashboard uses a rolling 24-hour observed-activity window. The deployed server runs source commit
+`be96ac3d8908beb8f3137f35f0c4ae6dc156498d` on image
+`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`; the installed client scan plan and addon
+remain revision 9.
 
 - latest scan time and planned / queried / successful counts;
 - up to ten profitable strategies only when positive listing depletion is observed in usable intervals in the rolling
@@ -207,6 +207,18 @@ explains that no profitable strategies currently have positive observed activity
 from asking prices alone. Rows sharing a cooldown group are alternatives; their rates are not additive. Profits
 assume every listed unit sells and are not expected income. Observed listing depletion is not confirmed sales, and
 sale probability remains unknown.
+
+The browser saves the last validated successful summary by house, build and profile, restores it before network
+results, and keeps it visible through new scans, loading, errors and the 60-second summary timeout. Its source sweep/time
+and advancing quote age remain visible, while latest-scan status stays separate; a valid empty success replaces it,
+and identities are never mixed. New scans
+queue shared summary warming before optional advice warming; duplicates do not warm, and logged warm errors do not
+affect uploads. Live proof on sweep 705 returned ten valid rows: 47.487 s cold and 0.006 s cached; served HTML and
+real-JS cache restoration/failure behavior passed. On 608,951 rows, the pinned SQL query improved 3,554→378 ms, while
+full cold summaries improved 48.235→45.599 s; JSON book loading remains the dominant work, so the full request is not
+9× faster. Proofs: `.archive/strategy-retention-20261114/ops/parent-live-proof.json`,
+`.archive/strategy-retention-20261114/parent-query-proof.json` and
+`.archive/strategy-retention-20261114/parent-full-summary-proof.json`.
 
 **Historical live HTTP check, sweep 597.** Source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` and image
 `sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` returned HTTP 200 for house
@@ -232,14 +244,15 @@ if-sold profit and 12.57 observed units/hour. Shadow Oil showed 4 crafts / 8 uni
 margin and descriptive-depletion figures, not confirmed sales. At verification time a post-unlock scan was running,
 but sweep 583 remained the latest accepted sweep. Source details are in `.archive/dashboard-trading-20261113/`.
 
-#### Water-walking watch (deployed; two-sweep cadence qualification passed)
+#### Water-walking watch (live; initial server receipts historical)
 
-The token-free, read-only `GET /v1/houses/{key}/recipe-watch` endpoint is live with the `/dashboard` panel. The final
-HTTP proof returned 200 in 0.896 s, matched the served dashboard to the reviewed wheel and validated the actual API
-JSON with the served JavaScript (`.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json`). Source commit
-`df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
-`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; package, server, generated target and
-`Data.lua` agree on revision 9. Both services were active and the doctor check passed.
+The token-free, read-only `GET /v1/houses/{key}/recipe-watch` endpoint and `/dashboard` panel remain live on current
+server source `be96ac3d8908beb8f3137f35f0c4ae6dc156498d`, image
+`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`; the client plan/addon remain revision 9.
+The current watch returned HTTP 200 (`parent-live-proof.json`). The original revision-9 server deployment used
+source `df71fa2ac81d73353fc988ca19e9ba3510235b16` / image
+`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; its sweep and watch receipts below are
+historical. The later server-only update did not change the native plan.
 
 Sweeps 688 and 689 each matched all 470 planned IDs and queried all successfully, including all 403 hot IDs and recipe
 288206. Their runtimes were 612 and 550 seconds; starts were 900 seconds apart and per-hot-item query gaps were

@@ -8,10 +8,11 @@ Revision 9 adds recipe 288206, **Recipe: Draught of Water Walking**, as one know
 `0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac`; plan hash:
 `9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. Cold slices remain 68/68/67/67/67/67,
 with 471/471/470/470/470/470 planned queries. Cadence is 900 seconds, cap 750 seconds, six slices and 20 retained
-price levels. Source commit `df71fa2ac81d73353fc988ca19e9ba3510235b16` runs on image
-`sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`.
+price levels. The initial revision-9 server deployment used source `df71fa2ac81d73353fc988ca19e9ba3510235b16` on
+image `sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; it was later updated server-only.
+See [HANDOFF](HANDOFF.md) for the current HTTP server identity; the collector plan remains revision 9.
 
-Two consecutive full revision-9 sweeps passed exact-set, all-query-success and cadence checks. Sweep 688
+Historical collector qualification: two consecutive full revision-9 sweeps passed exact-set, all-query-success and cadence checks. Sweep 688
 (`us-normal-alliance-1794696666-Dandune-0251`, slice 3) and sweep 689
 (`us-normal-alliance-1794697566-Dandune-4211`, slice 4) each queried all 470 planned IDs successfully, including all
 403 hot IDs and recipe 288206. They ran in 612 and 550 seconds, started 900 seconds apart, and were saved/uploaded
@@ -19,8 +20,8 @@ with ACKs written. All hot-item query gaps were 834–900 seconds (median 884). 
 verified; two runtime samples are not a p95. Receipts: `.archive/water-walking-alert-20261114/ops/parent-sweep-688.json`,
 `parent-sweep-689.json` and `parent-two-sweep-proof.json`.
 
-The token-free read-only watch and independent `/dashboard` panel passed final HTTP and served-JavaScript validation
-in `.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json` (HTTP 200; 0.896 seconds). The served HTML
+The initial token-free read-only watch and independent `/dashboard` panel passed served-JavaScript validation on the
+original server deployment in `.archive/water-walking-alert-20261114/ops/parent-live-http-proof.json` (HTTP 200; 0.896 seconds). The served HTML
 matched the reviewed wheel and its actual JSON passed the served page's validation. Native receipt
 `parent-native-recipe-first-proof.json` confirms the recipe observation was item-kind, full, source-complete and `ok`
 with two rows (`.archive/water-walking-alert-20261114/ops/parent-native-recipe-first-proof.json`). Sweep 689 showed an

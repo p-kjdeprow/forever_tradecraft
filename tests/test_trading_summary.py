@@ -230,10 +230,39 @@ def test_batch_economics_use_whole_vendor_bundles_and_per_stack_fees():
     assert row["cost"] == "311"
     assert row["sale_proceeds"] == "752"
     assert row["profit"] == "441"
+    assert row["profit_per_item"] == "441/8"
     assert row["market_units_per_hour"] == 40
     assert row["sale_probability"] is None
     assert row["volume_status"] == "observed_activity"
     assert any("assume a 10% share of observed market activity" in note for note in result["notes"])
+
+
+def test_profit_per_item_uses_exact_total_output_quantity_for_five_crafts():
+    recipe = _recipe(output_quantity=4, reagent_quantity=1)
+    inputs = _inputs(
+        [recipe],
+        books={
+            1000: _commodity_history(1000, units_removed=250, unit_price=101),
+            2000: [
+                Book(
+                    float(ASOF),
+                    [Group("fractional", Fraction(1, 3), 100, 100_000)],
+                    None,
+                    2000,
+                    583,
+                )
+            ],
+        },
+        facts=_facts(output_sell=7, output_max_stack=3),
+    )
+
+    row = summary.build_trading_summary(inputs)["candidates"][0]
+
+    assert row["crafts"] == 5
+    assert row["quantity"] == 20
+    exact_per_item = Fraction(row["profit"]) / row["quantity"]
+    assert Fraction(row["profit_per_item"]) == exact_per_item
+    assert exact_per_item.denominator > 1
 
 
 def test_vendor_only_reagent_needs_no_auction_book():
@@ -285,6 +314,7 @@ def test_cooldown_caps_ranking_flow_and_rows_expose_shared_group():
     rows = {row["spell_id"]: row for row in result["opportunities"]}
 
     assert [row["spell_id"] for row in result["opportunities"]] == [20, 21]
+    assert result["opportunities"] == result["candidates"]
     assert rows[20]["crafts"] == 5
     assert rows[21]["crafts"] == 1
     assert rows[21]["cooldown_seconds"] == 3600
@@ -348,8 +378,8 @@ def test_long_gaps_and_grouped_item_books_are_excluded():
 
 
 def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
-    qualified_ids = range(1000, 1010)
-    unknown_ids = range(1010, 1022)
+    qualified_ids = range(1000, 1013)
+    unknown_ids = range(1013, 1025)
     recipes = [
         _recipe(spell_id=item_id, output_id=item_id, reagent_id=2000)
         for item_id in (*qualified_ids, *unknown_ids)
@@ -375,7 +405,10 @@ def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
     result = summary.build_trading_summary(_inputs(recipes, books=books, facts=facts))
 
     assert len(result["opportunities"]) == 10
-    assert {row["item_id"] for row in result["opportunities"]} == set(qualified_ids)
+    assert len(result["candidates"]) == len(qualified_ids)
+    assert [row["item_id"] for row in result["candidates"]] == list(qualified_ids)
+    assert result["opportunities"] == result["candidates"][:10]
+    assert {row["item_id"] for row in result["opportunities"]} == set(range(1000, 1010))
     assert all(row["volume_status"] == "observed_activity" for row in result["opportunities"])
     assert all(row["market_units_per_hour"] > 0 for row in result["opportunities"])
 
@@ -393,6 +426,7 @@ def test_usable_24h_history_with_zero_depletion_is_excluded():
     )
 
     assert result["opportunities"] == []
+    assert result["candidates"] == []
 
 
 def test_short_positive_history_after_six_hours_qualifies_without_filling_missing_time():
@@ -567,8 +601,11 @@ def test_missing_output_or_reagent_prices_are_excluded_and_empty_summary_is_vali
     empty = summary.build_trading_summary(_inputs([], facts={}))
 
     assert missing_reagent["opportunities"] == []
+    assert missing_reagent["candidates"] == []
     assert missing_output["opportunities"] == []
+    assert missing_output["candidates"] == []
     assert empty["opportunities"] == []
+    assert empty["candidates"] == []
     assert empty["profile"] == {
         "alchemy": 225,
         "tailoring": 150,

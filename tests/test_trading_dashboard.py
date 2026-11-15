@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
@@ -13,7 +14,7 @@ DASHBOARD = ROOT / "src/crowley/server/static/trading-dashboard.html"
 def _node(script: str) -> dict:
     node = shutil.which("node")
     assert node is not None, "node is required for dashboard tests"
-    result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([node], input=script, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr
     return json.loads(result.stdout.splitlines()[-1])
 
@@ -52,7 +53,7 @@ class FakeNode {
   addEventListener(name, handler) { this.listeners[name] = handler; }
 }
 const mountDashboard = (storage) => {
-  const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+  const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
   const nodes = new Map(ids.map((id) => [id, new FakeNode("div")]));
   global.document = {
     getElementById: (id) => nodes.get(id),
@@ -219,6 +220,7 @@ def _item(index: int) -> dict:
         "cost": "6237/2" if index == 0 else "100",
         "sale_proceeds": "108851/10" if index == 0 else "200",
         "profit": "77666/10" if index == 0 else "100",
+        "profit_per_item": "38833/10" if index == 0 else "100",
         "market_units_per_hour": (12.57 if index == 0 else 750 if unknown else 0 if zero else 2.5),
         "volume_status": "unknown" if unknown else "observed_activity",
         "usable_hours": None if unknown else 5.25,
@@ -253,6 +255,7 @@ def _item(index: int) -> dict:
 
 
 def _summary(sweep_id: int, finished_epoch: int, count: int = 12) -> dict:
+    candidates = [_item(index) for index in range(count) if index not in {2, 3}]
     return {
         "house": "us-normal-alliance",
         "client_build": "1.60.1.70938",
@@ -267,9 +270,30 @@ def _summary(sweep_id: int, finished_epoch: int, count: int = 12) -> dict:
             "budget_copper": 100000,
             "recipes_assumed_owned": True,
         },
-        "opportunities": [_item(index) for index in range(count)],
+        "candidates": candidates,
+        "opportunities": candidates[:10],
         "notes": ["Recipe and leveling costs excluded."],
     }
+
+
+def _fraction_text(value: Fraction) -> str:
+    return str(value.numerator) if value.denominator == 1 else f"{value.numerator}/{value.denominator}"
+
+
+def _ranked_candidate(index: int, batch_profit: str, quantity: int, crafts: int = 1) -> dict:
+    profit = Fraction(batch_profit)
+    cost = Fraction(100)
+    item = _item(index + 100)
+    item.update(
+        name=f"Rank {index:02d}",
+        crafts=crafts,
+        quantity=quantity,
+        cost=_fraction_text(cost),
+        sale_proceeds=_fraction_text(cost + profit),
+        profit=_fraction_text(profit),
+        profit_per_item=_fraction_text(profit / quantity),
+    )
+    return item
 
 
 def test_dashboard_loads_scan_first_caps_cards_and_refreshes_without_auth():
@@ -299,11 +323,8 @@ def test_dashboard_loads_scan_first_caps_cards_and_refreshes_without_auth():
     }
     empty_summary = _summary(6, 1_800_000_300, count=0)
     empty_summary["house"] = "other-house"
-    no_coverage = _item(4)
-    no_coverage["usable_hours"] = None
-    nonfinite = _item(5)
-    nonfinite["market_units_per_hour"] = float("inf")
-    empty_summary["opportunities"] = [_item(2), _item(3), no_coverage, nonfinite]
+    empty_summary["candidates"] = []
+    empty_summary["opportunities"] = []
     actual = _node(
         f"""
 const calls = [];
@@ -329,7 +350,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const nodes = new Map(["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"].map((id) => [id, new FakeNode("div")]));
+const nodes = new Map(["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"].map((id) => [id, new FakeNode("div")]));
 global.document = {{
   getElementById: (id) => nodes.get(id),
   createElement: (tag) => new FakeNode(tag),
@@ -436,8 +457,8 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, requestSignals, callsAfter
     assert "31s 19c" in actual["rendered2"]["cards"]  # 3,118.5 copper rounds up as an expense.
     assert "Sale proceeds" in actual["rendered2"]["cards"]
     assert "1g 8s 85c" in actual["rendered2"]["cards"]  # 10,885.1 copper rounds down.
-    assert "Net profit if all sell" in actual["rendered2"]["cards"]
-    assert "77s 66c" in actual["rendered2"]["cards"]  # No decimal rounding can hide this profit.
+    assert "Net profit per item" in actual["rendered2"]["cards"]
+    assert "38s 83c" in actual["rendered2"]["cards"]  # Batch profit divided by two output units.
     assert "12.6 units/h" in actual["rendered2"]["cards"]
     assert "24h observed activity" in actual["rendered2"]["cards"]
     assert "5.25 usable h across 8 intervals" in actual["rendered2"]["cards"]
@@ -489,7 +510,7 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, requestSignals, callsAfter
     )
     assert "positive observed activity in the 24-hour window" in actual["emptyTurnover"]["cards"]
     assert actual["emptyTurnover"]["cardClass"] == "panel empty"
-    assert "positive observed activity" in actual["emptyTurnover"]["status"]
+    assert "No strategies meet this minimum net profit per item" in actual["emptyTurnover"]["status"]
     assert "other-house" in actual["emptyTurnover"]["watchState"]
     assert "Price history is warming" in actual["emptyTurnover"]["watchState"]
     assert all(
@@ -616,12 +637,17 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
     return {{ cards: page.nodes.get("opportunities").textContent, counts: page.nodes.get("scan-counts").textContent, source: page.nodes.get("summary-source").textContent, status: page.nodes.get("status").textContent, cachedSweep: JSON.parse(storage.getItem(cacheKey)).summary.sweep_id }};
   }};
   const afterReject = await check(2, "reject");
+  const statusBeforeFilter = page.nodes.get("status").textContent;
+  const sourceBeforeFilter = page.nodes.get("summary-source").textContent;
+  page.nodes.get("minimum-profit").value = "1000";
+  page.nodes.get("minimum-profit").listeners.change();
+  const afterFilter = {{ cards: page.nodes.get("opportunities").textContent, source: page.nodes.get("summary-source").textContent, status: page.nodes.get("status").textContent }};
   const afterInvalid = await check(3, "invalid");
   global.failElementTag = "article";
   const afterRenderError = await check(4, "render");
   global.failElementTag = null;
   const afterEmpty = await check(5, "empty");
-  console.log(JSON.stringify({{ initialCards, afterReject, afterInvalid, afterRenderError, afterEmpty }}));
+  console.log(JSON.stringify({{ initialCards, afterReject, afterFilter, statusBeforeFilter, sourceBeforeFilter, afterInvalid, afterRenderError, afterEmpty }}));
 }})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
 """
     )
@@ -631,11 +657,12 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
         assert "sweep #1" in result["source"].lower()
         assert result["cachedSweep"] == 1
     assert "offline" in actual["afterReject"]["source"]
+    assert "Last successful recommendation" in actual["afterFilter"]["cards"]
+    assert actual["afterFilter"]["source"] == actual["sourceBeforeFilter"]
+    assert actual["afterFilter"]["status"] == actual["statusBeforeFilter"]
     assert "profile" in actual["afterInvalid"]["source"]
     assert "render failed" in actual["afterRenderError"]["source"]
-    assert (
-        "No profitable strategies currently have positive observed activity" in actual["afterEmpty"]["cards"]
-    )
+    assert "No strategies meet this minimum net profit per item" in actual["afterEmpty"]["cards"]
     assert "Last successful recommendation" not in actual["afterEmpty"]["cards"]
     assert actual["afterEmpty"]["cachedSweep"] == 5
 
@@ -969,7 +996,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
 const nodes = new Map(ids.map((id) => [id, new FakeNode()]));
 global.document = {{ getElementById: (id) => nodes.get(id), createElement: (tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode("#text", text) }};
 global.window = {{ setInterval: () => 1 }};
@@ -1050,7 +1077,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
 const nodes = new Map(ids.map((id) => [id, new FakeNode()]));
 global.document = {{ getElementById: (id) => nodes.get(id), createElement: (tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode("#text", text) }};
 let intervalCallback;
@@ -1092,8 +1119,238 @@ def test_page_has_no_token_prompt_session_storage_or_external_runtime_assets():
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "/dashboard/advanced" in html
     assert "localStorage" in html
+    assert re.findall(r'<option value="(\d+)">', html) == ["50", "100", "300", "500", "1000"]
+    assert "Net profit is shown per item" in html
     assert not re.search(
         r"(?:sessionStorage|\.prompt\s*\(|Authorization\s*:|api[_-]?token)", html, re.IGNORECASE
     )
     assert not re.search(r"<script\s+src=|<link[^>]+href=[\"']https?://", html, re.IGNORECASE)
     assert "innerHTML" not in html
+
+
+def test_profit_per_item_thresholds_filter_full_pool_exactly_and_remember_preference():
+    candidates = [
+        _ranked_candidate(1, "250", 5, crafts=2),  # 50c each, across five output units.
+        _ranked_candidate(2, "101", 2),  # 50.5c each.
+        _ranked_candidate(3, "49999/1000", 1),  # Just below 50c.
+        _ranked_candidate(4, "100", 2),  # Exact 50c after multi-output craft.
+        _ranked_candidate(5, "10001/100", 1),  # Just above 1s.
+        _ranked_candidate(6, "299", 1),
+        _ranked_candidate(7, "300", 1),  # Exact 3s.
+        _ranked_candidate(8, "499", 1),
+        _ranked_candidate(9, "500", 1),  # Exact 5s.
+        _ranked_candidate(10, "999", 1),
+        _ranked_candidate(11, "1000", 1),  # Exact 10s.
+        _ranked_candidate(12, "1001", 1),
+        _ranked_candidate(13, "1500", 1),
+        _ranked_candidate(14, "3000", 1),
+        _ranked_candidate(15, "5000", 1),
+    ]
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 21,
+        "finished_epoch": 1_800_001_260,
+        "client_build": "1.60.1.70938",
+    }
+    summary = _summary(21, 1_800_001_260, count=0)
+    summary["candidates"] = candidates
+    summary["opportunities"] = candidates[:10]
+    watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+const calls = [];
+const values = new Map();
+const storage = {{ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) }};
+function reply(value) {{ return {{ ok: true, status: 200, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  calls.push(path);
+  if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply({json.dumps(latest)}));
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(watch)}));
+  return Promise.resolve(reply({json.dumps(summary)}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const page = mountDashboard(storage);
+  await settle();
+  const select = page.nodes.get("minimum-profit");
+  const defaultCopper = page.dashboard.state.minimumProfitCopper;
+  const defaultValue = select.value;
+  const thresholds = [50, 100, 300, 500, 1000];
+  const snapshots = [];
+  for (const threshold of thresholds) {{
+    select.value = String(threshold);
+    select.listeners.change();
+    const cards = page.nodes.get("opportunities").children.map((node) => node.textContent);
+    snapshots.push({{ threshold, count: cards.length, first: cards[0] ?? "", last: cards.at(-1) ?? "", status: page.nodes.get("status").textContent, ranks: cards.map((card, index) => card.includes("#" + (index + 1) + "Rank ")) }});
+  }}
+  const callsAfterFiltering = calls.length;
+  const preference = values.get("crowley.dashboard.minimum-profit-per-item.v1");
+  const reloaded = mountDashboard(storage);
+  await settle();
+  const afterReload = {{ selected: reloaded.nodes.get("minimum-profit").value, count: reloaded.nodes.get("opportunities").children.length, first: reloaded.nodes.get("opportunities").children[0]?.textContent ?? "", summaryCalls: calls.filter((path) => path.endsWith("/trading-summary")).length }};
+  console.log(JSON.stringify({{ defaultCopper, defaultValue, snapshots, callsAfterFiltering, preference, afterReload, callsAfterReload: calls.length }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert actual["defaultCopper"] == 50
+    assert actual["defaultValue"] == "50"
+    snapshots = actual["snapshots"]
+    assert [row["count"] for row in snapshots] == [10, 10, 9, 7, 5]
+    assert "Rank 01" in snapshots[0]["first"] and "Rank 11" in snapshots[0]["last"]
+    assert "Rank 05" in snapshots[1]["first"] and "Rank 14" in snapshots[1]["last"]
+    assert "Rank 07" in snapshots[2]["first"] and "Rank 15" in snapshots[2]["last"]
+    assert "Rank 09" in snapshots[3]["first"] and "Rank 15" in snapshots[3]["last"]
+    assert "Rank 11" in snapshots[4]["first"] and "Rank 15" in snapshots[4]["last"]
+    assert "Showing 10 of up to 10" in snapshots[0]["status"]
+    assert "Showing 9 of up to 10" in snapshots[2]["status"]
+    assert "Showing 5 of up to 10" in snapshots[4]["status"]
+    assert all(all(row["ranks"]) for row in snapshots)
+    assert actual["callsAfterFiltering"] == 3
+    assert actual["preference"] == "1000"
+    assert actual["afterReload"]["selected"] == "1000"
+    assert actual["afterReload"]["count"] == 5
+    assert "Rank 11" in actual["afterReload"]["first"]
+    assert actual["afterReload"]["summaryCalls"] == 1
+    assert actual["callsAfterReload"] == actual["callsAfterFiltering"] + 2
+
+
+def test_fresh_summary_validates_economics_after_the_legacy_top_ten():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 25,
+        "finished_epoch": 1_800_001_500,
+        "client_build": "1.60.1.70938",
+    }
+    summary = _summary(25, 1_800_001_500, count=13)
+    assert len(summary["candidates"]) == 11
+    assert len(summary["opportunities"]) == 10
+    summary["candidates"][10]["profit_per_item"] = "1"
+    actual = _node(
+        f"""
+{_pure_script()}
+let error = "";
+try {{ validateSummary({json.dumps(summary)}, {json.dumps(latest)}); }}
+catch (exception) {{ error = exception instanceof Error ? exception.message : String(exception); }}
+console.log(JSON.stringify({{ error }}));
+"""
+    )
+    assert "profit_per_item does not equal batch profit divided by output quantity" in actual["error"]
+
+
+def test_old_top_ten_cache_stays_limited_until_full_pool_refresh_then_upgrades():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 31,
+        "finished_epoch": 1_800_001_860,
+        "client_build": "1.60.1.70938",
+    }
+    legacy_summary = _summary(31, 1_800_001_860)
+    legacy_summary["opportunities"][0]["name"] = "Legacy saved row"
+    legacy_summary.pop("candidates")
+    for item in legacy_summary["opportunities"]:
+        item.update(quantity=1, crafts=1, cost="100", sale_proceeds="200", profit="100")
+        item.pop("profit_per_item")
+    fresh_summary = _summary(31, 1_800_001_860)
+    fresh_summary["candidates"][0]["name"] = "Fresh full-pool row"
+    latest_watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+const profile = "alchemy225-tailoring150-cap225-budget100000-owned";
+const legacyKey = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
+const currentKey = "crowley.trading-summary.v2.us-normal-alliance.1.60.1.70938." + profile;
+const values = new Map([[legacyKey, JSON.stringify({{ version: 1, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: profile, summary: {json.dumps(legacy_summary)} }})]]);
+const storage = {{ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) }};
+let summaryCalls = 0;
+let releaseSummary;
+function reply(value) {{ return {{ ok: true, status: 200, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply({json.dumps(latest)}));
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(latest_watch)}));
+  summaryCalls += 1;
+  return new Promise((resolve) => {{ releaseSummary = () => resolve(reply({json.dumps(fresh_summary)})); }});
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const page = mountDashboard(storage);
+  await settle();
+  const beforeRefresh = {{ cards: page.nodes.get("opportunities").textContent, source: page.nodes.get("summary-source").textContent, status: page.nodes.get("status").textContent, inFlight: page.dashboard.state.summaryInFlight, summaryCalls }};
+  page.nodes.get("minimum-profit").value = "1000";
+  page.nodes.get("minimum-profit").listeners.change();
+  const limitedNoMatch = {{ cards: page.nodes.get("opportunities").textContent, source: page.nodes.get("summary-source").textContent, status: page.nodes.get("status").textContent }};
+  releaseSummary();
+  await settle();
+  const upgraded = {{ cards: page.nodes.get("opportunities").textContent, source: page.nodes.get("summary-source").textContent, summaryCalls, cache: JSON.parse(values.get(currentKey)) }};
+  const reload = mountDashboard(storage);
+  await settle();
+  const afterReload = {{ cards: reload.nodes.get("opportunities").textContent, source: reload.nodes.get("summary-source").textContent, summaryCalls }};
+  console.log(JSON.stringify({{ beforeRefresh, limitedNoMatch, upgraded, afterReload }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert "Legacy saved row" in actual["beforeRefresh"]["cards"]
+    assert actual["beforeRefresh"]["inFlight"] is True
+    assert actual["beforeRefresh"]["summaryCalls"] == 1
+    assert "limited saved top ten" in actual["beforeRefresh"]["source"]
+    assert "No saved top-ten strategies meet this minimum" in actual["limitedNoMatch"]["cards"]
+    assert "Lower-ranked results are unavailable" in actual["limitedNoMatch"]["cards"]
+    assert actual["limitedNoMatch"]["status"] == actual["beforeRefresh"]["status"]
+    assert "Fresh full-pool row" in actual["upgraded"]["cards"]
+    assert "limited saved top ten" not in actual["upgraded"]["source"]
+    assert actual["upgraded"]["cache"]["version"] == 2
+    assert len(actual["upgraded"]["cache"]["summary"]["candidates"]) == 10
+    assert "Fresh full-pool row" in actual["afterReload"]["cards"]
+    assert actual["afterReload"]["summaryCalls"] == 1
+
+
+def test_v1_bridge_cache_with_full_candidates_is_restored_and_malformed_pool_is_rejected():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 41,
+        "finished_epoch": 1_800_002_460,
+        "client_build": "1.60.1.70938",
+    }
+    bridge_summary = _summary(41, 1_800_002_460)
+    bridge_summary["candidates"][0]["name"] = "Bridge full-pool row"
+    malformed_summary = _summary(41, 1_800_002_460)
+    malformed_summary["candidates"][0]["profit_per_item"] = "1"
+    watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+const profile = "alchemy225-tailoring150-cap225-budget100000-owned";
+const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
+const entry = (summary) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profile, summary }});
+const validValues = new Map([[key, entry({json.dumps(bridge_summary)})]]);
+const badValues = new Map([[key, entry({json.dumps(malformed_summary)})]]);
+const storageFor = (values) => ({{ getItem: (name) => values.get(name) ?? null, setItem: (name, value) => values.set(name, value) }});
+let summaryCalls = 0;
+function reply(value) {{ return {{ ok: true, status: 200, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply({json.dumps(latest)}));
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(watch)}));
+  summaryCalls += 1;
+  return Promise.resolve(reply({json.dumps(_summary(41, 1_800_002_460))}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const valid = mountDashboard(storageFor(validValues));
+  await settle();
+  const restored = {{ complete: valid.dashboard.state.summary?.candidatePoolComplete, cards: valid.nodes.get("opportunities").textContent, source: valid.nodes.get("summary-source").textContent, summaryCalls }};
+  const invalid = mountDashboard(storageFor(badValues));
+  await settle();
+  const recovered = {{ complete: invalid.dashboard.state.summary?.candidatePoolComplete, cards: invalid.nodes.get("opportunities").textContent, summaryCalls }};
+  console.log(JSON.stringify({{ restored, recovered }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert actual["restored"]["complete"] is True
+    assert "Bridge full-pool row" in actual["restored"]["cards"]
+    assert "limited saved top ten" not in actual["restored"]["source"]
+    assert actual["restored"]["summaryCalls"] == 0
+    assert actual["recovered"]["complete"] is True
+    assert actual["recovered"]["summaryCalls"] == 1

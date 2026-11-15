@@ -452,6 +452,7 @@ def _opportunity(
         "deposit_cost": exact_money(listing_deposit),
         "sale_proceeds": exact_money(sale_proceeds),
         "profit": exact_money(profit),
+        "profit_per_item": exact_money(profit / output_quantity),
         "market_units_per_hour": None if activity.rate is None else round(float(activity.rate), 2),
         "volume_status": activity.status,
         "usable_hours": activity.usable_hours,
@@ -479,7 +480,7 @@ def _opportunity(
 
 
 def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
-    """Calculate up to ten positive-margin opportunities from synthetic or loaded inputs."""
+    """Calculate ranked positive-margin candidates and retain the legacy top-ten field."""
 
     House.parse(inputs.house)
     candidates: list[tuple[int, Fraction, Fraction, int, dict[str, Any]]] = []
@@ -511,6 +512,7 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
         profit = Fraction(row["profit"])
         candidates.append((tier, -flow, -profit, recipe.spell_id, row))
     candidates.sort(key=lambda entry: entry[:4])
+    candidate_rows = [entry[4] for entry in candidates]
     return {
         "house": inputs.house,
         "client_build": inputs.client_build,
@@ -525,7 +527,8 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
             "budget_copper": BUDGET_COPPER,
             "recipes_assumed_owned": True,
         },
-        "opportunities": [entry[4] for entry in candidates[:10]],
+        "candidates": candidate_rows,
+        "opportunities": candidate_rows[:10],
         "notes": [
             "The 10 g bankroll and recipe ownership are assumptions; "
             "recipe acquisition and leveling costs are excluded.",

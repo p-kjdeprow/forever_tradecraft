@@ -64,6 +64,8 @@
     .watch-notes { margin: .7rem 0 0; color: var(--muted); font-size: .9rem; }
     .main-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin: 1.2rem 0 .65rem; }
     .profile { color: var(--muted); text-align: right; }
+    .summary-controls { display: flex; align-items: center; gap: .5rem; margin: .45rem 0; }
+    .summary-controls label { font-weight: 650; }
     .summary-note { color: var(--muted); margin: .3rem 0 .9rem; }
     .summary-source { color: var(--muted); margin: .35rem 0 .75rem; min-height: 1.2em; }
     .summary-source.error { color: var(--bad); }
@@ -97,7 +99,7 @@
     .house-change { margin-top: 1rem; color: var(--muted); font-size: .9rem; }
     .house-change summary { display: inline-block; }
     .house-form { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .4rem; }
-    input, button { min-height: 2.3rem; border: 1px solid var(--line); border-radius: .4rem; padding: .35rem .6rem; font: inherit; background: var(--panel); color: var(--text); }
+    input, button, select { min-height: 2.3rem; border: 1px solid var(--line); border-radius: .4rem; padding: .35rem .6rem; font: inherit; background: var(--panel); color: var(--text); }
     button { cursor: pointer; font-weight: 650; }
     button:hover, button:focus-visible, input:focus-visible { border-color: var(--accent); }
     .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
@@ -160,7 +162,17 @@
       </div>
       <div id="profile" class="profile">Alchemy 225 · Tailoring 150 (planning through 225) · 10 g assumed</div>
     </div>
-    <p class="summary-note">If a listed batch sells at its target: proceeds are after the auction house cut; cost includes materials and a 12-hour deposit. Recipe and leveling costs are excluded.</p>
+    <div class="summary-controls">
+      <label for="minimum-profit">Minimum net profit per item</label>
+      <select id="minimum-profit" name="minimum-profit">
+        <option value="50">50c</option>
+        <option value="100">1s</option>
+        <option value="300">3s</option>
+        <option value="500">5s</option>
+        <option value="1000">10s</option>
+      </select>
+    </div>
+    <p class="summary-note">Net profit is shown per item; cost and sale proceeds are batch totals. Profit assumes sale at the target price after the auction house cut. Cost includes materials and a 12-hour deposit; recipe and leveling costs are excluded.</p>
     <div id="status" class="status" role="status" aria-live="polite">Loading market summary…</div>
     <p id="summary-source" class="summary-source" aria-live="polite"></p>
     <section id="opportunities" class="cards" aria-label="Crafting opportunities" aria-live="polite"></section>
@@ -187,11 +199,14 @@
       budget_copper: 100000,
       recipes_assumed_owned: true,
     });
-    const SUMMARY_CACHE_VERSION = 1;
+    const SUMMARY_CACHE_VERSION = 2;
     const SUMMARY_CACHE_PREFIX = "crowley.trading-summary";
     const SUMMARY_TIMEOUT_MS = 60_000;
     const LATEST_TIMEOUT_MS = 30_000;
     const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap225-budget100000-owned";
+    const MIN_PROFIT_THRESHOLDS = [50, 100, 300, 500, 1000];
+    const DEFAULT_MIN_PROFIT_COPPER = 50;
+    const MIN_PROFIT_PREFERENCE_KEY = "crowley.dashboard.minimum-profit-per-item.v1";
     const POLL_MS = 60_000;
     const STALE_SECONDS = 45 * 60;
     const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -234,6 +249,10 @@
       if (copper || (!gold && !silver)) parts.push(`${copper}c`);
       return `${negative ? "−" : ""}${parts.join(" ")}`;
     }
+    function profitMeetsThreshold(value, thresholdCopper) {
+      const amount = exactRational(value, "profit_per_item");
+      return amount.numerator >= BigInt(thresholdCopper) * amount.denominator;
+    }
     function validateLatest(value, expectedHouse) {
       objectValue(value, "latest sweep");
       if (value.house !== expectedHouse) throw new Error("latest sweep belongs to a different house");
@@ -243,6 +262,58 @@
       if (!Number.isFinite(new Date(value.finished_epoch * 1000).getTime())) throw new Error("latest sweep.finished_epoch is invalid");
       if (typeof value.client_build !== "string" || !value.client_build) throw new Error("latest sweep.client_build is invalid");
       return { house: value.house, sweep_id: value.sweep_id, finished_epoch: value.finished_epoch, client_build: value.client_build };
+    }
+    function divideRationalByInteger(value, divisor) {
+      const amount = exactRational(value);
+      const count = BigInt(integerValue(divisor, "output quantity", 1));
+      return `${amount.numerator}/${amount.denominator * count}`;
+    }
+    function positiveKnownActivity(item) {
+      return item.volume_status === "observed_activity" &&
+        typeof item.market_units_per_hour === "number" && Number.isFinite(item.market_units_per_hour) && item.market_units_per_hour > 0 &&
+        typeof item.usable_hours === "number" && Number.isFinite(item.usable_hours) && item.usable_hours > 0 &&
+        Number.isSafeInteger(item.usable_intervals) && item.usable_intervals > 0;
+    }
+    function stableJson(value) {
+      if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+      if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+      return JSON.stringify(value);
+    }
+    function validateOpportunityRows(rawRows, label, { derivePerItem = false } = {}) {
+      if (!Array.isArray(rawRows)) throw new Error(`${label} must be an array`);
+      return rawRows.map((raw, index) => {
+        const itemLabel = `${label}[${index}]`;
+        const item = objectValue(raw, itemLabel);
+        for (const key of ["spell_id", "item_id", "required_skill", "crafts", "price_age_seconds", "cooldown_seconds"]) {
+          if (item[key] !== null) integerValue(item[key], `${itemLabel}.${key}`);
+        }
+        const quantity = integerValue(item.quantity, `${itemLabel}.quantity`, 1);
+        if (typeof item.name !== "string" || !item.name || !["alchemy", "tailoring"].includes(item.profession) || typeof item.skill_note !== "string") throw new Error(`${itemLabel} has invalid identity`);
+        if (typeof item.needs_leveling !== "boolean") throw new Error(`${itemLabel}.needs_leveling is invalid`);
+        if (item.cooldown_group != null && typeof item.cooldown_group !== "string") throw new Error(`${itemLabel}.cooldown_group is invalid`);
+        const unitPrice = exactRational(item.unit_list_price, `${itemLabel}.unit_list_price`);
+        const cost = exactRational(item.cost, `${itemLabel}.cost`);
+        const proceeds = exactRational(item.sale_proceeds, `${itemLabel}.sale_proceeds`);
+        const profit = exactRational(item.profit, `${itemLabel}.profit`);
+        const profitPerItemText = derivePerItem ? divideRationalByInteger(item.profit, quantity) : item.profit_per_item;
+        const profitPerItem = exactRational(profitPerItemText, `${itemLabel}.profit_per_item`);
+        if (unitPrice.numerator < 0n || cost.numerator < 0n || proceeds.numerator < 0n || profit.numerator < 0n || profitPerItem.numerator < 0n) throw new Error(`${itemLabel} contains negative trading amounts`);
+        if ((proceeds.numerator * cost.denominator - cost.numerator * proceeds.denominator) * profit.denominator !== profit.numerator * proceeds.denominator * cost.denominator) throw new Error(`${itemLabel}.profit does not equal proceeds minus cost`);
+        if (profit.numerator * profitPerItem.denominator !== profitPerItem.numerator * profit.denominator * BigInt(quantity)) throw new Error(`${itemLabel}.profit_per_item does not equal batch profit divided by output quantity`);
+        if (typeof item.volume_status !== "string" || typeof item.evidence_label !== "string") throw new Error(`${itemLabel} has invalid evidence`);
+        if (item.usable_hours != null && (typeof item.usable_hours !== "number" || !Number.isFinite(item.usable_hours) || item.usable_hours < 0)) throw new Error(`${itemLabel}.usable_hours is invalid`);
+        if (item.usable_intervals != null) integerValue(item.usable_intervals, `${itemLabel}.usable_intervals`);
+        if (!Array.isArray(item.reagents)) throw new Error(`${itemLabel}.reagents must be an array`);
+        for (const [reagentIndex, rawReagent] of item.reagents.entries()) {
+          const reagent = objectValue(rawReagent, `${itemLabel}.reagents[${reagentIndex}]`);
+          if (typeof reagent.name !== "string" || !reagent.name || !["ah", "vendor"].includes(reagent.source)) throw new Error(`${itemLabel}.reagents[${reagentIndex}] has invalid identity`);
+          integerValue(reagent.quantity, `${itemLabel}.reagents[${reagentIndex}].quantity`, 1);
+          exactRational(reagent.cost, `${itemLabel}.reagents[${reagentIndex}].cost`);
+          if (reagent.bundle_quantity != null) integerValue(reagent.bundle_quantity, `${itemLabel}.reagents[${reagentIndex}].bundle_quantity`, 1);
+        }
+        objectValue(item.requirements, `${itemLabel}.requirements`);
+        return { ...item, quantity, profit_per_item: profitPerItemText };
+      });
     }
     function validateSummary(value, latest) {
       objectValue(value, "trading summary");
@@ -259,42 +330,12 @@
       const profile = objectValue(value.profile, "profile");
       if (Object.keys(DASHBOARD_PROFILE).some((key) => profile[key] !== DASHBOARD_PROFILE[key])) throw new Error("trading summary profile does not match the dashboard profile");
       if (!Array.isArray(value.notes) || value.notes.some((note) => typeof note !== "string")) throw new Error("trading summary notes must be strings");
-      if (!Array.isArray(value.opportunities)) throw new Error("opportunities must be an array");
-      const opportunities = value.opportunities.map((raw, index) => {
-        const item = objectValue(raw, `opportunities[${index}]`);
-        for (const key of ["spell_id", "item_id", "required_skill", "crafts", "quantity", "price_age_seconds", "cooldown_seconds"]) {
-          if (item[key] !== null) integerValue(item[key], `opportunities[${index}].${key}`);
-        }
-        if (typeof item.name !== "string" || !item.name || !["alchemy", "tailoring"].includes(item.profession) || typeof item.skill_note !== "string") throw new Error(`opportunities[${index}] has invalid identity`);
-        if (typeof item.needs_leveling !== "boolean") throw new Error(`opportunities[${index}].needs_leveling is invalid`);
-        if (item.cooldown_group != null && typeof item.cooldown_group !== "string") throw new Error(`opportunities[${index}].cooldown_group is invalid`);
-        const unitPrice = exactRational(item.unit_list_price, `opportunities[${index}].unit_list_price`);
-        const cost = exactRational(item.cost, `opportunities[${index}].cost`);
-        const proceeds = exactRational(item.sale_proceeds, `opportunities[${index}].sale_proceeds`);
-        const profit = exactRational(item.profit, `opportunities[${index}].profit`);
-        if (unitPrice.numerator < 0n || cost.numerator < 0n || proceeds.numerator < 0n || profit.numerator < 0n) throw new Error(`opportunities[${index}] contains negative trading amounts`);
-        if ((proceeds.numerator * cost.denominator - cost.numerator * proceeds.denominator) * profit.denominator !== profit.numerator * proceeds.denominator * cost.denominator) throw new Error(`opportunities[${index}].profit does not equal proceeds minus cost`);
-        if (typeof item.volume_status !== "string" || typeof item.evidence_label !== "string") throw new Error(`opportunities[${index}] has invalid evidence`);
-        if (item.usable_hours != null && (typeof item.usable_hours !== "number" || !Number.isFinite(item.usable_hours) || item.usable_hours < 0)) throw new Error(`opportunities[${index}].usable_hours is invalid`);
-        if (item.usable_intervals != null) integerValue(item.usable_intervals, `opportunities[${index}].usable_intervals`);
-        if (!Array.isArray(item.reagents)) throw new Error(`opportunities[${index}].reagents must be an array`);
-        for (const [reagentIndex, rawReagent] of item.reagents.entries()) {
-          const reagent = objectValue(rawReagent, `opportunities[${index}].reagents[${reagentIndex}]`);
-          if (typeof reagent.name !== "string" || !reagent.name || !["ah", "vendor"].includes(reagent.source)) throw new Error(`opportunities[${index}].reagents[${reagentIndex}] has invalid identity`);
-          integerValue(reagent.quantity, `opportunities[${index}].reagents[${reagentIndex}].quantity`, 1);
-          exactRational(reagent.cost, `opportunities[${index}].reagents[${reagentIndex}].cost`);
-          if (reagent.bundle_quantity != null) integerValue(reagent.bundle_quantity, `opportunities[${index}].reagents[${reagentIndex}].bundle_quantity`, 1);
-        }
-        objectValue(item.requirements, `opportunities[${index}].requirements`);
-        return item;
-      });
-      const measured = opportunities.filter((item) =>
-        item.volume_status === "observed_activity" &&
-        typeof item.market_units_per_hour === "number" && Number.isFinite(item.market_units_per_hour) && item.market_units_per_hour > 0 &&
-        typeof item.usable_hours === "number" && Number.isFinite(item.usable_hours) && item.usable_hours > 0 &&
-        Number.isSafeInteger(item.usable_intervals) && item.usable_intervals > 0
-      );
-      return { ...value, scan: { planned, queried, successful }, opportunities: measured.slice(0, 10) };
+      const candidates = validateOpportunityRows(value.candidates, "candidates");
+      if (candidates.some((item) => !positiveKnownActivity(item))) throw new Error("candidates must contain only positive known-activity rows");
+      const opportunities = validateOpportunityRows(value.opportunities, "opportunities");
+      const top = candidates.slice(0, 10);
+      if (opportunities.length !== top.length || opportunities.some((item, index) => stableJson(item) !== stableJson(top[index]))) throw new Error("opportunities must match the first ten ranked candidates");
+      return { ...value, scan: { planned, queried, successful }, candidates, opportunities, candidatePoolComplete: true };
     }
     function validateCachedSummary(entry, expectedHouse, expectedBuild) {
       objectValue(entry, "cached trading summary");
@@ -303,13 +344,21 @@
       }
       const summary = objectValue(entry.summary, "cached trading summary.summary");
       if (summary.house !== expectedHouse || summary.client_build !== expectedBuild) throw new Error("cached trading summary belongs to a different house or build");
-      const snapshot = validateLatest({
-        house: summary.house,
-        sweep_id: summary.sweep_id,
-        finished_epoch: summary.finished_epoch,
-        client_build: summary.client_build,
-      }, expectedHouse);
+      const snapshot = validateLatest({ house: summary.house, sweep_id: summary.sweep_id, finished_epoch: summary.finished_epoch, client_build: summary.client_build }, expectedHouse);
       return validateSummary(summary, snapshot);
+    }
+    function validateLegacyCachedSummary(entry, expectedHouse, expectedBuild) {
+      objectValue(entry, "legacy cached trading summary");
+      if (entry.version !== 1 || entry.house !== expectedHouse || entry.client_build !== expectedBuild || entry.profile_key !== SUMMARY_PROFILE_KEY) throw new Error("legacy cached trading summary identity does not match this dashboard");
+      const summary = objectValue(entry.summary, "legacy cached trading summary.summary");
+      if (summary.house !== expectedHouse || summary.client_build !== expectedBuild) throw new Error("legacy cached summary identity does not match this dashboard");
+      const snapshot = validateLatest({ house: summary.house, sweep_id: summary.sweep_id, finished_epoch: summary.finished_epoch, client_build: summary.client_build }, expectedHouse);
+      if (own(summary, "candidates")) {
+        return validateSummary(summary, snapshot);
+      }
+      const rows = validateOpportunityRows(summary.opportunities, "legacy opportunities", { derivePerItem: true });
+      if (rows.length > 10 || rows.some((item) => !positiveKnownActivity(item))) throw new Error("legacy cached summary is not a qualified top-ten view");
+      return { ...validateSummary({ ...summary, candidates: rows, opportunities: rows }, snapshot), candidatePoolComplete: false, legacyTopTen: true };
     }
     function scanAge(latest, nowEpoch = Date.now() / 1000) {
       const seconds = Math.max(0, Math.floor(nowEpoch - latest.finished_epoch));
@@ -409,6 +458,7 @@
         generation: 0, summaryGeneration: 0, priceAgeEntries: [], interval: null,
         latestRequest: null, latestRequestId: 0, summaryRequest: null, summaryRequestId: 0,
         summaryErrorMessage: "", latestErrorMessage: "", summaryFromCache: false,
+        minimumProfitCopper: DEFAULT_MIN_PROFIT_COPPER,
         watch: null, watchInFlight: false, watchGeneration: 0,
       };
       const el = (tag, text = "", className = "") => {
@@ -425,16 +475,38 @@
       function summaryCacheKey(house, clientBuild) {
         return `${SUMMARY_CACHE_PREFIX}.v${SUMMARY_CACHE_VERSION}.${encodeURIComponent(house)}.${encodeURIComponent(clientBuild)}.${SUMMARY_PROFILE_KEY}`;
       }
+      function legacySummaryCacheKey(house, clientBuild) {
+        return `${SUMMARY_CACHE_PREFIX}.v1.${encodeURIComponent(house)}.${encodeURIComponent(clientBuild)}.${SUMMARY_PROFILE_KEY}`;
+      }
       function browserStorage() {
         try { return window.localStorage || null; }
         catch (_) { return null; }
       }
-      function readSummaryCache(house, clientBuild) {
+      function readMinimumProfitPreference() {
         try {
-          const storage = browserStorage();
-          if (!storage) return null;
+          const raw = browserStorage()?.getItem(MIN_PROFIT_PREFERENCE_KEY);
+          const value = Number(raw);
+          return MIN_PROFIT_THRESHOLDS.includes(value) ? value : DEFAULT_MIN_PROFIT_COPPER;
+        } catch (_) {
+          return DEFAULT_MIN_PROFIT_COPPER;
+        }
+      }
+      function writeMinimumProfitPreference(value) {
+        try { browserStorage()?.setItem(MIN_PROFIT_PREFERENCE_KEY, String(value)); }
+        catch (_) { /* Storage is optional; the current selection still works. */ }
+      }
+      function readSummaryCache(house, clientBuild) {
+        const storage = browserStorage();
+        if (!storage) return null;
+        try {
           const raw = storage.getItem(summaryCacheKey(house, clientBuild));
-          return raw === null ? null : validateCachedSummary(JSON.parse(raw), house, clientBuild);
+          if (raw !== null) return validateCachedSummary(JSON.parse(raw), house, clientBuild);
+        } catch (_) {
+          // A damaged version two entry must not prevent a version one recovery.
+        }
+        try {
+          const legacy = storage.getItem(legacySummaryCacheKey(house, clientBuild));
+          return legacy === null ? null : validateLegacyCachedSummary(JSON.parse(legacy), house, clientBuild);
         } catch (_) {
           return null;
         }
@@ -452,6 +524,7 @@
         }
       }
       function writeSummaryCache(summary) {
+        if (!summary.candidatePoolComplete || !Array.isArray(summary.candidates)) return false;
         try {
           const storage = browserStorage();
           if (!storage) return false;
@@ -480,7 +553,7 @@
         }
         const summary = state.summary;
         const age = scanAge({ finished_epoch: summary.finished_epoch }).age;
-        const source = `${summary.house} · sweep #${summary.sweep_id} · ${formattedSummaryTime(summary)} · age ${age} · build ${summary.client_build}`;
+        const source = summary.house + " · sweep #" + summary.sweep_id + " · " + formattedSummaryTime(summary) + " · age " + age + " · build " + summary.client_build + (summary.candidatePoolComplete ? "" : " · limited saved top ten");
         let message;
         if (state.summaryRequest) {
           const targetSweep = state.latest?.sweep_id ?? state.summaryRequest.sweepId;
@@ -586,7 +659,7 @@
           metric("Make / list quantity", `${item.crafts} crafts · ${item.quantity} units`),
           metric("Batch cost", safeMoney(item.cost, "ceil")),
           metric("Sale proceeds", safeMoney(item.sale_proceeds, "floor")),
-          metric("Net profit if all sell", safeMoney(item.profit, "floor"), "profit"),
+          metric("Net profit per item", safeMoney(item.profit_per_item, "floor"), "profit"),
           metric("List price each", safeMoney(item.unit_list_price)));
 
         const evidence = el("p", "", "evidence");
@@ -627,11 +700,16 @@
         append(card, title, numbers, evidence, details);
         return card;
       }
-      function renderSummary(summary, { fromCache = false } = {}) {
+      function renderSummary(summary, { fromCache = false, preserveStatus = false, filterChange = false } = {}) {
         const nextPriceAgeEntries = [];
-        const nextCards = summary.opportunities.length === 0
-          ? [el("p", "No profitable strategies currently have positive observed activity in the 24-hour window. Unknown or zero activity remains hidden.", "panel empty")]
-          : summary.opportunities.map((item, index) => renderOpportunity(item, index, summary.finished_epoch, summary.activity_window_hours, nextPriceAgeEntries));
+        const filtered = summary.candidates.filter((item) => profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
+        let emptyMessage = "No strategies meet this minimum net profit per item with positive observed activity in the 24-hour window. Unknown or zero activity remains hidden.";
+        if (!summary.candidatePoolComplete && filtered.length === 0) {
+          emptyMessage = "No saved top-ten strategies meet this minimum. Lower-ranked results are unavailable until the complete candidate pool refreshes.";
+        }
+        const nextCards = filtered.length === 0
+          ? [el("p", emptyMessage, "panel empty")]
+          : filtered.map((item, index) => renderOpportunity(item, index, summary.finished_epoch, summary.activity_window_hours, nextPriceAgeEntries));
         const nextNotes = (summary.notes || []).map((note) => el("span", note));
         const isLatest = summaryMatchesLatest(summary);
 
@@ -641,14 +719,23 @@
         state.priceAgeEntries = nextPriceAgeEntries;
         state.summary = summary;
         state.summaryFromCache = fromCache;
-        state.summaryErrorMessage = "";
-        state.latestErrorMessage = "";
+        if (!preserveStatus) {
+          state.summaryErrorMessage = "";
+          state.latestErrorMessage = "";
+        }
         updatePriceAges();
-        if (!fromCache && isLatest) {
-          if (summary.opportunities.length === 0) setStatus("No profitable strategies with positive observed activity for the latest scan.");
-          else setStatus(`Showing ${summary.opportunities.length} of up to 10 qualifying strategies. Refreshes every 60 seconds when a new scan arrives.`);
-        } else if (fromCache) {
-          setStatus("Showing saved strategy results while checking for a newer scan.");
+        if (!preserveStatus && filterChange) {
+          if (!summary.candidatePoolComplete && filtered.length === 0) setStatus("No saved top-ten strategies meet this minimum; lower-ranked results are unavailable until the complete pool refreshes.");
+          else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item in the candidate pool.");
+          else setStatus("Showing " + filtered.length + " of up to 10 strategies at this minimum.");
+        } else if (!preserveStatus && !fromCache && isLatest) {
+          if (filtered.length === 0 && !summary.candidatePoolComplete) setStatus("Showing a limited saved top-ten view while refreshing the complete candidate pool.");
+          else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item for the latest scan.");
+          else setStatus("Showing " + filtered.length + " of up to 10 strategies at this minimum. Refreshes every 60 seconds when a new scan arrives.");
+        } else if (!preserveStatus && fromCache) {
+          setStatus(summary.candidatePoolComplete
+            ? "Showing saved strategy results while checking for a newer scan."
+            : "Showing a limited saved top-ten view while checking for the complete candidate pool.");
         }
         updateSummarySource();
       }
@@ -920,12 +1007,13 @@
               if (!restoreSummaryCache(house, latest.client_build) && state.summary) clearSummaryDisplay(`No saved strategies for client build ${latest.client_build}; waiting for its summary.`);
             }
             $("scan-counts").replaceChildren(el("span", "Latest query counts load with its strategy summary"));
-            if (!summaryMatchesLatest(state.summary, latest)) void loadSummary(latest, generation);
+            if (summaryMatchesLatest(state.summary, latest)) $("scan-counts").replaceChildren(...countNodes(state.summary.scan));
+            if (!summaryMatchesLatest(state.summary, latest) || !state.summary?.candidatePoolComplete) void loadSummary(latest, generation);
             else {
               $("scan-counts").replaceChildren(...countNodes(state.summary.scan));
               updateSummarySource();
             }
-          } else if (!summaryMatchesLatest(state.summary, latest)) {
+          } else if (!summaryMatchesLatest(state.summary, latest) || !state.summary?.candidatePoolComplete) {
             void loadSummary(latest, generation);
           } else {
             updateSummarySource();
@@ -979,6 +1067,21 @@
         event.preventDefault();
         changeHouse($("house-key").value);
       });
+      state.minimumProfitCopper = readMinimumProfitPreference();
+      $("minimum-profit").value = String(state.minimumProfitCopper);
+      $("minimum-profit").addEventListener("change", () => {
+        const selected = Number($("minimum-profit").value);
+        if (!MIN_PROFIT_THRESHOLDS.includes(selected)) {
+          $("minimum-profit").value = String(state.minimumProfitCopper);
+          return;
+        }
+        state.minimumProfitCopper = selected;
+        writeMinimumProfitPreference(selected);
+        if (state.summary) {
+          const preserveStatus = Boolean(state.latestRequest || state.summaryRequest || state.summaryErrorMessage || state.latestErrorMessage);
+          renderSummary(state.summary, { fromCache: state.summaryFromCache, preserveStatus, filterChange: true });
+        }
+      });
       $("house-key").value = DEFAULT_HOUSE;
       clearSummaryDisplay("Loading market data…");
       restoreSummaryCache(DEFAULT_HOUSE, DEFAULT_CLIENT_BUILD);
@@ -992,7 +1095,7 @@
         pollLatest();
         pollRecipeWatch();
       }, POLL_MS);
-      window.__crowleyTradingDashboardTest = { state, pollLatest, pollRecipeWatch, loadSummary, changeHouse, renderLatest, renderSummary, expireCachedRecipeAlert, validateLatest, validateSummary, validateRecipeWatch, validateCachedSummary, summaryCacheKey, readSummaryCache, writeSummaryCache, restoreSummaryCache, cancelSummaryRequest };
+      window.__crowleyTradingDashboardTest = { state, pollLatest, pollRecipeWatch, loadSummary, changeHouse, renderLatest, renderSummary, expireCachedRecipeAlert, validateLatest, validateSummary, validateRecipeWatch, validateCachedSummary, validateLegacyCachedSummary, profitMeetsThreshold, summaryCacheKey, legacySummaryCacheKey, readSummaryCache, writeSummaryCache, restoreSummaryCache, cancelSummaryRequest };
     })();
   </script>
 </body>

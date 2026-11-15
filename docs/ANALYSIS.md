@@ -176,18 +176,18 @@ uses the current lowest listing.
 ### Trading dashboard
 
 Open deployed `/dashboard` on the loopback server, or forward it from a laptop with
-`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and browse to `http://127.0.0.1:18080/dashboard`. The latest-scan
+`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and browse to `/dashboard`. The latest-scan
 and trading-summary GETs are read-only and do not require an API token; write endpoints continue to require bearer
 authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tailoring 150, while allowing planning
 targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
-The dashboard uses a rolling 24-hour observed-activity window. The deployed server runs source commit
-`3519ddab70947b5562a0025a8321e13627dd742d` on image
-`sha256:59bc3239aab673b1d700dd5adb3aa46dc767d29294cb97d49126aa7f26031da5`; the installed client scan plan and addon
+The dashboard uses a rolling 24-hour observed-activity window. The deployed server uses the local uncommitted
+minimum-turnover patch over `5f2cc0044dbbd03ad2e4daafe9475d3871f862db` on image
+`sha256:bb5dc1fe200cff70f596f80ca1a7798985cf4b7b1fa87a635c5c0efa08e39230`; the installed client scan plan and addon
 remain revision 9.
 
 - latest scan time and planned / queried / successful counts;
-- up to ten profitable strategies only when positive listing depletion is observed in usable intervals in the rolling
+- up to ten profitable strategies only when at least 6 market units/hour of listing depletion is observed in usable intervals in the rolling
   24-hour window, with the rate divided by summed usable hours rather than the full day; batch
   quantity, reagent costs, list price, 12-hour deposit, batch net proceeds and net profit per output item;
 - the measured hours and interval count behind the 24-hour rate, plus reagent and profession-access details;
@@ -199,16 +199,17 @@ scheduled interval: base cadence for hot items and base cadence times `coldSlice
 the item in the cold pool. Both observations must fall inside the 24-hour window. Missing or invalid historical plan
 metadata is an API error; item-kind comparisons also retain their existing plan-change guard. A multi-hour gap beyond
 the recorded schedule is not treated as evidence. There is no full-day minimum or fixed 70% coverage threshold.
-Positive activity with less than six hours of measured data can qualify; zero or unknown evidence is removed before
-the top ten.
+Activity with less than six hours of measured data can qualify if its rate is at least 6 units/hour. The API tests the
+exact rate before rounding, excludes unknown and slower activity before ranking, and accepts exactly six.
 
 The API returns exact `profit_per_item` and the full ranked `candidates` pool; legacy `opportunities` remains the first
 ten. A remembered minimum-profit filter defaults to 50 copper, with 100, 300, 500 and 1,000 copper choices. It uses
 inclusive exact per-item values, filters before the top-ten slice and backfills from lower ranks. Batch costs, deposits,
 sale proceeds and profit remain unchanged and assume all listed output items sell. The v2 cache stores the full pool;
 older v1 snapshots without candidates restore as a limited prior view while the browser refreshes the full pool.
-Valid v1 records already containing candidates are validated and restored as complete pools. Filters trigger no network
-request. These additions leave activity, profile, ranking, budget, warming and recipe-watch behavior unchanged.
+Valid v1 records already containing candidates are validated and restored as complete pools. The browser also applies
+the 6-unit/hour floor to fresh and cached candidates before selecting ten, so older cached slow rows stay hidden.
+Filters trigger no network request.
 
 Ready-now positive-margin strategies with observed activity sort before marked leveling targets. The empty state
 reports that no qualified candidates meet the selected per-item minimum. For a limited v1 cache, it reports only

@@ -41,15 +41,23 @@ Make gold on the WoW Forever auction house with several independently profitable
 Revision 9 remains the installed collector plan for client build 1.60.1.70938 and house `us-normal-alliance`. The
 installed scanner package, generated addon target and `Data.lua` agree on catalog hash
 `0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac` and plan hash
-`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The current HTTP server is source commit
-`3519ddab70947b5562a0025a8321e13627dd742d` on image
-`sha256:59bc3239aab673b1d700dd5adb3aa46dc767d29294cb97d49126aa7f26031da5`; it is a server-only release, and the
+`9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The current HTTP server uses an uncommitted
+minimum-turnover patch over `5f2cc0044dbbd03ad2e4daafe9475d3871f862db` on image
+`sha256:bb5dc1fe200cff70f596f80ca1a7798985cf4b7b1fa87a635c5c0efa08e39230`; it is a server-only release, and the
 collector plan and addon remain revision 9. Earlier initial and retained-summary server images are historical:
 `df71fa2` / `sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d` and
 `be96ac3` / `sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`. The catalog has 974 entries and 807 active
 IDs (403 core, no discovery, 404 cold); all 973 previous entries and all 806 previous active memberships are
 preserved. Slices remain 68/68/67/67/67/67, with 471/471/470/470/470/470 planned queries. Cadence is 900 s, cap
 750 s and depth 20, unchanged from revision 8.
+
+The user requires at least **6 observed market units/hour** for dashboard strategies. The API applies this floor
+to the exact 24-hour activity rate before rounding or ranking; the browser filters fresh and saved rows before
+the profit filter's top-ten slice. Exactly six qualifies. Unknown and slower activity is hidden. This is observed
+market listing depletion, not a forecast of the user's sales. Relevant checks: 59 passing tests. Deployment
+artifacts are in `.archive/minimum-turnover-20261115/`; the prior image
+`sha256:59bc3239aab673b1d700dd5adb3aa46dc767d29294cb97d49126aa7f26031da5` is retained. Changes remain
+uncommitted because committing requires separate authorization.
 
 Historical revision-9 collector qualification is recorded by sweeps 688
 (`us-normal-alliance-1794696666-Dandune-0251`, slice 3) and 689
@@ -73,6 +81,26 @@ ambiguous whole-group disappearances (31 observed depletion units total); these 
 purchases.
 Confirmed sales remain null, and the suggested 1–2 potion pilot is qualitative. The earlier sweep-687 response was
 before the recipe's first query and is historical (`.archive/water-walking-alert-20261114/ops/parent-live-http-initial-proof.json`).
+
+### Network recovery verified, 2026-11-15
+
+The internet outage interrupted sweep 733: 154 of 471 items were queried, 134 successfully; the preceding sweep
+732 was complete. After connectivity returned, the collector's retry state was preserved and reset for one immediate
+normal launcher recovery. Dandune returned to the Stormwind AH with the unchanged revision-9 plan. Sweep 734
+(`us-normal-alliance-1794772798-Dandune-5374`) ran 19:59:58–20:11:03 UTC in 665 s. Its exact 471-item set was
+queried successfully, including all 403 hot IDs; 417 items were priced. It was saved and uploaded, with its ACK
+written. Client-loaded ACK was not independently verified. Scanner and companion remained active and the server
+healthy on the minimum-turnover image above.
+
+All 471 actual cross-outage observation pairs exceeded their historical sampling limits (1,260 s for hot IDs,
+7,560 s for cold IDs) and are excluded from activity. Four additional exact ten-hour cases covering commodity/item
+books and both tiers verified that missing time contributes neither inferred depletion nor zero-volume hours.
+The refreshed summary returned HTTP 200 for sweep 734 with 26 candidates meeting the 6-units/hour floor, output
+quote ages at scan finish of at most 650 s, and 5.248–13.347 usable hours. The recipe watch's recent six-hour potion rate was correctly
+unknown; its daily view retained 13.074 usable hours. Missing history still reduces evidence until collection fills
+the rolling window. Receipts: `.archive/network-recovery-20261115/first-post-outage-sweep.json`,
+`actual-outage-interval-proof.json`, `gap-calculation-proof.json`, `live-strategy-proof.json` and
+`recipe-watch-gap-proof.json`.
 
 ### Historical revision 8 scan plan; two-sweep qualification complete
 
@@ -241,8 +269,8 @@ recipes are owned and ignore recipe-acquisition costs. The 10 g starting budget 
 on a different account; no trading-character, recipe or inventory capture establishes skills, recipe ownership or stock.
 
 The trading dashboard is deployed at `/dashboard` on the healthy loopback server. Open
-`http://127.0.0.1:8080/dashboard` on this host. For laptop access, forward the loopback listener with
-`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open `http://127.0.0.1:18080/dashboard` locally. Its
+`/dashboard` on this host. For laptop access, forward the loopback listener with
+`ssh -N -L 18080:127.0.0.1:8080 <user>@<host>` and open `/dashboard` locally. Its
 latest-scan, trading-summary and recipe-watch GETs are token-free and read-only; write endpoints still require bearer
 authentication. Keep the server on its existing loopback binding. The page defaults to house `us-normal-alliance`
 and shows scan status before strategy results. The strict observed-turnover gate was introduced with server source

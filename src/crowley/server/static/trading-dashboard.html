@@ -65,6 +65,8 @@
     .main-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin: 1.2rem 0 .65rem; }
     .profile { color: var(--muted); text-align: right; }
     .summary-note { color: var(--muted); margin: .3rem 0 .9rem; }
+    .summary-source { color: var(--muted); margin: .35rem 0 .75rem; min-height: 1.2em; }
+    .summary-source.error { color: var(--bad); }
     .status { min-height: 1.45rem; color: var(--muted); }
     .status.error { font-weight: 650; }
     .cards { display: grid; grid-template-columns: 1fr; gap: .75rem; }
@@ -160,6 +162,7 @@
     </div>
     <p class="summary-note">If a listed batch sells at its target: proceeds are after the auction house cut; cost includes materials and a 12-hour deposit. Recipe and leveling costs are excluded.</p>
     <div id="status" class="status" role="status" aria-live="polite">Loading market summary…</div>
+    <p id="summary-source" class="summary-source" aria-live="polite"></p>
     <section id="opportunities" class="cards" aria-label="Crafting opportunities" aria-live="polite"></section>
     <p id="notes" class="notes"></p>
 
@@ -176,6 +179,19 @@
     "use strict";
     /* TRADING PURE LOGIC START */
     const DEFAULT_HOUSE = "us-normal-alliance";
+    const DEFAULT_CLIENT_BUILD = "1.60.1.70938";
+    const DASHBOARD_PROFILE = Object.freeze({
+      alchemy: 225,
+      tailoring: 150,
+      tailoring_planning_cap: 225,
+      budget_copper: 100000,
+      recipes_assumed_owned: true,
+    });
+    const SUMMARY_CACHE_VERSION = 1;
+    const SUMMARY_CACHE_PREFIX = "crowley.trading-summary";
+    const SUMMARY_TIMEOUT_MS = 60_000;
+    const LATEST_TIMEOUT_MS = 30_000;
+    const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap225-budget100000-owned";
     const POLL_MS = 60_000;
     const STALE_SECONDS = 45 * 60;
     const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
@@ -241,7 +257,8 @@
       const successful = integerValue(scan.successful, "scan.successful");
       if (queried > planned || successful > queried) throw new Error("scan counts are inconsistent");
       const profile = objectValue(value.profile, "profile");
-      if (profile.alchemy !== 225 || profile.tailoring !== 150 || profile.tailoring_planning_cap !== 225 || profile.budget_copper !== 100000 || profile.recipes_assumed_owned !== true) throw new Error("trading summary profile does not match the dashboard profile");
+      if (Object.keys(DASHBOARD_PROFILE).some((key) => profile[key] !== DASHBOARD_PROFILE[key])) throw new Error("trading summary profile does not match the dashboard profile");
+      if (!Array.isArray(value.notes) || value.notes.some((note) => typeof note !== "string")) throw new Error("trading summary notes must be strings");
       if (!Array.isArray(value.opportunities)) throw new Error("opportunities must be an array");
       const opportunities = value.opportunities.map((raw, index) => {
         const item = objectValue(raw, `opportunities[${index}]`);
@@ -278,6 +295,21 @@
         Number.isSafeInteger(item.usable_intervals) && item.usable_intervals > 0
       );
       return { ...value, scan: { planned, queried, successful }, opportunities: measured.slice(0, 10) };
+    }
+    function validateCachedSummary(entry, expectedHouse, expectedBuild) {
+      objectValue(entry, "cached trading summary");
+      if (entry.version !== SUMMARY_CACHE_VERSION || entry.house !== expectedHouse || entry.client_build !== expectedBuild || entry.profile_key !== SUMMARY_PROFILE_KEY) {
+        throw new Error("cached trading summary identity does not match this dashboard");
+      }
+      const summary = objectValue(entry.summary, "cached trading summary.summary");
+      if (summary.house !== expectedHouse || summary.client_build !== expectedBuild) throw new Error("cached trading summary belongs to a different house or build");
+      const snapshot = validateLatest({
+        house: summary.house,
+        sweep_id: summary.sweep_id,
+        finished_epoch: summary.finished_epoch,
+        client_build: summary.client_build,
+      }, expectedHouse);
+      return validateSummary(summary, snapshot);
     }
     function scanAge(latest, nowEpoch = Date.now() / 1000) {
       const seconds = Math.max(0, Math.floor(nowEpoch - latest.finished_epoch));
@@ -321,7 +353,7 @@
     function validateRecipeWatch(value, expectedHouse, nowEpoch = Date.now() / 1000) {
       objectValue(value, "recipe watch");
       if (value.watch_id !== "draught-of-water-walking" || value.house !== expectedHouse) throw new Error("recipe watch belongs to a different house or watch");
-      if (value.client_build !== "1.60.1.70938") throw new Error("recipe watch belongs to a different client build");
+      if (value.client_build !== DEFAULT_CLIENT_BUILD) throw new Error("recipe watch belongs to a different client build");
       integerValue(value.as_of_sweep, "recipe watch.as_of_sweep");
       if (typeof value.as_of_epoch !== "number" || !Number.isFinite(value.as_of_epoch) || value.as_of_epoch < 0) throw new Error("recipe watch.as_of_epoch is invalid");
       const recipe = objectValue(value.recipe, "recipe");
@@ -374,7 +406,9 @@
       const $ = (id) => document.getElementById(id);
       const state = {
         house: DEFAULT_HOUSE, latest: null, summary: null, latestInFlight: false, summaryInFlight: false,
-        generation: 0, summaryGeneration: 0, summaryRetryKey: null, priceAgeEntries: [], interval: null,
+        generation: 0, summaryGeneration: 0, priceAgeEntries: [], interval: null,
+        latestRequest: null, latestRequestId: 0, summaryRequest: null, summaryRequestId: 0,
+        summaryErrorMessage: "", latestErrorMessage: "", summaryFromCache: false,
         watch: null, watchInFlight: false, watchGeneration: 0,
       };
       const el = (tag, text = "", className = "") => {
@@ -388,6 +422,95 @@
         $("status").textContent = message;
         $("status").className = isError ? "status error" : "status";
       }
+      function summaryCacheKey(house, clientBuild) {
+        return `${SUMMARY_CACHE_PREFIX}.v${SUMMARY_CACHE_VERSION}.${encodeURIComponent(house)}.${encodeURIComponent(clientBuild)}.${SUMMARY_PROFILE_KEY}`;
+      }
+      function browserStorage() {
+        try { return window.localStorage || null; }
+        catch (_) { return null; }
+      }
+      function readSummaryCache(house, clientBuild) {
+        try {
+          const storage = browserStorage();
+          if (!storage) return null;
+          const raw = storage.getItem(summaryCacheKey(house, clientBuild));
+          return raw === null ? null : validateCachedSummary(JSON.parse(raw), house, clientBuild);
+        } catch (_) {
+          return null;
+        }
+      }
+      function restoreSummaryCache(house, clientBuild) {
+        const cached = readSummaryCache(house, clientBuild);
+        if (!cached) return false;
+        try {
+          renderSummary(cached, { fromCache: true });
+          return true;
+        } catch (_) {
+          clearSummaryDisplay("Saved strategies could not be displayed; loading the latest market data.");
+          setStatus("Could not render saved strategies; loading current data.", true);
+          return false;
+        }
+      }
+      function writeSummaryCache(summary) {
+        try {
+          const storage = browserStorage();
+          if (!storage) return false;
+          const entry = {
+            version: SUMMARY_CACHE_VERSION,
+            house: summary.house,
+            client_build: summary.client_build,
+            profile_key: SUMMARY_PROFILE_KEY,
+            summary,
+          };
+          storage.setItem(summaryCacheKey(summary.house, summary.client_build), JSON.stringify(entry));
+          return true;
+        } catch (_) {
+          return false;
+        }
+      }
+      function formattedSummaryTime(summary) {
+        return new Date(summary.finished_epoch * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+      }
+      function updateSummarySource() {
+        const node = $("summary-source");
+        if (!state.summary) {
+          node.textContent = "";
+          node.className = "summary-source";
+          return;
+        }
+        const summary = state.summary;
+        const age = scanAge({ finished_epoch: summary.finished_epoch }).age;
+        const source = `${summary.house} · sweep #${summary.sweep_id} · ${formattedSummaryTime(summary)} · age ${age} · build ${summary.client_build}`;
+        let message;
+        if (state.summaryRequest) {
+          const targetSweep = state.latest?.sweep_id ?? state.summaryRequest.sweepId;
+          message = `Showing last successful strategies from ${source}; refreshing latest sweep #${targetSweep}.`;
+        } else if (state.summaryErrorMessage) {
+          const targetSweep = state.latest?.sweep_id;
+          message = `Showing last successful strategies from ${source}; refresh${targetSweep ? ` for sweep #${targetSweep}` : ""} failed: ${state.summaryErrorMessage}`;
+        } else if (state.latestErrorMessage) {
+          message = `Showing last successful strategies from ${source}; latest scan refresh failed.`;
+        } else if (!state.latest) {
+          message = `Showing saved strategies from ${source}; checking the latest scan.`;
+        } else if (summary.house === state.latest.house && summary.client_build === state.latest.client_build && summary.sweep_id === state.latest.sweep_id) {
+          message = `${state.summaryFromCache ? "Showing saved strategies for" : "Strategies from"} latest sweep #${summary.sweep_id} · ${formattedSummaryTime(summary)} · age ${age} · build ${summary.client_build}.`;
+        } else {
+          message = `Showing last successful strategies from ${source}; latest scan is sweep #${state.latest.sweep_id}.`;
+        }
+        node.textContent = message;
+        node.className = state.summaryErrorMessage || state.latestErrorMessage ? "summary-source error" : "summary-source";
+      }
+      function clearSummaryDisplay(message) {
+        state.summary = null;
+        state.summaryFromCache = false;
+        state.summaryErrorMessage = "";
+        state.priceAgeEntries = [];
+        $("opportunities").replaceChildren(el("p", message || "Loading market data…", "panel loading"));
+        $("notes").replaceChildren();
+        $("summary-source").textContent = "";
+        $("summary-source").className = "summary-source";
+        $("scan-counts").replaceChildren(el("span", "Latest query counts load with its strategy summary"));
+      }
       function renderLatest(latest) {
         state.latest = latest;
         const time = $("scan-time");
@@ -395,6 +518,7 @@
         time.dateTime = date.toISOString();
         time.textContent = date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
         renderAge();
+        updateSummarySource();
       }
       function renderAge() {
         const node = $("scan-age");
@@ -413,13 +537,12 @@
           }
         }
       }
-      function renderCounts(scan) {
-        const counts = $("scan-counts");
-        counts.replaceChildren();
-        append(counts,
+      function countNodes(scan) {
+        return [
           el("span", `Planned ${scan.planned}`),
           el("span", `Queried ${scan.queried}`),
-          el("span", `Successful ${scan.successful}`));
+          el("span", `Successful ${scan.successful}`),
+        ];
       }
       function metric(label, value, className = "") {
         const box = el("div", "", `metric ${className}`.trim());
@@ -443,7 +566,7 @@
           ? `Cooldown: ${duration} · shared cooldown group: ${item.cooldown_group}`
           : `Cooldown: ${duration}`;
       }
-      function renderOpportunity(item, index, summaryFinishedEpoch, activityWindowHours) {
+      function renderOpportunity(item, index, summaryFinishedEpoch, activityWindowHours, priceAgeEntries) {
         const card = el("article", "", "panel strategy");
         const title = el("div", "", "strategy-head");
         const name = el("div", "", "strategy-name");
@@ -474,9 +597,8 @@
           el("strong", `${activity} units/h`),
           document.createTextNode(` · ${usableHours} usable h across ${item.usable_intervals} intervals · ${item.evidence_label}. Sales are unconfirmed.`));
         const priceAge = el("span", "", "price-age");
-        state.priceAgeEntries.push({ node: priceAge, ageAtScan: item.price_age_seconds, finishedEpoch: summaryFinishedEpoch });
+        priceAgeEntries.push({ node: priceAge, ageAtScan: item.price_age_seconds, finishedEpoch: summaryFinishedEpoch });
         append(evidence, document.createTextNode(" · "), priceAge);
-        updatePriceAges();
 
         const details = el("details");
         append(details, el("summary", "Reagents and access requirements"));
@@ -505,21 +627,30 @@
         append(card, title, numbers, evidence, details);
         return card;
       }
-      function renderSummary(summary) {
-        renderCounts(summary.scan);
-        state.priceAgeEntries = [];
-        const host = $("opportunities");
-        host.replaceChildren();
-        if (summary.opportunities.length === 0) {
-          host.appendChild(el("p", "No profitable strategies currently have positive observed activity in the 24-hour window. Unknown or zero activity remains hidden.", "panel empty"));
-          setStatus("No profitable strategies with positive observed activity for the latest scan.");
-        } else {
-          summary.opportunities.forEach((item, index) => host.appendChild(renderOpportunity(item, index, summary.finished_epoch, summary.activity_window_hours)));
-          setStatus(`Showing ${summary.opportunities.length} of up to 10 qualifying strategies. Refreshes every 60 seconds when a new scan arrives.`);
-        }
-        $("notes").replaceChildren();
-        for (const note of summary.notes || []) $("notes").appendChild(el("span", note));
+      function renderSummary(summary, { fromCache = false } = {}) {
+        const nextPriceAgeEntries = [];
+        const nextCards = summary.opportunities.length === 0
+          ? [el("p", "No profitable strategies currently have positive observed activity in the 24-hour window. Unknown or zero activity remains hidden.", "panel empty")]
+          : summary.opportunities.map((item, index) => renderOpportunity(item, index, summary.finished_epoch, summary.activity_window_hours, nextPriceAgeEntries));
+        const nextNotes = (summary.notes || []).map((note) => el("span", note));
+        const isLatest = summaryMatchesLatest(summary);
+
+        if (isLatest) $("scan-counts").replaceChildren(...countNodes(summary.scan));
+        $("opportunities").replaceChildren(...nextCards);
+        $("notes").replaceChildren(...nextNotes);
+        state.priceAgeEntries = nextPriceAgeEntries;
         state.summary = summary;
+        state.summaryFromCache = fromCache;
+        state.summaryErrorMessage = "";
+        state.latestErrorMessage = "";
+        updatePriceAges();
+        if (!fromCache && isLatest) {
+          if (summary.opportunities.length === 0) setStatus("No profitable strategies with positive observed activity for the latest scan.");
+          else setStatus(`Showing ${summary.opportunities.length} of up to 10 qualifying strategies. Refreshes every 60 seconds when a new scan arrives.`);
+        } else if (fromCache) {
+          setStatus("Showing saved strategy results while checking for a newer scan.");
+        }
+        updateSummarySource();
       }
       function watchDetail(label, value) {
         const row = el("p", "", "watch-detail");
@@ -643,71 +774,178 @@
           if (request === state.watchGeneration) state.watchInFlight = false;
         }
       }
-      async function getJson(path) {
-        const response = await fetch(path);
+      async function getJson(path, options) {
+        const response = options ? await fetch(path, options) : await fetch(path);
         if (!response.ok) throw new Error(`Request failed (${response.status})`);
         return response.json();
       }
+      function currentSummaryRequest(request) {
+        return state.summaryRequest === request && !request.cancelled && request.generation === state.generation && request.house === state.house;
+      }
+      function currentLatestRequest(request) {
+        return state.latestRequest === request && !request.cancelled && request.generation === state.generation && request.house === state.house;
+      }
+      function cancelSummaryRequest(reason) {
+        const request = state.summaryRequest;
+        if (!request) return;
+        request.cancelled = true;
+        if (request.timeoutId !== null) clearTimeout(request.timeoutId);
+        try { request.controller.abort(); } catch (_) { /* The request is already settled. */ }
+        if (request.rejectCancellation) request.rejectCancellation(new Error(reason));
+        if (state.summaryRequest === request) {
+          state.summaryRequest = null;
+          state.summaryInFlight = false;
+          state.summaryGeneration += 1;
+        }
+        updateSummarySource();
+      }
+      function cancelLatestRequest() {
+        const request = state.latestRequest;
+        if (!request) return;
+        request.cancelled = true;
+        if (request.timeoutId !== null) clearTimeout(request.timeoutId);
+        try { request.controller.abort(); } catch (_) { /* The request is already settled. */ }
+        if (request.rejectCancellation) request.rejectCancellation(new Error("Latest scan request superseded."));
+        state.latestRequest = null;
+        state.latestInFlight = false;
+        state.latestRequestId += 1;
+      }
+      function summaryMatchesLatest(summary, latest = state.latest) {
+        return Boolean(summary && latest && summary.house === latest.house && summary.client_build === latest.client_build && summary.sweep_id === latest.sweep_id && summary.finished_epoch === latest.finished_epoch);
+      }
       async function loadSummary(latest, generation) {
-        if (state.summaryInFlight || generation !== state.generation) return;
+        if (generation !== state.generation) return;
+        if (state.summaryRequest && state.summaryRequest.generation === generation && state.summaryRequest.house === latest.house && state.summaryRequest.sweepId === latest.sweep_id && state.summaryRequest.finishedEpoch === latest.finished_epoch && state.summaryRequest.clientBuild === latest.client_build) return;
+        if (state.summaryRequest) cancelSummaryRequest("Strategy request superseded by a newer scan.");
+        const controller = new AbortController();
+        let rejectCancellation;
+        const cancelled = new Promise((_, reject) => { rejectCancellation = reject; });
+        const request = {
+          id: ++state.summaryRequestId,
+          generation,
+          house: latest.house,
+          sweepId: latest.sweep_id,
+          finishedEpoch: latest.finished_epoch,
+          clientBuild: latest.client_build,
+          controller,
+          timeoutId: null,
+          rejectCancellation,
+          cancelled: false,
+        };
+        state.summaryRequest = request;
         state.summaryInFlight = true;
-        const request = ++state.summaryGeneration;
+        state.summaryGeneration = request.id;
+        state.summaryErrorMessage = "";
         setStatus("Loading crafting strategies for the latest scan…");
+        updateSummarySource();
+        const timeout = new Promise((_, reject) => {
+          request.timeoutId = setTimeout(() => {
+            request.timedOut = true;
+            reject(new Error(`Strategy request timed out after ${SUMMARY_TIMEOUT_MS / 1000} seconds`));
+            controller.abort();
+          }, SUMMARY_TIMEOUT_MS);
+        });
         try {
-          const summary = validateSummary(await getJson(`/v1/houses/${encodeURIComponent(state.house)}/trading-summary`), latest);
-          if (generation !== state.generation || request !== state.summaryGeneration || !state.latest) return;
+          const raw = await Promise.race([
+            getJson(`/v1/houses/${encodeURIComponent(latest.house)}/trading-summary`, { signal: controller.signal }),
+            timeout,
+            cancelled,
+          ]);
+          const summary = validateSummary(raw, latest);
+          if (!currentSummaryRequest(request) || !state.latest) return;
           if (summary.sweep_id < state.latest.sweep_id) return;
           if (summary.sweep_id > state.latest.sweep_id) renderLatest({ house: summary.house, sweep_id: summary.sweep_id, finished_epoch: summary.finished_epoch, client_build: summary.client_build });
           renderSummary(summary);
+          if (currentSummaryRequest(request)) writeSummaryCache(summary);
         } catch (error) {
-          if (generation !== state.generation || request !== state.summaryGeneration) return;
-          setStatus(`Could not load crafting strategies: ${error.message}`, true);
+          if (!currentSummaryRequest(request)) return;
+          state.summaryErrorMessage = request.timedOut
+            ? `Request timed out after ${SUMMARY_TIMEOUT_MS / 1000} seconds`
+            : error instanceof Error ? error.message : String(error);
+          setStatus(`Could not load crafting strategies: ${state.summaryErrorMessage}`, true);
           if (!state.summary) $("opportunities").replaceChildren(el("p", "The latest scan is available above. Strategy data will retry when the next scan is checked.", "panel empty"));
+          updateSummarySource();
         } finally {
-          state.summaryInFlight = false;
-          const current = state.latest;
-          const superseded = generation !== state.generation || !current || current.sweep_id !== latest.sweep_id || current.house !== latest.house;
-          if (superseded && current && current.house === state.house && (!state.summary || state.summary.sweep_id !== current.sweep_id)) {
-            const retryKey = `${current.house}:${current.client_build}:${current.sweep_id}`;
-            if (state.summaryRetryKey !== retryKey) {
-              state.summaryRetryKey = retryKey;
-              void loadSummary(current, state.generation);
-            }
+          if (request.timeoutId !== null) clearTimeout(request.timeoutId);
+          if (state.summaryRequest === request) {
+            state.summaryRequest = null;
+            state.summaryInFlight = false;
+            updateSummarySource();
           }
         }
       }
       async function pollLatest() {
-        if (state.latestInFlight) return;
+        if (state.latestRequest && state.latestRequest.generation === state.generation && state.latestRequest.house === state.house) return;
+        if (state.latestRequest) cancelLatestRequest();
+        const controller = new AbortController();
+        let rejectCancellation;
+        const cancelled = new Promise((_, reject) => { rejectCancellation = reject; });
         state.latestInFlight = true;
         const generation = state.generation;
         const house = state.house;
+        const request = {
+          id: ++state.latestRequestId,
+          generation,
+          house,
+          controller,
+          timeoutId: null,
+          rejectCancellation,
+          cancelled: false,
+        };
+        state.latestRequest = request;
+        const timeout = new Promise((_, reject) => {
+          request.timeoutId = setTimeout(() => {
+            request.timedOut = true;
+            reject(new Error(`Latest scan request timed out after ${LATEST_TIMEOUT_MS / 1000} seconds`));
+            controller.abort();
+          }, LATEST_TIMEOUT_MS);
+        });
         try {
-          const latest = validateLatest(await getJson(`/v1/houses/${encodeURIComponent(house)}/sweeps/latest`), house);
-          if (generation !== state.generation || house !== state.house) return;
+          const latest = validateLatest(await Promise.race([
+            getJson(`/v1/houses/${encodeURIComponent(house)}/sweeps/latest`, { signal: controller.signal }),
+            timeout,
+            cancelled,
+          ]), house);
+          if (!currentLatestRequest(request)) return;
           if (state.latest && state.latest.house === house && state.latest.client_build === latest.client_build &&
             (latest.sweep_id < state.latest.sweep_id || (latest.sweep_id === state.latest.sweep_id && latest.finished_epoch < state.latest.finished_epoch))) return;
-          const changed = !state.latest || state.latest.sweep_id !== latest.sweep_id || state.latest.client_build !== latest.client_build;
+          const changed = !state.latest || state.latest.sweep_id !== latest.sweep_id || state.latest.finished_epoch !== latest.finished_epoch || state.latest.client_build !== latest.client_build;
+          state.latestErrorMessage = "";
           renderLatest(latest);
           if (changed) {
-            if (state.summaryInFlight) state.summaryGeneration += 1;
-            state.summary = null;
-            state.summaryRetryKey = null;
-            state.priceAgeEntries = [];
-            $("scan-counts").replaceChildren(el("span", "Query counts load with market summary"));
-            $("opportunities").replaceChildren(el("p", "Loading market data…", "panel loading"));
+            cancelSummaryRequest("Newer scan available.");
+            const cachedIdentityMismatch = state.summary && (state.summary.house !== latest.house || state.summary.client_build !== latest.client_build);
+            const needsBuildCacheLookup = !state.summary && latest.client_build !== DEFAULT_CLIENT_BUILD;
+            if (cachedIdentityMismatch || needsBuildCacheLookup) {
+              if (!restoreSummaryCache(house, latest.client_build) && state.summary) clearSummaryDisplay(`No saved strategies for client build ${latest.client_build}; waiting for its summary.`);
+            }
+            $("scan-counts").replaceChildren(el("span", "Latest query counts load with its strategy summary"));
+            if (!summaryMatchesLatest(state.summary, latest)) void loadSummary(latest, generation);
+            else {
+              $("scan-counts").replaceChildren(...countNodes(state.summary.scan));
+              updateSummarySource();
+            }
+          } else if (!summaryMatchesLatest(state.summary, latest)) {
             void loadSummary(latest, generation);
-          } else if (!state.summary || state.summary.sweep_id !== latest.sweep_id) {
-            void loadSummary(latest, generation);
+          } else {
+            updateSummarySource();
           }
         } catch (error) {
-          if (generation !== state.generation) return;
-          $("scan-age").textContent = `Could not refresh scan: ${error.message}`;
+          if (!currentLatestRequest(request)) return;
+          state.latestErrorMessage = request.timedOut
+            ? `Request timed out after ${LATEST_TIMEOUT_MS / 1000} seconds`
+            : error instanceof Error ? error.message : String(error);
+          $("scan-age").textContent = `Could not refresh scan: ${state.latestErrorMessage}`;
           $("scan-age").className = "scan-state error";
-          if (!state.latest) setStatus(`Could not load the latest scan: ${error.message}`, true);
-          else setStatus(`Scan refresh failed; showing the last loaded scan. ${error.message}`, true);
+          if (!state.latest) setStatus(`Could not load the latest scan: ${state.latestErrorMessage}`, true);
+          else setStatus(`Scan refresh failed; showing the last loaded scan. ${state.latestErrorMessage}`, true);
+          updateSummarySource();
         } finally {
-          state.latestInFlight = false;
-          if (generation !== state.generation) void pollLatest();
+          if (request.timeoutId !== null) clearTimeout(request.timeoutId);
+          if (state.latestRequest === request) {
+            state.latestRequest = null;
+            state.latestInFlight = false;
+          }
         }
       }
       function changeHouse(value) {
@@ -717,13 +955,12 @@
           return;
         }
         if (house === state.house) return;
+        cancelSummaryRequest("Auction house changed.");
+        cancelLatestRequest();
         state.generation += 1;
-        state.summaryGeneration += 1;
         state.house = house;
         state.latest = null;
-        state.summary = null;
-        state.summaryRetryKey = null;
-        state.priceAgeEntries = [];
+        state.latestErrorMessage = "";
         state.watchGeneration += 1;
         state.watchInFlight = false;
         state.watch = null;
@@ -731,11 +968,10 @@
         $("scan-time").dateTime = "";
         $("scan-age").textContent = "";
         $("scan-age").className = "scan-state";
-        $("scan-counts").replaceChildren(el("span", "Query counts load with market summary"));
-        $("opportunities").replaceChildren(el("p", "Loading market data…", "panel loading"));
-        $("notes").replaceChildren();
+        clearSummaryDisplay("Loading market data…");
         showWatchLoading();
         setStatus(`Loading ${house}…`);
+        restoreSummaryCache(house, DEFAULT_CLIENT_BUILD);
         pollLatest();
         pollRecipeWatch();
       }
@@ -744,17 +980,19 @@
         changeHouse($("house-key").value);
       });
       $("house-key").value = DEFAULT_HOUSE;
-      $("opportunities").appendChild(el("p", "Loading market data…", "panel loading"));
+      clearSummaryDisplay("Loading market data…");
+      restoreSummaryCache(DEFAULT_HOUSE, DEFAULT_CLIENT_BUILD);
       pollLatest();
       pollRecipeWatch();
       state.interval = window.setInterval(() => {
         expireCachedRecipeAlert();
         renderAge();
         updatePriceAges();
+        updateSummarySource();
         pollLatest();
         pollRecipeWatch();
       }, POLL_MS);
-      window.__crowleyTradingDashboardTest = { state, pollLatest, pollRecipeWatch, loadSummary, changeHouse, renderLatest, renderSummary, expireCachedRecipeAlert, validateLatest, validateSummary, validateRecipeWatch };
+      window.__crowleyTradingDashboardTest = { state, pollLatest, pollRecipeWatch, loadSummary, changeHouse, renderLatest, renderSummary, expireCachedRecipeAlert, validateLatest, validateSummary, validateRecipeWatch, validateCachedSummary, summaryCacheKey, readSummaryCache, writeSummaryCache, restoreSummaryCache, cancelSummaryRequest };
     })();
   </script>
 </body>

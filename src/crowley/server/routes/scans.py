@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, StrictInt
 from starlette.concurrency import run_in_threadpool
 
 from crowley.advisor import service as advisor_service
+from crowley.analysis.trading_summary import load_trading_summary
 from crowley.core.scanformat import ScanFormatError
 from crowley.store.sweeps import record_probe
 
@@ -42,9 +43,22 @@ async def upload_scan(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SweepConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if result.status == "created" and settings.warm_advice:
-        background_tasks.add_task(_warm_advice, request.app.state.pool, result.house)
+    if result.status == "created":
+        pool = request.app.state.pool
+        background_tasks.add_task(_warm_trading_summary, pool, result.house)
+        if settings.warm_advice:
+            background_tasks.add_task(_warm_advice, pool, result.house)
     return result.__dict__
+
+
+def _warm_trading_summary(pool: Any, house_key: str) -> None:
+    """Warm the shared main-dashboard cache after ingest; failures do not affect the upload."""
+
+    try:
+        with pool.connection() as conn:
+            load_trading_summary(conn, house_key)
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to warm trading summary for house %s", house_key)
 
 
 def _warm_advice(pool: Any, house_key: str) -> None:

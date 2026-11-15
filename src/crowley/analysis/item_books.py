@@ -269,7 +269,6 @@ def load_item_books(
         JOIN market_observations mo ON mo.sweep_id = ms.id AND mo.house_id = ms.house_id
         LEFT JOIN market_captured_rows mcr ON mcr.sweep_id = mo.sweep_id AND mcr.item_id = mo.item_id
         WHERE {" AND ".join(conditions)}
-        ORDER BY mo.item_id, ms.started_at, ms.id, mcr.result_id
         """,
         tuple(parameters),
     ).fetchall()
@@ -346,9 +345,15 @@ def load_item_books(
 
     books: dict[int, list[ItemBook]] = defaultdict(list)
     for (item_id, sweep), entry in grouped.items():
+        ordered_rows = sorted(
+            zip(entry["auctions"], entry["rows"], strict=True),
+            key=lambda pair: pair[0].result_id,
+        )
+        entry["auctions"] = [auction for auction, _ in ordered_rows]
+        entry["rows"] = [row for _, row in ordered_rows]
         entry["observation"]["rows"] = entry["rows"]
         record = {"observation": entry["observation"], "envelope": entry["envelope"]}
         books[item_id].append(ItemBook(entry["t"], item_id, sweep, tuple(entry["auctions"]), record))
     for item_books in books.values():
         item_books.sort(key=lambda book: (book.t, book.sweep_id))
-    return dict(books)
+    return {item_id: books[item_id] for item_id in sorted(books)}

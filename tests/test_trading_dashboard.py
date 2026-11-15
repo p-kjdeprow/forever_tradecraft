@@ -30,6 +30,44 @@ def _pure_script() -> str:
     return script[start:end]
 
 
+def _dashboard_runtime() -> str:
+    return """
+class FakeNode {
+  constructor(tag = "div", text = "") {
+    if (global.failElementTag === tag) throw new Error("render failed");
+    this.tag = tag;
+    this.children = [];
+    this._text = String(text);
+    this.value = "";
+    this.className = "";
+    this.hidden = false;
+    this.dateTime = "";
+    this.listeners = {};
+  }
+  set textContent(value) { this._text = String(value); this.children = []; }
+  get textContent() { return this._text + this.children.map((child) => child.textContent).join(""); }
+  appendChild(child) { this.children.push(child); return child; }
+  append(...children) { this.children.push(...children); }
+  replaceChildren(...children) { this._text = ""; this.children = [...children]; }
+  addEventListener(name, handler) { this.listeners[name] = handler; }
+}
+const mountDashboard = (storage) => {
+  const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+  const nodes = new Map(ids.map((id) => [id, new FakeNode("div")]));
+  global.document = {
+    getElementById: (id) => nodes.get(id),
+    createElement: (tag) => new FakeNode(tag),
+    createTextNode: (text) => new FakeNode("#text", text),
+  };
+  let intervalCallback;
+  let intervalMs;
+  global.window = { localStorage: storage, setInterval: (callback, ms) => { intervalCallback = callback; intervalMs = ms; return 1; } };
+  __DASHBOARD_SCRIPT__
+  return { nodes, dashboard: window.__crowleyTradingDashboardTest, tick: () => intervalCallback(), intervalMs: () => intervalMs };
+};
+""".replace("__DASHBOARD_SCRIPT__", _script())
+
+
 def test_exact_money_rounding_and_stale_scan_model():
     actual = _node(
         f"""
@@ -291,7 +329,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const nodes = new Map(["scan-time", "scan-age", "scan-counts", "status", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"].map((id) => [id, new FakeNode("div")]));
+const nodes = new Map(["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"].map((id) => [id, new FakeNode("div")]));
 global.document = {{
   getElementById: (id) => nodes.get(id),
   createElement: (tag) => new FakeNode(tag),
@@ -331,7 +369,7 @@ await settle();
 latestReply = {json.dumps(latest4)};
 await poll();
 await settle();
-const afterNewScan = {{ summaryPending: pendingSummaries.length, cards: nodes.get("opportunities").textContent }};
+const afterNewScan = {{ summaryPending: pendingSummaries.length, cards: nodes.get("opportunities").textContent, counts: nodes.get("scan-counts").textContent, source: nodes.get("summary-source").textContent }};
 pendingSummaries.shift()({json.dumps(summary3)});
 await settle();
 const retriedForNewest = pendingSummaries.length;
@@ -372,7 +410,8 @@ const emptyTurnover = {{
   watchAlert: nodes.get("recipe-watch-alert").textContent,
   watchContent: nodes.get("recipe-watch-content").textContent,
 }};
-console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep, priceAgeAfterClockAdvance, watchAfterClockAdvance, afterNewScan, retriedForNewest, raced, latestRace, error, emptyTurnover, intervalCallbackRegistered: typeof intervalCallback === "function" }}));
+const requestSignals = calls.map((call) => ({{ path: call.path, hasSignal: Boolean(call.options?.signal) }}));
+console.log(JSON.stringify({{ scanWasFast, rendered2, requestSignals, callsAfterSameSweep, priceAgeAfterClockAdvance, watchAfterClockAdvance, afterNewScan, retriedForNewest, raced, latestRace, error, emptyTurnover, intervalCallbackRegistered: typeof intervalCallback === "function" }}));
 }})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
 """
     )
@@ -425,7 +464,11 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep
     )  # Both independent panels refresh even when the sweep is unchanged.
     assert "Price age ~3 min" in actual["priceAgeAfterClockAdvance"]
     assert "Updated" in actual["watchAfterClockAdvance"]
-    assert actual["afterNewScan"]["summaryPending"] == 1
+    assert actual["afterNewScan"]["summaryPending"] == 2
+    assert "Item 1" in actual["afterNewScan"]["cards"]
+    assert "sweep #2" in actual["afterNewScan"]["source"].lower()
+    assert "latest sweep #4" in actual["afterNewScan"]["source"]
+    assert "query counts load" in actual["afterNewScan"]["counts"].lower()
     assert actual["retriedForNewest"] == 1  # A stale summary is discarded; current sweep is fetched once.
     assert "Sweep #4" in actual["raced"]["scanAge"]
     assert "Newest sweep" in actual["raced"]["cards"]
@@ -449,7 +492,442 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, calls, callsAfterSameSweep
     assert "positive observed activity" in actual["emptyTurnover"]["status"]
     assert "other-house" in actual["emptyTurnover"]["watchState"]
     assert "Price history is warming" in actual["emptyTurnover"]["watchState"]
-    assert all(call.get("options") is None for call in actual["calls"])
+    assert all(
+        call["hasSignal"]
+        for call in actual["requestSignals"]
+        if call["path"].endswith(("/sweeps/latest", "/trading-summary"))
+    )
+    assert all(
+        not call["hasSignal"] for call in actual["requestSignals"] if call["path"].endswith("/recipe-watch")
+    )
+
+
+def test_cached_summary_restores_before_network_and_matching_latest_reuses_its_counts():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 8,
+        "finished_epoch": 1_800_000_060,
+        "client_build": "1.60.1.70938",
+    }
+    summary = _summary(8, 1_800_000_060)
+    summary["opportunities"][0]["name"] = "Saved recommendation"
+    watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+let nowMs = 1_800_000_180_000;
+Date.now = () => nowMs;
+const values = new Map();
+const storage = {{ getItem: (key) => values.has(key) ? values.get(key) : null, setItem: (key, value) => values.set(key, value) }};
+const calls = [];
+function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
+let latestReply = {json.dumps(latest)};
+global.fetch = (path, options) => {{
+  calls.push({{ path, options }});
+  if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply(latestReply));
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(watch)}));
+  return Promise.resolve(reply({json.dumps(summary)}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const first = mountDashboard(storage);
+  await settle();
+  const saved = {{ cards: first.nodes.get("opportunities").textContent, cacheCount: values.size }};
+  let releaseLatest;
+  let latestDeferred = true;
+  global.fetch = (path, options) => {{
+    calls.push({{ path, options }});
+    if (path.endsWith("/sweeps/latest") && latestDeferred) return new Promise((resolve) => {{ releaseLatest = () => resolve(reply(latestReply)); }});
+    if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply(latestReply));
+    if (path.endsWith("/recipe-watch")) return new Promise(() => {{}});
+    throw new Error("matching cached latest must not need a summary request");
+  }};
+  const reloaded = mountDashboard(storage);
+  await settle();
+  const beforeNetwork = {{ cards: reloaded.nodes.get("opportunities").textContent, counts: reloaded.nodes.get("scan-counts").textContent, source: reloaded.nodes.get("summary-source").textContent, latestCalls: calls.filter((call) => call.path.endsWith("/sweeps/latest")).length }};
+  latestDeferred = false;
+  releaseLatest();
+  await settle();
+  const afterLatest = {{ counts: reloaded.nodes.get("scan-counts").textContent, source: reloaded.nodes.get("summary-source").textContent, summaryCalls: calls.filter((call) => call.path.endsWith("/trading-summary")).length }};
+  nowMs += 60_000;
+  reloaded.tick();
+  await settle();
+  const afterClock = {{ cards: reloaded.nodes.get("opportunities").textContent, source: reloaded.nodes.get("summary-source").textContent }};
+  console.log(JSON.stringify({{ saved, beforeNetwork, afterLatest, afterClock }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert actual["saved"]["cacheCount"] == 1
+    assert "Saved recommendation" in actual["beforeNetwork"]["cards"]
+    assert "query counts load" in actual["beforeNetwork"]["counts"].lower()
+    assert "sweep #8" in actual["beforeNetwork"]["source"].lower()
+    assert "age 2 min" in actual["beforeNetwork"]["source"]
+    assert actual["beforeNetwork"]["latestCalls"] == 2
+    assert "Planned 484Queried 484Successful 483" in actual["afterLatest"]["counts"]
+    assert actual["afterLatest"]["summaryCalls"] == 1
+    assert "age 3 min" in actual["afterClock"]["source"]
+    assert "Price age ~4 min" in actual["afterClock"]["cards"]
+
+
+def test_failed_invalid_and_unrenderable_summaries_keep_cards_until_empty_success():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 1,
+        "finished_epoch": 1_800_000_000,
+        "client_build": "1.60.1.70938",
+    }
+    first = _summary(1, 1_800_000_000)
+    first["opportunities"][0]["name"] = "Last successful recommendation"
+    invalid = _summary(3, 1_800_000_120)
+    invalid["profile"]["alchemy"] = 1
+    unrenderable = _summary(4, 1_800_000_180)
+    empty = _summary(5, 1_800_000_240, count=0)
+    watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+let latestReply = {json.dumps(latest)};
+let mode = "first";
+const values = new Map();
+const storage = {{ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) }};
+function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply(latestReply));
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(watch)}));
+  if (mode === "first") return Promise.resolve(reply({json.dumps(first)}));
+  if (mode === "reject") return Promise.reject(new Error("offline"));
+  if (mode === "invalid") return Promise.resolve(reply({json.dumps(invalid)}));
+  if (mode === "render") return Promise.resolve(reply({json.dumps(unrenderable)}));
+  return Promise.resolve(reply({json.dumps(empty)}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const page = mountDashboard(storage);
+  await settle();
+  const initialCards = page.nodes.get("opportunities").textContent;
+  const cacheKey = page.dashboard.summaryCacheKey("us-normal-alliance", "1.60.1.70938");
+  const check = async (sweepId, nextMode) => {{
+    mode = nextMode;
+    latestReply = {{ ...latestReply, sweep_id: sweepId, finished_epoch: 1_800_000_000 + (sweepId - 1) * 60 }};
+    await page.dashboard.pollLatest();
+    await settle();
+    return {{ cards: page.nodes.get("opportunities").textContent, counts: page.nodes.get("scan-counts").textContent, source: page.nodes.get("summary-source").textContent, status: page.nodes.get("status").textContent, cachedSweep: JSON.parse(storage.getItem(cacheKey)).summary.sweep_id }};
+  }};
+  const afterReject = await check(2, "reject");
+  const afterInvalid = await check(3, "invalid");
+  global.failElementTag = "article";
+  const afterRenderError = await check(4, "render");
+  global.failElementTag = null;
+  const afterEmpty = await check(5, "empty");
+  console.log(JSON.stringify({{ initialCards, afterReject, afterInvalid, afterRenderError, afterEmpty }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    for result in (actual["afterReject"], actual["afterInvalid"], actual["afterRenderError"]):
+        assert "Last successful recommendation" in result["cards"]
+        assert "Planned 484Queried 484Successful 483" not in result["counts"]
+        assert "sweep #1" in result["source"].lower()
+        assert result["cachedSweep"] == 1
+    assert "offline" in actual["afterReject"]["source"]
+    assert "profile" in actual["afterInvalid"]["source"]
+    assert "render failed" in actual["afterRenderError"]["source"]
+    assert (
+        "No profitable strategies currently have positive observed activity" in actual["afterEmpty"]["cards"]
+    )
+    assert "Last successful recommendation" not in actual["afterEmpty"]["cards"]
+    assert actual["afterEmpty"]["cachedSweep"] == 5
+
+
+def test_summary_timeout_retries_and_late_response_cannot_clear_new_request():
+    latest1 = {
+        "house": "us-normal-alliance",
+        "sweep_id": 1,
+        "finished_epoch": 1_800_000_000,
+        "client_build": "1.60.1.70938",
+    }
+    latest2 = {**latest1, "sweep_id": 2, "finished_epoch": 1_800_000_060}
+    latest3 = {**latest1, "sweep_id": 3, "finished_epoch": 1_800_000_120}
+    first = _summary(1, 1_800_000_000)
+    first["opportunities"][0]["name"] = "Retained recommendation"
+    stale = _summary(2, 1_800_000_060)
+    stale["opportunities"][0]["name"] = "Late superseded result"
+    current = _summary(3, 1_800_000_120)
+    current["opportunities"][0]["name"] = "Current retry result"
+    watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+let latestReply = {json.dumps(latest1)};
+let summaryCalls = 0;
+const pending = [];
+const timers = new Map();
+let nextTimer = 0;
+global.setTimeout = (callback, ms) => {{ const id = ++nextTimer; timers.set(id, {{ callback, ms }}); return id; }};
+global.clearTimeout = (id) => timers.delete(id);
+function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path, options) => {{
+  if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply(latestReply));
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(watch)}));
+  summaryCalls += 1;
+  if (summaryCalls === 1) return Promise.resolve(reply({json.dumps(first)}));
+  return new Promise((resolve) => pending.push({{ resolve: (value) => resolve(reply(value)), signal: options.signal }}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const page = mountDashboard(null);
+  await settle();
+  latestReply = {json.dumps(latest2)};
+  await page.dashboard.pollLatest();
+  await settle();
+  const beforeTimeout = {{ cards: page.nodes.get("opportunities").textContent, inFlight: page.dashboard.state.summaryInFlight, timeoutMs: [...timers.values()].find((timer) => timer.ms === 60000)?.ms, signalPassed: Boolean(pending[0]?.signal) }};
+  const timeoutTimer = [...timers.entries()].find(([, timer]) => timer.ms === 60000);
+  timers.delete(timeoutTimer[0]);
+  timeoutTimer[1].callback();
+  await settle();
+  const afterTimeout = {{ cards: page.nodes.get("opportunities").textContent, inFlight: page.dashboard.state.summaryInFlight, request: page.dashboard.state.summaryRequest, status: page.nodes.get("status").textContent, signalAborted: pending[0].signal.aborted }};
+  await page.dashboard.pollLatest();
+  await settle();
+  const retryStarted = {{ pending: pending.length, inFlight: page.dashboard.state.summaryInFlight, requestSweep: page.dashboard.state.summaryRequest?.sweepId }};
+  latestReply = {json.dumps(latest3)};
+  await page.dashboard.pollLatest();
+  await settle();
+  const newerStarted = {{ inFlight: page.dashboard.state.summaryInFlight, requestSweep: page.dashboard.state.summaryRequest?.sweepId, pending: pending.length }};
+  pending[1].resolve({json.dumps(stale)});
+  await settle();
+  const afterLateResponse = {{ inFlight: page.dashboard.state.summaryInFlight, requestSweep: page.dashboard.state.summaryRequest?.sweepId, cards: page.nodes.get("opportunities").textContent }};
+  pending[2].resolve({json.dumps(current)});
+  await settle();
+  const afterCurrent = {{ inFlight: page.dashboard.state.summaryInFlight, cards: page.nodes.get("opportunities").textContent, counts: page.nodes.get("scan-counts").textContent }};
+  console.log(JSON.stringify({{ beforeTimeout, afterTimeout, retryStarted, newerStarted, afterLateResponse, afterCurrent }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert actual["beforeTimeout"]["inFlight"] is True
+    assert actual["beforeTimeout"]["timeoutMs"] == 60000
+    assert actual["beforeTimeout"]["signalPassed"] is True
+    assert actual["afterTimeout"]["inFlight"] is False
+    assert actual["afterTimeout"]["request"] is None
+    assert actual["afterTimeout"]["signalAborted"] is True
+    assert "timed out after 60 seconds" in actual["afterTimeout"]["status"]
+    assert "Retained recommendation" in actual["afterTimeout"]["cards"]
+    assert actual["retryStarted"] == {"pending": 2, "inFlight": True, "requestSweep": 2}
+    assert actual["newerStarted"] == {"inFlight": True, "requestSweep": 3, "pending": 3}
+    assert actual["afterLateResponse"]["inFlight"] is True
+    assert actual["afterLateResponse"]["requestSweep"] == 3
+    assert "Retained recommendation" in actual["afterLateResponse"]["cards"]
+    assert actual["afterCurrent"]["inFlight"] is False
+    assert "Current retry result" in actual["afterCurrent"]["cards"]
+    assert "Late superseded result" not in actual["afterCurrent"]["cards"]
+    assert "Planned 484Queried 484Successful 483" in actual["afterCurrent"]["counts"]
+
+
+def test_hung_latest_scan_request_times_out_and_next_poll_retries():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 9,
+        "finished_epoch": 1_800_000_540,
+        "client_build": "1.60.1.70938",
+    }
+    summary = _summary(9, 1_800_000_540)
+    summary["opportunities"][0]["name"] = "Latest retry recommendation"
+    watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+let latestCalls = 0;
+const timers = new Map();
+let nextTimer = 0;
+global.setTimeout = (callback, ms) => {{ const id = ++nextTimer; timers.set(id, {{ callback, ms }}); return id; }};
+global.clearTimeout = (id) => timers.delete(id);
+function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  if (path.endsWith("/sweeps/latest")) {{
+    latestCalls += 1;
+    return latestCalls === 1 ? new Promise(() => {{}}) : Promise.resolve(reply({json.dumps(latest)}));
+  }}
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(watch)}));
+  return Promise.resolve(reply({json.dumps(summary)}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const page = mountDashboard(null);
+  await settle();
+  const beforeTimeout = {{ latestInFlight: page.dashboard.state.latestInFlight, summaryCalls: latestCalls }};
+  const timeoutTimer = [...timers.entries()].find(([, timer]) => timer.ms === 30000);
+  timers.delete(timeoutTimer[0]);
+  timeoutTimer[1].callback();
+  await settle();
+  const afterTimeout = {{ latestInFlight: page.dashboard.state.latestInFlight, error: page.nodes.get("scan-age").textContent, cards: page.nodes.get("opportunities").textContent }};
+  await page.dashboard.pollLatest();
+  await settle();
+  const afterRetry = {{ latestInFlight: page.dashboard.state.latestInFlight, latestCalls, summarySweep: page.dashboard.state.summary?.sweep_id, cards: page.nodes.get("opportunities").textContent, counts: page.nodes.get("scan-counts").textContent, source: page.nodes.get("summary-source").textContent }};
+  console.log(JSON.stringify({{ beforeTimeout, afterTimeout, afterRetry }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert actual["beforeTimeout"] == {"latestInFlight": True, "summaryCalls": 1}
+    assert actual["afterTimeout"]["latestInFlight"] is False
+    assert "timed out after 30 seconds" in actual["afterTimeout"]["error"]
+    assert actual["afterRetry"]["latestInFlight"] is False
+    assert actual["afterRetry"]["latestCalls"] == 2
+    assert actual["afterRetry"]["summarySweep"] == 9
+    assert "Latest retry recommendation" in actual["afterRetry"]["cards"]
+    assert "Planned 484Queried 484Successful 483" in actual["afterRetry"]["counts"]
+
+
+def test_corrupt_profile_mismatched_and_blocked_storage_do_not_block_live_rendering():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 11,
+        "finished_epoch": 1_800_000_660,
+        "client_build": "1.60.1.70938",
+    }
+    summary = _summary(11, 1_800_000_660)
+    summary["opportunities"][0]["name"] = "Live result after bad cache"
+    malformed = {**summary, "notes": {"not": "an array"}}
+    wrong_profile = {
+        "version": 1,
+        "house": "us-normal-alliance",
+        "client_build": "1.60.1.70938",
+        "profile_key": "different-profile",
+        "summary": summary,
+    }
+    watch = _recipe_watch(status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938.alchemy225-tailoring150-cap225-budget100000-owned";
+const malformedStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps({**wrong_profile, "summary": malformed, "profile_key": "alchemy225-tailoring150-cap225-budget100000-owned"})}) : null, setItem: () => {{}} }};
+const mismatchStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps(wrong_profile)}) : null, setItem: () => {{}} }};
+const blockedStorage = new Proxy({{}}, {{ get: () => {{ throw new Error("storage blocked"); }} }});
+function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  if (path.endsWith("/sweeps/latest")) return Promise.resolve(reply({json.dumps(latest)}));
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply({json.dumps(watch)}));
+  return Promise.resolve(reply({json.dumps(summary)}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const results = [];
+  for (const storage of [malformedStorage, mismatchStorage, blockedStorage]) {{
+    const page = mountDashboard(storage);
+    await settle();
+    results.push({{ cards: page.nodes.get("opportunities").textContent, source: page.nodes.get("summary-source").textContent, summarySweep: page.dashboard.state.summary?.sweep_id }});
+  }}
+  console.log(JSON.stringify({{ results }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert len(actual["results"]) == 3
+    for result in actual["results"]:
+        assert "Live result after bad cache" in result["cards"]
+        assert "Wrong cached" not in result["cards"]
+        assert result["summarySweep"] == 11
+        assert "sweep #11" in result["source"].lower()
+
+
+def test_house_build_and_profile_cache_isolation_and_old_house_response_race():
+    default_latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 1,
+        "finished_epoch": 1_800_000_000,
+        "client_build": "1.60.1.70938",
+    }
+    other_latest = {
+        "house": "other-house",
+        "sweep_id": 7,
+        "finished_epoch": 1_800_000_360,
+        "client_build": "1.60.1.70938",
+    }
+    new_build_latest = {
+        **other_latest,
+        "sweep_id": 8,
+        "finished_epoch": 1_800_000_420,
+        "client_build": "1.60.2.70938",
+    }
+    default_summary = _summary(1, 1_800_000_000)
+    default_summary["opportunities"][0]["name"] = "Default house cache"
+    other_summary = _summary(7, 1_800_000_360)
+    other_summary["house"] = "other-house"
+    other_summary["opportunities"][0]["name"] = "Other house cache"
+    wrong_profile_summary = _summary(8, 1_800_000_420)
+    wrong_profile_summary["house"] = "other-house"
+    wrong_profile_summary["client_build"] = "1.60.2.70938"
+    wrong_profile_summary["opportunities"][0]["name"] = "Wrong profile build cache"
+    new_summary = _summary(8, 1_800_000_420)
+    new_summary["house"] = "other-house"
+    new_summary["client_build"] = "1.60.2.70938"
+    new_summary["opportunities"][0]["name"] = "New build live result"
+    default_watch = _recipe_watch(status="awaiting_scan")
+    other_watch = _recipe_watch("other-house", status="awaiting_scan")
+    runtime = _dashboard_runtime()
+    actual = _node(
+        f"""
+const values = new Map();
+const profileKey = "alchemy225-tailoring150-cap225-budget100000-owned";
+const cacheKey = (house, build) => `crowley.trading-summary.v1.${{encodeURIComponent(house)}}.${{encodeURIComponent(build)}}.${{profileKey}}`;
+const cacheEntry = (summary, override = {{}}) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profileKey, summary, ...override }});
+values.set(cacheKey("us-normal-alliance", "1.60.1.70938"), cacheEntry({json.dumps(default_summary)}));
+values.set(cacheKey("other-house", "1.60.1.70938"), cacheEntry({json.dumps(other_summary)}));
+values.set(cacheKey("other-house", "1.60.2.70938"), cacheEntry({json.dumps(wrong_profile_summary)}, {{ profile_key: "wrong-profile" }}));
+const storage = {{ getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) }};
+const latestResolvers = {{}};
+let latestMode = "deferred";
+let releaseNewBuild;
+function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  if (path.endsWith("/sweeps/latest")) {{
+    const house = path.includes("other-house") ? "other-house" : "us-normal-alliance";
+    if (house === "us-normal-alliance" || latestMode === "deferred") return new Promise((resolve) => {{ latestResolvers[house] = () => resolve(reply(house === "other-house" ? {json.dumps(other_latest)} : {json.dumps(default_latest)})); }});
+    return Promise.resolve(reply({json.dumps(new_build_latest)}));
+  }}
+  if (path.endsWith("/recipe-watch")) return Promise.resolve(reply(path.includes("other-house") ? {json.dumps(other_watch)} : {json.dumps(default_watch)}));
+  return new Promise((resolve) => {{ releaseNewBuild = () => resolve(reply({json.dumps(new_summary)})); }});
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{runtime}
+(async () => {{
+  const page = mountDashboard(storage);
+  await settle();
+  const defaultBeforeNetwork = page.nodes.get("opportunities").textContent;
+  page.dashboard.changeHouse("other-house");
+  await settle();
+  const afterHouseSwitch = {{ house: page.dashboard.state.house, cards: page.nodes.get("opportunities").textContent, source: page.nodes.get("summary-source").textContent }};
+  latestResolvers["us-normal-alliance"]();
+  await settle();
+  const afterOldHouseResponse = {{ house: page.dashboard.state.house, summaryHouse: page.dashboard.state.summary?.house, cards: page.nodes.get("opportunities").textContent }};
+  latestResolvers["other-house"]();
+  await settle();
+  latestMode = "build2";
+  await page.dashboard.pollLatest();
+  await settle();
+  const whileNewBuildLoads = {{ cards: page.nodes.get("opportunities").textContent, inFlight: page.dashboard.state.summaryInFlight, requestBuild: page.dashboard.state.summaryRequest?.clientBuild }};
+  releaseNewBuild();
+  await settle();
+  const afterNewBuild = {{ summaryBuild: page.dashboard.state.summary?.client_build, cards: page.nodes.get("opportunities").textContent, counts: page.nodes.get("scan-counts").textContent }};
+  console.log(JSON.stringify({{ defaultBeforeNetwork, afterHouseSwitch, afterOldHouseResponse, whileNewBuildLoads, afterNewBuild }}));
+}})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert "Default house cache" in actual["defaultBeforeNetwork"]
+    assert actual["afterHouseSwitch"]["house"] == "other-house"
+    assert "Other house cache" in actual["afterHouseSwitch"]["cards"]
+    assert "Default house cache" not in actual["afterHouseSwitch"]["cards"]
+    assert "other-house" in actual["afterHouseSwitch"]["source"]
+    assert actual["afterOldHouseResponse"]["house"] == "other-house"
+    assert actual["afterOldHouseResponse"]["summaryHouse"] == "other-house"
+    assert "Default house cache" not in actual["afterOldHouseResponse"]["cards"]
+    assert actual["whileNewBuildLoads"]["inFlight"] is True
+    assert actual["whileNewBuildLoads"]["requestBuild"] == "1.60.2.70938"
+    assert "Other house cache" not in actual["whileNewBuildLoads"]["cards"]
+    assert "Wrong profile build cache" not in actual["whileNewBuildLoads"]["cards"]
+    assert actual["afterNewBuild"]["summaryBuild"] == "1.60.2.70938"
+    assert "New build live result" in actual["afterNewBuild"]["cards"]
 
 
 def test_recipe_watch_house_race_and_failure_are_isolated_from_market_summary():
@@ -491,7 +969,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const ids = ["scan-time", "scan-age", "scan-counts", "status", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
 const nodes = new Map(ids.map((id) => [id, new FakeNode()]));
 global.document = {{ getElementById: (id) => nodes.get(id), createElement: (tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode("#text", text) }};
 global.window = {{ setInterval: () => 1 }};
@@ -572,7 +1050,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const ids = ["scan-time", "scan-age", "scan-counts", "status", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
 const nodes = new Map(ids.map((id) => [id, new FakeNode()]));
 global.document = {{ getElementById: (id) => nodes.get(id), createElement: (tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode("#text", text) }};
 let intervalCallback;
@@ -610,11 +1088,12 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
     assert actual["afterLateResponse"]["cachedAlert"] is False
 
 
-def test_page_has_no_token_prompt_storage_or_external_runtime_assets():
+def test_page_has_no_token_prompt_session_storage_or_external_runtime_assets():
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "/dashboard/advanced" in html
+    assert "localStorage" in html
     assert not re.search(
-        r"(?:localStorage|sessionStorage|\.prompt\s*\(|Authorization\s*:|api[_-]?token)", html, re.IGNORECASE
+        r"(?:sessionStorage|\.prompt\s*\(|Authorization\s*:|api[_-]?token)", html, re.IGNORECASE
     )
     assert not re.search(r"<script\s+src=|<link[^>]+href=[\"']https?://", html, re.IGNORECASE)
     assert "innerHTML" not in html

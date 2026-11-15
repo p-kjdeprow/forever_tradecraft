@@ -87,6 +87,8 @@ Distinguish command submission, an in-game message, saved output (SavedVariables
 acknowledgement, and report the stages actually verified. Check status and actual start time before forcing another
 scan; the configured sweep cap is a maximum, not a wait. Before interpreting payload shapes or depth coverage read
 [crowley-client-contracts](../crowley-client-contracts/SKILL.md).
+Verify receipt paths on disk before linking deployment reports; preserve their exact directories when condensing
+historical notes.
 
 Keep this skill short: correct it when an observed mistake reveals a reusable lesson, and leave out incident logs,
 transient PIDs and coordinates.

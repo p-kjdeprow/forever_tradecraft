@@ -182,14 +182,14 @@ authentication. The page defaults to `us-normal-alliance` and Alchemy 225 / Tail
 targets through Tailoring 225. It renders the latest scan before waiting for the summary. The page shows:
 
 The dashboard uses a rolling 24-hour observed-activity window. The deployed server runs source commit
-`be96ac3d8908beb8f3137f35f0c4ae6dc156498d` on image
-`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`; the installed client scan plan and addon
+`3519ddab70947b5562a0025a8321e13627dd742d` on image
+`sha256:59bc3239aab673b1d700dd5adb3aa46dc767d29294cb97d49126aa7f26031da5`; the installed client scan plan and addon
 remain revision 9.
 
 - latest scan time and planned / queried / successful counts;
 - up to ten profitable strategies only when positive listing depletion is observed in usable intervals in the rolling
   24-hour window, with the rate divided by summed usable hours rather than the full day; batch
-  quantity, reagent costs, list price, 12-hour deposit, net proceeds and if-sold profit;
+  quantity, reagent costs, list price, 12-hour deposit, batch net proceeds and net profit per output item;
 - the measured hours and interval count behind the 24-hour rate, plus reagent and profession-access details;
   unknown, zero, grouped, expired/reposted, out-of-scope or over-gap evidence is excluded;
 - the assumed 10 g budget, recipe-ownership assumption and a link to Advanced research at `/dashboard/advanced`.
@@ -202,23 +202,43 @@ the recorded schedule is not treated as evidence. There is no full-day minimum o
 Positive activity with less than six hours of measured data can qualify; zero or unknown evidence is removed before
 the top ten.
 
+The API returns exact `profit_per_item` and the full ranked `candidates` pool; legacy `opportunities` remains the first
+ten. A remembered minimum-profit filter defaults to 50 copper, with 100, 300, 500 and 1,000 copper choices. It uses
+inclusive exact per-item values, filters before the top-ten slice and backfills from lower ranks. Batch costs, deposits,
+sale proceeds and profit remain unchanged and assume all listed output items sell. The v2 cache stores the full pool;
+older v1 snapshots without candidates restore as a limited prior view while the browser refreshes the full pool.
+Valid v1 records already containing candidates are validated and restored as complete pools. Filters trigger no network
+request. These additions leave activity, profile, ranking, budget, warming and recipe-watch behavior unchanged.
+
 Ready-now positive-margin strategies with observed activity sort before marked leveling targets. The empty state
-explains that no profitable strategies currently have positive observed activity. The page does not suggest items
+reports that no qualified candidates meet the selected per-item minimum. For a limited v1 cache, it reports only
+that no saved top-ten rows match and lower ranks are unavailable until the full pool refreshes. The page does not suggest items
 from asking prices alone. Rows sharing a cooldown group are alternatives; their rates are not additive. Profits
 assume every listed unit sells and are not expected income. Observed listing depletion is not confirmed sales, and
 sale probability remains unknown.
 
-The browser saves the last validated successful summary by house, build and profile, restores it before network
-results, and keeps it visible through new scans, loading, errors and the 60-second summary timeout. Its source sweep/time
-and advancing quote age remain visible, while latest-scan status stays separate; a valid empty success replaces it,
-and identities are never mixed. New scans
-queue shared summary warming before optional advice warming; duplicates do not warm, and logged warm errors do not
-affect uploads. Live proof on sweep 705 returned ten valid rows: 47.487 s cold and 0.006 s cached; served HTML and
-real-JS cache restoration/failure behavior passed. On 608,951 rows, the pinned SQL query improved 3,554→378 ms, while
-full cold summaries improved 48.235→45.599 s; JSON book loading remains the dominant work, so the full request is not
-9× faster. Proofs: `.archive/strategy-retention-20261114/ops/parent-live-proof.json`,
+The browser restores last-success recommendations by house/build/profile before network results, retains their source
+sweep/time and advancing age on errors or timeout, and keeps latest-scan status separate. Valid empty success replaces
+them; identities are not mixed. New scans warm the shared summary cache before optional advice warming; duplicates do
+not warm and logged warm errors do not affect uploads.
+
+**Current live proof, sweep 722.** The current server returned 69 fully qualified candidates while preserving the
+legacy top ten; all per-item values were exact and all candidates had positive known activity. Served HTML matched the
+wheel. Live JavaScript verified the five thresholds, backfilled 2/2/5/5/7 lower-ranked rows at 50/100/300/500/1,000
+copper, made zero requests for filtering, restored the selected filter across reload and kept cards/status through a
+failed refresh and filter change. The first post-restart summary took 49.264 s; no calculation-speedup claim is made.
+Recipe watch returned HTTP 200. The server-only deployment preserved the native plan and dependencies and left the DB,
+scanner and companion unchanged. Proofs: `.archive/profit-per-item-20261115/ops/parent-live-proof.json`,
+`server-only-deploy-proof.json` and `parent-artifact-proof.json`.
+
+The pinned sweep-703 SQL profile covered 608,951 rows: removing the global sort reduced that query from 3,554 ms to
+378 ms, while full uncached summaries changed from 48.235 s to 45.599 s. The whole request is not 9× faster. Proofs:
 `.archive/strategy-retention-20261114/parent-query-proof.json` and
 `.archive/strategy-retention-20261114/parent-full-summary-proof.json`.
+
+**Historical retained-summary release, sweep 705.** Its first uncached request took 47.487 s and the repeat cache hit
+took 0.006 s; that response exposed only the then-current top ten. It predates the full-candidate filter release.
+Proof: `.archive/strategy-retention-20261114/ops/parent-live-proof.json`.
 
 **Historical live HTTP check, sweep 597.** Source commit `a0c533c9fd9846fef4d8bb680b510825bfff75cb` and image
 `sha256:3f078b72b0f322cc1efd48c40d40ec4c7de050c145aa80e308ba4922995f5738` returned HTTP 200 for house
@@ -247,9 +267,11 @@ but sweep 583 remained the latest accepted sweep. Source details are in `.archiv
 #### Water-walking watch (live; initial server receipts historical)
 
 The token-free, read-only `GET /v1/houses/{key}/recipe-watch` endpoint and `/dashboard` panel remain live on current
-server source `be96ac3d8908beb8f3137f35f0c4ae6dc156498d`, image
-`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`; the client plan/addon remain revision 9.
-The current watch returned HTTP 200 (`parent-live-proof.json`). The original revision-9 server deployment used
+server source `3519ddab70947b5562a0025a8321e13627dd742d`, image
+`sha256:59bc3239aab673b1d700dd5adb3aa46dc767d29294cb97d49126aa7f26031da5`; the client plan/addon remain revision 9.
+The current watch returned HTTP 200 (`parent-live-proof.json`). Previous server releases included the retained-summary
+image `sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1` and the initial revision-9 server
+deployment used
 source `df71fa2ac81d73353fc988ca19e9ba3510235b16` / image
 `sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`; its sweep and watch receipts below are
 historical. The later server-only update did not change the native plan.

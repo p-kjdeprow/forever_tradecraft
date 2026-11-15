@@ -1,6 +1,6 @@
 # Forever Tradecraft handoff
 
-Updated 2026-11-14. Current state, rules, decisions and open follow-ups. History lives in git
+Updated 2026-11-15. Current state, rules, decisions and open follow-ups. History lives in git
 (tag `pre-simplify` is the last commit with the old session stack).
 Technical reference: [ARCHITECTURE.md](ARCHITECTURE.md) (including the client assumptions table).
 Operator guide: [REPEATING_SCANS.md](REPEATING_SCANS.md).
@@ -34,7 +34,7 @@ Make gold on the WoW Forever auction house with several independently profitable
   `$XDG_CONFIG_HOME/crowley/secrets.env`. Stage explicit files only; never `git add .`.
 - Origin: https://github.com/p-kjdeprow/forever_tradecraft.
 
-## Host state snapshot (2026-11-14)
+## Host state snapshot (2026-11-15)
 
 ### Revision 9 deployed scan plan; two-sweep cadence qualification passed
 
@@ -42,10 +42,11 @@ Revision 9 remains the installed collector plan for client build 1.60.1.70938 an
 installed scanner package, generated addon target and `Data.lua` agree on catalog hash
 `0891207de314c2458def42d5827e5aefcb3279f0d0fe716f3a629f0ee226cdac` and plan hash
 `9b9fe00c52ff65933c2a2e95bb4023eaae1fe40666efadceaa45aa132eba4164`. The current HTTP server is source commit
-`be96ac3d8908beb8f3137f35f0c4ae6dc156498d` on image
-`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`; this server-only release followed the
-initial revision-9 server on `df71fa2` / `sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d`.
-The collector plan and addon remain revision 9. The catalog has 974 entries and 807 active
+`3519ddab70947b5562a0025a8321e13627dd742d` on image
+`sha256:59bc3239aab673b1d700dd5adb3aa46dc767d29294cb97d49126aa7f26031da5`; it is a server-only release, and the
+collector plan and addon remain revision 9. Earlier initial and retained-summary server images are historical:
+`df71fa2` / `sha256:28afedd954e419393d2a29ce8ff30b11ff54fe150aa04ac51d960b58b18f7c2d` and
+`be96ac3` / `sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`. The catalog has 974 entries and 807 active
 IDs (403 core, no discovery, 404 cold); all 973 previous entries and all 806 previous active memberships are
 preserved. Slices remain 68/68/67/67/67/67, with 471/471/470/470/470/470 planned queries. Cadence is 900 s, cap
 750 s and depth 20, unchanged from revision 8.
@@ -247,8 +248,8 @@ authentication. Keep the server on its existing loopback binding. The page defau
 and shows scan status before strategy results. The strict observed-turnover gate was introduced with server source
 commit `58a8206` (image `5aef916d9cde916301e924e2dc22b8bd7a31d82e31ce0581060b337f3b552e27`); deployed revision 9
 preserved the positive observed-turnover policy. The current server uses source commit
-`be96ac3d8908beb8f3137f35f0c4ae6dc156498d`, image
-`sha256:06fc81f8c9a4e08225e318387a9e733f67d417ba6e1f4a28941fc0f1f0a500e1`, and a rolling 24-hour observed-activity
+`3519ddab70947b5562a0025a8321e13627dd742d`, image
+`sha256:59bc3239aab673b1d700dd5adb3aa46dc767d29294cb97d49126aa7f26031da5`, and a rolling 24-hour observed-activity
 window instead of the former fixed 2-hour/6-hour gate. It sums usable interval hours rather than treating missing
 time as zero. Each pair uses the larger cadence recorded in its immutable sweep plans (base cadence for hot items,
 multiplied by `coldSlices` for cold items), with 1.4 tolerance; both endpoints must be inside the window. Missing or
@@ -257,9 +258,19 @@ comparisons also retain their plan-change, repost and owner-continuity guards. T
 There is no full-day or 70% coverage minimum; positive evidence with short measured history can qualify,
 while unknown and zero activity remain excluded before the top ten. Candidate recipes remain dynamic; there is no
 five-recipe whitelist. The page reports observed listing depletion, not confirmed sales. Strategy rows show batch
-cost, if-sold net proceeds and profit, list price, activity rate plus measured hours and interval count, reagents and
-access requirements. Shared cooldown rows are alternatives, not a combined portfolio forecast. The page links to
+cost, net proceeds if all outputs sell, net profit per output item, list price, activity rate plus measured
+hours and interval count, reagents and access requirements. Shared cooldown rows are alternatives, not a combined
+portfolio forecast. The page links to
 the prior research UI at `/dashboard/advanced`.
+
+The summary API adds exact `profit_per_item` (batch profit divided by total output quantity) and the complete ranked
+`candidates` pool; legacy `opportunities` remains the first ten candidates. A remembered minimum-profit filter defaults
+to 50 copper and offers 50, 100, 300, 500 or 1,000 copper. It compares exact per-item values inclusively, filters
+before taking the top ten and backfills from lower-ranked candidates. Costs, deposits, sale proceeds and batch profit
+remain batch totals under the existing 24-hour activity, ranking, profile and budget rules; profit still assumes sale.
+The full pool is cached in a version-2 browser record. Version-1 snapshots without candidates restore as a limited
+old view while a full-pool refresh is forced; valid version-1 records already containing candidates restore as complete
+pools. Both paths preserve prior recommendations. Filter changes need no network request.
 
 The browser saves the last successful, validated recommendations by house, client build and profile, and restores
 that matching snapshot before a network response. It keeps recommendations visible through a new scan, loading,
@@ -271,19 +282,25 @@ remains independent. Each
 newly created scan queues a main-summary warm before optional advanced-advice warming. Duplicate uploads do not queue
 work, and a logged warm failure does not affect upload or prevent advice warming.
 
-**Current live dashboard verification.** The deployed server returned HTTP 200 with ten positive known-activity rows
-for sweep 705. The first uncached request took 47.487 s and a repeat cache hit took 0.006 s. Served HTML matched the
-wheel; a Node check restored ten cached cards before the network response and preserved them through a controlled
-refresh failure. Recipe watch returned HTTP 200. The server-only deployment left the database container and
-scanner/companion processes unchanged and preserved the native revision-9 plan. Proof:
-`.archive/strategy-retention-20261114/ops/parent-live-proof.json`,
-`server-only-deploy-proof.json` and `parent-artifact-proof.json`.
+**Current live dashboard verification.** The deployed server returned sweep 722 with 69 fully qualified candidates;
+legacy `opportunities` remains the original top ten. All rows had positive known activity and exact per-item values.
+The first post-restart summary took 49.264 s. Served HTML matched the wheel; live JavaScript verified all five threshold
+filters, backfill beyond the original ten (2/2/5/5/7 matching rows at 50/100/300/500/1,000 copper), zero filter
+requests, remembered preference across reload, and retained cards/source status across a failed refresh and subsequent
+filter change. Recipe watch returned HTTP 200. The database container and scanner/companion processes were unchanged;
+the native revision-9 plan and dependencies were unchanged. Proofs:
+`.archive/profit-per-item-20261115/ops/parent-live-proof.json`, `server-only-deploy-proof.json` and
+`parent-artifact-proof.json`.
 
 The SQL profile on pinned sweep 703 covered 608,951 rows: removing the global sort reduced that query from 3,554 ms
 with a 634,440 KiB temporary disk sort to 378 ms without temporary I/O. The full uncached summary improved from
 48.235 s to 45.599 s in a fresh-process comparison, with an exactly equal response. The item-book query improvement
 does not make the whole calculation 9× faster. Proofs: `parent-query-proof.json` and
 `parent-full-summary-proof.json` in `.archive/strategy-retention-20261114/`.
+
+**Historical retained-summary release verification, sweep 705.** That server returned ten positive known-activity rows
+with batch-profit totals. Its 47.487 s uncached and 0.006 s cached measurements are historical, not current. Proof:
+`.archive/strategy-retention-20261114/ops/parent-live-proof.json`.
 
 **Historical 24-hour dashboard check, sweep 597.** The API returned HTTP 200 with ten positive known-activity rows;
 the page showed the 24-hour window, measured hours and interval counts. The profile remained Alchemy 225 / Tailoring

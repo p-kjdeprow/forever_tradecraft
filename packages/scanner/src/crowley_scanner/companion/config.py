@@ -152,7 +152,8 @@ def _secret_token(path: Path) -> SecretStr:
     raise ValueError("CROWLEY_API_TOKEN is missing from the environment and secrets.env")
 
 
-def load_settings(path: str | Path | None = None) -> CompanionSettings:
+def load_scanner_config(path: str | Path | None = None) -> ScannerConfig:
+    """Load public scanner settings without reading companion credentials."""
     source = config_path() if path is None else Path(path)
     try:
         with source.open("rb") as stream:
@@ -171,6 +172,12 @@ def load_settings(path: str | Path | None = None) -> CompanionSettings:
             f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}" for item in exc.errors()
         )
         raise ValueError(f"scanner config is invalid: {details}") from exc
+    return config
+
+
+def load_settings(path: str | Path | None = None) -> CompanionSettings:
+    source = config_path() if path is None else Path(path)
+    config = load_scanner_config(source)
     return CompanionSettings(**config.model_dump(), api_token=_secret_token(source))
 
 
@@ -186,4 +193,11 @@ def render_scanner_toml(config: ScannerConfig) -> str:
     return "\n".join(rows) + "\n"
 
 
-__all__ = ["CompanionSettings", "ScannerConfig", "config_path", "load_settings", "render_scanner_toml"]
+__all__ = [
+    "CompanionSettings",
+    "ScannerConfig",
+    "config_path",
+    "load_scanner_config",
+    "load_settings",
+    "render_scanner_toml",
+]

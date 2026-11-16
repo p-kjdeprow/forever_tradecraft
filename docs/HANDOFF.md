@@ -23,6 +23,12 @@ reviews after Luna implementation/fix loops. The canonical source is in packages
 the old src/crowley and root addon/deploy resource copies are removed. Installed addons are
 copies, not links, and this work did not deploy packages or change running services.
 
+The next feature is the [continuous seller](SELLER_PLAN.md), currently planning only. The user
+requires small posting batches, 60-second market checks, always matching price without undercutting,
+and recycling only the managed active listings for the exact item that runs out of bag stock.
+Native priority observations, durable selling-session authorization and selective return collection
+are planned extensions, not capabilities of the current released automation CLI.
+
 Before this refactor, the deployed scanner used catalog revision 9 on Forever build 70938,
 interface 16001. Its periodic scan plan is unchanged by this task. The dashboard's minimum-turnover
 patch was already deployed over 5f2cc00, image

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import binascii
 import json
+import math
 import re
 import struct
 import zlib
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from .scanformat import ScanFormatError, validate_item_key
 
 MAGIC = b"CRS1"
 VERSION = 1
@@ -173,10 +176,12 @@ def _frame_header(value: Any, expected_kind: FrameKind | None) -> tuple[dict[str
     return value, kind
 
 
-def _base(value: dict[str, Any], kind: FrameKind, expected_fields: set[str]) -> tuple[str, int, int, int]:
+def _base(
+    value: dict[str, Any], kind: FrameKind, expected_fields: set[str], *, schema_version: int = 1
+) -> tuple[str, int, int, int]:
     top = _keys(value, expected_fields, "snapshot")
-    if _integer(top["schema"], "schema", minimum=1, maximum=1) != 1:
-        raise _error("schema", "must be 1")
+    if _integer(top["schema"], "schema", minimum=schema_version, maximum=schema_version) != schema_version:
+        raise _error("schema", f"must be {schema_version}")
     if top["kind"] != kind:
         raise _error("kind", f"must be {kind}")
     boot = _string(top["boot"], "boot", limit=128)
@@ -333,16 +338,32 @@ def _validate_automation(value: dict[str, Any]) -> Snapshot:
         "auctioneer",
         "blockingUI",
         "chatEdit",
+        "goldCopper",
+        "operation",
+        "inspection",
+        "motion",
+        "mailOpen",
+        "ownership",
     }
-    boot, sequence, wall_time, uptime_ms = _base(value, "automation", top_fields)
+    boot, sequence, wall_time, uptime_ms = _base(value, "automation", top_fields, schema_version=2)
     context = _keys(
         value["context"],
-        {"addonVersion", "interface", "clientBuild", "character", "realm", "playerFaction", "zone"},
+        {
+            "addonVersion",
+            "interface",
+            "clientBuild",
+            "character",
+            "realm",
+            "playerFaction",
+            "zone",
+            "nativeRegion",
+        },
         "context",
     )
     for field in ("addonVersion", "clientBuild", "character", "realm", "playerFaction"):
         _string(context[field], f"context.{field}", limit=128)
     _integer(context["interface"], "context.interface", minimum=1)
+    _integer(context["nativeRegion"], "context.nativeRegion", minimum=1, maximum=MAX_U32)
     _string(context["zone"], "context.zone", empty=True, limit=128)
     _boolean(value["ahOpen"], "ahOpen")
 
@@ -403,7 +424,293 @@ def _validate_automation(value: dict[str, Any]) -> Snapshot:
         raise _error("chatEdit.focused", "cannot be true when chat is inactive")
     if len(text.encode("utf-8")) > 128:
         raise _error("chatEdit.text", "UTF-8 value is too long")
+    _integer(value["goldCopper"], "goldCopper", maximum=9_007_199_254_740_991)
+
+    operation = _keys(
+        value["operation"],
+        {"batchId", "ordinal", "stepIndex", "expiresAt", "action", "ready", "error", "buttonRect", "receipt"},
+        "operation",
+    )
+    batch_id = _string(operation["batchId"], "operation.batchId", empty=True, limit=64)
+    if batch_id and not re.fullmatch(r"[0-9a-f]{64}", batch_id):
+        raise _error("operation.batchId", "must be empty or a lowercase SHA256 digest")
+    ordinal = _integer(operation["ordinal"], "operation.ordinal")
+    step_index = _integer(operation["stepIndex"], "operation.stepIndex")
+    expires_at = _integer(operation["expiresAt"], "operation.expiresAt")
+    ready = _boolean(operation["ready"], "operation.ready")
+    operation_error = _string(operation["error"], "operation.error", empty=True, limit=128)
+    action = operation["action"]
+    if action is not False:
+        _validate_native_action(action)
+    if not batch_id:
+        if action is not False or ordinal or step_index or expires_at or ready:
+            raise _error("operation", "idle action must have empty identity and no ready state")
+    elif action is False or expires_at == 0:
+        raise _error("operation", "staged operation requires an action and expiry")
+    if ready and (not batch_id or operation_error or expires_at <= wall_time):
+        raise _error("operation.ready", "ready operation requires a live staged identity")
+    button = _keys(operation["buttonRect"], {"x", "y", "width", "height"}, "operation.buttonRect")
+    button_x = _integer(button["x"], "operation.buttonRect.x", maximum=32_767)
+    button_y = _integer(button["y"], "operation.buttonRect.y", maximum=32_767)
+    button_width = _integer(button["width"], "operation.buttonRect.width", minimum=1, maximum=2_048)
+    button_height = _integer(button["height"], "operation.buttonRect.height", minimum=1, maximum=2_048)
+    if button_x + button_width > 32_768 or button_y + button_height > 32_768:
+        raise _error("operation.buttonRect", "button rectangle exceeds the coordinate limit")
+    receipt = _keys(
+        operation["receipt"],
+        {
+            "sequence",
+            "batchId",
+            "ordinal",
+            "stepIndex",
+            "callbackDelivered",
+            "postcondition",
+            "actionComplete",
+            "detail",
+        },
+        "operation.receipt",
+    )
+    receipt_sequence = _integer(receipt["sequence"], "operation.receipt.sequence")
+    receipt_batch = _string(receipt["batchId"], "operation.receipt.batchId", empty=True, limit=64)
+    receipt_ordinal = _integer(receipt["ordinal"], "operation.receipt.ordinal")
+    receipt_step = _integer(receipt["stepIndex"], "operation.receipt.stepIndex")
+    for field in ("callbackDelivered", "postcondition", "actionComplete"):
+        if type(receipt[field]) is not bool and receipt[field] != "unknown":
+            raise _error(f"operation.receipt.{field}", "must be boolean or 'unknown'")
+    _string(receipt["detail"], "operation.receipt.detail", empty=True, limit=240)
+    if receipt_sequence == 0:
+        if (
+            receipt_batch
+            or receipt_ordinal
+            or receipt_step
+            or any(
+                receipt[field] != "unknown"
+                for field in ("callbackDelivered", "postcondition", "actionComplete")
+            )
+        ):
+            raise _error("operation.receipt", "empty receipt must use unknown outcomes and empty identity")
+    elif not re.fullmatch(r"[0-9a-f]{64}", receipt_batch):
+        raise _error("operation.receipt.batchId", "published receipt requires a lowercase SHA256 digest")
+
+    inspection = _keys(value["inspection"], {"kind", "page", "rows", "hasMore", "error"}, "inspection")
+    inspection_kind = inspection["kind"]
+    if inspection_kind not in {"none", "inventory", "owned", "mail"}:
+        raise _error("inspection.kind", "invalid inspection kind")
+    page = _integer(inspection["page"], "inspection.page", maximum=4_095)
+    if not isinstance(inspection["rows"], list) or len(inspection["rows"]) > 4:
+        raise _error("inspection.rows", "must be an array of at most four rows")
+    for index, row in enumerate(inspection["rows"]):
+        _validate_inspection_row(inspection_kind, row, f"inspection.rows[{index}]")
+    _boolean(inspection["hasMore"], "inspection.hasMore")
+    inspection_error = _string(inspection["error"], "inspection.error", empty=True, limit=128)
+    if inspection_kind == "none" and (page or inspection["rows"] or inspection["hasMore"]):
+        raise _error("inspection", "empty inspection must have no page or rows")
+    if inspection_error and (inspection["rows"] or inspection["hasMore"]):
+        raise _error("inspection", "failed inspection cannot publish rows")
+
+    motion = _keys(
+        value["motion"],
+        {
+            "x",
+            "y",
+            "instance",
+            "facing",
+            "moving",
+            "dead",
+            "inCombat",
+            "mounted",
+            "target",
+            "bindings",
+            "hover",
+        },
+        "motion",
+    )
+    for field in ("x", "y", "facing"):
+        _finite_number(motion[field], f"motion.{field}")
+    _integer(motion["instance"], "motion.instance")
+    for field in ("moving", "dead", "inCombat", "mounted"):
+        _boolean(motion[field], f"motion.{field}")
+    target = _keys(
+        motion["target"],
+        {"present", "guid", "name", "rangeAvailable", "withinRange"},
+        "motion.target",
+    )
+    target_present = _boolean(target["present"], "motion.target.present")
+    target_guid = _string(target["guid"], "motion.target.guid", empty=True, limit=128)
+    target_name = _string(target["name"], "motion.target.name", empty=True, limit=128)
+    range_available = _boolean(target["rangeAvailable"], "motion.target.rangeAvailable")
+    within_range = _boolean(target["withinRange"], "motion.target.withinRange")
+    if not target_present and (target_guid or target_name or range_available or within_range):
+        raise _error("motion.target", "absent target has target or range facts")
+    if target_present and (not target_guid or not target_name):
+        raise _error("motion.target", "present target requires GUID and name")
+    if within_range and not range_available:
+        raise _error("motion.target.withinRange", "cannot be true when range is unavailable")
+    bindings = _keys(motion["bindings"], {"forward", "left", "right"}, "motion.bindings")
+    for field in ("forward", "left", "right"):
+        _string(bindings[field], f"motion.bindings.{field}", empty=True, limit=64)
+    hover = _keys(motion["hover"], {"kind", "name", "screenX", "screenY"}, "motion.hover")
+    hover_kind = hover["kind"]
+    if hover_kind not in {"none", "unit", "object"}:
+        raise _error("motion.hover.kind", "invalid hover kind")
+    hover_name = _string(hover["name"], "motion.hover.name", empty=True, limit=128)
+    hover_x = _finite_number(hover["screenX"], "motion.hover.screenX")
+    hover_y = _finite_number(hover["screenY"], "motion.hover.screenY")
+    if not 0 <= hover_x <= 32_767 or not 0 <= hover_y <= 32_767:
+        raise _error("motion.hover", "physical cursor coordinates are outside the bound")
+    if (hover_kind == "none") != (hover_name == ""):
+        raise _error("motion.hover", "only a none hover has an empty name")
+
+    _boolean(value["mailOpen"], "mailOpen")
+    ownership = _keys(value["ownership"], {"mode", "ahOwner", "scannerState"}, "ownership")
+    if ownership["mode"] not in {"standalone", "coordinated"}:
+        raise _error("ownership.mode", "invalid ownership mode")
+    if ownership["ahOwner"] not in {"none", "automation", "scanner"}:
+        raise _error("ownership.ahOwner", "invalid auction-house owner")
+    if ownership["scannerState"] not in {
+        "not_installed",
+        "available",
+        "active",
+        "quiescent",
+        "suspended",
+        "unavailable",
+    }:
+        raise _error("ownership.scannerState", "invalid scanner state")
+    if ownership["mode"] == "standalone" and ownership["scannerState"] != "not_installed":
+        raise _error("ownership", "standalone mode cannot publish scanner state")
     return Snapshot(dict(value))
+
+
+def _finite_number(value: Any, path: str) -> float | int:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise _error(path, "expected a finite number")
+    return value
+
+
+def _action_integer(value: Any, path: str, *, minimum: int = 0, maximum: int = 9_007_199_254_740_991) -> int:
+    return _integer(value, path, minimum=minimum, maximum=maximum)
+
+
+def _validate_native_action(value: Any) -> None:
+    if not isinstance(value, dict) or not isinstance(value.get("kind"), str):
+        raise _error("operation.action", "expected an action object")
+    kind = value["kind"]
+    if kind in {"post_commodity", "post_item"}:
+        row = _keys(
+            value,
+            {"kind", "itemKey", "quantity", "unitPriceCopper", "durationHours", "maxDepositCopper"},
+            "operation.action",
+        )
+        try:
+            validate_item_key(row["itemKey"])
+        except (ScanFormatError, TypeError) as exc:
+            raise _error("operation.action.itemKey", "invalid canonical item key") from exc
+        _action_integer(row["quantity"], "operation.action.quantity", minimum=1, maximum=200)
+        price = _action_integer(row["unitPriceCopper"], "operation.action.unitPriceCopper", minimum=1)
+        duration = _action_integer(
+            row["durationHours"], "operation.action.durationHours", minimum=12, maximum=48
+        )
+        if duration not in {12, 24, 48} or price * row["quantity"] > 9_007_199_254_740_991:
+            raise _error("operation.action", "posting duration or total price is outside bounds")
+        _action_integer(row["maxDepositCopper"], "operation.action.maxDepositCopper")
+    elif kind == "cancel_auction":
+        row = _keys(value, {"kind", "auctionId", "maxCancelCostCopper"}, "operation.action")
+        _action_integer(row["auctionId"], "operation.action.auctionId", minimum=1)
+        _action_integer(row["maxCancelCostCopper"], "operation.action.maxCancelCostCopper")
+    elif kind == "collect_mail":
+        row = _keys(value, {"kind", "messageLimit"}, "operation.action")
+        _action_integer(row["messageLimit"], "operation.action.messageLimit", minimum=1, maximum=50)
+    elif kind in {"interact", "move_route"}:
+        field = "targetId" if kind == "interact" else "routeId"
+        row = _keys(value, {"kind", field}, "operation.action")
+        target = _string(row[field], f"operation.action.{field}", limit=64)
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*", target):
+            raise _error(f"operation.action.{field}", "must be a configured identifier")
+    else:
+        raise _error("operation.action.kind", "unsupported action kind")
+
+
+def _validate_inspection_row(kind: str, value: Any, path: str) -> None:
+    if kind == "inventory":
+        row = _keys(
+            value, {"bag", "slot", "itemKey", "itemLink", "count", "locked", "bound", "commodity"}, path
+        )
+        _integer(row["bag"], f"{path}.bag", maximum=4)
+        _integer(row["slot"], f"{path}.slot", minimum=1, maximum=256)
+        try:
+            validate_item_key(row["itemKey"])
+        except (ScanFormatError, TypeError) as exc:
+            raise _error(f"{path}.itemKey", "invalid canonical item key") from exc
+        _string(row["itemLink"], f"{path}.itemLink", limit=512)
+        _integer(row["count"], f"{path}.count", minimum=1, maximum=9_007_199_254_740_991)
+        for field in ("locked", "bound", "commodity"):
+            _boolean(row[field], f"{path}.{field}")
+    elif kind == "owned":
+        row = _keys(
+            value,
+            {
+                "auctionId",
+                "itemKey",
+                "itemLink",
+                "quantity",
+                "buyoutKnown",
+                "buyoutCopper",
+                "status",
+                "cancelAllowed",
+                "cancelCostKnown",
+                "cancelCostCopper",
+            },
+            path,
+        )
+        _integer(row["auctionId"], f"{path}.auctionId", minimum=1)
+        try:
+            validate_item_key(row["itemKey"])
+        except (ScanFormatError, TypeError) as exc:
+            raise _error(f"{path}.itemKey", "invalid canonical item key") from exc
+        _string(row["itemLink"], f"{path}.itemLink", limit=512)
+        _integer(row["quantity"], f"{path}.quantity", minimum=1, maximum=9_007_199_254_740_991)
+        buyout_known = _boolean(row["buyoutKnown"], f"{path}.buyoutKnown")
+        buyout = _integer(row["buyoutCopper"], f"{path}.buyoutCopper")
+        if not buyout_known and buyout != 0:
+            raise _error(f"{path}.buyoutCopper", "unknown buyout must be zero")
+        if row["status"] not in {"active", "sold"}:
+            raise _error(f"{path}.status", "invalid owned auction status")
+        _boolean(row["cancelAllowed"], f"{path}.cancelAllowed")
+        cost_known = _boolean(row["cancelCostKnown"], f"{path}.cancelCostKnown")
+        cost = _integer(row["cancelCostCopper"], f"{path}.cancelCostCopper")
+        if not cost_known and cost != 0:
+            raise _error(f"{path}.cancelCostCopper", "unknown cancellation cost must be zero")
+    elif kind == "mail":
+        row = _keys(
+            value,
+            {
+                "index",
+                "moneyCopper",
+                "codCopper",
+                "attachmentCount",
+                "attachmentItemIDs",
+                "returned",
+                "canDelete",
+                "daysLeft",
+            },
+            path,
+        )
+        _integer(row["index"], f"{path}.index", minimum=1, maximum=1_000_000)
+        _integer(row["moneyCopper"], f"{path}.moneyCopper")
+        _integer(row["codCopper"], f"{path}.codCopper")
+        attachment_count = _integer(row["attachmentCount"], f"{path}.attachmentCount", maximum=16)
+        item_ids = row["attachmentItemIDs"]
+        if not isinstance(item_ids, list) or len(item_ids) != attachment_count:
+            raise _error(f"{path}.attachmentItemIDs", "must exactly describe the attachment count")
+        for index, item_id in enumerate(item_ids):
+            _integer(item_id, f"{path}.attachmentItemIDs[{index}]", minimum=1)
+        _boolean(row["returned"], f"{path}.returned")
+        _boolean(row["canDelete"], f"{path}.canDelete")
+        days_left = _finite_number(row["daysLeft"], f"{path}.daysLeft")
+        if not 0 <= days_left <= 365:
+            raise _error(f"{path}.daysLeft", "must be within the one year bound")
+    else:
+        raise _error(path, "rows require inventory, owned, or mail inspection")
 
 
 def validate_snapshot(

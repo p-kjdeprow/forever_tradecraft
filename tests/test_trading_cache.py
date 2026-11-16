@@ -6,8 +6,7 @@ import threading
 import time
 
 import pytest
-
-from crowley.market.cache import MarketCache
+from crowley_market.cache import MarketCache
 
 
 class Clock:

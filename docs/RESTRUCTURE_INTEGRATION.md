@@ -1,5 +1,9 @@
 # Package cutover implementation
 
+Implementation complete. Temporary worker scopes below are historical; see
+RESTRUCTURE_EXECUTION.md for final review and verification, and AUTOMATION.md for operation.
+
+
 Read RESTRUCTURE_PLAN, RESTRUCTURE_API, CLAUDE and HANDOFF before editing. Parent owns
 git, documentation, native operation contracts and integration approval. No deployments,
 services, credentials, production DB, installed game files or live game input.

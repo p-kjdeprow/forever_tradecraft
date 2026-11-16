@@ -3,8 +3,7 @@ from __future__ import annotations
 import subprocess
 
 import pytest
-
-from crowley.scan import presence as p
+from crowley_automation import presence as p
 
 
 def fixed(reply: str) -> p.Runner:

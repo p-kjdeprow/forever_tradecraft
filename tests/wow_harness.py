@@ -11,13 +11,15 @@ import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from crowley_common.game_target import GameTarget, load_game_target, target_scan_plan
+from crowley_common.watchlist import Catalog
 from lupa import lua51
 
-from crowley.core.game_target import GameTarget, load_game_target, target_scan_plan
-from crowley.core.watchlist import Catalog
 from tools.generate_launch_target import render_generated_lua
 
-ADDONS = Path(__file__).resolve().parents[1] / "addon"
+ROOT = Path(__file__).resolve().parents[1]
+SCANNER_ADDONS = ROOT / "packages" / "scanner" / "src" / "crowley_scanner" / "addon"
+AUTOMATION_ADDONS = ROOT / "packages" / "automation" / "src" / "crowley_automation" / "addon"
 FIXTURES = Path(__file__).parent / "fixtures"
 TARGET = load_game_target(FIXTURES / "targets" / "verified-beta.json")
 DEFAULT_CATALOG = Catalog.model_validate_json(
@@ -38,7 +40,10 @@ def _temporary_addon_tree(target: GameTarget, catalog: Catalog) -> Path:
 
     temporary = tempfile.TemporaryDirectory(prefix="crowley-addon-tests-")
     root = Path(temporary.name) / "addon"
-    shutil.copytree(ADDONS, root)
+    shutil.copytree(SCANNER_ADDONS, root)
+    for addon_dir in AUTOMATION_ADDONS.iterdir():
+        if addon_dir.is_dir():
+            shutil.copytree(addon_dir, root / addon_dir.name)
     generated = render_generated_lua(target, plan)
     (root / "Crowley" / "GeneratedTarget.lua").write_text(generated, encoding="utf-8")
     _ADDON_TEMPORARIES[key] = temporary
@@ -58,16 +63,30 @@ function time() return _now end
 function GetTime() return _now - 1760000000 end
 function GetBuildInfo() return harness.clientVersion, harness.clientBuild, "Oct 1 2026", harness.interface end
 function UnitExists(unit)
+  if unit == "mouseover" then return harness.hoverUnit ~= "" end
   if unit == "target" then return harness.targetPresent == true end
   return unit == "player"
 end
 function UnitName(unit)
+  if unit == "mouseover" then return harness.hoverUnit end
   if unit == "target" then
     if harness.targetPresent == true then return harness.targetName end
     return nil
   end
   return harness.playerName or "Tester"
 end
+function UnitGUID(unit)
+  if unit == "target" then return harness.targetGUID end
+  if unit == "mouseover" then return harness.hoverGUID end
+end
+function UnitPosition(unit)
+  if unit == "player" then return harness.playerX, harness.playerY, 0, harness.playerInstance end
+end
+function GetPlayerFacing() return harness.playerFacing end
+function GetUnitSpeed() return harness.playerSpeed end
+function UnitIsDeadOrGhost() return harness.playerDead end
+function InCombatLockdown() return harness.inCombat end
+function IsMounted() return harness.mounted end
 function CheckInteractDistance(unit, index)
   assert(unit == "target", "documented trade-range predicate unit")
   harness.interactDistanceCalls[#harness.interactDistanceCalls + 1] = index
@@ -78,10 +97,16 @@ function CheckInteractDistance(unit, index)
   return false
 end
 function GetBindingAction(key)
-  assert(key == "CTRL-F12", "documented interaction binding lookup")
-  if harness.bindingAvailable == false then return nil end
-  return harness.ctrlF12Action or ""
+  if key == "CTRL-F12" then
+    if harness.bindingAvailable == false then return nil end
+    return harness.ctrlF12Action or ""
+  end
+  local movement = harness.movementBindings
+  return movement and movement[key] or ""
 end
+function GetPhysicalScreenSize() return harness.presentationWidth or 1920, harness.presentationHeight or 1080 end
+function GetCursorPosition() return harness.cursorX or 960, harness.cursorY or 540 end
+function GetMoney() return harness.money or 0 end
 function GetCVar(name)
   assert(name == "SoftTargetInteract", "documented keyboard interaction-mode lookup")
   return harness.softTargetInteract
@@ -132,7 +157,7 @@ UIParent = {
 }
 function UIParent:GetWidth() return self.width end
 function UIParent:GetHeight() return self.height end
-function UIParent:GetEffectiveScale() return self.effectiveScale end
+function UIParent.GetEffectiveScale() return harness.rootEffectiveScale or 1 end
 
 local chatEdit = harness.chatEdit
 function chatEdit:IsShown() return self.shown end
@@ -142,6 +167,12 @@ ChatFrameUtil = { GetActiveWindow = function() return chatEdit.shown and chatEdi
 AuctionHouseFrame = {
   IsShown = function() return harness.auctionHouseOpen == true end,
 }
+MailFrame = { IsShown = function() return harness.mailOpen == true end }
+GameTooltip = {
+  IsShown = function() return harness.tooltipShown == true end,
+  GetOwner = function() return harness.tooltipOwner end,
+}
+GameTooltipTextLeft1 = { GetText = function() return harness.tooltipText end }
 
 function CreateFrame(_, name, parent, template)
   local frame = { events = {}, name = name, parent = parent or UIParent, template = template }
@@ -164,9 +195,20 @@ function CreateFrame(_, name, parent, template)
   function frame:GetScale() return self.scale or 1 end
   function frame:SetAlpha(value) self.alpha = value end
   function frame:SetFrameStrata(value) self.strata = value end
+  function frame:SetFrameLevel(value) self.frameLevel = value end
   function frame:EnableMouse(value) self.mouse = value end
   function frame:SetSize(width, height) self.width, self.height = width, height end
-  function frame:SetPoint(...) self.point = {...} end
+  function frame:SetPoint(point, relative, relativePoint, x, y)
+    self.point, self.relative, self.relativePoint, self.offsetX, self.offsetY = point, relative, relativePoint, x or 0, y or 0
+    if self.name == "CrowleyAutomationOperationButton" then
+      self.left = ((harness.rootWidth or 1920) - (self.width or 0)) / 2
+      self.bottom = y or 0
+    end
+  end
+  function frame:GetLeft() return self.left or 0 end
+  function frame:GetBottom() return self.bottom or 0 end
+  function frame:GetWidth() return self.width or 0 end
+  function frame:GetHeight() return self.height or 0 end
   function frame:Show() self.shown = true end
   function frame:Hide() self.shown = false end
   function frame:IsShown() return self.shown == true end
@@ -176,6 +218,7 @@ function CreateFrame(_, name, parent, template)
   function frame:IsEnabled() return self.enabled ~= false end
   function frame:SetMovable(value) self.movable = value == true end
   function frame:RegisterForDrag(button) self.dragButton = button end
+  function frame:RegisterForClicks(...) self.clicks = {...} end
   function frame:StartMoving() self.moving = true end
   function frame:StopMovingOrSizing() self.moving = false end
   function frame:Click()
@@ -720,6 +763,7 @@ class WowClient:
     catalog: Catalog = field(default_factory=lambda: DEFAULT_CATALOG)
     load_scanner: bool = True
     load_automation: bool = True
+    combined_install: bool = False
 
     def __post_init__(self) -> None:
         if self.realm is None:
@@ -736,6 +780,8 @@ class WowClient:
             self.root_height = 768 / self.root_ui_scale
         if self.root_width is None:
             self.root_width = (1920 / 1080) * self.root_height
+        if self.combined_install and not (self.load_scanner and self.load_automation):
+            raise ValueError("the combined host bridge requires scanner and automation addons")
         self.lua = lua51.LuaRuntime(unpack_returned_tuples=True, encoding="latin-1")
         self.state = self.lua.table_from(
             {
@@ -748,6 +794,8 @@ class WowClient:
                 "subzone": self.subzone,
                 "region": self.current_region,
                 "regionName": self.current_region_name,
+                "presentationWidth": self.presentation_width,
+                "presentationHeight": self.presentation_height,
                 "realmInfo": self.realm_info,
                 "gameRules": self.game_rules,
                 "rootWidth": self.root_width,
@@ -755,6 +803,7 @@ class WowClient:
                 "rootEffectiveScale": self.root_effective_scale,
                 "targetPresent": self.target_present,
                 "targetName": self.target_name,
+                "targetGUID": "Creature-0-0-0-0-1-1",
                 "rangeAvailable": self.range_available,
                 "withinTradeRange": self.within_trade_range,
                 "interactDistanceCalls": self.lua.table(),
@@ -767,6 +816,26 @@ class WowClient:
                 "gameMenuShown": self.game_menu_shown,
                 "auctionHouseOpen": False,
                 "playerName": self.player_name,
+                "playerX": 0.0,
+                "playerY": 0.0,
+                "playerInstance": 0,
+                "playerFacing": 0.0,
+                "playerSpeed": 0.0,
+                "playerDead": False,
+                "inCombat": False,
+                "mounted": False,
+                "movementBindings": self.lua.table_from(
+                    {"UP": "MOVEFORWARD", "LEFT": "TURNLEFT", "RIGHT": "TURNRIGHT"}
+                ),
+                "cursorX": 960.0,
+                "cursorY": 540.0,
+                "hoverUnit": "",
+                "hoverGUID": "",
+                "tooltipShown": False,
+                "tooltipOwner": None,
+                "tooltipText": "",
+                "money": 0,
+                "mailOpen": False,
                 "requested": self.lua.table(),
                 "itemInfo": self.lua.table(),
                 "itemInfoPending": self.lua.table(),
@@ -855,7 +924,7 @@ class WowClient:
 
     def _load_addon(self) -> None:
         # Load order mirrors the client: scanner data, scanner, then independent observations.
-        addon_root = _temporary_addon_tree(self.target, self.catalog) if self.load_scanner else ADDONS
+        addon_root = _temporary_addon_tree(self.target, self.catalog)
         if self.load_scanner:
             self.run_file(addon_root / "Crowley_Data" / "Data.lua")
             for line in (addon_root / "Crowley" / "Crowley.toc").read_text().splitlines():
@@ -866,11 +935,13 @@ class WowClient:
                 (addon_root / "Crowley_Automation" / "Crowley_Automation.toc").read_text().splitlines()
             ):
                 if line.endswith(".lua"):
-                    self.run_file(
-                        addon_root / "Crowley_Automation" / line,
-                        self.automation_ns,
-                        addon_name="Crowley_Automation",
-                    )
+                    path = addon_root / "Crowley_Automation" / line
+                    source = path.read_text()
+                    if self.combined_install and line == "Mode.lua":
+                        source = source.replace("ns.Coordinated = false", "ns.Coordinated = true")
+                    self.run_source(source, path.name, self.automation_ns, addon_name="Crowley_Automation")
+        if self.combined_install:
+            self.run_file(addon_root / "Crowley_Host" / "Host.lua", addon_name="Crowley_Host")
 
     def inject_saved_variables(self, value: dict) -> None:
         """Inject SavedVariables after file execution and before ADDON_LOADED."""
@@ -878,9 +949,12 @@ class WowClient:
         self.lua.globals().CrowleyDB = self._to_lua(value)
 
     def run_file(self, path: Path, namespace=None, *, addon_name: str = "Crowley") -> None:
-        chunk = self.lua.globals().loadstring(path.read_text(), "@" + path.name)
+        self.run_source(path.read_text(), path.name, namespace, addon_name=addon_name)
+
+    def run_source(self, source: str, name: str, namespace=None, *, addon_name: str = "Crowley") -> None:
+        chunk = self.lua.globals().loadstring(source, "@" + name)
         if chunk is None:
-            raise SyntaxError(f"failed to load {path}")
+            raise SyntaxError(f"failed to load {name}")
         chunk(addon_name, namespace if namespace is not None else self.ns)
 
     def set_auctions(self, auctions: list[Auction]) -> None:
@@ -1151,7 +1225,7 @@ class WowClient:
         return self._json_table(self.ns.ScanStatusSnapshot())
 
     def automation_snapshot(self) -> dict:
-        return self._json_table(self.automation_ns.Automation.snapshot())
+        return self._json_table(self.lua.globals().CrowleyAutomation.snapshot())
 
     @property
     def scanner_frame(self) -> bytes:
@@ -1160,5 +1234,5 @@ class WowClient:
 
     @property
     def automation_frame(self) -> bytes:
-        value = self.automation_ns.Automation.frameBytes()
+        value = self.lua.globals().CrowleyAutomation.frameBytes()
         return value.encode("latin-1") if isinstance(value, str) else bytes(value)

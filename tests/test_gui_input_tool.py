@@ -9,8 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-from crowley.gui.input_tool import (
+from crowley_automation.gui.input_tool import (
     ARCHIVE_BASENAME,
     MANIFEST_BASENAME,
     PINNED_ARCHIVE_SHA256,
@@ -20,8 +19,8 @@ from crowley.gui.input_tool import (
     PinnedInputTool,
     verify_artifact,
 )
-from crowley.native import build as native_build
-from crowley.native import pins
+from crowley_automation.native import build as native_build
+from crowley_automation.native import pins
 
 VENDORED_SOURCE_ARCHIVE = native_build.VENDORED_SOURCE_ARCHIVE
 _TEST_BUILD_INPUTS = {
@@ -92,7 +91,7 @@ def test_private_artifact_and_sealed_memfd_identity(tmp_path: Path) -> None:
 
 
 def test_native_release_spec_rejects_matching_unsealed_memfd() -> None:
-    from crowley.gui.input_tool import NativeReleaseSpec, _memfd_create
+    from crowley_automation.gui.input_tool import NativeReleaseSpec, _memfd_create
 
     fd = _memfd_create()
     data = Path("/bin/true").read_bytes()
@@ -228,6 +227,6 @@ def test_manifest_rejects_legacy_missing_build_inputs(tmp_path: Path) -> None:
 def test_private_artifact_rejects_foreign_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     root = _artifact_copy(tmp_path)
     current_uid = os.getuid()
-    monkeypatch.setattr("crowley.gui.input_tool.os.getuid", lambda: current_uid + 1)
+    monkeypatch.setattr("crowley_automation.gui.input_tool.os.getuid", lambda: current_uid + 1)
     with pytest.raises(InputToolError, match="not user-owned"):
         verify_artifact(root)

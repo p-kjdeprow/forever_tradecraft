@@ -263,10 +263,10 @@ def test_scan_text_counts_each_machine_url_occurrence() -> None:
     assert findings == (Finding("synthetic.txt", "machine-url", url, 2),)
 
 
-def test_scan_text_allows_loopback_only_in_docker_deploy_files() -> None:
+def test_scan_text_allows_loopback_only_in_owned_docker_resource_files() -> None:
     url = _fragmented("http://127.0.", "0.1:8080/healthz")
-    assert scan_text("deploy/docker/Dockerfile", url) == ()
-    assert scan_text("src/crowley/ops/resources/docker-compose.yml", url) == ()
+    assert scan_text("apps/host/src/crowley_host/ops/package_data/docker/Dockerfile", url) == ()
+    assert scan_text("packages/market/src/crowley_market/resources/docker-compose.yml", url) == ()
     assert Finding("README.md", "machine-url", url, 1) in scan_text("README.md", url)
 
 

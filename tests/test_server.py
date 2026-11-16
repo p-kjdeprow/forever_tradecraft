@@ -8,18 +8,27 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import UTC, datetime
-from pathlib import Path
+from importlib import resources
 
 import psycopg
 import pytest
+from crowley_common.scanformat import decode_json_payload, encode_json_payload, validate_envelope
 from fastapi.testclient import TestClient
 from psycopg.rows import dict_row
-
-from crowley.core.scanformat import decode_json_payload, encode_json_payload, validate_envelope
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
 TOKEN = "test-token"
+
+
+def _migration_names() -> tuple[str, ...]:
+    from crowley_market.server.db import MigrationManifest
+
+    return MigrationManifest.from_package().names
+
+
+def _migration_resources():
+    return resources.files("crowley_market.server").joinpath("migrations")
 
 
 def _us_horde_addon(**kwargs):
@@ -93,7 +102,7 @@ def _encode_native_payload(value: dict) -> str:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     _reset_public_schema()
-    from crowley.server.db import migrate
+    from crowley_market.server.db import migrate
 
     with psycopg.connect(DB_URL) as conn:
         migrate(conn)
@@ -101,8 +110,8 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
-    from crowley.server.app import app
-    from crowley.server.config import get_settings
+    from crowley_market.server.app import app
+    from crowley_market.server.config import get_settings
 
     get_settings.cache_clear()
     with TestClient(app, headers={"Authorization": f"Bearer {TOKEN}"}) as test_client:
@@ -113,19 +122,19 @@ def client(tmp_path, monkeypatch):
 def _install_legacy_scan_before_010() -> None:
     """Prepare the legacy UID-collision row before migration 010 write guards."""
 
-    migration_dir = Path(__file__).parents[1] / "src" / "crowley" / "server" / "migrations"
+    migration_resources = _migration_resources()
     _reset_public_schema()
     with psycopg.connect(DB_URL, autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
         conn.execute(
             "CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
         )
-        for path in sorted(migration_dir.glob("*.sql"))[:9]:
-            sql = path.read_text(encoding="utf-8")
-            if path.name == "001_init.sql":
+        for name in _migration_names()[:9]:
+            sql = migration_resources.joinpath(name).read_text(encoding="utf-8")
+            if name == "001_init.sql":
                 sql = sql.replace("CREATE EXTENSION IF NOT EXISTS timescaledb;\n\n", "")
             conn.execute(sql)
-            conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (path.name,))
+            conn.execute("INSERT INTO schema_migrations (name) VALUES (%s)", (name,))
         house_id = conn.execute(
             """
             INSERT INTO houses (key, region, ruleset, faction)
@@ -144,7 +153,7 @@ def _install_legacy_scan_before_010() -> None:
             """,
             (house_id, at, at, json.dumps({})),
         )
-        from crowley.server.db import migrate
+        from crowley_market.server.db import migrate
 
         migrate(conn)
 
@@ -156,8 +165,8 @@ def legacy_client(tmp_path, monkeypatch):
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
-    from crowley.server.app import app
-    from crowley.server.config import get_settings
+    from crowley_market.server.app import app
+    from crowley_market.server.config import get_settings
 
     get_settings.cache_clear()
     with TestClient(app, headers={"Authorization": f"Bearer {TOKEN}"}) as test_client:
@@ -288,9 +297,9 @@ def grouped_item_scan(uid: str, *, format: int, at: int | None = None) -> tuple[
 
 
 def install_002_only() -> None:
-    from crowley.server.db import migrate
+    from crowley_market.server.db import migrate
 
-    migration_dir = os.path.join(os.path.dirname(__file__), "..", "src", "crowley", "server", "migrations")
+    migration_resources = _migration_resources()
     _reset_public_schema()
     with psycopg.connect(DB_URL, autocommit=True) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
@@ -298,8 +307,7 @@ def install_002_only() -> None:
             "CREATE TABLE schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())"
         )
         for name in ("001_init.sql", "002_market_observations.sql"):
-            with open(os.path.join(migration_dir, name)) as handle:
-                sql = handle.read()
+            sql = migration_resources.joinpath(name).read_text(encoding="utf-8")
             if name == "001_init.sql":
                 sql = sql.replace("CREATE EXTENSION IF NOT EXISTS timescaledb;\n\n", "")
             conn.execute(sql)
@@ -310,7 +318,7 @@ def install_002_only() -> None:
 
 
 def insert_old_item_rows() -> tuple[dict, str, int]:
-    from crowley.server.ingest import _logical_digest
+    from crowley_market.server.ingest import _logical_digest
 
     raw, payload = grouped_item_scan("migration-old", format=2, at=1_760_000_000)
     digest = _logical_digest(raw, payload)
@@ -748,7 +756,7 @@ def test_real_addon_envelope_reaches_strict_ingestion_and_archive(client):
 
 
 def test_ingest_normalizes_format2_but_keeps_received_payload_and_accepts_format3(client):
-    from crowley.server.ingest import _logical_digest
+    from crowley_market.server.ingest import _logical_digest
 
     format2, _ = grouped_item_scan("normalize-format2", format=2)
     response = client.post("/v1/scans", json=format2)
@@ -809,7 +817,7 @@ def test_ingest_normalizes_format2_but_keeps_received_payload_and_accepts_format
 
 
 def test_migration_003_normalizes_old_rows_and_guards_invalid_data():
-    from crowley.server.db import migrate
+    from crowley_market.server.db import migrate
 
     install_002_only()
     raw, digest, sweep_id = insert_old_item_rows()
@@ -818,12 +826,9 @@ def test_migration_003_normalizes_old_rows_and_guards_invalid_data():
         before = conn.execute(
             "SELECT payload, content_digest, raw_path FROM market_sweeps WHERE id=%s", (sweep_id,)
         ).fetchone()
-        migration_dir = Path(__file__).parents[1] / "src" / "crowley" / "server" / "migrations"
-        expected_migrations = sorted(
-            path.name
-            for path in migration_dir.glob("*.sql")
-            if path.name not in {"001_init.sql", "002_market_observations.sql"}
-        )
+        expected_migrations = [
+            name for name in _migration_names() if name not in {"001_init.sql", "002_market_observations.sql"}
+        ]
         assert migrate(conn) == expected_migrations
         captured = conn.execute(
             "SELECT unit_numerator, unit_denominator, row_data FROM market_captured_rows WHERE sweep_id=%s",
@@ -903,8 +908,8 @@ def test_uid_conflict_including_changed_payload_is_409(client):
 
 
 def test_concurrent_connections_claim_one_uid_and_archive(client):
-    from crowley.server.config import get_settings
-    from crowley.server.ingest import SweepConflictError, ingest_market_sweep
+    from crowley_market.server.config import get_settings
+    from crowley_market.server.ingest import SweepConflictError, ingest_market_sweep
 
     raw = scan("concurrent", "horde")
     data_dir = get_settings().data_dir
@@ -938,7 +943,7 @@ def test_legacy_uid_collision_is_409(legacy_client):
 
 
 def test_unstorable_timestamp_is_422_without_archive(client):
-    from crowley.server.config import get_settings
+    from crowley_market.server.config import get_settings
 
     raw = scan("bad-time", "horde")
     raw["finishedAt"] = 10**12
@@ -948,8 +953,8 @@ def test_unstorable_timestamp_is_422_without_archive(client):
 
 
 def test_database_rollback_leaves_no_sweep_reference(monkeypatch, client):
-    from crowley.server import ingest as ingest_module
-    from crowley.server.config import get_settings
+    from crowley_market.server import ingest as ingest_module
+    from crowley_market.server.config import get_settings
 
     raw = scan("rollback", "horde")
     data_dir = get_settings().data_dir
@@ -969,7 +974,7 @@ def test_database_rollback_leaves_no_sweep_reference(monkeypatch, client):
 
 
 def test_uid_path_is_content_addressed(client):
-    from crowley.server.config import get_settings
+    from crowley_market.server.config import get_settings
 
     raw = scan("../../outside/raw", "horde")
     assert client.post("/v1/scans", json=raw).status_code == 200

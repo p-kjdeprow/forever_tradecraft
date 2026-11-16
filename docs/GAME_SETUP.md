@@ -1,159 +1,64 @@
-# Local WoW setup
+# Local game setup
 
-Keep the selected client's account data, WTF, Interface and registry files when
-repairing the runtime. Record the configured game root and product directory in
-the host configuration; do not put machine paths in tracked files.
+Use the authenticated desktop session and the reviewed Wine runtime. Keep account/WTF,
+Interface, prefix registry and runtime DLL links when repairing an installation. Machine
+paths belong in private configuration, never tracked source.
 
-## Start the game
+The host installer renders separate scanner.toml and automation.toml from host.toml.
+Scanner configuration contains transport and account paths; automation configuration pins
+the game process/window, native identity and its independent canvas crop. Automation must
+observe the client with no scanner/catalog installed. The optional host application adds
+scan-aware recovery and both addon installations.
 
-Use the desktop entry for the selected client or run the rendered launcher:
+For a v0.1 upgrade, review the package-owned
+[host example](../apps/host/src/crowley_host/ops/package_data/config/host.example.toml).
+Remove retired host fields canvas_origin, client_x/client_y, client_width/client_height,
+outer_width/outer_height, model_crop and window_client_offset. Add the independent automation
+canvas crop from the example. Old companion.toml is replaced by strict scanner.toml; a host
+install rerender preserves valid scanner poll/refresh values while repinning identity/paths.
+Malformed existing scanner configuration fails before mutation and needs explicit repair.
 
-```sh
-~/.local/bin/crowley-world-of-warcraft
-```
+Disable the old crowley-scan unit at the reviewed quiet cutover boundary before starting
+crowley-host. Install the complete matching wheel set and expose component executables;
+do not leave old/new console scripts selected inconsistently from two tool environments.
+Verify the actual installed version and unit ExecStart paths before resuming. Keep rollback
+artifacts and the pre-cutover backup until the new install is qualified.
 
-This starts the cached Battle.net installation with the restored Wine runtime.
-The entry is `~/.local/share/applications/net.lutris.world-of-warcraft-1.desktop`;
-it invokes the wrapper directly rather than depending on the deleted Lutris game
-registration. It checks exact process identity, owner and prefix to avoid a
-second client. Startup still requires the authenticated desktop session.
+Review the installed configuration and `crowley-ops install --dry-run` output before the
+coordinated cutover. The installer copies package-owned resources and records their hashes;
+production units/addons must not point into a checkout. Build the pinned XTEST tool with
+`crowley-native build xdotool`. Keep API/database credentials and CROWLEY_WINE only in the
+private secrets.env. `crowley-ops doctor` checks the actual installation.
 
-Before starting the launcher, provide the required host-session environment:
+The launcher reuses the logged-in Battle.net instance. Client.SingleInstance must be true;
+change it only while Battle.net is stopped because a running process rewrites its settings.
+Do not launch a second instance: it can invalidate the login token. Direct Wow.exe startup
+cannot issue Battle.net's login ticket.
 
-```sh
-export CROWLEY_WINE="/path/to/reviewed/wine/bin/wine"
-export XAUTHORITY="/path/to/reviewed/xauthority"
-export XDG_STATE_HOME="/path/to/crowley-state"
-```
+The reviewed launcher invokes one Battle.net command at a time, selects the product page,
+then uses `crowley-desktop battle-net-play` for a real curved pointer click on the verified
+Play button. It verifies process/window identity and fullscreen geometry, waits for character
+select, and uses the independent automation frame probe to observe entry into the world.
+A click dispatch alone does not establish startup. Evidence remains private in XDG state.
 
-The launcher takes `DISPLAY` from `display` in the selected `host.toml`; do not
-override it through the shell environment. Missing `CROWLEY_WINE`,
-`XAUTHORITY`, or `XDG_STATE_HOME` causes the launcher to fail loudly, and an
-unreadable Xauthority file is also refused.
+GNOME animations must be disabled and idle blanking off; doctor refuses a host that cannot
+capture a stable canvas. Mutter IdleMonitor supplies physical-presence state. Synthetic
+XTEST input does not count as a human hold, so manual agent input requires explicit ownership
+of the GUI lease and suspension of the host controller.
 
-The launcher uses the verified Battle.net handoff: it ensures one logged-in
-Battle.net is running, invokes one `--exec` at a time (`launch_uid wowf`, then
-`focus play`, which selects the product page). It selects the one visible
-`battle.net.exe`-class window named `Battle.net` (failing unless exactly one
-matches), un-maximizes it, activates it and runs `crowley-ops battle-net-play`.
-That command captures the screen with `gnome-screenshot`, finds the large solid
-blue Play button (exactly one blue region of plausible size in the window's
-bottom-left quarter whose label is the four glyphs of "Play", roughly centred;
-it fails loudly otherwise) and clicks inside its inner 60% as a full simulated human click: a
-seeded, curved, Fitts-timed pointer path through the pinned XTEST emitter, a real
-press and release, held under the canonical click-rate gate (at least 1 s between
-automated clicks). Motion, an endpoint and target-window check, and the press are
-separate emissions. The seed and plan are recorded under
-`$XDG_STATE_HOME/crowley/executor-evidence/`. Keyboard activation is not used:
-after a fresh Battle.net start the embedded Chromium view has no keyboard focus,
-`focus play` does not move it, Return does nothing, and Tab reaches the logo menu
-(which contains Log Out). If the game has not started within 20 s the click is
-retried (fresh capture) up to 2 more times, then the launcher fails. The launcher
-resolves `crowley-ops` from `PATH` and requires `CROWLEY_WINE`. Battle.net must have `Client.SingleInstance` set to
-`"true"`. Set that value only while Battle.net is stopped: a running Battle.net
-rewrites its configuration from memory, and starting a second instance deletes
-the saved login token. Battle.net is the only component that can issue the game
-login ticket; starting `_forever_/Wow.exe` directly with
-`-launcherlogin -uid wowf` fails with `WOW51900308`.
+For the existing Stormwind scanner opener, SoftTargetInteract must be 2 (keyboard) or 3 (any),
+Ctrl-F12 must be free or bound to INTERACTTARGET, and the scanner character must be near the
+configured auctioneer. Never assume another account's character or location is the same.
 
-Host requirements for HUD capture and unattended operation:
+The current desktop adapters require one focused display-sized game window at the display
+origin and exact process ownership (UID, Windows argv0 and Wine prefix). Configured canvas
+crops are validated against actual captures; stale outer-window calibration fields are gone.
 
-```sh
-gsettings set org.gnome.desktop.interface enable-animations false
-gsettings set org.gnome.desktop.session idle-delay 0
-crowley-ops doctor
-```
+No measured current-build AH/mailbox route is shipped. First inspect native position,
+facing, key bindings and UI state, then record and review an immutable measured route/target
+profile. Refuse changed build/instance, combat/death/mount, stale frames and human takeover.
+Do not reuse old beta routes or blind mailbox coordinates.
 
-The doctor refuses the host unless animations are off (the screenshot flash would corrupt the captured frame) and
-`idle-delay` is 0 (a blanked screen cannot be captured). Human presence is read from Mutter's IdleMonitor, which
-GNOME provides; there is nothing to set up for it.
-
-Required client settings (stored by the client per account):
-
-- `SoftTargetInteract` must be `2` (keyboard) or `3` (any). The WoW Forever
-  default is `1` (gamepad only), and `crowley-scan` reports the fault
-  `interaction_mode_unavailable` instead of opening the auction house. Set it
-  once in game with `/console SoftTargetInteract 2`. The character must stand
-  in Stormwind City near Auctioneer Jaxon.
-- The display is 1920x1080 and the client runs windowed-fullscreen
-  (`gxMaximize 1` in `_forever_/WTF/Config.wtf`); the launcher then makes the
-  window fullscreen at the origin. Wine maps the window with fixed-size
-  `WM_NORMAL_HINTS` and `_MOTIF_WM_HINTS` limited to move|close, which makes the
-  window manager ignore a fullscreen request, so the launcher removes
-  `WM_NORMAL_HINTS` and resets `_MOTIF_WM_HINTS` with `xprop` first, then
-  verifies `_NET_WM_STATE_FULLSCREEN`, display-sized outer geometry and a single
-  display-sized child, failing loudly after 30 s. Once verified, it waits a
-  settle time for character select and sends `Return` (Enter World), repeating
-  until `crowley-scan probe-frame` decodes a frame (the addon exists only in the
-  world). The launcher's only automated click is the Battle.net Play click above;
-  this step is keyboard-only. The telemetry canvas is pinned to a
-  1920x1080 client.
-
-The launcher template is [crowley-world-of-warcraft.sh.in](../deploy/launcher/crowley-world-of-warcraft.sh.in).
-Render it from the selected target and preserve executable mode 0700 on the
-installed wrapper. Keep recovery evidence private under the XDG state directory.
-
-## Required runtime files
-
-The Wine runtime is selected by the host configuration:
-
-```text
-`$XDG_DATA_HOME` or the configured host runtime directory.
-```
-
-Its matching [maintainer release](https://github.com/Kron4ek/Wine-Builds/releases/tag/11.16)
-provides `wine-11.16-staging-amd64.tar.xz`, SHA256:
-
-```text
-4b6bae7ba94652c49bb9527abb6428828fa05d6c16bc3aad5c46f10311276366
-```
-
-The prefix also references these directories under `~/.local/share/lutris/runtime/`:
-
-- `dxvk/v2.6.2/`
-- `vkd3d/v2.14/`
-- `dxvk-nvapi/v0.9.0/`
-
-## Install the addon and units
-
-Install a non-editable package. The installer renders `companion.toml` and
-`secrets.env` into the XDG config directory (create `host.toml` from
-`deploy/templates/host.example.toml` first). Edit the account and secrets, and
-add `CROWLEY_WINE` to `secrets.env` (the scan unit's relaunch needs it), before
-starting services. The pinned XTEST input
-tool is built once into the private cache:
-
-```sh
-uv tool install --link-mode copy .
-crowley-native build xdotool
-crowley-ops install --game-root "/path/to/World of Warcraft" --dry-run
-crowley-ops install --game-root "/path/to/World of Warcraft"
-# Set wtf_account in companion.toml and secrets in secrets.env.
-crowley-ops doctor
-```
-
-The game root is explicit; the installer appends the packaged target's
-`productDir` and copies both addon directories into that flavor. Use
-`--dev-addon-from` only when deliberately testing a checkout symlink.
-
-Those are active game dependencies even though startup now uses Wine directly.
-Deleting a launcher/runtime data directory can leave dangling DLL links in the
-existing prefix. Check both `windows/system32` and `windows/syswow64` after a repair.
-
-## Verified recovery
-
-Keep runtime checksums, resolved DLL links, duplicate-process receipts, registry,
-addon and SavedVariables backups private under Crowley's executor-evidence
-directory in the XDG state directory. A new game process needs nothing else:
-`crowley-scan` re-observes it and carries no per-process calibration.
-
-## Start the scan loop
-
-After `crowley-ops doctor` is clean and the companion runs:
-
-```sh
-systemctl --user enable --now crowley-scan
-crowley-scan status
-```
-
-See [REPEATING_SCANS](REPEATING_SCANS.md).
+See [REPEATING_SCANS](REPEATING_SCANS.md) for collection and
+[ARCHITECTURE](ARCHITECTURE.md) for the independent ownership contracts. Read the local-game-control
+skill before any live game contact. This setup guide authorizes no trades.

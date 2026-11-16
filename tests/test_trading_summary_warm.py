@@ -9,9 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from crowley_market.server.routes import scans
 from starlette.background import BackgroundTasks
-
-from crowley.server.routes import scans
 
 HOUSE = "us-normal-horde"
 
@@ -100,7 +99,7 @@ def test_summary_warm_failure_is_logged_without_changing_upload_status(monkeypat
 
     assert pool.connection_count == 1
     assert any(
-        record.name == "crowley.server.routes.scans"
+        record.name == "crowley_market.server.routes.scans"
         and f"Failed to warm trading summary for house {HOUSE}" in record.getMessage()
         for record in caplog.records
     )

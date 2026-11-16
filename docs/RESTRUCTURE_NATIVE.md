@@ -1,5 +1,9 @@
 # Fresh native operation boundary
 
+Implementation complete. Temporary worker scopes below are historical; see
+RESTRUCTURE_EXECUTION.md for final review and verification, and AUTOMATION.md for operation.
+
+
 Read overall RESTRUCTURE_PLAN/API, CLAUDE, HANDOFF and client-contracts skill. No real
 game input, deployments, service actions, credentials, production DB or real trades.
 Parent owns docs/git; native Luna owns ONLY packages/automation/src/crowley_automation/addon/,
@@ -47,7 +51,7 @@ API return alone. Client boot change must invalidate all staging and receipt cor
 - /cauto inspect inventory|owned|mail PAGE publishes <=4 strict rows and hasMore. Inspection
   is read-only; unsupported/missing APIs produce explicit error, never guessed empty rows.
 - Fresh operation receipt publishes exact batch/ordinal/step and callback delivered,
-  postcondition bool or unknown, actionComplete bool or unknown, detail; bind observations
+  postcondition bool or 'unknown', actionComplete bool or 'unknown', detail; bind observations
   to actual post baseline and causal event. A delayed unrelated event cannot prove sale.
 
 ## Ownership
@@ -60,7 +64,10 @@ after conclusive receipt or explicit clear; uncertainty retains owner and reject
 No polling supervisor framework; tiny explicit bridge methods/events suffice.
 
 Extend automation frame strict schema to version2 with operation, inspection, motion,
-mailOpen and ownership fields (scanner remains version1). Bound compressed bytes and
+mailOpen, goldCopper and ownership fields (scanner remains version1). Motion also has exact
+arrow binding strings and current world hover name/kind/physical screen coordinates. Context
+adds nativeRegion. Idle action is false, receipt unknown values are literal 'unknown' because
+native Lua empty/nil JSON semantics cannot reliably emit null. Bound compressed bytes and
 all strings/collections; preserve fail-closed chat/focus observations and independent
 boot/sequence checks. Return a precise final wire field/type report for Python backend.
 Coordinate changed shared frame shape with parent before finishing; host cutover worker

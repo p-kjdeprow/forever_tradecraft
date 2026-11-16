@@ -14,9 +14,8 @@ from pathlib import Path
 
 import psycopg
 import pytest
-
-from crowley.core.client_data import ClientDataError, compare_profession_pages, normalize_export
-from crowley.core.watchlist import Catalog, CatalogItem
+from crowley_common.watchlist import Catalog, CatalogItem
+from crowley_market.client_import import ClientDataError, compare_profession_pages, normalize_export
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 
@@ -313,7 +312,16 @@ def test_export_cli_checks_build_and_refuses_overwrite(
 
 
 def test_migration_contains_typed_tables_and_latest_view() -> None:
-    sql = (Path(__file__).parents[1] / "src/crowley/server/migrations/005_client_data.sql").read_text()
+    sql = (
+        Path(__file__).parents[1]
+        / "packages"
+        / "market"
+        / "src"
+        / "crowley_market"
+        / "server"
+        / "migrations"
+        / "005_client_data.sql"
+    ).read_text()
     for name in (
         "client_data_exports",
         "client_recipes",

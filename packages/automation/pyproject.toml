@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crowley-automation"
+version = "0.2.0"
+description = "Standalone Crowley desktop control and local game operation contracts"
+requires-python = ">=3.12"
+dependencies = [
+    "crowley-common>=0.2,<0.3",
+    "pillow>=11.3.0",
+    "pydantic>=2.14.1,<3",
+]
+
+[project.scripts]
+crowley-automation = "crowley_automation.cli:main"
+crowley-desktop = "crowley_automation.desktop_cli:main"
+crowley-native = "crowley_automation.native.build:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crowley_automation"]
+artifacts = [
+  "src/crowley_automation/addon/**/*",
+  "src/crowley_automation/native/resources/vendor/xdotool-source.tar.gz",
+  "src/crowley_automation/resources/launcher/**/*",
+]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["pyproject.toml", "src/crowley_automation"]

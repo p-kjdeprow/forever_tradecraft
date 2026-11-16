@@ -192,7 +192,7 @@ different account; no trading-character, recipe or inventory capture establishes
 
 
 Crowley's first selective scan will use the item catalog in
-[`src/crowley/data/first_run.json`](../src/crowley/data/first_run.json). Every item has one
+[`first_run.json`](../packages/common/src/crowley_common/data/first_run.json). Every item has one
 entry keyed by its numeric item ID, with category, profession memberships, roles, inclusion
 reason, evidence, binding information and source URLs. Names are for review and display.
 Membership in multiple professions never causes duplicate queries.
@@ -358,17 +358,10 @@ require build-specific live evidence. A historical retained beta build70450 swee
 items with 407 full, 21 bounded observations and 2,183 positive-price rows; this validates that
 run, rather than every possible item variant or future client build.
 
-## Recipe knowledge
+## Recipe facts
 
-Recipe facts are maintained separately in
-[`recipe_foundation.json`](../src/crowley/data/recipe_foundation.json), with strict
-validation and coverage reporting in
-[`recipes.py`](../src/crowley/core/recipes.py). Its packaged source manifest binds
-known fields to reviewed evidence; raw snapshot checks run separately during review.
-Loading the installed package requires no network or archive directory.
-
-Coverage includes the eight crafting professions plus Mining. The initial Mining
-and Cooking records remain blocked: output quantities, server learnability and
-other requirements still need evidence. This is a recipe-data foundation, not a
-complete recipe graph or a producer of crafting margins. The
-544-item watchlist remains the independent scan catalog.
+Retained market analysis reads build-bound normalized client exports through crowley-market.
+The offline exporter is tools/client_data_export.py and normalization lives in client_import.py.
+Client data does not prove server recipe availability or a character's learned recipes; the
+main dashboard states its recipe-ownership assumption. The scan catalog remains independent
+of recipe economics and never requires the automation package.

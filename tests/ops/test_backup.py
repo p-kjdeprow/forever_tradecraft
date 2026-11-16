@@ -18,11 +18,10 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from crowley_market import backup
+from crowley_market.server.db import migrate
+from crowley_market.server.ingest import _logical_digest
 from psycopg.conninfo import conninfo_to_dict, make_conninfo
-
-from crowley.ops import backup
-from crowley.server.db import migrate
-from crowley.server.ingest import _logical_digest
 
 raw_scan = runpy.run_path(Path(__file__).parents[1] / "test_core.py")["raw_scan"]
 
@@ -292,7 +291,7 @@ def test_incomplete_published_states_and_changed_bytes_fail_closed(tmp_path: Pat
 
 def test_marker_and_manifest_canonical_bytes_are_bound(tmp_path: Path):
     snapshot = _write_snapshot(tmp_path)
-    (snapshot / "COMPLETE").write_bytes(b"crowley.market-backup-complete-v1 " + b"0" * 64 + b"\n")
+    (snapshot / "COMPLETE").write_bytes((backup.MARKER_PREFIX + "0" * 64 + "\n").encode())
     with pytest.raises(backup.BackupError, match="marker"):
         backup.validate_snapshot(snapshot)
     snapshot = _write_snapshot(tmp_path / "other")
@@ -428,7 +427,7 @@ def test_restored_raw_reference_verifier_fails_closed_for_legacy_and_missing_mem
 
 def test_format2_reference_matches_restored_rows_and_rejects_identity_drift():
     envelope = raw_scan()
-    from crowley.core.scanformat import validate_envelope
+    from crowley_common.scanformat import validate_envelope
 
     decoded = validate_envelope(envelope)["decoded"]
     digest = _logical_digest(envelope, decoded)
@@ -481,7 +480,10 @@ def test_migration_inventory_uses_packaged_relative_paths():
     assert [item["path"] for item in result] == [
         f"src/crowley/server/migrations/{name}"
         for name in sorted(
-            (path.name for path in Path("src/crowley/server/migrations").glob("*.sql")),
+            (
+                path.name
+                for path in Path("packages/market/src/crowley_market/server/migrations").glob("*.sql")
+            ),
             key=lambda value: value.encode("utf-8"),
         )
     ]
@@ -664,6 +666,13 @@ def test_snapshot_builds_new_manifest_from_packaged_resources(
         "_image_identity",
         lambda image_id: {"id": image_id, "repo_digests": []},
     )
+    with backup._packaged_resources() as packaged:
+        packaged_migrations = list(packaged.migrations)
+    monkeypatch.setattr(
+        backup,
+        "_target_image_migrations",
+        lambda _image_id, *, package_namespace: packaged_migrations,
+    )
     monkeypatch.setattr(backup, "_local_version", lambda _container_id: ("16.6", "2.17.2"))
     monkeypatch.setattr(
         backup,
@@ -680,7 +689,7 @@ def test_snapshot_builds_new_manifest_from_packaged_resources(
     snapshot = backup.snapshot(tmp_path / "backups")
     manifest = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["schema_version"] == backup.CURRENT_SCHEMA_VERSION
-    assert manifest["source"]["package_name"] == "crowley"
+    assert manifest["source"]["package_name"] == "crowley-market"
     assert "source_commit" not in manifest["source"]
     assert "dirty_tree_sha256" not in manifest["source"]
 
@@ -737,11 +746,14 @@ def test_wheel_contains_namespaced_compose_only_and_preserves_source_parity(
 ) -> None:
     repository = Path(__file__).parents[2]
     packaged = backup._compose_resource()
-    assert packaged.read_bytes() == (repository / "src/crowley/ops/resources/docker-compose.yml").read_bytes()
+    assert (
+        packaged.read_bytes()
+        == (repository / "packages/market/src/crowley_market/resources/docker-compose.yml").read_bytes()
+    )
 
     wheel_dir = tmp_path / "wheel"
     subprocess.run(
-        ["uv", "build", "--wheel", "--out-dir", str(wheel_dir)],
+        ["uv", "build", "--wheel", "--package", "crowley-market", "--out-dir", str(wheel_dir)],
         cwd=repository,
         check=True,
         capture_output=True,
@@ -752,7 +764,7 @@ def test_wheel_contains_namespaced_compose_only_and_preserves_source_parity(
     with zipfile.ZipFile(wheels[0]) as wheel:
         files = {name for name in wheel.namelist() if not name.endswith("/")}
     compose_files = sorted(name for name in files if name.endswith("docker-compose.yml"))
-    assert compose_files == ["crowley/ops/resources/docker-compose.yml"]
+    assert compose_files == ["crowley_market/resources/docker-compose.yml"]
     assert not any(name.startswith("deploy/") for name in files)
     assert not any(".data/" in name for name in files)
 

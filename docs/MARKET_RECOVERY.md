@@ -36,6 +36,11 @@ private receipt are derived from the restored disposable database.
 
 The manifest records the installed package name and version for provenance,
 along with a canonical digest of the packaged Compose file and migrations.
+The new tool verifies the exact pinned server image contains crowley_market and
+the matching migration bytes before any dump or completed snapshot. Take the
+pre-cutover snapshot using the still-installed legacy tool while the old server
+image contains crowley. Legacy manifests explicitly select that legacy namespace
+during restore; unknown identities fail instead of trying alternate imports.
 Restore compatibility is bound to that resource digest, the recorded Compose
 and migration digests, pinned database/server image identities, PostgreSQL and
 TimescaleDB versions, and the migration files embedded in the pinned server

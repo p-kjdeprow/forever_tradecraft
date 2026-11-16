@@ -20,11 +20,9 @@ from pathlib import Path
 from typing import Any
 
 import psycopg
-from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
-
-from crowley.config import host_config_path, load_host_config
-from crowley.core.client_data import (
+from crowley_common.game_target import selected_target
+from crowley_host.config import host_config_path, load_host_config
+from crowley_market.client_import import (
     EXPECTED_CLIENT_BUILD,
     TABLE_COLUMNS,
     ClientDataError,
@@ -32,10 +30,11 @@ from crowley.core.client_data import (
     manifest_sha256,
     normalize_export,
 )
-from crowley.core.game_target import packaged_game_target
-from crowley.server.db import migrate
+from crowley_market.server.db import migrate
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
 
-_TARGET = packaged_game_target()
+_TARGET = selected_target()
 PRODUCT = _TARGET.product
 PRODUCT_DIR = _TARGET.product_dir
 IMAGE = f"crowley-client-data:{_TARGET.native_build}"

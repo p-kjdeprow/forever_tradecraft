@@ -2,9 +2,8 @@ from dataclasses import FrozenInstanceError
 from fractions import Fraction
 
 import pytest
-
-from crowley.core.auction_rules import AuctionHouseRules, rules_for_house
-from crowley.core.house import House
+from crowley_common.auction_rules import AuctionHouseRules, rules_for_house
+from crowley_common.house import House
 
 
 def test_rules_map_faction_to_exact_seller_cut() -> None:

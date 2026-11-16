@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import pytest
-
-from crowley.core.errors import MarketDataNotFound
-from crowley.market.client_data import _latest_export
+from crowley_common.errors import MarketDataNotFound
+from crowley_market.client_data import _latest_export
 
 
 class EmptyConn:

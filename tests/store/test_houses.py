@@ -8,10 +8,9 @@ from datetime import UTC, datetime
 
 import psycopg
 import pytest
-
-from crowley.core.house import House
-from crowley.server.db import migrate
-from crowley.store.houses import ensure_house, house_id, list_houses
+from crowley_common.house import House
+from crowley_market.server.db import migrate
+from crowley_market.store.houses import ensure_house, house_id, list_houses
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = [pytest.mark.db, pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")]

@@ -23,7 +23,7 @@ def test_scanner_toml_has_only_scanner_owned_runtime_settings() -> None:
             "game_root": "/opt/wow",
             "wtf_account": "account",
             "character": "character",
-            "server_url": "http://127.0.0.1:8080",
+            "server_url": "https://scanner.example.invalid",
         }
     )
     assert settings.poll_seconds == 3.0
@@ -35,7 +35,7 @@ def test_scanner_toml_has_only_scanner_owned_runtime_settings() -> None:
     "extra",
     (
         {"window_title": "World of Warcraft"},
-        {"database_url": "postgresql://localhost/db"},
+        {"database_url": "postgresql://database.example.invalid/db"},
         {"canvas_crop": [80, 48, 256, 256]},
     ),
 )
@@ -44,7 +44,7 @@ def test_scanner_config_rejects_host_geometry_and_market_settings(extra: dict[st
         "game_root": "/opt/wow",
         "wtf_account": "account",
         "character": "character",
-        "server_url": "http://127.0.0.1:8080",
+        "server_url": "https://scanner.example.invalid",
         **extra,
     }
     with pytest.raises(ValidationError):
@@ -76,7 +76,7 @@ def test_scanner_settings_derive_paths_from_scanner_toml_and_preserve_state_loca
                     "game_root": game_root,
                     "wtf_account": "account",
                     "character": "character",
-                    "server_url": "http://127.0.0.1:8080",
+                    "server_url": "https://scanner.example.invalid",
                 }
             )
         ),

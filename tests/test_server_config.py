@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from crowley_market.server.config import ServerSettings
 from pydantic import ValidationError
-
-from crowley.server.config import ServerSettings
 
 
 def test_server_settings_require_database_url_and_host() -> None:

@@ -1,17 +1,13 @@
 # Deployed configuration
 
-These files are tracked tunable templates. `crowley-ops install` copies them
-to `$XDG_CONFIG_HOME/crowley/` after validating the untracked host contract at
-`$XDG_CONFIG_HOME/crowley/host.toml`.
+The host installer validates private host.toml and renders scanner.toml and automation.toml
+through their owning packages. scanner.toml contains game/account/character transport paths,
+server URL and polling/refresh intervals. automation.toml pins independent native identity,
+process/window facts and its canvas crop. Neither component loads the host contract at runtime.
 
-| File | Contents |
-|---|---|
-| `companion.toml` | companion polling and refresh intervals |
-
-The host contract is documented in `deploy/templates/host.example.toml`.
-It owns the absolute Wine/game roots, selected account and character, server
-URL, display, and measured window geometry. The game flavor, SavedVariables,
-addon files, state directory and runtime directory are
-derived by `crowley.config`.
-
-Secrets remain only in `$XDG_CONFIG_HOME/crowley/secrets.env` with mode 0600.
+The host example is [host.example.toml](../../apps/host/src/crowley_host/ops/package_data/config/host.example.toml).
+Actual window/capture bounds are
+validated by desktop adapters; unused outer-window calibration fields have been removed.
+Credentials remain only in private secrets.env, mode 0600. Production configuration and
+package-owned addon copies never point into a source checkout. Review install --dry-run
+and doctor before the coordinated cutover.

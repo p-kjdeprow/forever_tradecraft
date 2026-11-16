@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import stat
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
-from crowley.gui.keyboard import KeyStep
-from crowley.scan import act
-from crowley.scan.policy import SET_BINDING_COMMAND, Action, Decision, LoopState, Target
+from crowley_automation import desktop_input
+from crowley_automation.gui.keyboard import KeyStep
+from crowley_host.scan import act
+from crowley_host.scan.policy import SET_BINDING_COMMAND, Action, Decision, LoopState, Target
 
 TARGET = Target("Arthur", "R", "Alliance", "h", "p" * 64, "1", 1, "0.2.0", "0.3.0", "Auctioneer Jaxon")
 XMODMAP = """\
@@ -48,9 +49,9 @@ class Runner:
         return subprocess.CompletedProcess(argv, code, "", "")
 
 
-def keys(runner: Runner) -> act.XtestKeys:
+def keys(runner: Runner) -> desktop_input.XtestKeys:
     tool = SimpleNamespace(proc_path="/proc/self/fd/9", image=SimpleNamespace(fd=9))
-    return act.XtestKeys(tool, {"DISPLAY": ":0"}, run=runner)  # type: ignore[arg-type]
+    return desktop_input.XtestKeys(tool, {"DISPLAY": ":0"}, run=runner)  # type: ignore[arg-type]
 
 
 def sent(runner: Runner) -> list[list[str]]:
@@ -58,17 +59,17 @@ def sent(runner: Runner) -> list[list[str]]:
 
 
 def test_parse_keymap_takes_level_zero_and_first_keycode() -> None:
-    keymap = act.parse_keymap(XMODMAP + "keycode 99 = Return\n")
+    keymap = desktop_input.parse_keymap(XMODMAP + "keycode 99 = Return\n")
     assert keymap["Return"] == 36 and keymap["Shift_L"] == 50 and keymap["slash"] == 61
-    with pytest.raises(act.ActError):
-        act.parse_keymap("")
+    with pytest.raises(desktop_input.ActError):
+        desktop_input.parse_keymap("")
 
 
 def test_press_and_chord_argv() -> None:
     runner = Runner()
     sender = keys(runner)
     sender.press("Return")
-    sender.chord(act.INTERACT_CHORD)
+    sender.chord(desktop_input.INTERACT_CHORD)
     assert sent(runner) == [
         ["/proc/self/fd/9", "keydown", "036", "keyup", "036"],
         ["/proc/self/fd/9", "keydown", "037", "keydown", "096", "keyup", "096", "keyup", "037"],
@@ -87,35 +88,64 @@ def test_type_text_is_one_action_per_character_with_shift_nested() -> None:
 
 def test_failed_transition_releases_held_keys() -> None:
     runner = Runner(fail_on="keydown")
-    with pytest.raises(act.ActError):
-        keys(runner).chord(act.INTERACT_CHORD)
+    with pytest.raises(desktop_input.ActError):
+        keys(runner).chord(desktop_input.INTERACT_CHORD)
     releases = [c for c in runner.calls if c[1:2] == ["keyup"] and len(c) == 3]
     assert {c[2] for c in releases} == {"037", "096"}
 
 
 def test_gui_lease_is_exclusive_private_and_released(tmp_path: Path) -> None:
     path = tmp_path / "run" / "gui.lock"
-    first, second = act.GuiLease(path, timeout=0.2), act.GuiLease(path, timeout=0.2)
+    first, second = desktop_input.GuiLease(path, timeout=0.2), desktop_input.GuiLease(path, timeout=0.2)
     with first.hold():
         assert first.held
         assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
         assert stat.S_IMODE(path.stat().st_mode) == 0o600
-        with pytest.raises(act.ActError, match="held elsewhere"), second.hold():
+        with pytest.raises(desktop_input.ActError, match="held elsewhere"), second.hold():
             pass
     assert not first.held
     with second.hold():
         pass
 
 
+def test_inherited_gui_lease_keeps_parent_lock_held(tmp_path: Path) -> None:
+    path = tmp_path / "run" / "gui.lock"
+    parent = desktop_input.GuiLease(path)
+    contender = desktop_input.GuiLease(path, timeout=0.05)
+    with parent.hold():
+        assert parent.fd is not None
+        script = """
+from pathlib import Path
+import sys
+from crowley_automation.desktop_input import GuiLease
+lease = GuiLease.from_inherited_fd(Path(sys.argv[1]), int(sys.argv[2]))
+with lease.hold():
+    assert lease.held
+"""
+        child = subprocess.run(
+            [sys.executable, "-c", script, str(path), str(parent.fd)],
+            pass_fds=(parent.fd,),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert child.returncode == 0, child.stderr
+        with pytest.raises(desktop_input.ActError, match="held elsewhere"), contender.hold():
+            pass
+
+
 def test_gui_lease_rejects_a_non_private_directory(tmp_path: Path) -> None:
     (tmp_path / "d").mkdir(mode=0o755)
     (tmp_path / "d").chmod(0o755)
-    with pytest.raises(act.ActError, match="not private"), act.GuiLease(tmp_path / "d" / "gui.lock").hold():
+    with (
+        pytest.raises(desktop_input.ActError, match="not private"),
+        desktop_input.GuiLease(tmp_path / "d" / "gui.lock").hold(),
+    ):
         pass
 
 
 class RecordingKeys:
-    def __init__(self, lease: act.GuiLease) -> None:
+    def __init__(self, lease: desktop_input.GuiLease) -> None:
         self.lease = lease
         self.events: list[tuple[str, Any]] = []
         self.held_during: list[bool] = []
@@ -155,7 +185,7 @@ class Launcher:
 
 def actor(tmp_path: Path, *, active: bool = False) -> tuple[act.Actor, RecordingKeys, list[str]]:
     order: list[str] = []
-    lease = act.GuiLease(tmp_path / "gui.lock", timeout=0.2)
+    lease = desktop_input.GuiLease(tmp_path / "gui.lock", timeout=0.2)
     recording = RecordingKeys(lease)
 
     def terminate(pids: Any) -> int:
@@ -182,7 +212,7 @@ def actor(tmp_path: Path, *, active: bool = False) -> tuple[act.Actor, Recording
         (Action.PRESS_RETURN, ("press", "Return")),
         (Action.PRESS_ESCAPE, ("press", "Escape")),
         (Action.CLOSE_AH, ("press", "Escape")),
-        (Action.PRESS_INTERACT, ("chord", act.INTERACT_CHORD)),
+        (Action.PRESS_INTERACT, ("chord", desktop_input.INTERACT_CHORD)),
     ],
 )
 def test_input_actions_send_keys_under_the_lease(tmp_path: Path, action: Action, event: object) -> None:
@@ -197,7 +227,7 @@ def test_type_command_is_allowlisted(tmp_path: Path) -> None:
     runner.execute(decision(Action.TYPE_COMMAND, command="/targetexact Auctioneer Jaxon"), 77)
     runner.execute(decision(Action.TYPE_COMMAND, command="/reload"), 77)
     assert [e[1] for e in recording.events][-1] == "/reload"
-    with pytest.raises(act.ActError, match="allowlisted"):
+    with pytest.raises(desktop_input.ActError, match="allowlisted"):
         runner.execute(decision(Action.TYPE_COMMAND, command="/logout"), 77)
 
 
@@ -205,13 +235,13 @@ def test_activate_window_uses_the_observed_window(tmp_path: Path) -> None:
     runner, recording, order = actor(tmp_path)
     runner.execute(decision(Action.ACTIVATE_WINDOW), 4242)
     assert order == ["activate:4242"] and recording.events == []
-    with pytest.raises(act.ActError, match="no game window"):
+    with pytest.raises(desktop_input.ActError, match="no game window"):
         runner.execute(decision(Action.ACTIVATE_WINDOW), None)
 
 
 def test_presence_is_rechecked_under_the_lease(tmp_path: Path) -> None:
     runner, recording, order = actor(tmp_path, active=True)
-    assert runner.execute(decision(Action.PRESS_RETURN), 77) == act.SKIPPED_HUMAN
+    assert runner.execute(decision(Action.PRESS_RETURN), 77) == desktop_input.SKIPPED_HUMAN
     assert recording.events == [] and order == []
 
 
@@ -226,10 +256,57 @@ def test_relaunch_terminates_the_owned_pids_then_starts_the_launcher_without_the
     tmp_path: Path,
 ) -> None:
     runner, recording, order = actor(tmp_path)
+    terminate = runner._terminate
+
+    def verify_lease_ownership(pids: Any) -> int:
+        assert runner._lease.held
+        return terminate(pids)
+
+    runner._terminate = verify_lease_ownership
+    start_launcher = runner.launcher.start
+
+    def verify_launcher_starts_after_release() -> None:
+        assert not runner._lease.held
+        start_launcher()
+
+    runner.launcher.start = verify_launcher_starts_after_release
     assert runner.execute(decision(Action.RELAUNCH), None) == "relaunch_started"
     assert order == ["terminate:[5, 6]", "launcher"]
     assert recording.events == [] and not runner._lease.held
     assert runner.launcher_running
+
+
+def test_relaunch_skips_termination_when_a_human_is_active(tmp_path: Path) -> None:
+    runner, recording, order = actor(tmp_path, active=True)
+    assert runner.execute(decision(Action.RELAUNCH), None) == desktop_input.SKIPPED_HUMAN
+    assert order == []
+    assert recording.events == [] and not runner._lease.held
+
+
+def test_relaunch_cannot_terminate_during_another_gui_lease(tmp_path: Path) -> None:
+    runner, recording, order = actor(tmp_path)
+    with runner._lease.hold():
+        with pytest.raises(desktop_input.ActError, match="GUI lease is held elsewhere"):
+            runner.execute(decision(Action.RELAUNCH), None)
+    assert order == [] and recording.events == []
+    assert not runner.launcher_running and not runner._lease.held
+
+
+@pytest.mark.parametrize("action", [Action.RELAUNCH, Action.ACTIVATE_WINDOW, Action.PRESS_RETURN])
+def test_maintenance_guard_rechecks_inside_gui_lease(tmp_path: Path, action: Action) -> None:
+    runner, recording, order = actor(tmp_path)
+    checked: list[bool] = []
+
+    def blocker() -> str:
+        checked.append(runner._lease.held)
+        return "automation_running"
+
+    runner._maintenance_blocker = blocker
+    with pytest.raises(act.MaintenanceBlocked, match="automation_running"):
+        runner.execute(decision(action), 77)
+    assert checked == [True]
+    assert order == [] and recording.events == []
+    assert not runner._lease.held and not runner.launcher_running
 
 
 class Child:
@@ -258,14 +335,16 @@ def test_launcher_run_lifecycle_and_timeout(monkeypatch: pytest.MonkeyPatch) -> 
         assert kw["start_new_session"] is True
         return child
 
-    run = act.LauncherRun(which=lambda name: f"/bin/{name}", popen=popen, clock=lambda: now[0], timeout=600)
+    run = desktop_input.LauncherRun(
+        which=lambda name: f"/bin/{name}", popen=popen, clock=lambda: now[0], timeout=600
+    )
     run.start()
     assert started == [["/bin/crowley-world-of-warcraft"]] and run.running
-    with pytest.raises(act.ActError, match="already running"):
+    with pytest.raises(desktop_input.ActError, match="already running"):
         run.start()
     assert run.poll() == (False, "running")
     killed: list[int] = []
-    monkeypatch.setattr(act.os, "killpg", lambda pid, sig: killed.append(pid))
+    monkeypatch.setattr(desktop_input.os, "killpg", lambda pid, sig: killed.append(pid))
     now[0] = 601.0
     assert run.poll() == (True, "timeout") and killed == [4321] and not run.running
     child.code = 0
@@ -274,8 +353,8 @@ def test_launcher_run_lifecycle_and_timeout(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_launcher_must_be_on_path() -> None:
-    with pytest.raises(act.ActError, match="not on PATH"):
-        act.LauncherRun(which=lambda name: None).start()
+    with pytest.raises(desktop_input.ActError, match="not on PATH"):
+        desktop_input.LauncherRun(which=lambda name: None).start()
 
 
 def test_activate_window_runs_xdotool_windowactivate_sync() -> None:
@@ -285,10 +364,12 @@ def test_activate_window_runs_xdotool_windowactivate_sync() -> None:
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    act.activate_window({"DISPLAY": ":0"}, 55, run=run)
+    desktop_input.activate_window({"DISPLAY": ":0"}, 55, run=run)
     assert calls == [["xdotool", "windowactivate", "--sync", "55"]]
-    with pytest.raises(act.ActError):
-        act.activate_window({}, 55, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", ""))
+    with pytest.raises(desktop_input.ActError):
+        desktop_input.activate_window(
+            {}, 55, run=lambda argv, **kw: subprocess.CompletedProcess(argv, 1, "", "")
+        )
 
 
 def test_terminate_failure_is_an_action_fault_not_a_crash(tmp_path: Path) -> None:
@@ -298,6 +379,6 @@ def test_terminate_failure_is_an_action_fault_not_a_crash(tmp_path: Path) -> Non
         raise RuntimeError("owned game process survived SIGKILL")
 
     runner._terminate = stuck
-    with pytest.raises(act.ActError, match="could not be terminated"):
+    with pytest.raises(desktop_input.ActError, match="could not be terminated"):
         runner.execute(decision(Action.RELAUNCH), None)
     assert order == []  # the launcher was never started

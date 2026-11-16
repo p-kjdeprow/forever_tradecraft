@@ -8,19 +8,18 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from crowley_common.frames import decode_frame
+from crowley_common.game_target import selected_target
+from crowley_common.scanformat import ScanFormatError, validate_envelope
+from crowley_common.watchlist import load_catalog
+from crowley_scanner import savedvars
 from lupa import lua51
-
-from crowley.core import savedvars
-from crowley.core.game_target import packaged_game_target
-from crowley.core.scanformat import ScanFormatError, validate_envelope
-from crowley.core.watchlist import load_catalog
-from crowley.gui.frames import decode_frame
 
 from .wow_harness import Auction, WowClient
 
 
 def non_beta_target(*, ruleset: str = "normal", realm: str = "Normal"):
-    target = packaged_game_target()
+    target = selected_target()
     faction = "Alliance"
     return replace(
         target,
@@ -92,7 +91,16 @@ def load_pure_lua_modules(*names: str) -> tuple[lua51.LuaRuntime, object]:
     lua = lua51.LuaRuntime(unpack_returned_tuples=True, encoding="latin-1")
     namespace = lua.table()
     for name in names:
-        source = (Path(__file__).parents[1] / "addon" / "Crowley" / f"{name}.lua").read_text()
+        source = (
+            Path(__file__).parents[1]
+            / "packages"
+            / "scanner"
+            / "src"
+            / "crowley_scanner"
+            / "addon"
+            / "Crowley"
+            / f"{name}.lua"
+        ).read_text()
         lua.execute(f"return function(...) {source}\nend")("Crowley", namespace)
     return lua, namespace
 
@@ -141,7 +149,7 @@ def test_scanner_publishes_without_automation_addon():
     assert raw["house"]["key"] == "beta-normal-horde"
     frame = decode_frame(client.scanner_frame, expected_kind="scanner")
     assert frame.snapshot["kind"] == "scanner"
-    assert client.automation_ns.Automation is None
+    assert client.lua.globals().CrowleyAutomation is None
 
 
 def test_automation_publishes_without_scanner_or_scan_plan():
@@ -214,33 +222,24 @@ def test_automation_publishes_strict_auctioneer_binding_and_blocking_ui_facts():
     assert client.automation_snapshot()["blockingUI"]["staticPopupShown"] is True
     client.set_blocking_ui_state(game_menu_shown=True)
     assert client.automation_snapshot()["blockingUI"]["gameMenuShown"] is True
+    previous_frame = client.automation_frame
     client.set_blocking_ui_state(static_popup_available=False)
-    unavailable = client.automation_snapshot()["blockingUI"]
-    assert unavailable["staticPopupAvailable"] is False
-    assert unavailable["staticPopupShown"] is False
     client.fire("PLAYER_ENTERING_WORLD")
-    assert (
-        decode_frame(client.automation_frame, expected_kind="automation").snapshot.value["blockingUI"]
-        == unavailable
-    )
+    assert client.automation_frame == previous_frame
+    client.set_blocking_ui_state(static_popup_available=True, game_menu_available=False)
+    client.fire("PLAYER_ENTERING_WORLD")
+    assert client.automation_frame == previous_frame
+    client.set_blocking_ui_state(game_menu_available=True)
 
     client.set_auctioneer_state(
         target_name="Auctioneer Jaxon",
         range_available=False,
         binding_available=False,
     )
-    unavailable_binding = client.automation_snapshot()["auctioneer"]
+    previous_frame = client.automation_frame
     assert client.state.interactDistanceCalls[2] == 2
-    assert unavailable_binding["targetPresent"] is True
-    assert unavailable_binding["rangeAvailable"] is False
-    assert unavailable_binding["withinTradeRange"] is False
-    assert unavailable_binding["bindingAvailable"] is False
-    assert unavailable_binding["ctrlF12Action"] == ""
     client.fire("PLAYER_ENTERING_WORLD")
-    assert (
-        decode_frame(client.automation_frame, expected_kind="automation").snapshot.value["auctioneer"]
-        == unavailable_binding
-    )
+    assert client.automation_frame == previous_frame
 
 
 def test_automation_chat_readback_requires_methods_and_bounds_utf8_bytes():
@@ -342,6 +341,63 @@ def test_suspend_quiescence_waits_for_active_query_then_resumes_schedule():
     assert api.quiescent("host-active") is True
     assert api.resume("host-active") == (True, None)
     assert client.lua.globals()._nextTimerAt() is not None
+
+
+def test_combined_host_holds_native_market_grant_until_real_scanner_finishes():
+    catalog = load_catalog()
+    item = next(item for item in catalog.items if item.status == "active")
+    small_catalog = catalog.model_copy(update={"items": [item]})
+    client = WowClient(combined_install=True, catalog=small_catalog)
+    client.login()
+    client.set_canonical_plan()
+    client.set_event_behavior(delay=1)
+    client.set_auctions([Auction(itemID=item.item_id, name=item.name, count=2, buyout=200)])
+    client.fire("AUCTION_HOUSE_SHOW")
+    client.slash("scan")
+    client.run_timers()
+    assert client.ns.Scanner.InProgress() is True
+    assert client.state.queryCalls == 1
+
+    command = client.lua.globals().SlashCmdList.CAUTO
+    batch_id = "a" * 64
+    for value in (
+        f"begin {batch_id} 0 0",
+        "kind post_commodity",
+        f"key 1 {item.item_id}",
+        "arg quantity 1",
+        "arg unitPriceCopper 100",
+        "arg durationHours 12",
+        "arg maxDepositCopper 0",
+        "expires 1760000100",
+        "seal",
+    ):
+        command(value)
+    waiting = client.automation_snapshot()
+    assert waiting["operation"]["batchId"] == batch_id
+    assert waiting["operation"]["ready"] is False
+    assert waiting["ownership"]["ahOwner"] == "scanner"
+    assert waiting["ownership"]["scannerState"] == "active"
+    assert client.state.ownedQueries == 0
+
+    finish_canonical(client)
+    client.fire("PLAYER_ENTERING_WORLD")
+    held = client.automation_snapshot()
+    assert client.ns.Scanner.InProgress() is False
+    assert held["ownership"]["mode"] == "coordinated"
+    assert held["ownership"]["ahOwner"] == "automation"
+    assert held["ownership"]["scannerState"] == "quiescent"
+    assert client.state.ownedQueries > 0
+
+    command("clear")
+    released = client.automation_snapshot()
+    assert released["operation"]["batchId"] == ""
+    assert released["ownership"]["ahOwner"] == "none"
+    assert client.lua.globals().CrowleyScanner.quiescent("crowley-automation") is False
+    trace = schedule_trace(client)
+    assert any(
+        event["type"] == "timer_create" and event.get("source") == "ownership_resume"
+        for event in trace["events"]
+    )
 
 
 def test_scanner_auction_house_suspend_protocol_is_explicit_and_exclusive():

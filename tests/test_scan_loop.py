@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from crowley_automation.desktop_input import ActError
+from crowley_host.scan import loop, observe, policy
+from crowley_host.scan.act import MaintenanceBlocked
+from crowley_host.scan.observe import ObserveError
+from crowley_host.scan.policy import Action, Decision, LoopState, Observation
 
-from crowley.scan import loop, observe, policy
-from crowley.scan.act import ActError
-from crowley.scan.observe import ObserveError
-from crowley.scan.policy import Action, Decision, LoopState, Observation
 from tests.support.scan_frames import automation_snapshot, snapshot
 from tests.test_scan_observe import TARGET
 
@@ -95,7 +96,9 @@ class Time:
 
 
 def make(
-    tmp_path: Path, state: LoopState | None = None
+    tmp_path: Path,
+    state: LoopState | None = None,
+    maintenance_blocker: Any = lambda: None,
 ) -> tuple[loop.ScanLoop, FakeObserver, FakeActor, io.StringIO, Time]:
     observer, actor, out, clock = FakeObserver(), FakeActor(), io.StringIO(), Time()
     scan = loop.ScanLoop(
@@ -106,6 +109,7 @@ def make(
         status_file=tmp_path / "run" / "scan-status.json",
         out=out,
         clock=clock,
+        maintenance_blocker=maintenance_blocker,
     )
     return scan, observer, actor, out, clock
 
@@ -162,6 +166,19 @@ def test_status_file_has_decision_and_no_chat_text_or_frame(tmp_path: Path) -> N
     assert status["observation"]["process_alive"] and status["pid"] == os.getpid()
     assert {"updated_at", "started_at", "action"} <= set(status)
     assert "chat_text" not in raw and "payload" not in raw
+
+
+def test_automation_ledger_guard_holds_before_policy_and_reports_only_stable_reason(tmp_path: Path) -> None:
+    scan, observer, actor, out, _clock = make(tmp_path, maintenance_blocker=lambda: "automation_running")
+    observer.obs = [observation(LoopState(), chat="private text")]
+    scan.tick()
+    assert actor.executed == []
+    assert events(out)[-1]["action"] == "wait"
+    assert events(out)[-1]["detail"] == "automation_running"
+    raw = (tmp_path / "run" / "scan-status.json").read_text()
+    assert "private text" not in raw
+    status = json.loads(raw)
+    assert status["action"] == "wait" and status["detail"] == "automation_running"
 
 
 def test_status_writes_on_change_and_heartbeat_only(tmp_path: Path) -> None:
@@ -242,6 +259,18 @@ def test_action_failure_is_reported_and_the_loop_continues(tmp_path: Path) -> No
     scan.tick()
     fault = next(e for e in events(out) if e["event"] == "fault")
     assert fault["fault_code"] == "action_failed" and fault["action"] == "relaunch"
+
+
+def test_inner_lease_guard_converts_a_raced_action_to_wait_and_restores_state(tmp_path: Path) -> None:
+    scan, observer, actor, out, _clock = make(tmp_path)
+    actor.result = MaintenanceBlocked("automation_uncertain")
+    observer.obs = [observation(LoopState(), process_alive=False, last_frame_at=None)]
+    scan.tick()
+    assert scan.state == LoopState()
+    assert events(out)[-1]["action"] == "wait"
+    assert events(out)[-1]["detail"] == "automation_uncertain"
+    status = json.loads((tmp_path / "run" / "scan-status.json").read_text())
+    assert status["action"] == "wait" and status["detail"] == "automation_uncertain"
 
 
 def test_ticks_only_poll_the_launcher_while_it_runs(tmp_path: Path) -> None:

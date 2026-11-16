@@ -1,111 +1,82 @@
-# Forever Tradecraft
+# Forever Tradecraft / Crowley
 
-Project repository: [p-kjdeprow/forever_tradecraft](https://github.com/p-kjdeprow/forever_tradecraft).
-The addon, Python package, configuration paths and `/crowley` commands currently retain
-the Crowley name.
+Auction-house collection, retained market analysis and bounded local game automation for WoW
+Forever. The main dashboard and recipe watch remain at `/dashboard`. Scanner and automation
+are separate installable Python packages and separate addons.
 
-Auction house data platform and addon for **WoW Forever**. Scan the AH in game, store the
-retained observation history per house on a server, and compute gold-making strategies.
+| Distribution | Source | Purpose |
+|---|---|---|
+| crowley-common | packages/common | Identity, scan/frame contracts, target data and private filesystem helpers |
+| crowley-market | packages/market | Ingestion, history, dashboard, recipe watch and recovery tools |
+| crowley-scanner | packages/scanner | Crowley/Crowley_Data addons and upload/ACK companion |
+| crowley-automation | packages/automation | Game observation/input/launch, operation ledger, native actions and measured routes |
+| crowley-host | apps/host | Optional combined installation, diagnosis and scan-aware game maintenance |
 
-```
-addon/Crowley        in-game scanner, /crowley commands (Lua)
-addon/Crowley_Data   data file the companion writes; loaded at login or /reload
-src/crowley/core     shared: SavedVariables parser, scan format, stats, Lua writer
-src/crowley/scan     crowley-scan: keeps the game in the world with the AH open (observe, decide, act)
-src/crowley/gui      pointer, click gate, XTEST tool, keyboard, capture, frame decode
-src/crowley/companion  watches the game folder, uploads scans, writes Crowley_Data
-src/crowley/server   FastAPI + TimescaleDB ingest and query API
-deploy/              systemd, launcher and image-build templates
-```
+Each component depends on common. Scanner, automation and market never import each other;
+only host composes them. Market installs without desktop libraries. Automation resolves no
+scanner catalog or plan. Package-owned resources work outside a checkout.
 
-See [docs/HANDOFF.md](docs/HANDOFF.md) for requirements, history and roadmap, and
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the technical design.
-
-The [first-run watchlist](docs/WATCHLIST.md) contains the 544-item catalog, its management
-commands and delivery path; 428 active item IDs are in the current scan plan. The addon
-consumes the immutable format-2 plan and
-starts targeted sweeps every 900 seconds while the AH is open, with bounded retained depth.
-
-## Quickstart (server and game on one Linux machine)
+For development:
 
 ```sh
-# 1. Create the untracked host contract, then install the package.
-uv tool install --link-mode copy .
-export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
-mkdir -p "$XDG_CONFIG_HOME/crowley"
-cp deploy/templates/host.example.toml "$XDG_CONFIG_HOME/crowley/host.toml"
-$EDITOR "$XDG_CONFIG_HOME/crowley/host.toml"
-crowley-ops install
-
-# 2. Review the tunable templates. Identity and paths stay in host.toml.
-$EDITOR "$XDG_CONFIG_HOME/crowley/companion.toml"
-$EDITOR "$XDG_CONFIG_HOME/crowley/secrets.env"
-# Put CROWLEY_API_TOKEN, CROWLEY_DB_PASSWORD, CROWLEY_IMAGE_VERSION,
-# CROWLEY_DATABASE_URL, CROWLEY_BIND and CROWLEY_PAPER_RUN only in secrets.env.
-chmod 600 "$XDG_CONFIG_HOME/crowley/secrets.env"
-
-# 3. Build the server image from this checkout (or pass an explicit wheel instead).
-crowley-ops image build --source "$PWD"
-
-# 4. Server + database. Compose uses the values in secrets.env for its internal DSN;
-# CROWLEY_DATABASE_URL is also the URL used by doctor and paper trading.
-docker compose --env-file "$XDG_CONFIG_HOME/crowley/secrets.env" \
-  -f "$(crowley-ops compose-file)" up -d
-# Verify the health endpoint at the server_url configured in host.toml.
-
-# 5. Copy units, timers, launcher and packaged addon files, then inspect every check.
-crowley-ops doctor
-crowley-native build xdotool        # the pinned XTEST input tool (once)
-
-# 6. Start the companion and the scan loop only after reviewing doctor output.
-systemctl --user enable --now crowley-companion crowley-scan
-crowley-scan status
+uv sync
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run python tools/generate_launch_target.py --check
 ```
 
-`crowley-scan` relaunches the game when needed (the launcher needs `CROWLEY_WINE` in `secrets.env`), enters the world,
-opens the AH and reloads at the right moments, and holds while you use the keyboard or mouse. See
-[docs/REPEATING_SCANS.md](docs/REPEATING_SCANS.md) and [docs/GAME_SETUP.md](docs/GAME_SETUP.md).
+The default suite needs no game or database. Database checks require a fresh disposable
+TimescaleDB and serial execution; see [TESTING](docs/TESTING.md). No test should point at
+the deployed database or send live game input.
 
-In game:
+Build a coordinated installable set with `uv build --all-packages`. Install the wheels as
+non-editable packages, supplying the matching four component wheels as local dependencies
+of crowley-host. With uv tool install, use --with-executables-from for each component to
+expose its scripts as well as host's. Keep rollback wheels privately before replacing an
+existing installation; never link production services or addons to a checkout.
 
-| Command | What it does |
+The public commands are:
+
+| Command | Purpose |
 |---|---|
-| `/crowley probe` | Records the client's AH API surface. **Run this first on a new client build.** |
-| `/crowley status` | Current house, next due time, loaded plan, cursor, stored sweeps and failures |
-| `/crowley scan` | Manual targeted watchlist sweep (AH must be open); the addon also sweeps every 15 minutes on its own |
-| `/crowley set faction neutral` | Override house detection (`region`/`ruleset`/`faction`, or `auto`) |
+| crowley-server | Market API/dashboard |
+| crowley-companion | Standalone saved-scan/probe upload and ACK transport |
+| crowley-watchlist | Manage the scanner catalog and canonical plan |
+| crowley-desktop | Independent game observation, presence, frame probe and Battle.net Play |
+| crowley-native | Build/verify the pinned XTEST tool |
+| crowley-automation | Inspect/prepare/run exact local operation batches and read receipts |
+| crowley-host | Scan-aware host loop and status |
+| crowley-ops | Install, doctor, health, image build and market backup/restore |
 
-Sweeps reach the server after `/reload` or logout, because that is when WoW writes SavedVariables
-(`crowley-scan` types the `/reload`).
-At six pending sweeps the addon pauses and never evicts unacknowledged evidence. The first
-reload lets the companion upload and write acknowledgements; a second reload loads those
-acknowledgements and resumes collection.
+Use each command's --help for its installed version. Host configuration lives in private
+host.toml ([example](apps/host/src/crowley_host/ops/package_data/config/host.example.toml));
+installation renders independent scanner.toml and automation.toml. Credentials
+stay in secrets.env. Review `crowley-ops install --dry-run` and doctor output before the
+coordinated package/addon/service cutover. This repository refactor does not deploy itself.
 
-Format 2 is the only accepted upload format. Its compressed JSON payload carries the unchanged
-canonical `planJSON` and `planHash`, one object observation per planned item, and a separately
-gated owned snapshot. Exact reduced rational unit prices, raw item variants, tagged unknowns,
-coverage cutoffs and witnesses prevent fractional copper rounding or missing data being treated
-as zero supply. Public-market churn is an uncalibrated proxy; an observed disappearance is not a
-confirmed sale. Confirmed own sales are recorded separately only after a full owned query.
+The scanner addon schedules targeted sweeps every 900 seconds while the AH is open. A human
+can collect without automation. At six unacknowledged sweeps it pauses without deleting
+evidence. SavedVariables reaches disk on reload/logout; companion uploads original bytes,
+writes Data.lua ACKs, and a later client reload loads them. The host can automate that cycle.
+See [REPEATING_SCANS](docs/REPEATING_SCANS.md) and [GAME_SETUP](docs/GAME_SETUP.md).
 
-## Game and server on different machines (Tailscale)
+In game, `/crowley probe`, `/crowley status`, `/crowley scan` and `/crowley set` are scanner
+commands. Fresh automation uses its separate `/cauto` staging surface through the supported
+Python runtime. It supports exact commodity/item listing, cancellation, non-COD mail collection,
+known-location interaction and measured movement. A batch requires its full immutable digest
+and a separate expiring current-client session arm. Staging/dry-run cannot post. Missing causal
+receipts stay uncertain and prevent automatic retry or maintenance behind the operation.
 
-1. On the server, set `CROWLEY_BIND` in `$XDG_CONFIG_HOME/crowley/secrets.env` to the selected Tailscale address and restart Compose with that env file.
-2. On the game machine, set `server_url` in `host.toml` to the server endpoint and run the companion there.
+Every automated click uses seeded curved pointer motion, a real press/release and the hard
+one-second global rate gate. Focus, target, identity and physical presence are checked before
+input. Routes and mailbox targets require reviewed current-build measurements; none are guessed
+or shipped as qualified. Current-client protected-call behavior needs specific live qualification
+before arming real trades. A listing is not a sale.
 
-## Deployment notes
-
-The installer copies units, timers and packaged addon files into user-owned destinations and
-records a sha256 manifest under the XDG state directory. It never links a production unit or
-addon to a checkout. Use `--dev-addon-from` only for an explicit development checkout, and
-use `--dry-run` to review the diff first.
-
-## Tests
-
-```sh
-uv run pytest  # bounded xdist default: 16 workers
-```
-
-Run DB coverage serially against a fresh disposable test database using the
-[documented command](docs/TESTING.md). Its fixtures reset one schema; the default suite refuses a shared database URL with xdist workers.
-See [TESTING](docs/TESTING.md).
+Retained analysis uses exact copper, canonical itemKey and separate houses. The summary requires
+at least 6 observed market units/hour under recorded-cadence and outage-gap rules. Profit assumes
+sale; listing depletion is not confirmed revenue. See the [agent operation guide](docs/AUTOMATION.md), [ANALYSIS](docs/ANALYSIS.md),
+[ARCHITECTURE](docs/ARCHITECTURE.md), [HANDOFF](docs/HANDOFF.md) and
+[MARKET_RECOVERY](docs/MARKET_RECOVERY.md).

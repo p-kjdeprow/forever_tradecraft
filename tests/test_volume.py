@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import pytest
-
-from crowley.core.volume import (
+from crowley_market.volume import (
     NORMALIZATION_POLICY,
     compare_observations_detailed,
 )
@@ -262,7 +261,7 @@ def test_commodity_price_cap_boundary_group_is_in_scope():
 
 
 def test_commodity_gap_beyond_shared_max_gap_is_excluded():
-    from crowley.analysis.books import MAX_GAP
+    from crowley_market.analysis.books import MAX_GAP
 
     before, after = _commodity_pair([_row(1, 5)], [_row(1, 1)], gap=MAX_GAP)
     assert compare_observations_detailed(before, after)["valid"]

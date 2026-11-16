@@ -2,11 +2,9 @@ import hashlib
 import json
 
 import pytest
-
-from crowley.core import savedvars
-from crowley.core.house import House
-from crowley.core.luawriter import render_assignment, to_lua
-from crowley.core.scanformat import (
+from crowley_common.house import House
+from crowley_common.luawriter import render_assignment, to_lua
+from crowley_common.scanformat import (
     MAX_SAFE_INTEGER,
     ScanFormatError,
     decode_json_payload,
@@ -15,6 +13,7 @@ from crowley.core.scanformat import (
     normalize_observation,
     validate_envelope,
 )
+from crowley_scanner import savedvars
 
 WOW_STYLE = b"""
 CrowleyDB = {

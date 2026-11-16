@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: Crowley Host
+## Notes: Optional public scanner ownership bridge for combined operation.
+## Author: Kyle DeProw
+## Version: 0.1.0
+## OptionalDeps: Crowley, Crowley_Automation
+
+Host.lua

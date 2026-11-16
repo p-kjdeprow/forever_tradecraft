@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
-
-from crowley.ops import backup, cli, health
+from crowley_host.ops import cli, health
+from crowley_market import backup
 
 
 def _xdg(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> health.OperationPaths:

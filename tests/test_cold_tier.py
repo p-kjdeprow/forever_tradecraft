@@ -8,18 +8,18 @@ import json
 from dataclasses import replace
 
 import pytest
-
-from crowley.core import savedvars
-from crowley.core.game_target import target_scan_plan
-from crowley.core.scanformat import (
+from crowley_common.frames import PLAN_COUNT, ProtocolContract, ProtocolError, validate_snapshot
+from crowley_common.game_target import target_scan_plan
+from crowley_common.scanformat import (
     ScanFormatError,
     decode_json_payload,
     encode_json_payload,
     sweep_item_ids,
     validate_envelope,
 )
-from crowley.core.watchlist import Catalog, load_catalog
-from crowley.gui.frames import PLAN_COUNT, ProtocolContract, ProtocolError, validate_snapshot
+from crowley_common.watchlist import Catalog, load_catalog
+from crowley_scanner import savedvars
+
 from tests.support.scan_frames import snapshot
 
 from .wow_harness import TARGET, Auction, WowClient

@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from fractions import Fraction
 from typing import Any
 
-from crowley.analysis.item_books import Auction, ItemBook, item_intervals, load_item_books
+from crowley_market.analysis.item_books import Auction, ItemBook, item_intervals, load_item_books
 
 HOUSE = "us-normal-alliance"
 BUILD = "1.60.1.70938"

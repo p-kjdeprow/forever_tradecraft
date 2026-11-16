@@ -11,19 +11,22 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from crowley.core import companion_state, scanformat
-from crowley.core.game_target import (
+from crowley_common import scanformat
+from crowley_common.game_target import (
+    CatalogLike,
     GameTarget,
     GameTargetError,
     load_game_target,
     selected_target,
     target_catalog,
 )
-from crowley.core.watchlist import Catalog
-from crowley.server.routes.addon import AddonDataResponse
+from crowley_common.watchlist import Catalog
+from crowley_market.server.routes.addon import AddonDataResponse
+from crowley_scanner import state as companion_state
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_CATALOG = ROOT / "src" / "crowley" / "data" / "first_run.json"
+_COMMON_DATA = ROOT / "packages" / "common" / "src" / "crowley_common" / "data"
+DEFAULT_CATALOG = _COMMON_DATA / "first_run.json"
 
 
 class GenerationError(ValueError):
@@ -120,7 +123,7 @@ def render_generated_schemas() -> str:
 
 def _default_target_path() -> Path:
     selected = selected_target()
-    path = ROOT / "src" / "crowley" / "data" / "targets" / f"{selected.target_id}.json"
+    path = _COMMON_DATA / "targets" / f"{selected.target_id}.json"
     try:
         packaged = load_game_target(path)
     except (OSError, GameTargetError) as exc:
@@ -283,13 +286,15 @@ def _read_catalog(path: Path) -> Catalog:
 
 
 def _source_artifacts(root: Path, target_id: str) -> dict[Path, str]:
+    common_data = root / "packages" / "common" / "src" / "crowley_common" / "data"
+    scanner_addon = root / "packages" / "scanner" / "src" / "crowley_scanner" / "addon"
     return {
-        root / "src" / "crowley" / "data" / "targets" / f"{target_id}.json": "target",
-        root / "src" / "crowley" / "data" / "first_run.json": "catalog",
-        root / "addon" / "Crowley" / "GeneratedTarget.lua": "generated_lua",
-        root / "addon" / "Crowley" / "GeneratedSchemas.lua": "generated_schemas",
-        root / "addon" / "Crowley" / "Crowley.toc": "crowley_toc",
-        root / "addon" / "Crowley_Data" / "Crowley_Data.toc": "data_toc",
+        common_data / "targets" / f"{target_id}.json": "target",
+        common_data / "first_run.json": "catalog",
+        scanner_addon / "Crowley" / "GeneratedTarget.lua": "generated_lua",
+        scanner_addon / "Crowley" / "GeneratedSchemas.lua": "generated_schemas",
+        scanner_addon / "Crowley" / "Crowley.toc": "crowley_toc",
+        scanner_addon / "Crowley_Data" / "Crowley_Data.toc": "data_toc",
     }
 
 
@@ -300,7 +305,7 @@ def _render(root: Path, target_path: Path, catalog_path: Path) -> dict[Path, str
         raise GenerationError(f"target is invalid: {target_path}: {exc}") from exc
     catalog = _read_catalog(catalog_path)
     try:
-        bound = target_catalog(catalog, target)
+        bound = cast(Catalog, target_catalog(cast(CatalogLike, catalog), target))
     except (AttributeError, GameTargetError) as exc:
         raise GenerationError(f"catalog identity cannot be bound to target: {exc}") from exc
     plan = bound.scan_plan(cadence_seconds=target.cadence_seconds, cold_slices=target.cold_slices)

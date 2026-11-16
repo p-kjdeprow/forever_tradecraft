@@ -9,21 +9,22 @@ import sys
 from pathlib import Path
 
 import pytest
-
-from crowley.core.game_target import (
+from crowley_common.game_target import (
     GameTarget,
     GameTargetError,
     canonical_plan,
     load_game_target,
     load_target,
-    packaged_game_target,
+    selected_target,
 )
-from crowley.core.watchlist import Catalog
+from crowley_common.watchlist import Catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = ROOT / "tools" / "generate_launch_target.py"
-TARGET_PATH = ROOT / "src" / "crowley" / "data" / "targets" / "verified-beta.json"
-CATALOG_PATH = ROOT / "src" / "crowley" / "data" / "first_run.json"
+COMMON_DATA = ROOT / "packages" / "common" / "src" / "crowley_common" / "data"
+SCANNER_ADDON = ROOT / "packages" / "scanner" / "src" / "crowley_scanner" / "addon"
+TARGET_PATH = ROOT / "tests" / "fixtures" / "targets" / "verified-beta.json"
+CATALOG_PATH = COMMON_DATA / "first_run.json"
 BETA_CATALOG_PATH = ROOT / "tests" / "fixtures" / "catalogs" / "verified-beta.json"
 
 
@@ -32,7 +33,7 @@ def test_selected_target_is_identity_only_and_plan_is_cached(
     packaged_catalog: Catalog,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from crowley.core import watchlist
+    from crowley_common import watchlist
 
     target = packaged_selection_target
     canonical_plan.cache_clear()
@@ -43,11 +44,7 @@ def test_selected_target_is_identity_only_and_plan_is_cached(
 
     monkeypatch.setattr(watchlist, "load_catalog", real_catalog_loader)
     assert target == load_target(target.target_id)
-    value = json.loads(
-        (ROOT / "src" / "crowley" / "data" / "targets" / f"{target.target_id}.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    value = json.loads((COMMON_DATA / "targets" / f"{target.target_id}.json").read_text(encoding="utf-8"))
     assert "installation" not in value
     assert not hasattr(target, "installation")
     assert not hasattr(target, "game_root")
@@ -65,11 +62,9 @@ def test_selected_target_is_identity_only_and_plan_is_cached(
 def test_fixture_target_pin_is_independent_of_packaged_selection(
     packaged_selection_target: GameTarget,
 ) -> None:
-    selected_id = (
-        (ROOT / "src" / "crowley" / "data" / "targets" / "selected").read_text(encoding="ascii").strip()
-    )
+    selected_id = (COMMON_DATA / "targets" / "selected").read_text(encoding="ascii").strip()
 
-    assert packaged_game_target().target_id == "verified-beta"
+    assert selected_target().target_id == "verified-beta"
     assert packaged_selection_target.target_id == selected_id
 
 
@@ -77,9 +72,9 @@ def test_real_packaged_selection_binds_real_catalog_in_fresh_process(tmp_path: P
     script = """
 import sys
 
-sys.path.insert(0, PACKAGE_ROOT)
-from crowley.core.game_target import selected_target
-from crowley.core.watchlist import load_catalog
+sys.path[:0] = PACKAGE_ROOTS
+from crowley_common.game_target import selected_target
+from crowley_common.watchlist import load_catalog
 
 target = selected_target()
 catalog = load_catalog()
@@ -88,7 +83,10 @@ assert target.catalog_revision == catalog.revision
 assert target.full_build == catalog.client_build
 assert target.initial_price_levels == catalog.initial_price_levels
 print(target.target_id)
-""".replace("PACKAGE_ROOT", repr(str(ROOT / "src")))
+""".replace(
+        "PACKAGE_ROOTS",
+        repr([str(ROOT / "packages" / package / "src") for package in ("common", "market", "scanner")]),
+    )
     result = subprocess.run(
         [sys.executable, "-I", "-c", script],
         cwd=tmp_path,
@@ -123,13 +121,6 @@ def test_target_contract_rejects_unknown_or_inconsistent_values(
         load_game_target(path)
 
 
-def _copy_generator_trees(root: Path) -> None:
-    for relative in ("addon/Crowley/Crowley.toc", "addon/Crowley_Data/Crowley_Data.toc"):
-        destination = root / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, destination)
-
-
 def test_generator_checks_current_target_derived_artifacts() -> None:
     result = subprocess.run(
         [sys.executable, str(GENERATOR), "--check"],
@@ -150,7 +141,7 @@ def test_generated_wire_schema_artifact_is_current() -> None:
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    schemas = (ROOT / "addon" / "Crowley" / "GeneratedSchemas.lua").read_text(encoding="utf-8")
+    schemas = (SCANNER_ADDON / "Crowley" / "GeneratedSchemas.lua").read_text(encoding="utf-8")
     assert '["ackedScans"] = true' in schemas
     assert 'crowleyData = {["ackedScans"] = true, ["generatedAt"] = true, ["scanPlan"] = true}' in schemas
     assert all(
@@ -159,7 +150,6 @@ def test_generated_wire_schema_artifact_is_current() -> None:
 
 
 def test_generator_writes_target_catalog_lua_and_tocs_without_toml_staging(tmp_path: Path) -> None:
-    _copy_generator_trees(tmp_path)
     target = tmp_path / "verified-beta.json"
     catalog = tmp_path / "first_run.json"
     shutil.copy2(TARGET_PATH, target)
@@ -183,15 +173,16 @@ def test_generator_writes_target_catalog_lua_and_tocs_without_toml_staging(tmp_p
     )
     assert result.returncode == 0, result.stderr
     rendered = json.loads(
-        (tmp_path / "src/crowley/data/targets/verified-beta.json").read_text(encoding="utf-8")
+        (tmp_path / "packages/common/src/crowley_common/data/targets/verified-beta.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert "installation" not in rendered
-    assert (tmp_path / "addon/Crowley/GeneratedTarget.lua").is_file()
+    assert (tmp_path / "packages/scanner/src/crowley_scanner/addon/Crowley/GeneratedTarget.lua").is_file()
     assert not (tmp_path / "stage").exists()
 
 
 def test_generator_rebinds_catalog_for_an_alternate_target(tmp_path: Path) -> None:
-    _copy_generator_trees(tmp_path)
     catalog_value = json.loads(BETA_CATALOG_PATH.read_text(encoding="utf-8"))
     catalog_value["items"][0]["status"] = "research"
     catalog = tmp_path / "first_run.json"
@@ -221,10 +212,14 @@ def test_generator_rebinds_catalog_for_an_alternate_target(tmp_path: Path) -> No
 
     assert result.returncode == 0, result.stderr
     rendered = json.loads(
-        (tmp_path / "src/crowley/data/targets/synthetic-target.json").read_text(encoding="utf-8")
+        (tmp_path / "packages/common/src/crowley_common/data/targets/synthetic-target.json").read_text(
+            encoding="utf-8"
+        )
     )
     assert rendered["targetId"] == "synthetic-target"
-    generated = (tmp_path / "addon/Crowley/GeneratedTarget.lua").read_text(encoding="utf-8")
+    generated = (
+        tmp_path / "packages/scanner/src/crowley_scanner/addon/Crowley/GeneratedTarget.lua"
+    ).read_text(encoding="utf-8")
     assert "count = 479" in generated
 
 
@@ -244,7 +239,6 @@ def test_generator_rejects_broken_toc_load_order() -> None:
 
 
 def test_generator_check_mode_never_writes_missing_artifacts(tmp_path: Path) -> None:
-    _copy_generator_trees(tmp_path)
     target = tmp_path / "verified-beta.json"
     catalog = tmp_path / "first_run.json"
     shutil.copy2(TARGET_PATH, target)
@@ -271,4 +265,4 @@ def test_generator_check_mode_never_writes_missing_artifacts(tmp_path: Path) -> 
     assert result.returncode != 0
     assert "generated artifacts drifted:" in result.stderr
     assert "GeneratedTarget.lua" in result.stderr
-    assert not (tmp_path / "addon/Crowley/GeneratedTarget.lua").exists()
+    assert not (tmp_path / "packages/scanner/src/crowley_scanner/addon/Crowley/GeneratedTarget.lua").exists()

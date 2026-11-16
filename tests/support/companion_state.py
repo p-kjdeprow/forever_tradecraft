@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 
-from crowley.core.companion_state import STATE_VERSION, CompanionState, dump_bytes
+from crowley_scanner.state import STATE_VERSION, CompanionState, dump_bytes
 
 
 def write_companion_state(

@@ -12,15 +12,14 @@ from importlib import resources
 
 import psycopg
 import pytest
-from psycopg.types.json import Jsonb
-
-from crowley.server.db import (
+from crowley_market.server.db import (
     MigrationStateError,
     MigrationVerificationError,
     migrate,
     migration_status,
     verify_current,
 )
+from psycopg.types.json import Jsonb
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
@@ -86,7 +85,7 @@ def _reset_public_schema() -> None:
 
 
 def _migration_sql(name: str) -> str:
-    return resources.files("crowley.server.migrations").joinpath(name).read_text(encoding="utf-8")
+    return resources.files("crowley_market.server.migrations").joinpath(name).read_text(encoding="utf-8")
 
 
 def _apply_migrations(conn: psycopg.Connection, names: tuple[str, ...]) -> None:
@@ -491,10 +490,9 @@ def test_server_startup_refuses_pending_migrations_without_mutation(
     monkeypatch.setenv("CROWLEY_API_TOKEN", "startup-test-token")
     monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
+    from crowley_market.server.app import app
+    from crowley_market.server.config import get_settings
     from fastapi.testclient import TestClient
-
-    from crowley.server.app import app
-    from crowley.server.config import get_settings
 
     get_settings.cache_clear()
     try:
@@ -582,8 +580,8 @@ def test_status_command_prints_without_applying(
             """
         ).fetchall()
 
-    from crowley.server.__main__ import main
-    from crowley.server.config import get_settings
+    from crowley_market.server.__main__ import main
+    from crowley_market.server.config import get_settings
 
     monkeypatch.setenv("CROWLEY_DATABASE_URL", DB_URL)
     monkeypatch.setenv("CROWLEY_API_TOKEN", "status-test-token")

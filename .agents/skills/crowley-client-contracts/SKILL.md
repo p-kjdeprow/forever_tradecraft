@@ -16,6 +16,8 @@ total does not cover an omitted case. Validate scalar types before sentinel comp
 and falsey `None` can bypass malformed-input rejection. Per-field byte ceilings and the aggregate compressed-frame
 limit are separate; measure varied real compositions and assert oversize publication fails closed.
 
+Derive stub return shapes from the selected client's API/UI source; do not invent
+convenient fields or boolean success returns for APIs that return nothing.
 Lua API stubs must forward varargs to argument counters; fixed signatures discard
 unexpected arguments before the counter can detect them. Assert exact failure
 reasons and use distinct simultaneous failures when testing precedence.
@@ -38,6 +40,9 @@ client-reachable behavior.
   Inspect returned query keys: zero arguments do not guarantee zero fields, and
   cache warming can change native item levels. Equipment comparison keys and
   ordinary recipe/container search keys follow different native contracts.
+  For listing identity, combine the native key with the full parsed item link;
+  missing native `bonusIDs` does not establish an unmodified item. Preserve
+  repeated sorted bonus IDs allowed by the canonical itemKey contract.
 - Preserve original failed payload bytes. Validate any internal normalization
   separately from the wire contract and ingestion identity. Never edit a game's
   SavedVariables file to make an upload pass.

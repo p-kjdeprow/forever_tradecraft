@@ -5,9 +5,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from crowley.platform import paths
-from crowley.platform.paths import XdgDirs, XdgPathError
+from crowley_common.platform import paths
+from crowley_common.platform.paths import XdgDirs, XdgPathError
 
 
 def _runtime(root: Path) -> Path:

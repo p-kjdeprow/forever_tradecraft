@@ -7,7 +7,7 @@ Scan operations handoff (monitoring, incidents, deploy recipes, Codex/Luna setup
 `.archive/handoff-scan-ops-20261112.md` (local, untracked). Run Codex here with the pinned binary
 (`CROWLEY_CODEX_PATH` in `~/.config/crowley/secrets.env`) and `-p crowley` (model `gpt-6-luna`).
 
-`crowley-scan` owns the game (relaunch, enter world, open the AH, reload). Operator guide:
+`crowley-host` owns the game (older deployed versions use `crowley-scan`) (relaunch, enter world, open the AH, reload). Operator guide:
 [docs/REPEATING_SCANS.md](docs/REPEATING_SCANS.md). Before manual contact with the game or troubleshooting game
 windows, read [local-game-control](.agents/skills/local-game-control/SKILL.md); include this path when delegating
 game operation to a worker that does not inherit repository context. Delegate the whole bounded outcome and keep
@@ -24,3 +24,6 @@ Maintain reusable lessons in `.agents/skills/` so they travel with the codebase.
 Consolidate observed mistakes into the relevant existing skill; create a new skill
 only for a distinct workflow. Keep instructions short and exclude incident logs,
 secrets, transient process IDs, and screen coordinates.
+
+For exact AH posting/cancellation, mailbox and measured movement operations, read
+[crowley-automation](.agents/skills/crowley-automation/SKILL.md) and use the supported CLI.

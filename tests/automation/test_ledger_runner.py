@@ -263,6 +263,37 @@ def test_admission_denials_leave_dispatch_unclaimed(
     assert backend.dispatched == []
 
 
+def test_preflight_recovers_crash_marker_under_lock_before_backend_input(tmp_path: Path) -> None:
+    ledger = Ledger(tmp_path / "ledger.sqlite3")
+    batch = make_batch()
+    ledger.prepare(batch, now=NOW)
+    ledger.claim_dispatch(batch.batch_id, 0, 0, now=NOW, session_boot_id=BOOT_ID, receipt_baseline=4)
+
+    class NoInputBackend:
+        def observe(self) -> Admission:
+            raise AssertionError("preflight observed the game before recovering uncertainty")
+
+        def stage(self, *args: object, **kwargs: object) -> None:
+            raise AssertionError("preflight staged before recovering uncertainty")
+
+        def clear_stage(self) -> None:
+            raise AssertionError("preflight cleanup sent input before checking uncertainty")
+
+    auth, arm = make_auth(batch)
+    runner = AutomationRunner(ledger, clock=lambda: NOW)
+    with pytest.raises(UncertainEffectInterlock):
+        runner.preflight(
+            batch,
+            authorization=auth,
+            session_arm=arm,
+            confirmed_batch_id=batch.batch_id,
+            backend=NoInputBackend(),  # type: ignore[arg-type]
+        )
+
+    assert ledger.status(batch.batch_id)["state"] == "uncertain"
+    assert ledger.has_uncertain_effect()
+
+
 @pytest.mark.parametrize("field", ["batch", "ordinal", "step", "digest", "ready"])
 def test_staged_readback_mismatch_blocks_dispatch_before_claim(tmp_path: Path, field: str) -> None:
     ledger, runner = runner_for(tmp_path / "ledger.sqlite3")

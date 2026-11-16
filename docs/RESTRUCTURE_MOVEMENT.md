@@ -1,5 +1,9 @@
 # Bounded route controller
 
+Implementation complete. Temporary worker scopes below are historical; see
+RESTRUCTURE_EXECUTION.md for final review and verification, and AUTOMATION.md for operation.
+
+
 Luna owns ONLY new packages/automation/src/crowley_automation/movement.py and
 tests/automation/test_movement.py. Read RESTRUCTURE_API, CLAUDE and HANDOFF. No other
 edits, commits/reset/stash, game input, services, deployment or installed/private files.

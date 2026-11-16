@@ -1,27 +1,28 @@
 ---
 name: local-game-control
-description: Operate and diagnose the running WoW Forever client on this Linux desktop (Wine, Battle.net, the crowley-scan loop). Use for live addon checks, game-window troubleshooting and any manual contact with the game; excludes addon implementation and trading automation.
+description: Operate and diagnose the running WoW Forever client on this Linux desktop (Wine, Battle.net, the Crowley host loop). Use for live addon checks, game-window troubleshooting and any manual contact with the game; excludes addon implementation and trading automation.
 ---
 
 # Local game control
 
-`crowley-scan` (unit `crowley-scan.service`) already owns the game: it relaunches, enters the world, opens the AH
-and reloads. Read [REPEATING_SCANS](../../../docs/REPEATING_SCANS.md) first. A diagnostic task does not authorize
+`crowley-host` (unit `crowley-host.service`) already owns the game: it relaunches, enters the world, opens the AH
+and reloads. Read [REPEATING_SCANS](../../../docs/REPEATING_SCANS.md) first. Older deployed packages use `crowley-scan`; verify the installed version
+and use its matching command/unit until the coordinated v0.2 cutover. Source edits do not deploy it. A diagnostic task does not authorize
 trading, account changes or unrelated display changes.
 
 ## Before touching the game
 
-- Look first, do not act: `systemctl --user status crowley-scan`, `crowley-scan status` (action, fault code,
-  observation summary), `journalctl --user -u crowley-scan -n 50`, `crowley-scan probe-frame`
+- Look first, do not act: `systemctl --user status crowley-host`, `crowley-host status` (action, fault code,
+  observation summary), `journalctl --user -u crowley-host -n 50`, `crowley-desktop probe-frame`
   (exit 0 frame decoded, 1 verified none, 3 error).
 - Any physical input holds the loop for 5 minutes (Mutter IdleMonitor), so a human using the desktop is safe.
-  For longer manual work stop the loop: `systemctl --user stop crowley-scan` (the game keeps running) and start it
+  For longer manual work stop the loop: `systemctl --user stop crowley-host` (the game keeps running) and start it
   again when done.
 - Your own synthetic input (XTEST) does not register as a human, so it will not hold the loop. Stop the unit
   before sending any, and obey the click rules in `CLAUDE.md` (at most one automated click per second, curved
-  human pointer motion through `crowley.gui`, never warp the pointer).
+  human pointer motion through `crowley_automation.gui`, never warp the pointer).
 - Check processes and map windows to PIDs before launching anything. Match the owned game by uid, Windows argv0
-  `Wow.exe` and `WINEPREFIX` (`crowley.gui.process`), not by broad command text. Battle.net visible does not mean
+  `Wow.exe` and `WINEPREFIX` (`crowley_automation.gui.process`), not by broad command text. Battle.net visible does not mean
   the game stopped. Never start a second client or a second Battle.net (it deletes the saved login token).
 
 ## Environment
@@ -61,7 +62,7 @@ trading, account changes or unrelated display changes.
 ## Make input observable
 
 - Exit code zero from an input tool proves dispatch, not effect. Read the result from a fresh HUD frame
-  (`crowley-scan probe-frame`, `crowley-scan status`) before the next dependent step; XTEST keys can land up to about
+  (`crowley-desktop probe-frame`, `crowley-host status`) before the next dependent step; XTEST keys can land up to about
   1 s late and go to the compositor-focused window, which is not always the X "active window".
 - Do not replay an action because its first frame lags.
 - A GNOME system modal can dim the HUD and ignore Xwayland input. A disconnected login screen keeps the same Wine

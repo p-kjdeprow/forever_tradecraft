@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import pytest
+from crowley_common.frames import PLAN_COUNT, ProtocolError, validate_snapshot
 
-from crowley.gui.frames import PLAN_COUNT, ProtocolError, validate_snapshot
 from tests.support.scan_frames import automation_snapshot, snapshot
 
 

@@ -5,15 +5,14 @@ from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
+from crowley_market.server.app import app
+from crowley_market.server.deps import require_token
+from crowley_market.server.routes import dashboard as dashboard_routes
+from crowley_market.server.routes.addon import AddonDataRequest, AddonDataResponse
 from fastapi import HTTPException
 from fastapi.routing import APIRoute, _IncludedRouter
 from pydantic import ValidationError
 from starlette.routing import BaseRoute
-
-from crowley.server.app import app
-from crowley.server.deps import require_token
-from crowley.server.routes import dashboard as dashboard_routes
-from crowley.server.routes.addon import AddonDataRequest, AddonDataResponse
 
 EXPECTED_ROUTES = frozenset(
     {

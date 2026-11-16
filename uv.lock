@@ -2,6 +2,15 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 
+[manifest]
+members = [
+    "crowley-automation",
+    "crowley-common",
+    "crowley-host",
+    "crowley-market",
+    "crowley-scanner",
+]
+
 [[package]]
 name = "annotated-doc"
 version = "0.0.5"
@@ -61,16 +70,43 @@ wheels = [
 ]
 
 [[package]]
-name = "crowley"
-version = "0.1.0"
+name = "crowley-automation"
+version = "0.2.0"
+source = { editable = "packages/automation" }
+dependencies = [
+    { name = "crowley-common" },
+    { name = "pillow" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crowley-common", editable = "packages/common" },
+    { name = "pillow", specifier = ">=11.3.0" },
+    { name = "pydantic", specifier = ">=2.14.1,<3" },
+]
+
+[[package]]
+name = "crowley-common"
+version = "0.2.0"
+source = { editable = "packages/common" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.14.1,<3" }]
+
+[[package]]
+name = "crowley-host"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "pillow" },
-    { name = "psycopg", extra = ["binary", "pool"] },
-    { name = "pydantic-settings" },
-    { name = "uvicorn", extra = ["standard"] },
+    { name = "crowley-automation" },
+    { name = "crowley-common" },
+    { name = "crowley-market" },
+    { name = "crowley-scanner" },
+    { name = "pydantic" },
 ]
 
 [package.dev-dependencies]
@@ -84,12 +120,11 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.143.1" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "pillow", specifier = ">=11.3.0" },
-    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.6" },
-    { name = "pydantic-settings", specifier = ">=2.16.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+    { name = "crowley-automation", editable = "packages/automation" },
+    { name = "crowley-common", editable = "packages/common" },
+    { name = "crowley-market", editable = "packages/market" },
+    { name = "crowley-scanner", editable = "packages/scanner" },
+    { name = "pydantic", specifier = ">=2.14.1,<3" },
 ]
 
 [package.metadata.requires-dev]
@@ -99,6 +134,48 @@ dev = [
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.17.0" },
+]
+
+[[package]]
+name = "crowley-market"
+version = "0.2.0"
+source = { editable = "packages/market" }
+dependencies = [
+    { name = "crowley-common" },
+    { name = "fastapi" },
+    { name = "psycopg", extra = ["binary", "pool"] },
+    { name = "pydantic" },
+    { name = "pydantic-settings" },
+    { name = "starlette" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crowley-common", editable = "packages/common" },
+    { name = "fastapi", specifier = ">=0.143.1" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.6" },
+    { name = "pydantic", specifier = ">=2.14.1,<3" },
+    { name = "pydantic-settings", specifier = ">=2.16.0" },
+    { name = "starlette", specifier = ">=1.8.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54.0" },
+]
+
+[[package]]
+name = "crowley-scanner"
+version = "0.2.0"
+source = { editable = "packages/scanner" }
+dependencies = [
+    { name = "crowley-common" },
+    { name = "httpx" },
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "crowley-common", editable = "packages/common" },
+    { name = "httpx", specifier = ">=0.28.1,<1" },
+    { name = "pydantic", specifier = ">=2.14.1,<3" },
 ]
 
 [[package]]

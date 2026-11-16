@@ -12,8 +12,8 @@ from typing import TYPE_CHECKING, Protocol
 import pytest
 
 if TYPE_CHECKING:
-    from crowley.core.game_target import GameTarget
-    from crowley.core.watchlist import Catalog
+    from crowley_common.game_target import GameTarget
+    from crowley_common.watchlist import Catalog
 
 
 class _CatalogLoader(Protocol):
@@ -27,7 +27,7 @@ _FIXTURE_CATALOG: Catalog | None = None
 
 @lru_cache(maxsize=1)
 def _fixture_target() -> GameTarget:
-    from crowley.core.game_target import load_game_target
+    from crowley_common.game_target import load_game_target
 
     return load_game_target(Path(__file__).parent / "fixtures" / "targets" / "verified-beta.json")
 
@@ -42,20 +42,19 @@ def _fixture_load_catalog(*, enforce_target: bool = True) -> Catalog:
 def _pin_fixture_target() -> None:
     global _FIXTURE_CATALOG, _REAL_LOAD_CATALOG, _REAL_SELECTED_TARGET
 
-    from crowley.core import game_target, watchlist
-    from crowley.core.watchlist import Catalog
+    from crowley_common import game_target, watchlist
+    from crowley_common.watchlist import Catalog
 
     _REAL_SELECTED_TARGET = game_target.selected_target
     _REAL_LOAD_CATALOG = watchlist.load_catalog
     watchlist.load_catalog.cache_clear()
-    game_target.packaged_game_target.cache_clear()
+    game_target.selected_target.cache_clear()
     game_target.canonical_plan.cache_clear()
 
     fixture_path = Path(__file__).parent / "fixtures" / "catalogs" / "verified-beta.json"
     _FIXTURE_CATALOG = Catalog.model_validate_json(fixture_path.read_text(encoding="utf-8"))
     _fixture_target().validate_catalog(_FIXTURE_CATALOG)
     game_target.selected_target = _fixture_target
-    game_target.packaged_game_target = _fixture_target
     watchlist.load_catalog = _fixture_load_catalog
 
 

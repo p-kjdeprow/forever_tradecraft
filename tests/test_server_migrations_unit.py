@@ -5,8 +5,7 @@ from __future__ import annotations
 import hashlib
 
 import pytest
-
-from crowley.server.db import MigrationManifest, MigrationManifestError
+from crowley_market.server.db import MigrationManifest, MigrationManifestError
 
 
 def test_packaged_manifest_contains_the_new_ledger_migration() -> None:

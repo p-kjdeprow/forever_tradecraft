@@ -5,8 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
-
-from crowley.scan.policy import (
+from crowley_host.scan.policy import (
     SET_BINDING_COMMAND,
     Action,
     CommandTx,
@@ -26,7 +25,7 @@ from crowley.scan.policy import (
 WALL = 1_000_000.0
 MONO = 500.0
 JAXON = "Auctioneer Jaxon"
-TARGET = Target("Char", "Realm", "Alliance", "house-a", "plan-1", "70862", 11500, "0.1.0", "0.3.0", JAXON)
+TARGET = Target("Char", "Realm", "Alliance", "house-a", "plan-1", "70862", 11500, "0.2.0", "0.3.0", JAXON)
 S1, S2, S3 = "uid-1", "uid-2", "uid-3"
 
 
@@ -41,7 +40,7 @@ def snap(**kw: object) -> Snapshot:
         zone="Stormwind City",
         build="70862",
         interface=11500,
-        addon_version="0.1.0",
+        addon_version="0.2.0",
         scanner_addon_version="0.3.0",
         house_key="house-a",
         plan_hash="plan-1",
@@ -108,6 +107,23 @@ def check(d: Decision, action: Action, code: str = "") -> None:
 def test_row_p_human_holds_everything_including_relaunch() -> None:
     check(decide(obs(human_active=True, human_reason="key")), Action.HOLD_HUMAN)
     check(decide(obs(human_active=True, process_alive=False)), Action.HOLD_HUMAN)
+
+
+def test_automation_guards_withhold_scan_maintenance() -> None:
+    blocked = replace(obs(), maintenance_blocker="automation_uncertain")
+    decision = decide(blocked)
+    check(decision, Action.WAIT)
+    assert decision.detail == "automation_uncertain"
+
+    native_busy = replace(obs(snapshot=snap(automation_busy=True)), process_alive=False)
+    decision = decide(native_busy)
+    check(decision, Action.WAIT)
+    assert decision.detail == "automation_native_busy"
+
+    busy_without_scan_frame = replace(obs(snapshot=None, process_alive=False), native_automation_busy=True)
+    decision = decide(busy_without_scan_frame)
+    check(decision, Action.WAIT)
+    assert decision.detail == "automation_native_busy"
 
 
 def test_row_1_no_process_relaunches_then_backs_off() -> None:

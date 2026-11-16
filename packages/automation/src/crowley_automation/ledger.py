@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import sqlite3
@@ -34,6 +35,8 @@ class StepStatus(TypedDict):
     step: int
     state: ActionState
     dispatched_at: int | None
+    session_boot_id: str | None
+    receipt_baseline: int | None
     callback_delivered: bool | None
     postcondition: bool | None
     action_complete: bool | None
@@ -107,6 +110,8 @@ class Ledger:
                     state TEXT NOT NULL CHECK(state IN
                         ('ready','dispatched','succeeded','failed','uncertain')),
                     dispatched_at INTEGER,
+                    session_boot_id TEXT,
+                    receipt_baseline INTEGER,
                     callback_delivered INTEGER
                         CHECK(callback_delivered IN (0,1) OR callback_delivered IS NULL),
                     postcondition INTEGER CHECK(postcondition IN (0,1) OR postcondition IS NULL),
@@ -116,8 +121,19 @@ class Ledger:
                     PRIMARY KEY(batch_id, ordinal, step),
                     FOREIGN KEY(batch_id,ordinal) REFERENCES actions(batch_id,ordinal)
                 );
+                CREATE TABLE IF NOT EXISTS automation_control (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    stop_reason TEXT,
+                    stop_at INTEGER
+                );
+                INSERT OR IGNORE INTO automation_control(singleton,stop_reason,stop_at) VALUES(1,NULL,NULL);
                 """
             )
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(action_steps)")}
+            if "session_boot_id" not in columns:
+                db.execute("ALTER TABLE action_steps ADD COLUMN session_boot_id TEXT")
+            if "receipt_baseline" not in columns:
+                db.execute("ALTER TABLE action_steps ADD COLUMN receipt_baseline INTEGER")
 
     def _create_or_validate_file(self) -> None:
         try:
@@ -252,7 +268,8 @@ class Ledger:
                 (batch_id,),
             ).fetchall()
             steps = db.execute(
-                "SELECT ordinal,step,state,dispatched_at,callback_delivered,postcondition,action_complete,"
+                "SELECT ordinal,step,state,dispatched_at,session_boot_id,receipt_baseline,"
+                "callback_delivered,postcondition,action_complete,"
                 "receipt_json,reason FROM action_steps WHERE batch_id=? ORDER BY ordinal,step",
                 (batch_id,),
             ).fetchall()
@@ -278,6 +295,8 @@ class Ledger:
                     "step": row["step"],
                     "state": row["state"],
                     "dispatched_at": row["dispatched_at"],
+                    "session_boot_id": row["session_boot_id"],
+                    "receipt_baseline": row["receipt_baseline"],
                     "callback_delivered": _bool_db(row["callback_delivered"]),
                     "postcondition": _bool_db(row["postcondition"]),
                     "action_complete": _bool_db(row["action_complete"]),
@@ -302,6 +321,165 @@ class Ledger:
             ).fetchone()
         return bool(row["found"])
 
+    def stop_requested(self) -> bool:
+        with self._connect() as db:
+            row = db.execute("SELECT stop_reason FROM automation_control WHERE singleton=1").fetchone()
+        return row is not None and row["stop_reason"] is not None
+
+    def stop(self, reason: str = "operator_stop", *, now: int | None = None) -> None:
+        if type(reason) is not str or not reason or len(reason) > 120:
+            raise LedgerError("stop reason must be bounded non-empty text")
+        timestamp = int(time.time()) if now is None else now
+        with self._connect() as db:
+            db.execute(
+                "UPDATE automation_control SET stop_reason=?,stop_at=? WHERE singleton=1",
+                (reason, timestamp),
+            )
+
+    def clear_stop(self) -> None:
+        if self.has_uncertain_effect():
+            raise UncertainEffectInterlock("uncertain effects must be reconciled before clearing stop")
+        with self._connect() as db:
+            db.execute("UPDATE automation_control SET stop_reason=NULL,stop_at=NULL WHERE singleton=1")
+
+    def reconcile_receipt(
+        self,
+        batch_id: str,
+        ordinal: int,
+        step: int,
+        native_receipt: dict[str, object],
+        *,
+        boot_id: str,
+        step_limit: int,
+        now: int | None = None,
+    ) -> None:
+        """Resolve one uncertain marker only from a matching later native receipt."""
+        expected_fields = {
+            "sequence",
+            "batchId",
+            "ordinal",
+            "stepIndex",
+            "callbackDelivered",
+            "postcondition",
+            "actionComplete",
+            "detail",
+        }
+        if type(native_receipt) is not dict or set(native_receipt) != expected_fields:
+            raise LedgerError("native receipt fields are not exact")
+        if (
+            type(boot_id) is not str
+            or not boot_id
+            or type(step_limit) is not int
+            or step_limit < 1
+            or type(native_receipt["sequence"]) is not int
+            or type(native_receipt["ordinal"]) is not int
+            or type(native_receipt["stepIndex"]) is not int
+            or type(native_receipt["batchId"]) is not str
+            or type(native_receipt["detail"]) is not str
+            or len(native_receipt["detail"]) > 240
+            or native_receipt["callbackDelivered"] is not True
+            or type(native_receipt["postcondition"]) is not bool
+            or type(native_receipt["actionComplete"]) is not bool
+            or native_receipt["sequence"] <= 0
+            or native_receipt["batchId"] != batch_id
+            or native_receipt["ordinal"] != ordinal
+            or native_receipt["stepIndex"] != step
+        ):
+            raise LedgerError("native receipt does not prove this dispatched effect")
+        timestamp = int(time.time()) if now is None else now
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            batch = db.execute("SELECT state FROM batches WHERE batch_id=?", (batch_id,)).fetchone()
+            action = db.execute(
+                "SELECT state,next_step,action_json FROM actions WHERE batch_id=? AND ordinal=?",
+                (batch_id, ordinal),
+            ).fetchone()
+            dispatched = db.execute(
+                "SELECT state,session_boot_id,receipt_baseline FROM action_steps "
+                "WHERE batch_id=? AND ordinal=? AND step=?",
+                (batch_id, ordinal, step),
+            ).fetchone()
+            if batch is None or action is None or dispatched is None:
+                raise LedgerError("receipt does not identify a durable action")
+            if (
+                batch["state"] != "uncertain"
+                or action["state"] != "uncertain"
+                or dispatched["state"] != "uncertain"
+            ):
+                raise LedgerError("only an uncertain dispatched effect can be reconciled")
+            if dispatched["session_boot_id"] != boot_id:
+                raise LedgerError("receipt boot does not match the dispatch marker")
+            if (
+                dispatched["receipt_baseline"] is None
+                or native_receipt["sequence"] <= dispatched["receipt_baseline"]
+            ):
+                raise LedgerError("native receipt sequence did not advance beyond dispatch")
+            action_data = json.loads(action["action_json"])
+            digest = hashlib.sha256(action["action_json"].encode("utf-8")).hexdigest()
+            if native_receipt["postcondition"] is False:
+                if native_receipt["actionComplete"] is not False:
+                    raise LedgerError("negative native receipt has contradictory completion evidence")
+                evidence = {
+                    "action_digest": digest,
+                    "boot_id": boot_id,
+                    "native_receipt": native_receipt,
+                    "reconciled_at": timestamp,
+                }
+                db.execute(
+                    "UPDATE action_steps SET state='failed',callback_delivered=1,postcondition=0,"
+                    "action_complete=0,receipt_json=?,reason='reconciled native precondition failure' "
+                    "WHERE batch_id=? AND ordinal=? AND step=?",
+                    (canonical_json(evidence), batch_id, ordinal, step),
+                )
+                db.execute(
+                    "UPDATE actions SET state='failed',reason='reconciled native precondition failure' "
+                    "WHERE batch_id=? AND ordinal=?",
+                    (batch_id, ordinal),
+                )
+                db.execute(
+                    "UPDATE batches SET state='failed',updated_at=? WHERE batch_id=?",
+                    (timestamp, batch_id),
+                )
+                return
+            advance_step = not native_receipt["actionComplete"] and step + 1 < step_limit
+            if not native_receipt["actionComplete"] and not advance_step:
+                if action_data.get("kind") != "collect_mail":
+                    raise LedgerError("incomplete native receipt cannot advance this action")
+            evidence = {
+                "action_digest": digest,
+                "boot_id": boot_id,
+                "native_receipt": native_receipt,
+                "reconciled_at": timestamp,
+            }
+            db.execute(
+                "UPDATE action_steps SET state='succeeded',callback_delivered=1,postcondition=1,"
+                "action_complete=?,receipt_json=?,reason=NULL WHERE batch_id=? AND ordinal=? AND step=?",
+                (int(native_receipt["actionComplete"]), canonical_json(evidence), batch_id, ordinal, step),
+            )
+            if advance_step:
+                next_step = step + 1
+                db.execute(
+                    "UPDATE actions SET state='ready',next_step=?,reason=NULL WHERE batch_id=? AND ordinal=?",
+                    (next_step, batch_id, ordinal),
+                )
+                db.execute(
+                    "INSERT INTO action_steps(batch_id,ordinal,step,state) VALUES(?,?,?,'ready')",
+                    (batch_id, ordinal, next_step),
+                )
+                next_state = "running"
+            else:
+                db.execute(
+                    "UPDATE actions SET state='succeeded',reason=NULL WHERE batch_id=? AND ordinal=?",
+                    (batch_id, ordinal),
+                )
+                incomplete = db.execute(
+                    "SELECT COUNT(*) AS n FROM actions WHERE batch_id=? AND state!='succeeded'", (batch_id,)
+                ).fetchone()["n"]
+                next_state = "succeeded" if incomplete == 0 else "running"
+            db.execute(
+                "UPDATE batches SET state=?,updated_at=? WHERE batch_id=?", (next_state, timestamp, batch_id)
+            )
+
     def mark_expired(self, batch_id: str, *, now: int) -> None:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -316,8 +494,21 @@ class Ledger:
                     "UPDATE batches SET state='expired',updated_at=? WHERE batch_id=?", (now, batch_id)
                 )
 
-    def claim_dispatch(self, batch_id: str, ordinal: int, step: int, *, now: int) -> None:
+    def claim_dispatch(
+        self,
+        batch_id: str,
+        ordinal: int,
+        step: int,
+        *,
+        now: int,
+        session_boot_id: str | None = None,
+        receipt_baseline: int | None = None,
+    ) -> None:
         """Commit the write-ahead dispatch marker before returning the action."""
+        if session_boot_id is not None and (type(session_boot_id) is not str or not session_boot_id):
+            raise LedgerError("dispatch boot identity is malformed")
+        if receipt_baseline is not None and (type(receipt_baseline) is not int or receipt_baseline < 0):
+            raise LedgerError("native receipt baseline is malformed")
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             batch = db.execute("SELECT state FROM batches WHERE batch_id=?", (batch_id,)).fetchone()
@@ -348,9 +539,10 @@ class Ledger:
                 (batch_id, ordinal),
             )
             db.execute(
-                "UPDATE action_steps SET state='dispatched',dispatched_at=? "
+                "UPDATE action_steps SET state='dispatched',dispatched_at=?,session_boot_id=?,"
+                "receipt_baseline=? "
                 "WHERE batch_id=? AND ordinal=? AND step=?",
-                (now, batch_id, ordinal, step),
+                (now, session_boot_id, receipt_baseline, batch_id, ordinal, step),
             )
             db.execute("UPDATE batches SET state='running',updated_at=? WHERE batch_id=?", (now, batch_id))
 

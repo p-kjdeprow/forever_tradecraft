@@ -12,8 +12,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from crowley_host.ops import health as ops
 
-from crowley.ops import health as ops
 from tests.support.companion_state import write_companion_state
 
 NOW = datetime(2026, 10, 19, 20, 0, tzinfo=UTC)
@@ -455,10 +455,11 @@ def test_service_nonzero_exec_main_status_is_attention() -> None:
 
 
 def test_systemd_units_are_bounded_and_minute_aligned() -> None:
-    backup_service = Path("deploy/systemd/crowley-market-backup.service.in").read_text(encoding="utf-8")
-    backup_timer = Path("deploy/systemd/crowley-market-backup.timer").read_text(encoding="utf-8")
-    health_service = Path("deploy/systemd/crowley-health.service.in").read_text(encoding="utf-8")
-    health_timer = Path("deploy/systemd/crowley-health.timer").read_text(encoding="utf-8")
+    systemd = Path("apps/host/src/crowley_host/ops/package_data/systemd")
+    backup_service = (systemd / "crowley-market-backup.service.in").read_text(encoding="utf-8")
+    backup_timer = (systemd / "crowley-market-backup.timer").read_text(encoding="utf-8")
+    health_service = (systemd / "crowley-health.service.in").read_text(encoding="utf-8")
+    health_timer = (systemd / "crowley-health.timer").read_text(encoding="utf-8")
     assert "Type=oneshot" in backup_service and "UMask=0077" in backup_service
     assert "ExecStart=%h/.local/bin/crowley-ops backup" in backup_service
     assert "--repo" not in backup_service
@@ -590,7 +591,7 @@ def test_health_journal_failure_cannot_leave_fresh_green_latest(
 
 
 def test_health_watches_the_scan_and_companion_services_only() -> None:
-    assert ops.SERVICE_NAMES == ("crowley-scan.service", "crowley-companion.service")
+    assert ops.SERVICE_NAMES == ("crowley-host.service", "crowley-companion.service")
 
 
 def test_health_surfaces_a_fault_code_on_any_action(tmp_path: Path) -> None:
@@ -620,13 +621,12 @@ def test_stale_uploads_get_a_grace_period_after_a_hold_ends(tmp_path: Path) -> N
 
 
 def _write_default_companion_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    from crowley.config import resolve_companion
+    from crowley_common.game_target import selected_target
+    from crowley_scanner.companion.config import load_scanner_config
+
     from tests.support.config import (
-        fixture_companion_tunables,
         fixture_host,
-        fixture_target,
         fixture_xdg,
-        write_companion_toml,
         write_host_toml,
     )
 
@@ -642,8 +642,26 @@ def _write_default_companion_config(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     host = fixture_host(tmp_path)
     xdg.crowley_config.mkdir(parents=True)
     write_host_toml(xdg.crowley_config / "host.toml", host)
-    write_companion_toml(xdg.crowley_config / "companion.toml")
-    return resolve_companion(fixture_target(), host, fixture_companion_tunables(), xdg=xdg).state_file
+    target = selected_target()
+    scanner_path = xdg.crowley_config / "scanner.toml"
+    scanner_path.write_text(
+        "[scanner]\n"
+        f'game_root = "{host.game_root}"\n'
+        f'wtf_account = "{host.wtf_account}"\n'
+        f'character = "{host.character}"\n'
+        f'server_url = "{host.server_url}"\n',
+        encoding="utf-8",
+    )
+    (xdg.crowley_config / "secrets.env").write_text("CROWLEY_API_TOKEN=test\n", encoding="utf-8")
+    load_scanner_config(scanner_path)
+    return (
+        xdg.crowley_state
+        / target.house
+        / target.target_id
+        / host.wtf_account
+        / host.character
+        / "companion.json"
+    )
 
 
 def test_health_default_companion_state_is_the_live_resolved_file(
@@ -676,7 +694,7 @@ def test_health_fails_loudly_when_the_companion_state_cannot_be_resolved(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_default_companion_config(tmp_path, monkeypatch)
-    (Path(os.environ["XDG_CONFIG_HOME"]) / "crowley" / "host.toml").unlink()
+    (Path(os.environ["XDG_CONFIG_HOME"]) / "crowley" / "scanner.toml").unlink()
     with pytest.raises(ops.OperationsError, match="companion state path cannot be resolved"):
         ops.health_operation(
             state_root=tmp_path / "state-root", backup_root=tmp_path / "backups", service_fn=_healthy_services

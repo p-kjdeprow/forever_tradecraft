@@ -8,7 +8,7 @@ from fractions import Fraction
 from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
-DASHBOARD = ROOT / "src/crowley/server/static/trading-dashboard.html"
+DASHBOARD = ROOT / "packages/market/src/crowley_market/server/static/trading-dashboard.html"
 
 
 def _node(script: str) -> dict:

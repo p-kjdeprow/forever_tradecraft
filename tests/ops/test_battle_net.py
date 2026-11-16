@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-import pytest
-from PIL import Image, ImageDraw, ImageFont
+import os
+import time
+from pathlib import Path
 
-from crowley.ops import battle_net
-from crowley.ops.battle_net import BattleNetPlayError, Box, inner_target, locate_play_button
+import pytest
+from crowley_automation import battle_net
+from crowley_automation.battle_net import BattleNetPlayError, Box, inner_target, locate_play_button
+from crowley_automation.desktop_input import ActError, GuiLease, gui_lock_path
+from crowley_automation.ledger import Ledger
+from crowley_automation.model import Batch, CollectMail
+from PIL import Image, ImageDraw, ImageFont
 
 PLAY_BLUE = (0, 116, 224)
 WINDOW = Box(154, 70, 1664, 940)
@@ -93,18 +99,18 @@ def test_tiny_blue_specks_are_not_candidates() -> None:
 def test_cli_wires_the_command(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     from pathlib import Path
 
-    from crowley.ops import cli
+    from crowley_automation.desktop_cli import main
 
     seen: list[int | None] = []
     monkeypatch.setattr(battle_net, "click_play", lambda window: seen.append(window) or Path("evidence.json"))
-    assert cli.main(["battle-net-play", "--window", "42"]) == 0
+    assert main(["play", "--window", "42"]) == 0
     assert seen == [42]
 
     def fail(_window: int | None) -> Path:
         raise BattleNetPlayError("no blue Play button region found in the Battle.net window")
 
     monkeypatch.setattr(battle_net, "click_play", fail)
-    assert cli.main(["battle-net-play"]) == 1
+    assert main(["play"]) == 1
     assert "no blue Play button" in capsys.readouterr().err
 
 
@@ -215,6 +221,11 @@ def _install_fakes(monkeypatch: pytest.MonkeyPatch, tmp_path, *, press_fails: bo
     monkeypatch.setattr(battle_net, "_tool_run", tool_run)
     monkeypatch.setattr(battle_net, "_pointer_position", position)
     monkeypatch.setattr(battle_net, "_is_window_or_descendant", lambda _x, _a: log.append("window") or True)
+    monkeypatch.setattr(
+        battle_net,
+        "Presence",
+        lambda: type("IdlePresence", (), {"human_active": lambda _self: (False, "idle")})(),
+    )
     return log
 
 
@@ -247,3 +258,108 @@ def test_failure_after_precommit_releases_the_button(monkeypatch: pytest.MonkeyP
         battle_net.click_play(window=7)
     assert log[-4:] == ["precommit", "press", "release", "close"]
     assert "record_press" not in log
+
+
+def test_direct_play_refuses_competing_gui_lease_before_input(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    log = _install_fakes(monkeypatch, tmp_path, press_fails=False)
+    monkeypatch.setattr(battle_net, "GuiLease", lambda path: GuiLease(path, timeout=0.05))
+    with GuiLease(gui_lock_path()).hold(), pytest.raises(BattleNetPlayError, match="GUI lease unavailable"):
+        battle_net.click_play(window=7)
+    assert log == []
+
+
+def test_direct_play_refuses_recent_human_input_before_capture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    log = _install_fakes(monkeypatch, tmp_path, press_fails=False)
+    monkeypatch.setattr(
+        battle_net,
+        "Presence",
+        lambda: type("ActivePresence", (), {"human_active": lambda _self: (True, "recent input")})(),
+    )
+    with pytest.raises(BattleNetPlayError, match="physical input detected"):
+        battle_net.click_play(window=7)
+    assert log == []
+
+
+def _default_ledger_path() -> Path:
+    return Path(os.environ["XDG_STATE_HOME"]) / "crowley" / "automation" / "ledger.sqlite3"
+
+
+def test_direct_play_refuses_an_inflight_runner_before_capture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    log = _install_fakes(monkeypatch, tmp_path, press_fails=False)
+    ledger = Ledger(_default_ledger_path())
+
+    with ledger.runner_lock(), pytest.raises(BattleNetPlayError, match="automation_running"):
+        battle_net.click_play(window=7)
+
+    assert log == []
+
+
+def test_direct_play_uses_the_launcher_inherited_gui_lease(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    log = _install_fakes(monkeypatch, tmp_path, press_fails=False)
+    parent = GuiLease(gui_lock_path())
+    contender = GuiLease(gui_lock_path(), timeout=0.05)
+
+    with parent.hold():
+        assert parent.fd is not None
+        monkeypatch.setenv("CROWLEY_GUI_LEASE_FD", str(parent.fd))
+        evidence = battle_net.click_play(window=7)
+        assert evidence.exists()
+        assert "press" in log
+        with pytest.raises(ActError, match="held elsewhere"), contender.hold():
+            pass
+
+
+def test_direct_play_refuses_an_uncertain_effect_before_capture(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    log = _install_fakes(monkeypatch, tmp_path, press_fails=False)
+    ledger = Ledger(_default_ledger_path())
+    now = int(time.time())
+    batch = Batch("us-normal-alliance", "Tester", now + 300, (CollectMail(2),))
+    ledger.prepare(batch, now=now)
+    ledger.claim_dispatch(batch.batch_id, 0, 0, now=now, session_boot_id="boot", receipt_baseline=1)
+    ledger.finish_step(
+        batch.batch_id,
+        0,
+        0,
+        "uncertain",
+        now=now,
+        callback_delivered=None,
+        postcondition=None,
+        action_complete=None,
+        receipt=None,
+    )
+
+    with pytest.raises(BattleNetPlayError, match="automation_uncertain"):
+        battle_net.click_play(window=7)
+
+    assert log == []
+
+
+@pytest.mark.parametrize(
+    ("active_at", "motion_expected"),
+    [(2, False), (3, True)],
+)
+def test_play_rechecks_presence_before_motion_and_press(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, active_at: int, motion_expected: bool
+) -> None:
+    log = _install_fakes(monkeypatch, tmp_path, press_fails=False)
+    count = 0
+
+    class SequencePresence:
+        def human_active(self) -> tuple[bool, str]:
+            nonlocal count
+            count += 1
+            return count == active_at, "recent input"
+
+    monkeypatch.setattr(battle_net, "Presence", SequencePresence)
+    with pytest.raises(BattleNetPlayError, match="physical input detected"):
+        battle_net.click_play(window=7)
+    assert ("motion" in log) is motion_expected
+    assert "press" not in log

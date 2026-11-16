@@ -1,5 +1,9 @@
 # Refactor package and operation interfaces
 
+Implementation complete. Temporary worker scopes below are historical; see
+RESTRUCTURE_EXECUTION.md for final review and verification, and AUTOMATION.md for operation.
+
+
 Read with RESTRUCTURE_PLAN.md and RESTRUCTURE_EXECUTION.md. This is the shared implementation
 contract for parallel workers. Parent owns updates. No live game operations or real trades are
 authorized by this file.
@@ -12,12 +16,12 @@ The common distribution groups already-shared OS helpers with contract modules t
 privacy/path code or adding a fifth foundation library. Contract validation itself remains pure.
 
 - packages/common/src/crowley_common: house, auction_rules, errors, scanformat, game_target,
-  watchlist, data, platform (paths/privfs only), and later frames (pure byte/schema/pixel validation).
+  watchlist, data, luawriter, platform (paths/privfs only), and frames (pure byte/schema/pixel validation).
   It has no scanner runtime, GUI input, database, HTTP, action execution, or component resolvers.
 - packages/market/src/crowley_market: retained market models/cache/economics/client_data,
   analysis, volume, server, store, client_import (old core/client_data), and backup support as needed.
 - packages/scanner/src/crowley_scanner: companion, state (old companion_state), savedvars,
-  luawriter, scanner configuration/plan transport, and owned addon resources Crowley/Crowley_Data.
+  scanner configuration/plan transport, and owned addon resources Crowley/Crowley_Data.
   No GUI/launcher or automation imports.
 - packages/automation/src/crowley_automation: input/capture/native adapters, standalone game
   observation/config, new operations/ledger/runner, movement, and Crowley_Automation addon.
@@ -74,11 +78,12 @@ Incomplete or uncertain receipts stop that operation. GUI ownership and client-s
 are separately required for market actions. Session/identity, human presence, focus and freshness
 are rechecked before dispatch. The existing hard click interval and curved pointer path are retained.
 
-Combined operation has one GUI owner: the host loop executes submitted automation through the
-public runner instead of allowing an independent trading process to race its scan-maintenance
-actions. Standalone automation refuses a conflicting GUI owner. During an active or uncertain
-effect the host cannot type scan commands, reload, or relaunch behind the runner. Use a small
-explicit ownership handoff/status interface; do not add a second supervisor or message broker.
+Combined operation has one GUI owner: a batch holds the shared GUI lease, and the host composes
+the automation runtime's public maintenance guard before policy and again inside the lease.
+The guard uses the existing runner lock and durable uncertainty; no new queue or dispatcher is
+needed. Standalone automation refuses a conflicting GUI owner. During an active or uncertain
+effect the host cannot type scan commands, reload, or relaunch behind the runner. Native
+ownership observations additionally block maintenance. See RESTRUCTURE_COORDINATION.md.
 Mail collection and walking use bounded primitive steps with a persisted progress cursor. Every
 protected mail call gets its own dispatch marker and causal receipt. Posting and cancellation
 remain one protected-call step each.

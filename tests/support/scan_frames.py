@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from crowley_common.frames import PLAN_COUNT, encode_frame, pack_cells
 from PIL import Image
-
-from crowley.gui.frames import PLAN_COUNT, encode_frame, pack_cells
 
 DISPLAY = (1920, 1080)
 SCANNER_CROP = (80, 48, 256, 256)
@@ -56,20 +55,21 @@ def snapshot(sequence: int = 1) -> dict[str, Any]:
 def automation_snapshot(sequence: int = 1) -> dict[str, Any]:
     """Game facts, independent of a Crowley scan plan."""
     return {
-        "schema": 1,
+        "schema": 2,
         "kind": "automation",
         "boot": "automation-boot-1",
         "sequence": sequence,
         "wallTime": 1_000,
         "uptimeMs": sequence,
         "context": {
-            "addonVersion": "0.1.0",
+            "addonVersion": "0.2.0",
             "interface": 16001,
             "clientBuild": "70450",
             "character": "Arthur",
             "realm": "Classic Beta PvE 2",
             "playerFaction": "Alliance",
             "zone": "Orgrimmar",
+            "nativeRegion": 1,
         },
         "ahOpen": True,
         "auctioneer": {
@@ -88,6 +88,49 @@ def automation_snapshot(sequence: int = 1) -> dict[str, Any]:
             "gameMenuShown": False,
         },
         "chatEdit": {"active": False, "focused": False, "text": ""},
+        "goldCopper": 0,
+        "operation": {
+            "batchId": "",
+            "ordinal": 0,
+            "stepIndex": 0,
+            "expiresAt": 0,
+            "action": False,
+            "ready": False,
+            "error": "",
+            "buttonRect": {"x": 700, "y": 400, "width": 160, "height": 36},
+            "receipt": {
+                "sequence": 0,
+                "batchId": "",
+                "ordinal": 0,
+                "stepIndex": 0,
+                "callbackDelivered": "unknown",
+                "postcondition": "unknown",
+                "actionComplete": "unknown",
+                "detail": "",
+            },
+        },
+        "inspection": {"kind": "none", "page": 0, "rows": [], "hasMore": False, "error": ""},
+        "motion": {
+            "x": 0,
+            "y": 0,
+            "instance": 0,
+            "facing": 0,
+            "moving": False,
+            "dead": False,
+            "inCombat": False,
+            "mounted": False,
+            "target": {
+                "present": False,
+                "guid": "",
+                "name": "",
+                "rangeAvailable": False,
+                "withinRange": False,
+            },
+            "bindings": {"forward": "MOVEFORWARD", "left": "TURNLEFT", "right": "TURNRIGHT"},
+            "hover": {"kind": "none", "name": "", "screenX": 0, "screenY": 0},
+        },
+        "mailOpen": False,
+        "ownership": {"mode": "standalone", "ahOwner": "none", "scannerState": "not_installed"},
     }
 
 

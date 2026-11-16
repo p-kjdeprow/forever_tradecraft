@@ -8,8 +8,7 @@ from multiprocessing.connection import Connection
 from pathlib import Path
 
 import pytest
-
-from crowley.native import build
+from crowley_automation.native import build
 
 
 def _simple_publication(root: Path, artifact: bytes, manifest: bytes) -> build._Publication:
@@ -227,16 +226,55 @@ def test_xdotool_builder_rejects_different_isolated_build_inputs(
 def test_clean_wheel_native_cli_runs_outside_the_checkout(tmp_path: Path) -> None:
     repository = Path(__file__).resolve().parents[2]
     wheel_dir = tmp_path / "wheel"
-    subprocess.run(["uv", "build", "--wheel", "--out-dir", str(wheel_dir)], cwd=repository, check=True)
-    wheel = next(wheel_dir.glob("crowley-*.whl"))
+    for package in ("crowley-common", "crowley-automation"):
+        subprocess.run(
+            ["uv", "build", "--wheel", "--package", package, "--out-dir", str(wheel_dir)],
+            cwd=repository,
+            check=True,
+        )
+    common_wheel = next(wheel_dir.glob("crowley_common-*.whl"))
+    automation_wheel = next(wheel_dir.glob("crowley_automation-*.whl"))
     virtualenv = tmp_path / "venv"
     subprocess.run(["uv", "venv", str(virtualenv)], cwd=tmp_path, check=True)
     python = virtualenv / "bin" / "python"
-    subprocess.run(["uv", "pip", "install", "--python", str(python), str(wheel)], cwd=tmp_path, check=True)
+    subprocess.run(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            str(python),
+            str(common_wheel),
+            str(automation_wheel),
+        ],
+        cwd=tmp_path,
+        check=True,
+    )
     outside = tmp_path / "outside-checkout"
     outside.mkdir(mode=0o700)
     environment = os.environ.copy()
     environment.pop("PYTHONPATH", None)
+    resource_check = subprocess.run(
+        [
+            str(python),
+            "-c",
+            (
+                "import pathlib, sys; import crowley_automation.native.build as build; "
+                "module = pathlib.Path(build.__file__).resolve(); "
+                "resource = build.VENDORED_SOURCE_ARCHIVE.resolve(); "
+                "assert module.is_relative_to(pathlib.Path(sys.prefix).resolve()); "
+                "assert resource.is_file() and resource.is_relative_to(module.parents[1]); "
+                "print(resource)"
+            ),
+        ],
+        cwd=outside,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert resource_check.returncode == 0, resource_check.stderr
+    assert str(virtualenv) in resource_check.stdout
     result = subprocess.run(
         [str(virtualenv / "bin" / "crowley-native"), "build", "--help"],
         cwd=outside,
@@ -247,4 +285,3 @@ def test_clean_wheel_native_cli_runs_outside_the_checkout(tmp_path: Path) -> Non
     )
     assert result.returncode == 0, result.stderr
     assert "xdotool" in result.stdout
-    assert build.VENDORED_SOURCE_ARCHIVE.is_file()

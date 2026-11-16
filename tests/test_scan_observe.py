@@ -5,18 +5,19 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from crowley.core.companion_state import (
+from crowley_automation import desktop_observe
+from crowley_automation.gui.capture import CaptureError
+from crowley_common.frames import PLAN_COUNT
+from crowley_host.scan import observe
+from crowley_host.scan.policy import LoopState, Target
+from crowley_scanner.state import (
     STATE_VERSION,
     CompanionState,
     RejectionKey,
     RejectionRecord,
     dump_bytes,
 )
-from crowley.gui.capture import CaptureError
-from crowley.gui.frames import PLAN_COUNT
-from crowley.scan import observe
-from crowley.scan.policy import LoopState, Target
+
 from tests.support.scan_frames import (
     AUTOMATION_CROP,
     SCANNER_CROP,
@@ -33,7 +34,7 @@ TARGET = Target(
     plan_hash="a" * 64,
     build="70450",
     interface=16001,
-    addon_version="0.1.0",
+    addon_version="0.2.0",
     scanner_addon_version="0.3.0",
     auctioneer="Auctioneer Jaxon",
 )
@@ -53,9 +54,9 @@ class FakeProcess:
 
 class FakeWindow:
     def __init__(self, ok: bool = True, focused: bool = True, xid: int = 77) -> None:
-        self.state = observe.WindowState(xid, 1, ok, focused, DISPLAY)
+        self.state = desktop_observe.WindowState(xid, 1, ok, focused, DISPLAY)
 
-    def observe(self, pids: list[int]) -> observe.WindowState:
+    def observe(self, pids: list[int]) -> desktop_observe.WindowState:
         self.pids = pids
         return self.state
 
@@ -104,7 +105,7 @@ def make(
 ) -> tuple[observe.Observer, FakeProcess, FakeWindow, FakeCanvas, Clock]:
     process, window = process or FakeProcess([10]), window or FakeWindow()
     canvas, clock = canvas or FakeCanvas(), clock or Clock()
-    from crowley.gui.frames import ProtocolContract
+    from crowley_common.frames import ProtocolContract
 
     obs = observe.Observer(
         process=process,
@@ -145,7 +146,7 @@ def test_snapshot_mapping_covers_every_policy_field() -> None:
     assert (snap.build, snap.interface, snap.addon_version, snap.scanner_addon_version) == (
         "70450",
         16001,
-        "0.1.0",
+        "0.2.0",
         "0.3.0",
     )
     assert (snap.house_key, snap.plan_hash) == ("beta-normal-alliance", "a" * 64)
@@ -157,6 +158,22 @@ def test_snapshot_mapping_covers_every_policy_field() -> None:
     assert not snap.pending_blocked and snap.pending_reason == ""
     assert snap.loaded_acked_ids == {"a1"}
     assert (snap.chat_active, snap.chat_focused, snap.chat_text) == (True, True, "/rel")
+    assert not snap.automation_busy
+
+
+def test_native_operation_and_auction_house_ownership_block_maintenance() -> None:
+    scanner = snapshot(1)
+    game = automation_snapshot(1)
+    game["operation"]["batchId"] = "batch-1"
+    assert observe.to_snapshot(scanner, game, 1000.0).automation_busy
+
+    game = automation_snapshot(2)
+    game["ownership"]["ahOwner"] = "automation"
+    assert observe.to_snapshot(scanner, game, 1000.0).automation_busy
+
+    game = automation_snapshot(3)
+    game["operation"]["receipt"]["actionComplete"] = "unknown"
+    assert not observe.to_snapshot(scanner, game, 1000.0).automation_busy
 
 
 @pytest.mark.parametrize(
@@ -222,6 +239,40 @@ def test_capture_and_decode_errors_leave_no_fresh_snapshot() -> None:
     assert result.snapshot is None and obs.decode_error.startswith("scanner ProtocolError")
 
 
+def test_native_busy_survives_a_bad_scanner_canvas_without_rewriting_frame_time() -> None:
+    from PIL import ImageDraw
+
+    def mixed(sequence: int, busy: bool, *, bad_scanner: bool):
+        scanner, game = snapshot(sequence), automation_snapshot(sequence)
+        if busy:
+            game["ownership"]["ahOwner"] = "automation"
+        image = render_screen(scanner, game)
+        if bad_scanner:
+            left, top, width, height = SCANNER_CROP
+            ImageDraw.Draw(image).rectangle((left, top, left + width - 1, top + height - 1), fill=(7, 7, 7))
+        return image
+
+    obs, _process, _window, canvas, clock = make()
+    canvas.frames = [mixed(1, False, bad_scanner=False)]
+    first = obs.observe(LoopState())
+    assert first.snapshot is not None and not first.native_automation_busy
+
+    clock.now += 1
+    canvas.frames = [mixed(2, True, bad_scanner=True)]
+    stale_pair = obs.observe(LoopState())
+    assert stale_pair.snapshot == first.snapshot
+    assert stale_pair.snapshot is not None and not stale_pair.snapshot.automation_busy
+    assert stale_pair.native_automation_busy
+    assert stale_pair.last_frame_at == first.last_frame_at
+    assert obs.decode_error.startswith("scanner ProtocolError")
+
+    fresh, _process, _window, fresh_canvas, _clock = make()
+    fresh_canvas.frames = [mixed(1, True, bad_scanner=True)]
+    no_scanner_history = fresh.observe(LoopState())
+    assert no_scanner_history.snapshot is None
+    assert no_scanner_history.native_automation_busy
+
+
 def test_window_not_ok_skips_capture() -> None:
     obs, _p, _w, canvas, _c = make(window=FakeWindow(ok=False))
     canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
@@ -262,31 +313,10 @@ def test_decoder_epoch_resets_on_process_and_window_change() -> None:
     assert fresh.frames_seen_this_process == 1 and fresh.process_started_at == 500.0
     assert fresh.snapshot is not None and fresh.snapshot.boot == "automation-boot-9"
     # A new window id also gets a new decoder (the old one is bound to the old identity).
-    window.state = observe.WindowState(78, 1, True, True, DISPLAY)
+    window.state = desktop_observe.WindowState(78, 1, True, True, DISPLAY)
     canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     obs.observe(LoopState())
     assert obs.decode_error == ""
-
-
-def test_probe_frame_is_tristate_with_a_throwaway_decoder() -> None:
-    obs, _p, window, canvas, _c = make()
-    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
-    assert obs.probe_frame() is True
-    assert obs.probe_frame() is True  # no sequence/boot memory between probes
-    from PIL import Image
-
-    canvas.frames = [Image.new("RGB", DISPLAY, (7, 7, 7))]
-    assert obs.probe_frame() is False  # window valid, capture worked, nothing decodes
-    canvas.error = CaptureError("x")
-    with pytest.raises(CaptureError):
-        obs.probe_frame()
-    canvas.error = None
-    window.state = observe.WindowState(None, 0, False, False, DISPLAY, "window_count=0")
-    with pytest.raises(observe.ObserveError, match="not valid"):
-        obs.probe_frame()
-    no_process, *_rest = make(process=FakeProcess([]))
-    with pytest.raises(observe.ObserveError, match="no owned game process"):
-        no_process.probe_frame()
 
 
 def test_observer_passes_the_owned_pids_to_the_window_source() -> None:
@@ -348,8 +378,8 @@ def x11_runner(
     return run, calls
 
 
-def window(run: observe.X11Run) -> observe.X11Window:
-    return observe.X11Window("wow.exe", TITLE, run)
+def window(run: desktop_observe.X11Run) -> desktop_observe.X11Window:
+    return desktop_observe.X11Window("wow.exe", TITLE, run)
 
 
 def test_window_exactly_one_owned_fullscreen_focused() -> None:
@@ -454,7 +484,7 @@ def test_disk_source_rejects_malformed_files_and_caches(tmp_path: Path) -> None:
     saved, data = tmp_path / "Crowley.lua", tmp_path / "Data.lua"
     saved.write_bytes(b"CrowleyDB = {}\n")
     data.write_bytes(DATA)
-    with pytest.raises(observe.ObserveError, match="scans"):
+    with pytest.raises(desktop_observe.ObserveError, match="scans"):
         observe.FileDiskSource(saved, tmp_path / "c", data).read()
     saved.write_bytes(SAVED)
     source = observe.FileDiskSource(saved, tmp_path / "c", data)
@@ -462,5 +492,5 @@ def test_disk_source_rejects_malformed_files_and_caches(tmp_path: Path) -> None:
     saved.write_bytes(copy.copy(SAVED))  # rewritten identically, but the cache key is mtime/size
     assert source.read().saved_ids == first.saved_ids
     data.write_bytes(b'CROWLEY_DATA = {\n["ackedScans"] = {1},\n}\n')
-    with pytest.raises(observe.ObserveError, match="ackedScans"):
+    with pytest.raises(desktop_observe.ObserveError, match="ackedScans"):
         source.read()

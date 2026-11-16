@@ -65,8 +65,8 @@ _PRIVATE_IPV4_NETWORKS = (
 )
 _DOCKER_DEPLOY_PATHS: Final = frozenset(
     {
-        "deploy/docker/Dockerfile",
-        "src/crowley/ops/resources/docker-compose.yml",
+        "apps/host/src/crowley_host/ops/package_data/docker/Dockerfile",
+        "packages/market/src/crowley_market/resources/docker-compose.yml",
     }
 )
 
@@ -142,9 +142,9 @@ def _is_machine_host(host: str) -> bool:
 
 
 def _is_allowed_docker_loopback(path: str, host: str) -> bool:
-    """Allow container-local loopback only in the Docker deployment files.
+    """Allow container-local loopback only in the owning Docker resource files.
 
-    IPv4 loopback and hostname forms in ``deploy/docker/`` refer to the
+    IPv4 loopback and hostname forms in the host package Dockerfile refer to the
     container itself or enforce a loopback-only host bind; the same values
     elsewhere remain machine-specific.
     """

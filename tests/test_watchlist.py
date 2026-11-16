@@ -1,11 +1,10 @@
 import json
 
 import pytest
+from crowley_common.luawriter import render_assignment
+from crowley_common.watchlist import Catalog, load_catalog
+from crowley_scanner import savedvars
 from pydantic import ValidationError
-
-from crowley.core import savedvars
-from crowley.core.luawriter import render_assignment
-from crowley.core.watchlist import Catalog, load_catalog
 
 
 def test_shipped_plan_covers_professions_and_preserves_review_states():

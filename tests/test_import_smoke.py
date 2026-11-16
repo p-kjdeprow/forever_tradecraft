@@ -10,17 +10,27 @@ import sys
 import tomllib
 from pathlib import Path
 
+import crowley_automation.gui
+import crowley_host.scan
 import pytest
 
-import crowley.gui
-import crowley.scan
-
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPTS: dict[str, str] = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"][
-    "scripts"
-]
-GUI_MODULES = sorted(f"crowley.gui.{info.name}" for info in pkgutil.iter_modules(crowley.gui.__path__))
-SCAN_MODULES = sorted(f"crowley.scan.{info.name}" for info in pkgutil.iter_modules(crowley.scan.__path__))
+PROJECT_FILES = (
+    ROOT / "pyproject.toml",
+    *(ROOT / "packages" / name / "pyproject.toml" for name in ("common", "market", "scanner", "automation")),
+)
+PROJECT_SCRIPTS = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["scripts"]
+SCRIPTS = {
+    name: entry
+    for path in PROJECT_FILES
+    for name, entry in tomllib.loads(path.read_text(encoding="utf-8"))["project"].get("scripts", {}).items()
+}
+GUI_MODULES = sorted(
+    f"crowley_automation.gui.{info.name}" for info in pkgutil.iter_modules(crowley_automation.gui.__path__)
+)
+SCAN_MODULES = sorted(
+    f"crowley_host.scan.{info.name}" for info in pkgutil.iter_modules(crowley_host.scan.__path__)
+)
 
 
 def test_scripts_are_declared() -> None:
@@ -35,38 +45,48 @@ def test_console_script_entry_point_imports(script: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "module_name", ["crowley.ops.battle_net", "crowley.gui", "crowley.scan", *GUI_MODULES, *SCAN_MODULES]
+    "module_name",
+    [
+        "crowley_automation.battle_net",
+        "crowley_automation.config",
+        "crowley_automation.desktop_cli",
+        "crowley_automation.desktop_input",
+        "crowley_automation.desktop_observe",
+        "crowley_automation.gui",
+        "crowley_common.frames",
+        "crowley_host.scan",
+        *GUI_MODULES,
+        *SCAN_MODULES,
+    ],
 )
 def test_module_imports(module_name: str) -> None:
     importlib.import_module(module_name)
 
 
 def test_scan_entry_point_and_modules_are_listed() -> None:
-    assert SCRIPTS["crowley-scan"] == "crowley.scan.cli:main"
+    assert SCRIPTS["crowley-host"] == "crowley_host.scan.cli:main"
     assert {
-        "crowley.scan.act",
-        "crowley.scan.cli",
-        "crowley.scan.config",
-        "crowley.scan.loop",
-        "crowley.scan.observe",
-        "crowley.scan.policy",
-        "crowley.scan.presence",
+        "crowley_host.scan.act",
+        "crowley_host.scan.cli",
+        "crowley_host.scan.config",
+        "crowley_host.scan.loop",
+        "crowley_host.scan.observe",
+        "crowley_host.scan.policy",
     } <= set(SCAN_MODULES)
 
 
 def test_gui_modules_are_listed() -> None:
     assert {
-        "crowley.gui.capture",
-        "crowley.gui.click_gate",
-        "crowley.gui.frames",
-        "crowley.gui.input_tool",
-        "crowley.gui.keyboard",
-        "crowley.gui.pointer",
-        "crowley.gui.process",
+        "crowley_automation.gui.capture",
+        "crowley_automation.gui.click_gate",
+        "crowley_automation.gui.input_tool",
+        "crowley_automation.gui.keyboard",
+        "crowley_automation.gui.pointer",
+        "crowley_automation.gui.process",
     } <= set(GUI_MODULES)
 
 
-@pytest.mark.parametrize("script", sorted(SCRIPTS))
+@pytest.mark.parametrize("script", sorted(PROJECT_SCRIPTS))
 def test_console_script_help_exits_zero(script: str) -> None:
     executable = Path(sys.executable).parent / script
     assert executable.is_file(), f"console script {script} is not installed next to the interpreter"
@@ -78,12 +98,15 @@ def test_console_script_help_exits_zero(script: str) -> None:
 
 
 def test_session_stack_is_gone() -> None:
-    assert importlib.util.find_spec("crowley.session") is None
+    assert importlib.util.find_spec("crowley") is None
     assert set(SCRIPTS) == {
         "crowley-server",
         "crowley-companion",
         "crowley-watchlist",
-        "crowley-scan",
+        "crowley-host",
         "crowley-ops",
+        "crowley-automation",
+        "crowley-desktop",
         "crowley-native",
     }
+    assert importlib.util.find_spec("crowley") is None

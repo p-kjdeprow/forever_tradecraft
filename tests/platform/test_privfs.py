@@ -7,9 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
-from crowley.platform import privfs
-from crowley.platform.privfs import (
+from crowley_common.platform import privfs
+from crowley_common.platform.privfs import (
     PrivateCopyError,
     PrivateFileError,
     PrivatePathError,

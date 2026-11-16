@@ -82,6 +82,7 @@ class Admission:
     staged_step_index: int | None = None
     staged_action_digest: str | None = None
     ready: bool | None = None
+    receipt_sequence: int | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -99,6 +100,10 @@ class Admission:
             for value in (self.human_present, self.focused, self.gui_lock_owned, self.client_ah_owned)
         ):
             raise ValueError("admission gates must be exact booleans")
+        if self.receipt_sequence is not None and (
+            type(self.receipt_sequence) is not int or not 0 <= self.receipt_sequence <= MAX_INTEGER
+        ):
+            raise ValueError("receipt sequence must be a non-negative exact integer")
         staged_values = (
             self.staged_batch_id,
             self.staged_ordinal,
@@ -249,6 +254,64 @@ class AutomationRunner:
             "actions": [action_object(action) for action in batch.actions],
         }
 
+    def preflight(
+        self,
+        batch: Batch,
+        *,
+        authorization: BatchAuthorization,
+        session_arm: SessionArm,
+        confirmed_batch_id: str,
+        backend: Backend,
+    ) -> dict[str, object]:
+        """Stage each immutable action for native readiness without dispatching it."""
+        self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, int(self.clock()))
+        result: list[dict[str, object]] = []
+        may_have_staged = False
+        with self.ledger.runner_lock():
+            try:
+                self.ledger.recover_interrupted(now=int(self.clock()))
+                if self.ledger.stop_requested():
+                    raise AdmissionDenied("durable stop is active")
+                if self.ledger.has_uncertain_effect():
+                    raise UncertainEffectInterlock("an unresolved effect interlocks all new action batches")
+                for ordinal, action in enumerate(batch.actions):
+                    now = int(self.clock())
+                    self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, now)
+                    self._check_configured_target(action)
+                    deadline = min(batch.expires_at, authorization.expires_at, session_arm.expires_at)
+                    set_deadline = getattr(backend, "set_deadline", None)
+                    if callable(set_deadline):
+                        set_deadline(deadline)
+                    observed = backend.observe()
+                    self._check_before_stage(batch, session_arm, observed, now)
+                    digest = hashlib.sha256(canonical_json(action_object(action)).encode("utf-8")).hexdigest()
+                    may_have_staged = True
+                    backend.stage(
+                        action, batch_id=batch.batch_id, ordinal=ordinal, step_index=0, action_digest=digest
+                    )
+                    ready = backend.observe()
+                    self._check_before_dispatch(
+                        batch, session_arm, ready, int(self.clock()), action, ordinal, 0, digest
+                    )
+                    result.append(
+                        {
+                            "ordinal": ordinal,
+                            "action": action_object(action),
+                            "actionDigest": digest,
+                            "nativePreflight": "ready",
+                            "boot": ready.session_boot_id,
+                            "goldCopper": getattr(backend, "preflight_gold", None),
+                        }
+                    )
+                return {"batch_id": batch.batch_id, "dry_run": True, "preflight": result}
+            finally:
+                clear_stage = getattr(backend, "clear_stage", None)
+                if may_have_staged and callable(clear_stage):
+                    try:
+                        clear_stage()
+                    except Exception:
+                        pass
+
     def run(
         self,
         batch: Batch,
@@ -309,6 +372,9 @@ class AutomationRunner:
             pre_stage_now = int(self.clock())
             self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, pre_stage_now)
             self._check_before_stage(batch, session_arm, observed, pre_stage_now)
+            set_deadline = getattr(backend, "set_deadline", None)
+            if callable(set_deadline):
+                set_deadline(min(batch.expires_at, authorization.expires_at, session_arm.expires_at))
             try:
                 backend.stage(
                     action,
@@ -318,17 +384,42 @@ class AutomationRunner:
                     action_digest=digest,
                 )
             except Exception as exc:
+                clear_stage = getattr(backend, "clear_stage", None)
+                if callable(clear_stage):
+                    try:
+                        clear_stage()
+                    except Exception:
+                        pass
                 self.ledger.fail_before_dispatch(
                     batch.batch_id, ordinal, f"stage failed: {type(exc).__name__}", now=int(self.clock())
                 )
                 return self.ledger.status(batch.batch_id)
-            observed = backend.observe()
-            observed_now = int(self.clock())
-            self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, observed_now)
-            self._check_before_dispatch(
-                batch, session_arm, observed, observed_now, action, ordinal, step_index, digest
+            try:
+                observed = backend.observe()
+                observed_now = int(self.clock())
+                self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, observed_now)
+                self._check_before_dispatch(
+                    batch, session_arm, observed, observed_now, action, ordinal, step_index, digest
+                )
+            except Exception:
+                clear_stage = getattr(backend, "clear_stage", None)
+                if callable(clear_stage):
+                    try:
+                        clear_stage()
+                    except Exception:
+                        pass
+                raise
+            set_deadline = getattr(backend, "set_deadline", None)
+            if callable(set_deadline):
+                set_deadline(min(batch.expires_at, authorization.expires_at, session_arm.expires_at))
+            self.ledger.claim_dispatch(
+                batch.batch_id,
+                ordinal,
+                step_index,
+                now=observed_now,
+                session_boot_id=observed.session_boot_id,
+                receipt_baseline=observed.receipt_sequence,
             )
-            self.ledger.claim_dispatch(batch.batch_id, ordinal, step_index, now=observed_now)
             try:
                 current_admission = backend.observe()
                 dispatch_now = int(self.clock())
@@ -344,6 +435,12 @@ class AutomationRunner:
                     digest,
                 )
             except Exception as exc:
+                clear_stage = getattr(backend, "clear_stage", None)
+                if callable(clear_stage):
+                    try:
+                        clear_stage()
+                    except Exception:
+                        pass
                 self.ledger.finish_step(
                     batch.batch_id,
                     ordinal,
@@ -421,6 +518,13 @@ class AutomationRunner:
                 continue_action=continue_action,
                 reason=None if result_state == "succeeded" else "operation did not reach verified completion",
             )
+            if result_state == "succeeded" and not continue_action:
+                completed = self.ledger.status(batch.batch_id)
+                if completed["state"] == "succeeded":
+                    finish_batch = getattr(backend, "finish_batch", None)
+                    if callable(finish_batch):
+                        finish_batch()
+                    return completed
 
     @staticmethod
     def _next_ready_step(status: BatchStatus) -> ReadyStep | None:
@@ -429,8 +533,8 @@ class AutomationRunner:
             return None
         return {"ordinal": row["ordinal"], "step_index": row["next_step"]}
 
-    @staticmethod
     def _check_authorization(
+        self,
         batch: Batch,
         authorization: BatchAuthorization,
         session_arm: SessionArm,
@@ -451,6 +555,8 @@ class AutomationRunner:
             raise AdmissionDenied("session arm identity does not match batch identity")
         if type(session_arm.expires_at) is not int or session_arm.expires_at <= now:
             raise AdmissionDenied("session arm is expired or invalid")
+        if self.ledger.stop_requested():
+            raise AdmissionDenied("durable stop is active")
 
     def _check_session_and_gui(
         self,

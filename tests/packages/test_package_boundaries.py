@@ -83,7 +83,7 @@ def test_common_market_and_scanner_import_from_only_their_new_sources() -> None:
         "from crowley_scanner.companion.config import ScannerConfig, render_scanner_toml; "
         "from crowley_scanner.companion.sync import Companion; "
         "config = ScannerConfig.model_validate({'game_root': '/opt/game', 'wtf_account': 'ACCOUNT', "
-        "'character': 'Tester', 'server_url': 'http://127.0.0.1:8080'}); "
+        "'character': 'Tester', 'server_url': 'https://scanner.example.invalid'}); "
         "rendered = render_scanner_toml(config); "
         "assert '[scanner]' in rendered and 'character = \\\"Tester\\\"' in rendered; "
         "assert selected_target().product_dir == '_forever_'; "
@@ -99,6 +99,7 @@ def test_imports_follow_component_boundaries() -> None:
         "common": ("crowley", "crowley_market", "crowley_scanner", "crowley_automation", "crowley_host"),
         "market": ("crowley", "crowley_scanner", "crowley_automation", "crowley_host"),
         "scanner": ("crowley", "crowley_market", "crowley_automation", "crowley_host"),
+        "automation": ("crowley", "crowley_market", "crowley_scanner", "crowley_host"),
     }
     for component, roots in forbidden.items():
         source_root = _PACKAGES / component / "src"
@@ -117,6 +118,12 @@ def test_imports_follow_component_boundaries() -> None:
                         path,
                         name,
                     )
+                    if component == "automation":
+                        assert name not in {"crowley_common.game_target", "crowley_common.watchlist"}, (
+                            path,
+                            "automation must not resolve the scanner target/catalog",
+                            name,
+                        )
 
 
 def test_distribution_dependencies_match_component_ownership() -> None:
@@ -171,6 +178,23 @@ def test_wheels_and_sdists_contain_only_owned_component_resources(tmp_path: Path
                 "crowley_scanner/addon/Crowley_Data/Crowley_Data.toc",
             },
             "forbidden": ("crowley_market/", "crowley_common/", "Crowley_Automation/"),
+        },
+        "automation": {
+            "namespace": "crowley_automation",
+            "required": {
+                "crowley_automation/model.py",
+                "crowley_automation/runner.py",
+                "crowley_automation/addon/Crowley_Automation/Crowley_Automation.toc",
+                "crowley_automation/addon/Crowley_Host/Crowley_Host.toc",
+                "crowley_automation/native/resources/vendor/xdotool-source.tar.gz",
+            },
+            "forbidden": (
+                "crowley_market/",
+                "crowley_scanner/",
+                "crowley_host/",
+                "/Crowley/",
+                "/Crowley_Data/",
+            ),
         },
     }
     wheels: list[Path] = []

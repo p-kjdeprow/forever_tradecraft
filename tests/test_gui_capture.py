@@ -7,10 +7,9 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from crowley_automation.gui import capture as capture_module
+from crowley_automation.gui.capture import CaptureError, InvalidCaptureOutput
 from PIL import Image
-
-from crowley.gui import capture as capture_module
-from crowley.gui.capture import CaptureError, InvalidCaptureOutput
 
 IMAGE_SIZE = (16, 12)
 

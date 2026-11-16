@@ -1,7 +1,8 @@
 # Crowley cleanup and architecture plan
 
 Updated 2026-11-15. Implementation authorized using parallel Luna implementation and Sol review loops.
-Changes land on main; live trading remains subject to specific authorization.
+Source implementation and independent review are complete; see RESTRUCTURE_EXECUTION.md for
+final verification. Changes land on main; live trading remains subject to specific authorization.
 
 Crowley will retain its working AH collection, main dashboard, and recipe watch, remove inactive
 workflows, separate scanning from game control, and then add fresh automation for listing,
@@ -33,7 +34,8 @@ fallback implementations, new database migrations only, private evidence, one GU
 hard limit of at most one automated click per second with the required human pointer motion.
 Building automation does not authorize real trades. The current requirement for authorization of
 a specific queue is carried forward as authorization of an exact immutable operation batch, with
-a separate session arm. Committing, pushing, and destroying data still require permission.
+a separate session arm. The user authorized committing and landing this refactor on main, plus cleanup of task worktrees
+and temporary files. Production data destruction and real trades still require specific authorization.
 
 ## Current dependencies that affect the work
 

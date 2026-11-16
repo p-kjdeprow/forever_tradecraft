@@ -11,10 +11,9 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from crowley_common.game_target import load_game_target
+from crowley_host.ops import install
 from packaging.utils import parse_wheel_filename
-
-from crowley.core.game_target import load_game_target
-from crowley.ops import install
 
 TARGET_FIXTURE = Path(__file__).parents[1] / "fixtures" / "targets" / "verified-beta.json"
 
@@ -22,7 +21,7 @@ TARGET_FIXTURE = Path(__file__).parents[1] / "fixtures" / "targets" / "verified-
 @pytest.fixture(autouse=True)
 def _fixture_target(monkeypatch: pytest.MonkeyPatch) -> None:
     target = load_game_target(TARGET_FIXTURE)
-    monkeypatch.setattr(install, "packaged_game_target", lambda: target)
+    monkeypatch.setattr(install, "selected_target", lambda: target)
 
 
 def _write_host(config_home: Path, game_root: Path, wine_prefix: Path) -> None:
@@ -38,17 +37,8 @@ def _write_host(config_home: Path, game_root: Path, wine_prefix: Path) -> None:
                 'display = ":crowley-test"',
                 'server_url = "http://server.invalid:8080"',
                 'window_title = "World of Warcraft"',
-                "client_x = 0",
-                "client_y = 0",
-                "client_width = 1920",
-                "client_height = 1080",
-                "outer_width = 1928",
-                "outer_height = 1092",
-                "window_client_offset = [0, 0]",
-                "canvas_origin = [80, 48]",
                 "canvas_crop = [80, 48, 256, 256]",
                 "automation_canvas_crop = [352, 48, 256, 256]",
-                "model_crop = [80, 48, 1760, 984]",
                 "",
             )
         ),
@@ -84,7 +74,7 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         "crowley-health.timer",
         "crowley-market-backup.service",
         "crowley-market-backup.timer",
-        "crowley-scan.service",
+        "crowley-host.service",
     }
     for name, raw in units.items():
         text = raw.decode("utf-8")
@@ -96,7 +86,7 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         assert "WorkingDirectory=" not in text
         if name.endswith(".service"):
             assert "EnvironmentFile=%E/crowley/secrets.env" in text
-        if name == "crowley-scan.service":
+        if name == "crowley-host.service":
             # The runtime directory is tmpfs; the unit recreates it after a reboot.
             service = parser["Service"]
             assert service["RuntimeDirectory"] == "crowley"
@@ -104,11 +94,11 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
             assert service["RuntimeDirectoryPreserve"] == "yes"
 
 
-def test_scan_unit_is_rendered_and_not_enabled() -> None:
+def test_host_unit_is_rendered_and_not_enabled() -> None:
     units = {name: raw.decode("utf-8") for name, raw in install.render_units()}
-    scan = units["crowley-scan.service"]
-    assert "ExecStart=%h/.local/bin/crowley-scan run" in scan
-    assert "Conflicts=" not in scan
+    host = units["crowley-host.service"]
+    assert "ExecStart=%h/.local/bin/crowley-host run" in host
+    assert "Conflicts=" not in host
     assert not any("session" in name for name in units)
     for line in (
         "EnvironmentFile=%E/crowley/secrets.env",
@@ -122,7 +112,7 @@ def test_scan_unit_is_rendered_and_not_enabled() -> None:
         "RestartSec=5s",
         "StartLimitIntervalSec=0",
     ):
-        assert line in scan
+        assert line in host
     source = Path(install.__file__).read_text(encoding="utf-8")
     assert "enable" not in source  # the installer never enables or starts a unit
 
@@ -173,7 +163,7 @@ def test_refuses_symlinked_xdg_config_root(tmp_path: Path) -> None:
         install.install(install.InstallRequest(game_root=game_root, dry_run=True), environment)
 
 
-def test_hostile_paths_are_escaped_in_launcher_and_tunables(tmp_path: Path) -> None:
+def test_hostile_paths_are_escaped_in_launcher_and_component_configs(tmp_path: Path) -> None:
     environment, _game_root, _runtime = _environment(tmp_path)
     marker = tmp_path / "executed"
     hostile_root = tmp_path / ("game;$(touch " + str(marker) + ')"\\é')
@@ -183,12 +173,12 @@ def test_hostile_paths_are_escaped_in_launcher_and_tunables(tmp_path: Path) -> N
     configs = {
         item.relative_name: item.content
         for item in plan.files
-        if item.relative_name in {"config/companion.toml"}
+        if item.relative_name in {"config/scanner.toml"}
     }
     assert all(content is not None for content in configs.values())
-    companion = tomllib.loads(configs["config/companion.toml"].decode("utf-8"))
-    assert set(companion) == {"companion"}
-    assert str(hostile_root) not in configs["config/companion.toml"].decode("utf-8")
+    scanner = tomllib.loads(configs["config/scanner.toml"].decode("utf-8"))
+    assert set(scanner) == {"scanner"}
+    assert scanner["scanner"]["game_root"] == str(hostile_root)
     launcher = next(
         item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
     )
@@ -258,30 +248,32 @@ def test_launcher_selects_the_target_product_without_repeated_exec(tmp_path: Pat
     # The only keyboard Return is the Enter World press sent to the game window.
     assert rendered.count("xdotool key") == 1
     assert "x11 xdotool key --clearmodifiers Return" in rendered
-    assert rendered.index("battle-net-play") < rendered.index("xdotool key --clearmodifiers Return")
+    assert rendered.index('"$CROWLEY_DESKTOP" play') < rendered.index("xdotool key --clearmodifiers Return")
     # Enter World repeats until a canvas frame decodes (no blind fixed settle).
     assert "CHARACTER_SELECT_SETTLE_SECONDS" not in rendered
     assert "ENTER_WORLD_SETTLE_SECONDS=15" in rendered
     assert "ENTER_WORLD_TIMEOUT_SECONDS=600" in rendered
     assert "ENTER_WORLD_ATTEMPTS" not in rendered
-    assert 'x11 "$CROWLEY_SCAN" probe-frame || probe=$?' in rendered
+    assert 'x11 "$CROWLEY_DESKTOP" probe-frame || probe=$?' in rendered
     # Return only on exit 1; 0 breaks; anything else fails.
     assert "0) break ;;" in rendered and "1) gui_step enter_world ;;" in rendered
     assert "*) fail " in rendered
     assert rendered.index("probe-frame") < rendered.index("1) gui_step enter_world")
     # Every input step holds the shared GUI lease and passes the presence gate.
-    assert '"$CROWLEY_SCAN" presence-ok' in rendered
+    assert '"$CROWLEY_DESKTOP" presence-ok --for-input' in rendered
     assert '9>"$GUI_LOCK"' in rendered and 'flock -w "$GUI_LEASE_WAIT_SECONDS" 9' in rendered
     assert 'GUI_LOCK="$GUI_LOCK_DIR/gui.lock"' in rendered
     assert rendered.count("gui_step x11 xdotool windowactivate --sync") == 2
-    assert 'gui_step x11 "$CROWLEY_OPS" battle-net-play --window "$window"' in rendered
+    play_call = 'gui_step x11 "$CROWLEY_DESKTOP" play --window "$window"'
+    assert play_call in rendered
+    assert "crowley-ops" not in rendered
     assert "gui_step enter_world" in rendered
     assert rendered.index("xdotool key --clearmodifiers Return") > rendered.index(
         'xdotool windowactivate --sync "$game_window"'
     )
     assert "xdotool key --clearmodifiers Escape" not in rendered
     assert rendered.count("battle_net_exec 'focus play'") == 1
-    assert '"$CROWLEY_OPS" battle-net-play --window "$window"' in rendered
+    assert '"$CROWLEY_DESKTOP" play --window "$window"' in rendered
     assert "PLAY_ATTEMPTS=3" in rendered
     assert "GAME_START_ATTEMPT_SECONDS=20" in rendered
     assert "xdotool click" not in rendered
@@ -372,6 +364,46 @@ def test_install_copies_addon_units_and_manifest_and_is_idempotent(
     assert "sha256" not in manifest["files"]["addon/Crowley_Data/Data.lua"]
     assert manifest_path.stat().st_mode & 0o777 == 0o600
     assert not (tmp_path / "config/crowley/systemd/user/crowley-health.timer").is_symlink()
+
+
+@pytest.mark.parametrize(
+    "contents",
+    [b"[scanner\n", b"[scanner]\nunknown_setting = true\n"],
+    ids=("malformed-toml", "unknown-setting"),
+)
+def test_install_refuses_invalid_existing_scanner_config_without_mutations(
+    tmp_path: Path, contents: bytes
+) -> None:
+    environment, game_root, _runtime = _environment(tmp_path)
+    scanner_path = tmp_path / "config" / "crowley" / "scanner.toml"
+    scanner_path.write_bytes(contents)
+
+    with pytest.raises(install.InstallError, match="existing scanner.toml is invalid; repair or remove"):
+        install.install(install.InstallRequest(game_root=game_root, dry_run=True), environment)
+
+    assert scanner_path.read_bytes() == contents
+    assert not (tmp_path / "state/crowley/install/manifest.json").exists()
+    assert not (tmp_path / "config/systemd/user/crowley-host.service").exists()
+    assert not (game_root / "_classic_beta_" / "Interface" / "AddOns" / "Crowley").exists()
+
+
+def test_combined_install_renders_the_host_bridge_and_coordinated_mode(tmp_path: Path) -> None:
+    environment, game_root, _runtime = _environment(tmp_path)
+    plan = install.build_plan(install.InstallRequest(game_root=game_root), environment)
+    files = {item.relative_name: item.content for item in plan.files}
+    assert files["addon/Crowley_Host/Crowley_Host.toc"] is not None
+    assert b"ns.Coordinated = true" in files["addon/Crowley_Automation/Mode.lua"]
+    standalone_mode = (
+        Path(__file__).parents[2]
+        / "packages"
+        / "automation"
+        / "src"
+        / "crowley_automation"
+        / "addon"
+        / "Crowley_Automation"
+        / "Mode.lua"
+    ).read_bytes()
+    assert b"ns.Coordinated = false" in standalone_mode
 
 
 def test_install_refuses_a_foreign_file(tmp_path: Path) -> None:
@@ -590,11 +622,11 @@ def test_clean_wheel_contains_package_resources_without_checkout_trees(tmp_path:
     assert len(wheels) == 1
     with zipfile.ZipFile(wheels[0]) as wheel:
         names = set(wheel.namelist())
-        assert "crowley/ops/package_data/addon/Crowley/Crowley.toc" in names
-        assert "crowley/ops/package_data/docker/Dockerfile" in names
-        assert "crowley/ops/package_data/systemd/crowley-health.service.in" in names
-        assert "crowley/ops/resources/docker-compose.yml" in names
-        assert "crowley/ops/package_data/config/host.example.toml" in names
+        assert "crowley_host/ops/package_data/docker/Dockerfile" in names
+        assert "crowley_host/ops/package_data/systemd/crowley-health.service.in" in names
+        assert "crowley_host/ops/package_data/systemd/crowley-host.service.in" in names
+        assert "crowley_host/ops/package_data/config/host.example.toml" in names
+        assert not any("launcher" in name or "/addon/" in name for name in names)
         assert not any(name.startswith("addon/") or name.startswith("deploy/") for name in names)
 
 
@@ -612,7 +644,7 @@ def test_compose_config_accepts_dummy_required_environment(tmp_path: Path) -> No
         CROWLEY_DATABASE_URL="postgresql://crowley:host-only@db.invalid:5432/crowley",
         CROWLEY_API_TOKEN="dummy",
         CROWLEY_BIND="0.0.0.0",
-        CROWLEY_IMAGE_VERSION="0.1.0",
+        CROWLEY_IMAGE_VERSION="0.2.0",
         XDG_CONFIG_HOME=str(config_home),
     )
     completed = subprocess.run(
@@ -622,7 +654,7 @@ def test_compose_config_accepts_dummy_required_environment(tmp_path: Path) -> No
             "--env-file",
             str(env_file),
             "-f",
-            "src/crowley/ops/resources/docker-compose.yml",
+            str(install.compose_file_path()),
             "config",
         ],
         check=False,
@@ -632,9 +664,9 @@ def test_compose_config_accepts_dummy_required_environment(tmp_path: Path) -> No
     )
     assert completed.returncode == 0, completed.stderr
     assert "build:" not in completed.stdout
-    assert "image: crowley-server:0.1.0" in completed.stdout
+    assert "image: crowley-server:0.2.0" in completed.stdout
     assert "postgresql://crowley:dummy@db:5432/crowley" in completed.stdout
-    compose_text = Path("src/crowley/ops/resources/docker-compose.yml").read_text(encoding="utf-8")
+    compose_text = install.compose_file_path().read_text(encoding="utf-8")
     assert "CROWLEY_HOST: 0.0.0.0" in compose_text
     assert '"${CROWLEY_BIND:?set CROWLEY_BIND in secrets.env}:8080:8080"' in compose_text
     host_endpoint = "db.invalid:5432"
@@ -642,7 +674,7 @@ def test_compose_config_accepts_dummy_required_environment(tmp_path: Path) -> No
 
 
 def test_packaged_compose_keeps_container_host_and_host_bind_variable() -> None:
-    compose_text = Path("src/crowley/ops/resources/docker-compose.yml").read_text(encoding="utf-8")
+    compose_text = install.compose_file_path().read_text(encoding="utf-8")
     server_marker = "\n  server:\n"
     assert server_marker in compose_text
     server_text = compose_text.split(server_marker, 1)[1]
@@ -654,8 +686,10 @@ def test_packaged_compose_keeps_container_host_and_host_bind_variable() -> None:
 
 
 def test_image_build_from_wheel_stages_only_packaged_inputs(tmp_path: Path) -> None:
-    wheel = tmp_path / "crowley-0.1.0-py3-none-any.whl"
-    wheel.write_bytes(b"wheel bytes")
+    market_wheel = tmp_path / "crowley_market-0.2.0-py3-none-any.whl"
+    common_wheel = tmp_path / "crowley_common-0.2.0-py3-none-any.whl"
+    market_wheel.write_bytes(b"market wheel bytes")
+    common_wheel.write_bytes(b"common wheel bytes")
     calls: list[tuple[tuple[str, ...], Path]] = []
 
     def runner(command: object, cwd: Path) -> None:
@@ -665,19 +699,27 @@ def test_image_build_from_wheel_stages_only_packaged_inputs(tmp_path: Path) -> N
         if typed_command[0] == "docker":
             context = Path(typed_command[-1])
             staged_wheels = tuple(path for path in context.iterdir() if path.suffix == ".whl")
-            assert {path.name for path in context.iterdir()} == {"Dockerfile", wheel.name}
-            assert len(staged_wheels) == 1
-            assert parse_wheel_filename(staged_wheels[0].name)[0] == "crowley"
-            assert parse_wheel_filename(staged_wheels[0].name)[1].public == "0.1.0"
-            assert staged_wheels[0].read_bytes() == b"wheel bytes"
+            assert {path.name for path in context.iterdir()} == {
+                "Dockerfile",
+                market_wheel.name,
+                common_wheel.name,
+            }
+            assert {parse_wheel_filename(path.name)[0] for path in staged_wheels} == {
+                "crowley-market",
+                "crowley-common",
+            }
+            assert {path.read_bytes() for path in staged_wheels} == {
+                b"market wheel bytes",
+                b"common wheel bytes",
+            }
             dockerfile = (context / "Dockerfile").read_bytes()
             assert b"COPY *.whl /build/" in dockerfile
             assert b"/build/*.whl" in dockerfile
 
-    tag = install.build_image(wheel=wheel, runner=runner)
-    assert tag == "crowley-server:0.1.0"
+    tag = install.build_image(wheel=market_wheel, common_wheel=common_wheel, runner=runner)
+    assert tag == "crowley-server:0.2.0"
     assert len(calls) == 1
-    assert calls[0][0][:4] == ("docker", "build", "--tag", "crowley-server:0.1.0")
+    assert calls[0][0][:4] == ("docker", "build", "--tag", "crowley-server:0.2.0")
 
 
 def test_image_build_from_source_stages_uv_built_wheel(tmp_path: Path) -> None:
@@ -691,19 +733,23 @@ def test_image_build_from_source_stages_uv_built_wheel(tmp_path: Path) -> None:
         calls.append((typed_command, cwd))
         if typed_command[0] == "uv":
             output_dir = Path(typed_command[typed_command.index("--out-dir") + 1])
-            (output_dir / "crowley-0.1.0-py3-none-any.whl").write_bytes(b"built wheel")
+            (output_dir / "crowley_common-0.2.0-py3-none-any.whl").write_bytes(b"built common wheel")
+            (output_dir / "crowley_market-0.2.0-py3-none-any.whl").write_bytes(b"built market wheel")
         else:
             context = Path(typed_command[-1])
             staged_wheels = tuple(path for path in context.iterdir() if path.suffix == ".whl")
             assert {path.name for path in context.iterdir()} == {
                 "Dockerfile",
-                "crowley-0.1.0-py3-none-any.whl",
+                "crowley_common-0.2.0-py3-none-any.whl",
+                "crowley_market-0.2.0-py3-none-any.whl",
             }
-            assert len(staged_wheels) == 1
-            assert parse_wheel_filename(staged_wheels[0].name)[0] == "crowley"
-            assert (staged_wheels[0]).read_bytes() == b"built wheel"
+            assert len(staged_wheels) == 2
+            assert {path.read_bytes() for path in staged_wheels} == {
+                b"built common wheel",
+                b"built market wheel",
+            }
 
     tag = install.build_image(source=source, runner=runner)
-    assert tag == "crowley-server:0.1.0"
+    assert tag == "crowley-server:0.2.0"
     assert [call[0][0] for call in calls] == ["uv", "docker"]
     assert calls[0][1] == source

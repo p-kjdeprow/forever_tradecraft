@@ -1,33 +1,32 @@
 # Testing
 
-```sh
-uv run pytest                      # default: 16 xdist workers, --dist worksteal (pyproject.toml)
-uv run ruff check . && uv run ruff format --check .
-```
-
-The default suite needs no database and no game. Tests that need PostgreSQL/TimescaleDB are skipped unless
-`CROWLEY_TEST_DATABASE_URL` is set. The server tests reset the shared schema for each test, so run them serially
-(`-n0`) against a freshly created disposable database, never the production one, and never with xdist workers
-(`tests/conftest.py` refuses that combination before collection):
+Run from the workspace root:
 
 ```sh
-CROWLEY_TEST_DATABASE_URL='<fresh disposable database URL>' \
-  uv run pytest -n0 tests/test_server.py tests/test_client_data.py tests/test_trading_paper.py
+uv sync
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
 ```
 
-Use `-n0` too for focused debugging. `tmp_path_retention_policy = "failed"` keeps only failed tests' directories.
+The default suite uses 16 xdist workers and needs neither a game nor a database. Database
+checks skip unless CROWLEY_TEST_DATABASE_URL is set. Their fixtures reset the schema, so use
+a fresh disposable TimescaleDB and run serially. Never use the deployed database:
 
-## What is covered
+```sh
+CROWLEY_TEST_DATABASE_URL='<disposable test database URL>' uv run pytest -n0
+```
 
-- Scan loop (`tests/test_scan_*.py`): the policy table including each fault row and the 90 s reload margin, the
-  typed-command transaction, relaunch backoff, presence on IdleMonitor, observation and the loop/CLI wiring.
-- GUI layer (`tests/test_gui_*.py`): pointer planning and clicks, the one-click-per-second gate, the pinned
-  XTEST tool and capture.
-- `tests/test_import_smoke.py`: imports every console script and runs `--help` for each CLI.
-- `tests/test_repo_hardcoded_paths.py`: no absolute paths or links in tracked files.
-- Addon and data path: Lua harness (`tests/wow_harness.py`), scan format, companion, server, migrations.
-- Trading and analysis: item/data identity, financial queue and paper-trading safety, golden statistics.
-- Ops and platform: install, doctor, health, backup, launch target (`tests/ops`, `tests/platform`).
+The fixture rejects a shared database URL with xdist. Tests retain only failed temporary
+directories. Type checking requires zero errors across the five workspace source roots.
 
-Live checks (a real game, desktop or database) are not part of the suite; see
-[REPEATING_SCANS](REPEATING_SCANS.md) for the loop's live acceptance.
+Tests cover retained dashboard economics/activity/caching, canonical scan formats and
+migration ledger, native scanner lifecycle and transport/ACK behavior, host policy/input,
+private filesystem and backup contracts, strict operation batches, crash/receipt ambiguity,
+client operation staging and bounded measured movement. Package tests build wheels and
+sdists, check exact owned resources, and reject forbidden component imports.
+
+The Lua harness models native behavior; it does not prove actual protected-call semantics.
+Live qualification needs the selected client build and exact authorized batch. A dispatched
+input is distinct from a callback, and a callback from a verified native postcondition.

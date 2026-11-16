@@ -1,110 +1,72 @@
-# Refactor execution
+# Refactor completion record
 
-Read RESTRUCTURE_PLAN.md in full. User authorizes Luna implementation and Sol review loops,
-commits on main, and cleanup of task worktrees and temporary artifacts. No live trading is authorized.
-Do not deploy or touch installed game files, credentials, live services, databases, or private evidence.
-All implementation workers use gpt-6-luna xhigh; independent reviewers use gpt-6.1-sol xhigh.
-Do not commit, reset, stash, or revert another worker's changes. Parent owns git and integration.
-Use the current checkout; installed addons are copies, not links into this checkout.
+Updated 2026-11-15. The user authorized parallel Luna implementation / independent Sol review
+loops, landing changes on main, and cleanup of task worktrees and temporary artifacts. No live
+trade, deployment, production database operation or installed game-file change was performed.
+Read RESTRUCTURE_PLAN.md for the approved deletion inventory and acceptance requirements.
 
-## Wave one ownership
+## Delivered architecture
 
-Three disjoint implementation loops run in parallel. No frameworks, compatibility layers, speculative
-actions, generalized routing, or unrelated improvements. Prefer deleting entire retired consumers.
-Ask parent to resolve cross-scope dependencies. Exact verification commands are in each assignment.
+- crowley-common owns pure identity/scan/frame contracts, selected target data and shared private
+  filesystem helpers.
+- crowley-market owns retained ingestion, history, main dashboard, recipe watch and backup/restore.
+- crowley-scanner owns scanner configuration, companion/upload/ACK state and Crowley/Crowley_Data.
+- crowley-automation owns independent desktop/native observation/input, exact operation batches,
+  durable ledger, concrete execution, measured movement and its separate addon.
+- crowley-host composes the components for installation, diagnosis and scan-aware maintenance.
 
-### Market cleanup
+Scanner, market and automation never import each other's implementation. Each component builds
+and installs independently. Only host composes scanner and automation; the optional in-game host
+bridge coordinates exclusive AH use. Automation never resolves a scanner catalog or scan plan.
+The old namespace, duplicate resource trees and deprecated command aliases are removed.
 
-Own src/crowley/analysis/, src/crowley/trading/, src/crowley/advisor/, src/crowley/forecast/,
-and new src/crowley/market/. Own tests/test_analysis*.py, tests/test_advisor*.py,
-tests/test_forecast*.py, tests/test_trading*.py, tests/perf/bench_paper.py.
-Do not change server, companion, addon, scan, config, ops, pyproject, tools, or docs.
-Extract only the calculations and data access required by trading-summary and recipe-watch.
-Delete inactive analysis/rank CLI workflows except helpers actually required by retained outputs.
-Remove all advanced advice, simulation, strategy runner, forecasting, paper and backtest code/tests.
-Preserve active dashboard semantics, including exact turnover floor and gap rules.
+Deleted inactive products include advanced dashboard/advice/forecast views, paper/backtests,
+old executor and remote queues, Queue.lua, account/reference capture and dormant lifecycle stacks.
+Historical SQL tables remain; all 12 applied migration files preserve their exact original bytes.
+Existing exact six-units/hour dashboard behavior and retained scan/ACK semantics are preserved.
 
-### Addon and observation cleanup
+Fresh automation implements commodity/item listing, cancellation, bounded non-COD mail,
+known-location interaction and measured routes. It uses exact immutable batch authorization,
+expiring current-boot arms, causal per-primitive receipts, persisted progress and an uncertainty
+interlock. No buying, vendors, crafting, arbitrary Lua, retry framework, plugin bus or second
+supervisor was added. Host maintenance checks the existing runner/ledger and shared GUI lease.
+Every click retains curved seeded pointer movement, real press/release and the global 1-second gate.
 
-Own addon/Crowley/, addon/Crowley_Data/, addon/Crowley_Automation/ (new), addon/Crowley_Host/ (new),
-src/crowley/gui/frames.py, src/crowley/scan/, tools/generate_launch_target.py,
-tests/test_addon.py, tests/test_executor.py, tests/wow_harness.py,
-tests/test_gui_frames.py, tests/test_scan*.py, tests/test_cold_tier.py,
-tests/test_launch_target.py, tests/support/scan_frames.py.
-Do not change companion/server/config/ops/pyproject/market modules or other tests/docs.
-Read .agents/skills/crowley-client-contracts/SKILL.md.
-Delete dormant executor, capture modules, construction/recovery/measurement workflows, and unused
-telemetry. Separate scanner and game observations with independent addon lifecycle and schemas;
-scanner must work without automation addon and automation observation without scanner/plan.
-Preserve active AH loop behavior through explicit integration/public observation.
-Remove queue schema generation. Keep generated scan/data schemas and native scan serialization.
-Use simple bounded publications and explicit types; do not recreate the retired session stack.
+## Implementation and review
 
-### Transport and server cleanup
+All implementation/fix rounds used gpt-6-luna at xhigh; independent read-only reviews used
+gpt-6.1-sol at xhigh. Parent owned integration, verification, docs and git. The three cleanup
+loops, package extraction, strict operation foundation, measured movement, concrete backend,
+native actions and final host coordination all reached Sol STATUS: READY with no outstanding
+Must-Fix or Should-Fix findings. Reviews did not claim actual protected-call qualification.
 
-Own src/crowley/companion/, src/crowley/server/ except migrations and static/trading-dashboard.html,
-src/crowley/store/accounts.py, references.py, queues.py, paper.py;
-src/crowley/config/; src/crowley/core/companion_state.py;
-tests/test_companion.py, tests/test_server*.py, tests/test_trade_queue.py,
-tests/test_account.py, tests/test_reference.py, tests/test_dashboard.py,
-tests/support/companion_state.py, tests/support/config.py, tests/config/.
-Do not change migrations, analysis/trading/advisor/forecast, addon, scan, gui, tools, ops, pyproject, docs.
-Remove advanced dashboard/advice/paper/queue routes and background advice warming. Remove dormant
-account/reference/execution uploads and queue fetching/writing from companion. Retain scanner/probe
-transport, strict original payload acceptance, ACK bytes, retries/rejections, main dashboard/recipe watch.
-Preserve historical tables; remove store readers only if no retained consumers, coordinate with parent.
-Remove retired config fields and update affected owned fixtures. Never edit applied migrations.
+Concrete review fixes included native SavedVariables restore ordering, exact staging/readback,
+item-link identity and cursor scale; sequential batch ownership and fresh motion samples;
+stop/expiry/focus checks after blocking calls; causal interaction completion; durable dispatch
+recovery; and launcher-child admission under the GUI lease. Regression tests cover these failures.
+No active worker owns further source changes.
 
-## Parent integration
+## Final parent checks
 
-Parent owns project metadata, dependency lock, CLI smoke checks, ops/deploy cleanup, documentation,
-remaining orphan tests/core modules, package extraction, final verification and git operations.
-Before spending Sol review, parent inspects scope and independently reproduces relevant passing tests.
-Reviewers are read-only and must report Must-Fix / Should-Fix / Nits and STATUS.
-Loop until substantive findings are resolved; do not invent extra features during fixes.
+- Default full suite: 1203 passed, 31 skipped. DB-dependent checks skip without an explicit URL.
+- Disposable tmpfs Timescale: 37 migration/server/item-loader/house/client-data checks passed,
+  plus 1 real packaged-migration backup inventory check passed, all serially.
+- Ruff check and format: pass. Pyright: zero errors. Generated selected target: check passed.
+- Package qualification is included in the full suite: wheel/SDIST builds, an isolated host SDIST
+  rebuild without workspace sources, exact package resources, all five installed wheels, independent
+  imports outside the repository and all eight command help checks.
+- All 12 applied SQL migrations retain exact bytes from before the move.
+- The stale test worktree was removed; main is the only worktree. Task-owned build/test resources
+  are removed at completion. Pre-existing private archives, wheels and unrelated temp data stay intact.
 
-## Gates
+The implementation scopes in RESTRUCTURE_API/INTEGRATION/NATIVE/MOVEMENT/BACKEND/COORDINATION
+are retained as design/review specifications; their temporary worker ownership sections are historical.
+README, ARCHITECTURE, HANDOFF, TESTING and AUTOMATION describe the final supported interfaces.
 
-1. Baseline preserved; current main-dashboard modifications recorded separately.
-2. Wave one retained behavior passes and all three loops have READY Sol reviews.
-3. Independent package builds/import boundaries/install checks pass.
-4. Fresh scoped automation and its crash/admission/coordination cases pass review and checks.
-5. Full retained tests, lint, typing and artifact checks pass on main; temporary artifacts are removed.
+## Qualification boundary
 
-Live qualification requiring specific real-gold operations remains separate from code completion.
-
-## Implementation checkpoint
-
-- Main contains the approved planning commit. Application cleanup is still uncommitted until the
-  coordinated producer/consumer batch is complete. No changes have been deployed or pushed.
-- Original uncommitted turnover code/UI/test changes are preserved in the working cleanup.
-- market_cleanup is Luna. Its cleanup passed independent Sol market_review after restoring retained
-  item-book and real loader DB tests. It now owns the fresh automation foundation per RESTRUCTURE_API.
-- transport_cleanup is Luna. Its cleanup passed independent Sol transport_review. It now prepares
-  new common/market/scanner packages per RESTRUCTURE_API without changing original source paths.
-- addon_cleanup is Luna and still owns the original addon/frames/scan/harness rewrite. It must finish
-  and pass independent Sol review before the package/resource handoff and old import switch.
-- market_review and transport_review are read-only Sol workers available for subsequent rounds.
-- Parent removed orphan core account/reference/queue modules, volume API-only reporting/projection
-  helpers and store readers, unused domain/typed-clock/procfs scaffolding, paper deployment/CLI
-  metadata, and abandoned screenshot tooling. Preserved active volume comparison behavior/tests.
-- Parent ops integration handles the second canvas, separate addon resource roots, no Queue.lua,
-  and removal of paper units. Existing backup type errors were corrected without behavior changes.
-- Parent independent checks: market retained suite 83 passed; restored item-book suite 58 passed;
-  actual item-book loader DB 1 passed; volume/summary/watch 69 passed; transport suite 65 passed and
-  14 DB skips; ops backup 109 passed and 1 skipped; install/doctor 46 passed; migrations on disposable
-  Timescale 13 passed. Server DB suite 13 passed, with one cross-addon test blocked on the harness
-  rewrite at that point. Re-run after addon work completes.
-- The pre-existing old test worktree and its test cache were removed; main is the only worktree.
-  A parent-owned disposable tmpfs Timescale test container is active for DB qualification; discover
-  its published port with docker rather than using the production database, and remove it afterward.
-- Root package metadata, old-to-new import switch, source removal, docs refresh, baseline ratchets,
-  final artifact tests, native automation adapters, movement, and live dry-run qualification remain.
-- Host-config inventory found legacy model_crop, canvas_origin, outer geometry and client-offset
-  fields have no consumers beyond their own validation. Remove them when switching to the new
-  host application and adapt fixtures together; validate actual screenshot/window bounds in the
-  adapters rather than retaining stale calibration configuration.
-
-Scanner standalone configuration will be its own strict scanner.toml [scanner] with game_root,
-wtf_account, character, server_url, poll_seconds, and refresh_minutes. Character preserves the
-existing state directory layout. Host installation renders this from its master host contract.
+Source implementation and artifact verification are complete. Nothing was deployed and no live
+operation was sent. Current-client protected posting/cancellation/mail behavior and current-build
+route/target measurements still require specific live qualification. No measured profile is shipped
+as qualified. An agent can inspect/prepare through the documented CLI; real effects require the
+concrete unchanged batch authorization, current-session arm and qualified native assumptions.

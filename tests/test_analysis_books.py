@@ -2,8 +2,7 @@ from contextlib import nullcontext
 from fractions import Fraction
 
 import pytest
-
-from crowley.analysis.books import Book, Group, bottom_walk, load_commodity_books, valid_intervals
+from crowley_market.analysis.books import Book, Group, bottom_walk, load_commodity_books, valid_intervals
 
 
 def _group(result_id, unit, quantity, time_left=10_000):

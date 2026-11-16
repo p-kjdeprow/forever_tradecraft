@@ -4,13 +4,18 @@ local Operations = {}
 ns.AutomationOperations = Operations
 
 local MAX_SAFE, MAX_ITEM_KEY_BYTES, MAX_ACTION_BYTES = 9007199254740991, 128, 128
+local MAX_MARKET_RESULTS, MAX_MARKET_MORE_REQUESTS, MAX_MANAGED_IDS = 100000, 8, 1024
+local MARKET_QUERY_TIMEOUT_SECONDS, MARKET_ROWS_PER_UPDATE = 20, 256
 local DURATIONS = { [12] = 1, [24] = 2, [48] = 3 }
-local NATIVE_KINDS = { post_commodity = true, post_item = true, cancel_auction = true, collect_mail = true }
+local NATIVE_KINDS = {
+  post_commodity = true, post_item = true, cancel_auction = true, collect_mail = true, collect_return = true,
+}
 local FIELD_SETS = {
   post_commodity = { itemKey = true, quantity = true, unitPriceCopper = true, durationHours = true, maxDepositCopper = true },
   post_item = { itemKey = true, quantity = true, unitPriceCopper = true, durationHours = true, maxDepositCopper = true },
   cancel_auction = { auctionId = true, maxCancelCostCopper = true },
   collect_mail = { messageLimit = true },
+  collect_return = { itemKey = true, quantity = true, mailFingerprint = true },
   interact = { targetId = true },
   move_route = { routeId = true },
 }
@@ -23,6 +28,13 @@ end
 
 local function exactInteger(value, minimum, maximum)
   return type(value) == "number" and value == math.floor(value) and value >= minimum and value <= maximum
+end
+
+local function addSafeInteger(total, value, label)
+  if not exactInteger(total, 0, MAX_SAFE) or not exactInteger(value, 0, MAX_SAFE) or total > MAX_SAFE - value then
+    error(label .. " exceeds exact integer range", 0)
+  end
+  return total + value
 end
 
 local function finite(value)
@@ -120,6 +132,7 @@ local function generalFreeBagSlots()
     end
     if family == 0 then total = total + freeSlots end
   end
+
   return total
 end
 
@@ -138,8 +151,8 @@ local function itemAt(bag, slot)
   local bound = requireFunction(C_Item, "IsBound", "bound item query")(location)
   local commodityStatus = requireFunction(C_AuctionHouse, "GetItemCommodityStatus", "commodity status query")(location)
   local status = type(Enum) == "table" and Enum.ItemCommodityStatus or nil
-  if type(status) ~= "table" or status.Commodity == nil or status.NonCommodity == nil or
-      (commodityStatus ~= status.Commodity and commodityStatus ~= status.NonCommodity) then
+  if type(status) ~= "table" or status.Unknown == nil or status.Item == nil or status.Commodity == nil or
+      (commodityStatus ~= status.Item and commodityStatus ~= status.Commodity) then
     error("item commodity status is unavailable", 0)
   end
   local valid = requireFunction(C_AuctionHouse, "IsSellItemValid", "auctionable item query")(location, false)
@@ -237,7 +250,7 @@ local function inboxMessage(index)
     error("mail header facts malformed", 0)
   end
   local attachmentCount = nativeItemCount or 0
-  local ids, quantities = {}, {}
+  local ids, quantities, attachments = {}, {}, {}
   local hasItem = requireFunction(_G, "HasInboxItem", "mail attachment presence query")
   local getItem = requireFunction(_G, "GetInboxItem", "mail attachment query")
   for attachment = 1, 16 do
@@ -253,6 +266,19 @@ local function inboxMessage(index)
         error("mail attachment identity unavailable", 0)
       end
       ids[#ids + 1], quantities[#quantities + 1] = itemID, itemCount
+      local linkValues = captureReturns(requireFunction(_G, "GetInboxItemLink", "mail attachment link query")(
+        index, attachment
+      ))
+      if linkValues.n ~= 1 or type(linkValues[1]) ~= "string" or linkValues[1] == "" then
+        error("mail_attachment_link_unavailable", 0)
+      end
+      local itemKey = ns.AutomationIdentity.CommodityKeyFromLink(linkValues[1], itemID) or false
+      attachments[#attachments + 1] = {
+        attachment = attachment,
+        itemID = itemID,
+        itemKey = itemKey,
+        quantity = itemCount,
+      }
     end
   end
   if #ids ~= attachmentCount then error("mail header and attachment slots disagree", 0) end
@@ -266,6 +292,7 @@ local function inboxMessage(index)
     attachmentCount = attachmentCount,
     attachmentItemIDs = ids,
     attachmentQuantities = quantities,
+    attachments = attachments,
     daysLeft = daysLeft,
     returned = wasReturned,
     canDelete = canDelete,
@@ -284,6 +311,23 @@ local function inboxMessages()
   local rows = {}
   for index = 1, count do rows[#rows + 1] = inboxMessage(index) end
   return rows
+end
+
+local function nativeCommodityItem(itemKey)
+  if type(itemKey) ~= "string" or not itemKey:match("^[1-9][0-9]*$") then return false end
+  local itemID = integerText(itemKey, 1, MAX_SAFE)
+  if not itemID then return false end
+  local makeKey = requireFunction(C_AuctionHouse, "MakeItemKey", "commodity item identity API")
+  local key = makeKey(itemID)
+  if type(key) ~= "table" or key.itemID ~= itemID or key.itemLevel ~= 0 or
+      key.itemSuffix ~= 0 or key.battlePetSpeciesID ~= 0 then
+    error("commodity item key is not the exact base identity", 0)
+  end
+  local info = requireFunction(C_AuctionHouse, "GetItemKeyInfo", "commodity item-kind API")(key, false)
+  if type(info) ~= "table" or info.itemID ~= itemID or type(info.isCommodity) ~= "boolean" then
+    error("commodity item kind is unavailable", 0)
+  end
+  return info.isCommodity == true
 end
 
 local function bagCountsByID()
@@ -306,53 +350,120 @@ local function bagCountsByID()
   return totals
 end
 
-local function tablePage(rows, page)
+local function inspectionPageSize(kind)
+  return kind == "mail" and 1 or 4
+end
+
+local function tablePage(rows, page, pageSize)
   local result = {}
-  local first = page * 4 + 1
-  for index = first, math.min(first + 3, #rows) do result[#result + 1] = rows[index] end
+  local first = page * pageSize + 1
+  for index = first, math.min(first + pageSize - 1, #rows) do result[#result + 1] = rows[index] end
   return result, first + #result <= #rows
+end
+
+local inspectionCounter = 0
+local inspectionCache = {}
+local returnSelections = {}
+
+local function inspectionToken()
+  inspectionCounter = (inspectionCounter + 1) % 4294967296
+  local uptime = math.floor(GetTime() * 1000) % 4294967296
+  local randomA, randomB = math.random(0, 65535), math.random(0, 65535)
+  local random = randomA * 65536 + randomB
+  return string.format("%08x%08x%08x%08x", time() % 4294967296, uptime, inspectionCounter, random)
+end
+
+local function mintReturnSelection(itemKey, quantity)
+  local token
+  repeat token = inspectionToken() .. inspectionToken() until not returnSelections[token]
+  returnSelections[token] = {
+    itemKey = itemKey,
+    quantity = quantity,
+    expiresAt = time() + 60,
+    used = false,
+  }
+  return token
+end
+
+local function attachReturnSelections(rows)
+  returnSelections = {}
+  for _, row in ipairs(rows) do
+    for _, attachment in ipairs(row.attachments) do
+      attachment.selectionToken = false
+      if row.codCopper == 0 and not row.isGM and
+          type(attachment.itemKey) == "string" and exactInteger(attachment.quantity, 1, MAX_SAFE) then
+        local ok, commodity = pcall(nativeCommodityItem, attachment.itemKey)
+        if ok and commodity then
+          attachment.selectionToken = mintReturnSelection(attachment.itemKey, attachment.quantity)
+        end
+      end
+    end
+  end
+end
+
+local function publishInspection(kind, page, rows)
+  local token = inspectionToken()
+  local cache = { rows = rows, requestId = token, capturedAt = time(), sourceCount = #rows }
+  inspectionCache[kind] = cache
+  local pageRows, hasMore = tablePage(rows, page, inspectionPageSize(kind))
+  return {
+    kind = kind, page = page, rows = pageRows, hasMore = hasMore, error = "",
+    requestId = token, capturedAt = cache.capturedAt, sourceCount = cache.sourceCount,
+  }
 end
 
 local function inspect(kind, page, mailOpen, ownedRows)
   local rows
-  if kind == "inventory" then
-    local all = allBagItems()
-    rows = {}
-    for _, row in ipairs(all) do
-      rows[#rows + 1] = {
-        bag = row.bag, slot = row.slot, itemKey = row.itemKey, itemLink = row.itemLink,
-        count = row.count, locked = row.locked, bound = row.bound, commodity = row.commodity,
-      }
+  if page == 0 then
+    inspectionCache[kind] = nil
+    if kind == "mail" then returnSelections = {} end
+    if kind == "inventory" then
+      rows = {}
+      for _, row in ipairs(allBagItems()) do
+        rows[#rows + 1] = {
+          bag = row.bag, slot = row.slot, itemKey = row.itemKey, itemLink = row.itemLink,
+          count = row.count, locked = row.locked, bound = row.bound, commodity = row.commodity,
+        }
+      end
+    elseif kind == "owned" then
+      if not isAuctionHouseOpen() then error("auction_house_closed", 0) end
+      if type(ownedRows) ~= "table" then error("owned_query_pending", 0) end
+      rows = ownedRows
+    elseif kind == "mail" then
+      if not mailOpen or not isMailOpen() then error("mail_closed", 0) end
+      rows = {}
+      for _, row in ipairs(inboxMessages()) do
+        rows[#rows + 1] = {
+          index = row.index, moneyCopper = row.moneyCopper, codCopper = row.codCopper,
+          attachmentCount = row.attachmentCount, attachmentItemIDs = row.attachmentItemIDs,
+          returned = row.returned, canDelete = row.canDelete, daysLeft = row.daysLeft,
+          isGM = row.isGM, attachments = row.attachments,
+        }
+      end
+      attachReturnSelections(rows)
+    else
+      error("inspection_kind_invalid", 0)
     end
-  elseif kind == "owned" then
-    if not isAuctionHouseOpen() then error("auction_house_closed", 0) end
-    if type(ownedRows) ~= "table" then error("owned_query_pending", 0) end
-    rows = ownedRows
-  elseif kind == "mail" then
-    if not mailOpen or not isMailOpen() then error("mail_closed", 0) end
-    local internal = inboxMessages()
-    rows = {}
-    for _, row in ipairs(internal) do
-      rows[#rows + 1] = {
-        index = row.index,
-        moneyCopper = row.moneyCopper,
-        codCopper = row.codCopper,
-        attachmentCount = row.attachmentCount,
-        attachmentItemIDs = row.attachmentItemIDs,
-        returned = row.returned,
-        canDelete = row.canDelete,
-        daysLeft = row.daysLeft,
-      }
-    end
-  else
-    error("inspection_kind_invalid", 0)
+    return publishInspection(kind, page, rows)
   end
-  local pageRows, hasMore = tablePage(rows, page)
-  return { kind = kind, page = page, rows = pageRows, hasMore = hasMore, error = "" }
+
+  local cache = inspectionCache[kind]
+  if not cache or time() - cache.capturedAt > 60 then error("inspection_snapshot_unavailable", 0) end
+  rows = cache.rows
+  local pageSize = inspectionPageSize(kind)
+  local pageRows, hasMore = tablePage(rows, page, pageSize)
+  if page * pageSize > #rows then error("inspection_page_out_of_range", 0) end
+  return {
+    kind = kind, page = page, rows = pageRows, hasMore = hasMore, error = "",
+    requestId = cache.requestId, capturedAt = cache.capturedAt, sourceCount = cache.sourceCount,
+  }
 end
 
 local function inspectError(kind, page, reason)
-  return { kind = kind, page = page, rows = {}, hasMore = false, error = tostring(reason):sub(1, 128) }
+  return {
+    kind = kind, page = page, rows = {}, hasMore = false, error = tostring(reason):sub(1, 128),
+    requestId = "", capturedAt = 0, sourceCount = 0,
+  }
 end
 
 local function actionFields(kind, fields, chunks)
@@ -382,6 +493,11 @@ local function actionFields(kind, fields, chunks)
     if action.auctionId < 1 or action.maxCancelCostCopper < 0 then return nil, "cancel_bounds_invalid" end
   elseif kind == "collect_mail" then
     if action.messageLimit < 1 or action.messageLimit > 50 then return nil, "mail_limit_invalid" end
+  elseif kind == "collect_return" then
+    if action.quantity < 1 or action.quantity > MAX_SAFE or
+        #action.mailFingerprint ~= 64 or not action.mailFingerprint:match("^[0-9a-f]+$") then
+      return nil, "return_selection_invalid"
+    end
   elseif kind == "interact" then
     if not action.targetId:match("^[a-z][a-z0-9_-]*$") then return nil, "target_id_invalid" end
   elseif kind == "move_route" then
@@ -402,12 +518,23 @@ function Operations.New()
   local pendingSaved = saved.pending
   local unresolved = pendingSaved ~= nil
   local uncertainKind = type(pendingSaved) == "table" and pendingSaved.kind or ""
-  local uncertainMarket = uncertainKind ~= "collect_mail"
+  local uncertainMarket = uncertainKind ~= "collect_mail" and uncertainKind ~= "collect_return"
   local self = {
     stage = nil,
     receipt = { sequence = 0, batchId = "", ordinal = 0, stepIndex = 0,
-      callbackDelivered = "unknown", postcondition = "unknown", actionComplete = "unknown", detail = "" },
-    inspection = { kind = "none", page = 0, rows = {}, hasMore = false, error = "" },
+      callbackDelivered = "unknown", postcondition = "unknown", actionComplete = "unknown", detail = "", result = false },
+    inspection = {
+      kind = "none", page = 0, rows = {}, hasMore = false, error = "",
+      requestId = "", capturedAt = 0, sourceCount = 0,
+    },
+    sellerMarket = {
+      requestId = "", itemKey = "", complete = false, coverage = "none", resultCount = 0,
+      bestCompetitorUnitPriceCopper = false, bestCompetitorQuantity = 0, bestCompetitorResultCount = 0,
+      ambiguousOwnerUnitPriceCopper = false, managedUnitPriceCopper = false, managedAuctionCount = 0,
+      managedQuantity = 0, error = "", capturedAt = 0,
+    },
+    sellerQuery = nil,
+    marketSetup = nil,
     bridge = nil,
     grantHeld = unresolved and uncertainMarket,
     uncertain = unresolved,
@@ -452,7 +579,7 @@ function Operations.New()
     self.stage = nil
     if reason then self.lastError = actionError(reason) else self.lastError = "" end
     self.heldBatchId, self.heldExpiresAt = "", 0
-    if not self.uncertain then release() end
+    if not self.uncertain and not self.sellerQuery then release() end
   end
 
   local function failInput(reason)
@@ -484,6 +611,265 @@ function Operations.New()
       self.ahOwner, self.scannerState = "automation", "not_installed"
     end
     return true, ""
+  end
+
+  local function verifyHeldAuctionOwnership()
+    if not self.ahOpen or not isAuctionHouseOpen() then return false, "auction_house_closed" end
+    if self.ahOwner ~= "automation" then return false, "auction_house_ownership_lost" end
+    if ns.Coordinated then
+      if not self.grantHeld or not self.bridge or type(self.bridge.quiescent) ~= "function" then
+        return false, "auction_house_ownership_lost"
+      end
+      local ok, quiet = pcall(self.bridge.quiescent, "crowley-automation")
+      if not ok or quiet ~= true then return false, "auction_house_ownership_lost" end
+    end
+    return true, ""
+  end
+
+  local function searchItemID(value)
+    if exactInteger(value, 1, MAX_SAFE) then return value end
+    if type(value) == "table" and exactInteger(value.itemID, 1, MAX_SAFE) then return value.itemID end
+    return nil
+  end
+
+  local function noteNativeSearch(kind, value)
+    local itemID = searchItemID(value)
+    local request = self.sellerQuery
+    if request then
+      if request.issuing == kind and itemID == request.itemID then
+        request.dispatchSeen = true
+      else
+        request.foreignQuery = true
+      end
+    end
+  end
+
+  local function installSearchHooks()
+    if type(hooksecurefunc) ~= "function" or type(C_AuctionHouse) ~= "table" then
+      self.marketHookError = "market_search_hooks_unavailable"
+      return false
+    end
+    local hooks = {
+      { "SendSearchQuery", "send" },
+      { "SendSellSearchQuery", "sell" },
+      { "RequestMoreCommoditySearchResults", "more" },
+      { "RequestMoreItemSearchResults", "more_item" },
+      { "RefreshCommoditySearchResults", "refresh" },
+      { "RefreshItemSearchResults", "refresh_item" },
+    }
+    for _, hook in ipairs(hooks) do
+      if type(C_AuctionHouse[hook[1]]) ~= "function" then
+        self.marketHookError = "market_search_hook_missing_" .. hook[1]
+        return false
+      end
+      local apiName, kind = hook[1], hook[2]
+      local ok = pcall(hooksecurefunc, C_AuctionHouse, apiName, function(first, ...)
+        noteNativeSearch(kind, first)
+      end)
+      if not ok then
+        self.marketHookError = "market_search_hook_install_failed_" .. apiName
+        return false
+      end
+    end
+    return true
+  end
+
+  installSearchHooks()
+
+  local function failedMarket(request, reason)
+    if not request or self.sellerQuery ~= request then return end
+    self.sellerMarket = {
+      requestId = request.requestId,
+      itemKey = request.itemKey,
+      complete = false,
+      coverage = "none",
+      resultCount = 0,
+      bestCompetitorUnitPriceCopper = false,
+      bestCompetitorQuantity = 0,
+      bestCompetitorResultCount = 0,
+      ambiguousOwnerUnitPriceCopper = false,
+      managedUnitPriceCopper = false,
+      managedAuctionCount = 0,
+      managedQuantity = 0,
+      error = actionError(reason),
+      capturedAt = time(),
+    }
+    self.sellerQuery = nil
+    if not self.uncertain then release() end
+  end
+
+  local function completeMarket(request)
+    if not request or self.sellerQuery ~= request then return end
+    local ownershipHeld, ownershipError = verifyHeldAuctionOwnership()
+    if not ownershipHeld then
+      failedMarket(request, ownershipError)
+      return
+    end
+    local bestPrice = false
+    local bestQuantity, bestCount = 0, 0
+    local ambiguousPrice = false
+    local managedPrice = false
+    local managedCount, managedQuantity = 0, 0
+    for _, price in ipairs(request.prices) do
+      local level = request.byPrice[price]
+      if level.competitorCount > 0 and (bestPrice == false or price < bestPrice) then
+        bestPrice, bestQuantity, bestCount = price, level.competitorQuantity, level.competitorCount
+      end
+      if level.ambiguousOwner and (ambiguousPrice == false or price < ambiguousPrice) then
+        ambiguousPrice = price
+      end
+      if level.managedCount > 0 and (managedPrice == false or price < managedPrice) then
+        managedPrice = price
+      end
+      managedCount = addSafeInteger(managedCount, level.managedCount, "managed auction count")
+      managedQuantity = addSafeInteger(managedQuantity, level.managedQuantity, "managed auction quantity")
+    end
+    self.sellerMarket = {
+      requestId = request.requestId,
+      itemKey = request.itemKey,
+      complete = true,
+      coverage = "full",
+      resultCount = request.resultCount,
+      bestCompetitorUnitPriceCopper = bestPrice,
+      bestCompetitorQuantity = bestQuantity,
+      bestCompetitorResultCount = bestCount,
+      ambiguousOwnerUnitPriceCopper = ambiguousPrice,
+      managedUnitPriceCopper = managedPrice,
+      managedAuctionCount = managedCount,
+      managedQuantity = managedQuantity,
+      error = "",
+      capturedAt = time(),
+    }
+    if not self.uncertain and not release() then
+      failedMarket(request, "scanner_resume_refused")
+      return
+    end
+    self.sellerQuery = nil
+  end
+
+  local function marketQueryKey(request)
+    local auction = requireFunction(C_AuctionHouse, "MakeItemKey", "native commodity ItemKey constructor")
+    local key = auction(request.itemID)
+    if type(key) ~= "table" or key.itemID ~= request.itemID or key.itemLevel ~= 0 or
+        key.itemSuffix ~= 0 or key.battlePetSpeciesID ~= 0 then
+      error("commodity_item_key_unavailable", 0)
+    end
+    local info = requireFunction(C_AuctionHouse, "GetItemKeyInfo", "native ItemKey information")(key, false)
+    if type(info) ~= "table" or info.itemID ~= request.itemID or type(info.isCommodity) ~= "boolean" then
+      error("commodity_item_kind_unavailable", 0)
+    end
+    if not info.isCommodity then error("seller_commodity_required", 0) end
+    return key
+  end
+
+  local function throttleReady()
+    local ok, ready = pcall(function()
+      return requireFunction(C_AuctionHouse, "IsThrottledMessageSystemReady", "auction search throttle")()
+    end)
+    if not ok or type(ready) ~= "boolean" then error("auction_search_throttle_unavailable", 0) end
+    return ready
+  end
+
+  local function dispatchMarketQuery(request, kind)
+    local auction = C_AuctionHouse
+    if type(Enum) ~= "table" or type(Enum.AuctionHouseSortOrder) ~= "table" or
+        Enum.AuctionHouseSortOrder.Price == nil then
+      error("auction_house_price_sort_unavailable", 0)
+    end
+    local sort = { { sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false } }
+    request.issuing, request.dispatchSeen = kind, false
+    request.dispatchReturned = false
+    request.messagePending = true
+    request.sentBarrier, request.responseBarrier, request.queryEvent = false, false, false
+    local ok, result
+    if kind == "send" then
+      ok, result = pcall(requireFunction(auction, "SendSearchQuery", "commodity search API"),
+        marketQueryKey(request), sort, true, 0, 0)
+    else
+      local more = requireFunction(auction, "RequestMoreCommoditySearchResults", "commodity page API")
+      ok, result = pcall(more, request.itemID)
+      request.moreRequests = request.moreRequests + 1
+    end
+    request.issuing = false
+    if not ok then error(kind == "send" and "commodity_search_call_failed" or "commodity_page_call_failed", 0) end
+    if kind == "more" and type(result) ~= "boolean" then error("commodity_page_result_malformed", 0) end
+    if not request.dispatchSeen or request.foreignQuery then error("market_query_attribution_ambiguous", 0) end
+    request.started, request.dispatchReturned = true, true
+    request.awaitingEvent = true
+    request.messageDeadline = time() + MARKET_QUERY_TIMEOUT_SECONDS
+    if kind == "more" and result then request.nativeFullHint = true end
+  end
+
+  local function beginMarketRows(request)
+    local auction = C_AuctionHouse
+    local count = requireFunction(auction, "GetNumCommoditySearchResults", "commodity result count")(
+      request.itemID
+    )
+    if not exactInteger(count, 0, MAX_MARKET_RESULTS) then error("commodity_result_count_malformed", 0) end
+    local totalQuantity = requireFunction(auction, "GetCommoditySearchResultsQuantity", "commodity result quantity")(
+      request.itemID
+    )
+    if not exactInteger(totalQuantity, 0, MAX_SAFE) then error("commodity_result_quantity_malformed", 0) end
+    request.resultCount, request.nativeTotalQuantity = count, totalQuantity
+    request.scanIndex, request.scannedQuantity = 1, 0
+    request.byPrice, request.prices, request.auctionIDsSeen = {}, {}, {}
+    request.phase = "rows"
+  end
+
+  local function scanMarketRows(request)
+    local finish = math.min(request.resultCount, request.scanIndex + MARKET_ROWS_PER_UPDATE - 1)
+    for index = request.scanIndex, finish do
+      local row = requireFunction(C_AuctionHouse, "GetCommoditySearchResultInfo", "commodity result query")(
+        request.itemID, index
+      )
+      if type(row) ~= "table" or row.itemID ~= request.itemID or
+          not exactInteger(row.quantity, 1, MAX_SAFE) or not exactInteger(row.unitPrice, 1, MAX_SAFE) or
+          not exactInteger(row.auctionID, 1, MAX_SAFE) or type(row.owners) ~= "table" or
+          not exactInteger(row.totalNumberOfOwners, 1, 100000) or not exactInteger(row.numOwnerItems, 0, 100000) or
+          type(row.containsOwnerItem) ~= "boolean" or type(row.containsAccountItem) ~= "boolean" then
+        error("commodity_result_malformed", 0)
+      end
+      if request.auctionIDsSeen[row.auctionID] then error("commodity_result_repeats_auction_id", 0) end
+      request.auctionIDsSeen[row.auctionID] = true
+      local ownerCount = #row.owners
+      if ownerCount > row.totalNumberOfOwners then error("commodity_result_owners_malformed", 0) end
+      for _, owner in ipairs(row.owners) do
+        if type(owner) ~= "string" or owner == "" then error("commodity_result_owners_malformed", 0) end
+      end
+      local price = row.unitPrice
+      local level = request.byPrice[price]
+      if not level then
+        level = { competitorCount = 0, competitorQuantity = 0, ambiguousOwner = false, managedCount = 0, managedQuantity = 0 }
+        request.byPrice[price], request.prices[#request.prices + 1] = level, price
+      end
+      request.scannedQuantity = addSafeInteger(request.scannedQuantity, row.quantity, "commodity result quantity")
+      if request.managedIDs[row.auctionID] and row.containsOwnerItem and not row.containsAccountItem and
+          row.numOwnerItems == 1 and row.totalNumberOfOwners == 1 and ownerCount == 1 then
+        if not request.managedSeen[row.auctionID] then
+          request.managedSeen[row.auctionID] = true
+          level.managedCount = addSafeInteger(level.managedCount, 1, "managed auction count")
+          level.managedQuantity = addSafeInteger(level.managedQuantity, row.quantity, "managed auction quantity")
+        else
+          error("commodity_managed_auction_repeated", 0)
+        end
+      elseif row.containsOwnerItem or row.containsAccountItem or row.numOwnerItems > 0 then
+        level.ambiguousOwner = true
+        if request.managedIDs[row.auctionID] then request.managedAmbiguous = true end
+      else
+        level.competitorCount = addSafeInteger(level.competitorCount, 1, "competitor result count")
+        level.competitorQuantity = addSafeInteger(level.competitorQuantity, row.quantity, "competitor quantity")
+      end
+    end
+    request.scanIndex = finish + 1
+    if request.scanIndex > request.resultCount then
+      if request.scannedQuantity ~= request.nativeTotalQuantity then error("commodity_result_quantity_mismatch", 0) end
+      local managedSeenCount = 0
+      for _ in pairs(request.managedSeen) do managedSeenCount = managedSeenCount + 1 end
+      if request.managedAmbiguous then error("commodity_managed_ownership_ambiguous", 0) end
+      if managedSeenCount ~= request.managedCount then error("commodity_managed_set_mismatch", 0) end
+      table.sort(request.prices)
+      completeMarket(request)
+    end
   end
 
   local function requestOwnedResults(request)
@@ -534,7 +920,6 @@ function Operations.New()
           local canSell = requireFunction(C_AuctionHouse, "IsSellItemValid", "auctionable item query")(row.location, false)
           if type(canSell) ~= "boolean" then error("auctionable item facts malformed", 0) end
           if canSell then
-            local status = Enum.ItemCommodityStatus
             if row.commodity ~= (action.kind == "post_commodity") then error("item commodity kind mismatch", 0) end
             if row.commodity then
               chosen = chosen or row
@@ -580,7 +965,7 @@ function Operations.New()
     if not found.cancelAllowed or not found.cancelCostKnown then error("auction_cancellation_unavailable", 0) end
     if found.cancelCostCopper > action.maxCancelCostCopper then error("cancel_cost_limit_exceeded", 0) end
     if money() < found.cancelCostCopper then error("insufficient_gold_for_cancel", 0) end
-    return rows, found.cancelCostCopper
+    return rows, found.cancelCostCopper, found
   end
 
   local function mailFingerprint(row)
@@ -621,6 +1006,43 @@ function Operations.New()
     }
   end
 
+  local function returnPrecondition(action)
+    if not self.mailOpen or not isMailOpen() then error("mail_closed", 0) end
+    local mailCommandPending = requireFunction(C_Mail, "IsCommandPending", "mail command state query")()
+    if type(mailCommandPending) ~= "boolean" then error("mail command state malformed", 0) end
+    if mailCommandPending then error("mail_command_pending", 0) end
+    local selection = returnSelections[action.mailFingerprint]
+    if not selection then error("return_selection_unknown", 0) end
+    if selection.used then error("return_selection_used", 0) end
+    if time() >= selection.expiresAt then error("return_selection_expired", 0) end
+    if selection.itemKey ~= action.itemKey or selection.quantity ~= action.quantity then
+      error("return_selection_mismatch", 0)
+    end
+    if not nativeCommodityItem(action.itemKey) then error("return_item_not_commodity", 0) end
+
+    local chosen, chosenAttachment
+    for _, row in ipairs(inboxMessages()) do
+      if not row.isGM and row.codCopper == 0 then
+        for _, attachment in ipairs(row.attachments) do
+          if attachment.itemKey == selection.itemKey and attachment.quantity == selection.quantity then
+            chosen, chosenAttachment = row, attachment
+            break
+          end
+        end
+      end
+      if chosen then break end
+    end
+    if not chosen or not chosenAttachment then error("return_attachment_not_found", 0) end
+    if generalFreeBagSlots() < 1 then error("insufficient_return_bag_slots", 0) end
+    return {
+      selection = selection,
+      message = chosen,
+      attachment = chosenAttachment,
+      itemID = tonumber(action.itemKey),
+      bagCounts = bagCountsByID(),
+    }
+  end
+
   local function operationReady(action)
     if action.kind == "post_commodity" or action.kind == "post_item" or action.kind == "cancel_auction" then
       local acquired, acquireError = acquireAuctionOwnership()
@@ -639,13 +1061,16 @@ function Operations.New()
       if not self.mailOpen or not isMailOpen() then return false, "mail_closed" end
       local ok, reason = pcall(mailPrecondition, action, self.stage.stepIndex)
       return ok, ok and "" or actionError(reason)
+    elseif action.kind == "collect_return" then
+      local ok, reason = pcall(returnPrecondition, action)
+      return ok, ok and "" or actionError(reason)
     end
     return true, ""
   end
 
   local function capturePostBaseline(action)
     local rows = ownedAuctions()
-    return { rows = rows, ids = ownedIDSet(rows) }
+    return { rows = rows, ids = ownedIDSet(rows), moneyBefore = money() }
   end
 
   local function savePending(action, stage, baseline)
@@ -661,10 +1086,11 @@ function Operations.New()
     self.ahOwner = self.uncertainMarket and "automation" or "none"
   end
 
-  local function finish(postcondition, actionComplete, detail)
+  local function finish(postcondition, actionComplete, detail, result)
     self.receipt.postcondition = postcondition
     self.receipt.actionComplete = actionComplete
     self.receipt.detail = actionError(detail or "")
+    self.receipt.result = result or false
     if postcondition ~= "unknown" and actionComplete ~= "unknown" then
       local completedStage = self.stage
       local completedAction = self.pending and self.pending.action or completedStage and completedStage.action
@@ -695,6 +1121,48 @@ function Operations.New()
       row.quantity == action.quantity and row.buyoutKnown and row.buyoutCopper == totalPrice
   end
 
+  local function exactPostReceipt(pending, row)
+    local baseline = pending.baseline
+    local charged = baseline.moneyBefore - money()
+    if charged ~= baseline.depositCopper then return nil end
+    return {
+      kind = pending.action.kind,
+      auctionId = row.auctionId,
+      itemKey = row.itemKey,
+      quantity = row.quantity,
+      unitPriceCopper = pending.action.unitPriceCopper,
+      depositCopper = charged,
+    }
+  end
+
+  local function exactCancelReceipt(pending)
+    local baseline, row = pending.baseline, pending.baseline.cancelRow
+    local charged = baseline.moneyBefore - money()
+    if charged ~= baseline.cost then return nil end
+    return {
+      kind = "cancel_auction",
+      auctionId = row.auctionId,
+      itemKey = row.itemKey,
+      remainingQuantity = row.quantity,
+      cancelCostCopper = charged,
+    }
+  end
+
+  local function verifyPendingMarketEffect(pending)
+    if pending.action.kind == "cancel_auction" and pending.eventSeen then
+      local row = currentOwnedByID(pending.action.auctionId)
+      if row ~= nil then return end
+      local result = exactCancelReceipt(pending)
+      if result then finish(true, true, "owned_auction_removed_after_cancel_event", result) end
+    elseif pending.eventAuctionID then
+      local row = currentOwnedByID(pending.eventAuctionID)
+      if createdListingMatches(row, pending.action, pending.eventAuctionID) then
+        local result = exactPostReceipt(pending, row)
+        if result then finish(true, true, "created_listing_matches_owned_auction", result) end
+      end
+    end
+  end
+
   local function verifyMailChange(baseline)
     local after = inboxMessages()
     local target
@@ -710,6 +1178,22 @@ function Operations.New()
       end
     end
     return true
+  end
+
+  local function verifyReturnEffect(pending)
+    if not pending.takeSuccess then return end
+    local baseline = pending.baseline
+    local bags = bagCountsByID()
+    local before = baseline.bagCounts[baseline.itemID] or 0
+    local after = bags[baseline.itemID] or 0
+    local gained = after - before
+    if gained ~= baseline.attachment.quantity then return end
+    finish(true, true, "native_mail_success_and_exact_bag_increment", {
+      kind = "collect_return",
+      itemKey = pending.action.itemKey,
+      quantity = baseline.attachment.quantity,
+      mailFingerprint = pending.action.mailFingerprint,
+    })
   end
 
   function self:SetHostBridge(value)
@@ -773,6 +1257,10 @@ function Operations.New()
     return self.inspection
   end
 
+  function self:SellerMarket()
+    return copy(self.sellerMarket)
+  end
+
   function self:Ownership()
     local mode = ns.Coordinated and "coordinated" or "standalone"
     local owner = self.ahOwner
@@ -791,6 +1279,79 @@ function Operations.New()
   end
 
   function self:Update()
+    local marketRequest = self.sellerQuery
+    if marketRequest and not marketRequest.issuing then
+      if time() >= marketRequest.deadline then
+        failedMarket(marketRequest, "commodity_search_timeout")
+      elseif marketRequest.foreignQuery then
+        failedMarket(marketRequest, "market_query_attribution_ambiguous")
+      elseif not marketRequest.started then
+        if time() >= marketRequest.startDeadline then
+          failedMarket(marketRequest, "auction_house_ownership_timeout")
+        else
+          local acquired, acquireError = acquireAuctionOwnership()
+          if not acquired and acquireError ~= "" then
+            failedMarket(marketRequest, acquireError)
+          elseif acquired then
+            local throttleOk, ready = pcall(throttleReady)
+            if not throttleOk then
+              failedMarket(marketRequest, tostring(ready))
+            elseif ready then
+              local dispatched, reason = pcall(dispatchMarketQuery, marketRequest, "send")
+              if not dispatched then failedMarket(marketRequest, tostring(reason)) end
+            end
+          end
+        end
+      else
+        local held, ownershipError = verifyHeldAuctionOwnership()
+        if not held then
+          failedMarket(marketRequest, ownershipError)
+        elseif marketRequest.messagePending and time() >= marketRequest.messageDeadline then
+          failedMarket(marketRequest, "commodity_search_response_timeout")
+        elseif marketRequest.queryEvent then
+          marketRequest.queryEvent, marketRequest.awaitingEvent = false, false
+          marketRequest.messagePending = false
+          local fullOk, full = pcall(function()
+            return requireFunction(C_AuctionHouse, "HasFullCommoditySearchResults", "commodity completeness query")(
+              marketRequest.itemID
+            )
+          end)
+          if not fullOk or type(full) ~= "boolean" then
+            failedMarket(marketRequest, "commodity_completeness_unavailable")
+          elseif full then
+            marketRequest.needMore = false
+            local begun, reason = pcall(beginMarketRows, marketRequest)
+            if not begun then failedMarket(marketRequest, tostring(reason)) end
+          elseif marketRequest.moreRequests >= MAX_MARKET_MORE_REQUESTS then
+            failedMarket(marketRequest, "commodity_results_truncated")
+          else
+            marketRequest.needMore = true
+          end
+        elseif marketRequest.needMore then
+          if marketRequest.moreRequests >= MAX_MARKET_MORE_REQUESTS then
+            failedMarket(marketRequest, "commodity_results_truncated")
+          else
+            local throttleOk, ready = pcall(throttleReady)
+            if not throttleOk then
+              failedMarket(marketRequest, tostring(ready))
+            elseif ready then
+              marketRequest.needMore = false
+              local dispatched, reason = pcall(dispatchMarketQuery, marketRequest, "more")
+              if not dispatched then failedMarket(marketRequest, tostring(reason)) end
+            end
+          end
+        elseif marketRequest.phase == "rows" then
+          local scanned, reason = pcall(scanMarketRows, marketRequest)
+          if not scanned then failedMarket(marketRequest, tostring(reason)) end
+        end
+      end
+    end
+
+    if self.marketSetup and time() - self.marketSetup.createdAt >= 120 then
+      self.marketSetup = nil
+      self.lastError = "partial_market_setup_expired"
+    end
+
     local stage = self.stage
     if stage and not stage.action and time() - stage.createdAt >= 120 then
       clearStage("partial_stage_expired")
@@ -842,7 +1403,8 @@ function Operations.New()
         self.scannerState = "unavailable"
       end
     end
-    if self.grantHeld and not self.uncertain and not self.stage and not self.ownedInspection and self.heldBatchId == "" then
+    if self.grantHeld and not self.uncertain and not self.stage and not self.sellerQuery and
+        not self.ownedInspection and self.heldBatchId == "" then
       release()
     end
   end
@@ -851,6 +1413,7 @@ function Operations.New()
     if event == "AUCTION_HOUSE_SHOW" then self.ahOpen = true
     elseif event == "AUCTION_HOUSE_CLOSED" then
       self.ahOpen = false
+      if self.sellerQuery then failedMarket(self.sellerQuery, "auction_house_closed") end
       if self.stage and self.stage.action and hasMarket(self.stage.action) and not self.pending then
         clearStage("auction_house_closed")
       end
@@ -858,10 +1421,22 @@ function Operations.New()
     elseif event == "MAIL_SHOW" then self.mailOpen = true
     elseif event == "MAIL_CLOSED" then
       self.mailOpen = false
-      if self.stage and self.stage.action and self.stage.action.kind == "collect_mail" and not self.pending then
+      if self.stage and self.stage.action and
+          (self.stage.action.kind == "collect_mail" or self.stage.action.kind == "collect_return") and not self.pending then
         clearStage("mail_closed")
       end
-      if self.pending and self.pending.action.kind == "collect_mail" then self.receipt.detail = "mail_closed_while_effect_unresolved" end
+      if self.pending and (self.pending.action.kind == "collect_mail" or self.pending.action.kind == "collect_return") then
+        self.receipt.detail = "mail_closed_while_effect_unresolved"
+      end
+    end
+
+    local request = self.sellerQuery
+    if request and request.messagePending then
+      if event == "AUCTION_HOUSE_THROTTLED_MESSAGE_SENT" then
+        request.sentBarrier = true
+      elseif event == "AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED" and request.sentBarrier then
+        request.responseBarrier = true
+      end
     end
 
     if event == "OWNED_AUCTIONS_UPDATED" then
@@ -870,30 +1445,63 @@ function Operations.New()
       end
       if self.ownedInspection and self.ownedInspection.queryRequested then self.ownedInspection.queryEvent = true end
     end
+    if event == "COMMODITY_SEARCH_RESULTS_UPDATED" or event == "COMMODITY_SEARCH_RESULTS_ADDED" then
+      local itemID = ...
+      if request and request.started and itemID == request.itemID then
+        if request.phase == "rows" then
+          failedMarket(request, "commodity_results_changed_during_scan")
+        elseif request.dispatchReturned and request.messagePending and request.sentBarrier and
+            request.responseBarrier then
+          if request.foreignQuery then failedMarket(request, "market_query_attribution_ambiguous")
+          else
+            request.queryEvent = true
+            self:Update()
+          end
+        end
+      end
+    end
     if not self.pending then return end
     local pending = self.pending
     if pending.action.kind == "cancel_auction" and event == "AUCTION_CANCELED" then
       local auctionID = ...
-      if auctionID == pending.action.auctionId then pending.eventSeen = true end
+      if auctionID == pending.action.auctionId then
+        pending.eventSeen = true
+        local ok = pcall(verifyPendingMarketEffect, pending)
+        if not ok then self.receipt.detail = "native_effect_verification_failed" end
+      end
     elseif (pending.action.kind == "post_item" or pending.action.kind == "post_commodity") and
         event == "AUCTION_HOUSE_AUCTION_CREATED" then
       local auctionID = ...
       if exactInteger(auctionID, 1, MAX_SAFE) and not pending.baseline.ids[auctionID] then
         pending.eventAuctionID = auctionID
+        local ok = pcall(verifyPendingMarketEffect, pending)
+        if not ok then self.receipt.detail = "native_effect_verification_failed" end
       end
     elseif event == "MAIL_INBOX_UPDATE" and pending.action.kind == "collect_mail" and pending.mailBaseline then
       local ok, changed = pcall(verifyMailChange, pending.mailBaseline)
       if ok and changed then finish(true, false, "mail_state_and_settlement_changed") end
-    elseif event == "OWNED_AUCTIONS_UPDATED" then
-      if pending.action.kind == "cancel_auction" and pending.eventSeen then
-        local ok, row = pcall(currentOwnedByID, pending.action.auctionId)
-        if ok and row == nil then finish(true, true, "owned_auction_removed_after_cancel_event") end
-      elseif pending.eventAuctionID then
-        local ok, row = pcall(currentOwnedByID, pending.eventAuctionID)
-        if ok and createdListingMatches(row, pending.action, pending.eventAuctionID) then
-          finish(true, true, "created_listing_matches_owned_auction")
-        end
+    elseif event == "MAIL_SUCCESS" and pending.action.kind == "collect_return" then
+      local itemID = ...
+      if itemID == pending.baseline.itemID then
+        pending.takeSuccess = true
+        local ok = pcall(verifyReturnEffect, pending)
+        if not ok then self.receipt.detail = "native_effect_verification_failed" end
       end
+    elseif event == "MAIL_FAILED" and pending.action.kind == "collect_return" then
+      local itemID = ...
+      if itemID == pending.baseline.itemID then finish(false, false, "native_mail_take_failed") end
+    elseif (event == "BAG_UPDATE_DELAYED" or event == "MAIL_INBOX_UPDATE") and
+        pending.action.kind == "collect_return" and pending.takeSuccess then
+      local ok = pcall(verifyReturnEffect, pending)
+      if not ok then self.receipt.detail = "native_effect_verification_failed" end
+    elseif event == "OWNED_AUCTIONS_UPDATED" then
+      local ok = pcall(verifyPendingMarketEffect, pending)
+      if not ok then self.receipt.detail = "native_effect_verification_failed" end
+    elseif event == "PLAYER_MONEY" and
+        (pending.action.kind == "post_item" or pending.action.kind == "post_commodity" or
+          pending.action.kind == "cancel_auction") then
+      local ok = pcall(verifyPendingMarketEffect, pending)
+      if not ok then self.receipt.detail = "native_effect_verification_failed" end
     end
   end
 
@@ -913,6 +1521,7 @@ function Operations.New()
     self.receipt.callbackDelivered = true
     self.receipt.postcondition, self.receipt.actionComplete = "unknown", "unknown"
     self.receipt.detail = "dispatching"
+    self.receipt.result = false
 
     local action = stage.action
     local baseline
@@ -929,18 +1538,22 @@ function Operations.New()
         baseline = capturePostBaseline(action)
       elseif action.kind == "collect_mail" then
         baseline = mailPrecondition(action, stage.stepIndex)
+      elseif action.kind == "collect_return" then
+        baseline = returnPrecondition(action)
       end
       if action.kind == "post_commodity" or action.kind == "post_item" then
-        local location = findPostLocation(action)
+        local location, deposit = findPostLocation(action)
         baseline.itemKey = action.itemKey
         baseline.quantity = action.quantity
         baseline.unitPriceCopper = action.unitPriceCopper
         baseline.durationIndex = DURATIONS[action.durationHours]
         baseline.location = location.location
+        baseline.depositCopper = deposit
       elseif action.kind == "cancel_auction" then
-        local rows, cost = cancelPrecondition(action)
+        local rows, cost, row = cancelPrecondition(action)
         baseline.rows = rows
         baseline.cost = cost
+        baseline.cancelRow = row
       end
     end)
     if not ok then
@@ -971,6 +1584,11 @@ function Operations.New()
         if message.codCopper ~= 0 or message.isGM then error("mail_payment_or_gm_mail_forbidden", 0) end
         requireFunction(_G, "AutoLootMailItem", "mail collection API")(message.index)
         self.pending.mailBaseline = baseline
+      elseif action.kind == "collect_return" then
+        baseline.selection.used = true
+        requireFunction(_G, "TakeInboxItem", "selective mail attachment API")(
+          baseline.message.index, baseline.attachment.attachment
+        )
       end
     end)
     if not called then
@@ -990,7 +1608,12 @@ function Operations.New()
     if not args then failInput(parseError) return false end
     local command = table.remove(args, 1)
     if command == "clear" and #args == 0 then
+      if self.sellerQuery then
+        self.lastError = "market_query_active"
+        return false
+      end
       self.stage = nil
+      self.marketSetup = nil
       self.ownedInspection = nil
       if self.uncertain then
         self.lastError = "uncertain_effect_requires_safe_reconciliation"
@@ -999,10 +1622,14 @@ function Operations.New()
       end
       self.lastError = ""
       release()
-      self.inspection = { kind = "none", page = 0, rows = {}, hasMore = false, error = "" }
+      self.inspection = {
+        kind = "none", page = 0, rows = {}, hasMore = false, error = "",
+        requestId = "", capturedAt = 0, sourceCount = 0,
+      }
       return true
     elseif command == "begin" and #args == 3 then
       if self.uncertain or self.pending then failInput("uncertain_effect_blocks_new_work") return false end
+      if self.sellerQuery or self.marketSetup then failInput("market_query_active") return false end
       local batchID = args[1]
       local ordinal = integerText(args[2], 0, MAX_SAFE)
       local step = integerText(args[3], 0, MAX_SAFE)
@@ -1036,12 +1663,15 @@ function Operations.New()
       local expected = FIELD_SETS[stage.actionKind]
       if not expected[field] or field == "itemKey" or stage.fields[field] ~= nil then failInput("argument_field_invalid") return false end
       local parsed = value
-      if field == "quantity" then parsed = integerText(value, 1, 200)
+      if field == "quantity" then
+        parsed = integerText(value, 1, stage.actionKind == "collect_return" and MAX_SAFE or 200)
       elseif field == "unitPriceCopper" then parsed = integerText(value, 1, MAX_SAFE)
       elseif field == "durationHours" then parsed = integerText(value, 12, 48)
       elseif field == "maxDepositCopper" or field == "maxCancelCostCopper" then parsed = integerText(value, 0, MAX_SAFE)
       elseif field == "auctionId" then parsed = integerText(value, 1, MAX_SAFE)
       elseif field == "messageLimit" then parsed = integerText(value, 1, 50)
+      elseif field == "mailFingerprint" then
+        if #value ~= 64 or not value:match("^[0-9a-f]+$") then parsed = nil end
       elseif field == "targetId" or field == "routeId" then
         if #value > 64 or not value:match("^[a-z][a-z0-9_-]*$") then parsed = nil end
       end
@@ -1052,7 +1682,8 @@ function Operations.New()
       local stage = self.stage
       local index = integerText(args[1], 1, 3)
       local chunk = args[2]
-      if not stage or stage.actionKind ~= "post_commodity" and stage.actionKind ~= "post_item" or
+      if not stage or stage.actionKind ~= "post_commodity" and stage.actionKind ~= "post_item" and
+          stage.actionKind ~= "collect_return" or
           not index or #chunk < 1 or #chunk > 60 or stage.keyChunks[index] ~= nil then
         failInput("item_key_chunk_invalid") return false
       end
@@ -1090,16 +1721,107 @@ function Operations.New()
       end
       self.lastError = stage.error
       return true
+    elseif command == "market" and #args == 2 then
+      local requestID, itemIDText = args[1], args[2]
+      local itemID = integerText(itemIDText, 1, MAX_SAFE)
+      if not requestID:match("^[0-9a-f]+$") or #requestID ~= 32 or not itemID or
+          tostring(itemID) ~= itemIDText or self.marketSetup or self.sellerQuery then
+        failInput("market_request_invalid") return false
+      end
+      if self.stage or self.uncertain or self.ownedInspection or self.heldBatchId ~= "" or self.grantHeld then
+        failInput("market_ownership_busy") return false
+      end
+      self.marketSetup = {
+        requestId = requestID, itemKey = itemIDText, itemID = itemID,
+        managedIDs = {}, nextChunk = 1, managedCount = 0, lastManagedID = 0, createdAt = time(),
+      }
+      return true
+    elseif command == "market_ids" and #args == 3 then
+      local setup = self.marketSetup
+      local requestID, chunkIndex, encodedIDs = args[1], integerText(args[2], 1, MAX_MANAGED_IDS), args[3]
+      if not setup or requestID ~= setup.requestId or not chunkIndex or chunkIndex ~= setup.nextChunk or
+          #encodedIDs > 72 then
+        failInput("market_managed_ids_invalid") return false
+      end
+      local parsed, previous = {}, 0
+      for encoded in encodedIDs:gmatch("[^,]+") do
+        local auctionID = integerText(encoded, 1, MAX_SAFE)
+        if not auctionID or tostring(auctionID) ~= encoded or auctionID <= previous or
+            auctionID <= setup.lastManagedID then
+          failInput("market_managed_ids_invalid") return false
+        end
+        parsed[#parsed + 1], previous = auctionID, auctionID
+      end
+      if #parsed == 0 or table.concat(parsed, ",") ~= encodedIDs or
+          setup.managedCount + #parsed > MAX_MANAGED_IDS then
+        failInput("market_managed_ids_invalid") return false
+      end
+      for _, auctionID in ipairs(parsed) do
+        if setup.managedIDs[auctionID] then failInput("market_managed_ids_duplicate") return false end
+        setup.managedIDs[auctionID] = true
+      end
+      setup.managedCount = setup.managedCount + #parsed
+      setup.lastManagedID = previous
+      setup.nextChunk = setup.nextChunk + 1
+      return true
+    elseif command == "market_start" and #args == 2 then
+      local setup = self.marketSetup
+      local expectedCount = integerText(args[2], 0, MAX_MANAGED_IDS)
+      if not setup or args[1] ~= setup.requestId or not expectedCount or expectedCount ~= setup.managedCount then
+        failInput("market_start_invalid") return false
+      end
+      if self.stage or self.uncertain or self.ownedInspection or self.heldBatchId ~= "" or self.grantHeld or self.sellerQuery then
+        failInput("market_ownership_busy") return false
+      end
+      if self.marketHookError then
+        self.sellerQuery = {
+          requestId = setup.requestId, itemKey = setup.itemKey, itemID = setup.itemID,
+        }
+        self.marketSetup = nil
+        failedMarket(self.sellerQuery, self.marketHookError)
+        return true
+      end
+      if not self.ahOpen or not isAuctionHouseOpen() then
+        self.sellerQuery = {
+          requestId = setup.requestId, itemKey = setup.itemKey, itemID = setup.itemID,
+          managedIDs = setup.managedIDs, started = false, startDeadline = time() + MARKET_QUERY_TIMEOUT_SECONDS,
+        }
+        self.marketSetup = nil
+        failedMarket(self.sellerQuery, "auction_house_closed")
+        return true
+      end
+      self.sellerQuery = {
+        requestId = setup.requestId, itemKey = setup.itemKey, itemID = setup.itemID,
+        managedIDs = setup.managedIDs, started = false, startDeadline = time() + MARKET_QUERY_TIMEOUT_SECONDS,
+        moreRequests = 0, foreignQuery = false, managedSeen = {}, managedCount = setup.managedCount,
+        deadline = time() + MARKET_QUERY_TIMEOUT_SECONDS * (MAX_MARKET_MORE_REQUESTS + 1),
+      }
+      self.marketSetup = nil
+      self.sellerMarket = {
+        requestId = setup.requestId, itemKey = setup.itemKey, complete = false, coverage = "none",
+        resultCount = 0, bestCompetitorUnitPriceCopper = false, bestCompetitorQuantity = 0,
+        bestCompetitorResultCount = 0, ambiguousOwnerUnitPriceCopper = false,
+        managedUnitPriceCopper = false, managedAuctionCount = 0, managedQuantity = 0,
+        error = "", capturedAt = 0,
+      }
+      self:Update()
+      return true
     elseif command == "inspect" and #args == 2 then
       local kind, page = args[1], integerText(args[2], 0, 4095)
       if not page or (kind ~= "inventory" and kind ~= "owned" and kind ~= "mail") then
         failInput("inspection_request_invalid") return false
       end
-      if kind == "owned" then
-        if self.stage or self.uncertain or self.ownedInspection or self.heldBatchId ~= "" then
+      if kind == "owned" and page > 0 and inspectionCache.owned then
+        local ok, value = pcall(inspect, kind, page, self.mailOpen)
+        self.inspection = ok and value or inspectError(kind, page, value)
+        return ok
+      elseif kind == "owned" then
+        if self.stage or self.uncertain or self.ownedInspection or self.heldBatchId ~= "" or
+            self.sellerQuery or self.marketSetup or self.grantHeld then
           self.inspection = inspectError(kind, page, "owned_inspection_busy")
           return false
         end
+        if page == 0 then inspectionCache.owned = nil end
         self.ownedInspection = { page = page, expiresAt = time() + 15, queryRequested = false, queryEvent = false }
         self.inspection = inspectError(kind, page, "owned_query_pending")
         self:Update()

@@ -10,7 +10,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from crowley_automation.backend import CapturedFrame, DesktopBackend, DesktopBackendError
+from crowley_automation.backend import (
+    CapturedFrame,
+    DesktopBackend,
+    DesktopBackendError,
+    _seller_market_id_commands,
+)
 from crowley_automation.config import AutomationConfig
 from crowley_automation.desktop_input import GuiLease
 from crowley_automation.desktop_observe import WindowState
@@ -19,6 +24,7 @@ from crowley_automation.model import (
     Batch,
     CancelAuction,
     CollectMail,
+    CollectReturn,
     Interact,
     MoveRoute,
     PostCommodity,
@@ -34,6 +40,7 @@ from crowley_automation.runner import (
     RunnerConfig,
     SessionArm,
 )
+from crowley_automation.runtime import arm_seller_backend
 from crowley_automation.targets import TargetProfile, load_profiles
 from crowley_common.frames import Sample, decode_frame
 
@@ -42,8 +49,8 @@ from tests.automation.native_harness import NativeHarness
 
 def config() -> AutomationConfig:
     return AutomationConfig(
-        wine_prefix="/tmp/wine",
-        game_root="/tmp/game",
+        wine_prefix=str(Path.cwd() / "synthetic-wine-prefix"),
+        game_root=str(Path.cwd() / "synthetic-game-root"),
         display=":0",
         window_title="World of Warcraft",
         game_executable="Wow.exe",
@@ -104,6 +111,7 @@ def snapshot() -> dict[str, object]:
                 "postcondition": "unknown",
                 "actionComplete": "unknown",
                 "detail": "",
+                "result": False,
             },
         },
         "goldCopper": 12345,
@@ -438,7 +446,7 @@ def stage_lua_action(
     routes: dict[str, RouteProfile] | None = None,
     stop_requested: Callable[[], bool] = lambda: False,
 ) -> tuple[DesktopBackend, Admission, str, GuiLease]:
-    lease = GuiLease(Path("/tmp/lua-backend-test-lock"))
+    lease = GuiLease(Path("lua-backend-gui-lock-fixture"))
     lease.held = True
     backend = DesktopBackend(
         lua_config(),
@@ -473,7 +481,7 @@ def test_stage_publishes_exact_action_and_never_dispatches(action: object) -> No
     from crowley_automation.model import canonical_json
 
     io = FakeIO(action)
-    lease = GuiLease(Path("/tmp/test-gui-lock"))
+    lease = GuiLease(Path("test-gui-lock-fixture"))
     lease.held = True
     targets: dict[str, TargetProfile] = {}
     routes: dict[str, RouteProfile] = {}
@@ -499,11 +507,132 @@ def test_stage_publishes_exact_action_and_never_dispatches(action: object) -> No
 
 def test_stale_or_cached_frame_is_refused() -> None:
     io = FakeIO(CollectMail(1), cached=True)
-    lease = GuiLease(Path("/tmp/test-gui-lock"))
+    lease = GuiLease(Path("test-gui-lock-fixture"))
     backend = DesktopBackend(config(), {}, {}, lease, io=io)
 
     with pytest.raises(DesktopBackendError, match="fresh"):
         backend.observe_native()
+
+
+@pytest.mark.parametrize(
+    ("item_key", "request_id", "message"),
+    [
+        ("123:b2.2", "a" * 32, "commodity"),
+        ("123", "short", "request ID"),
+    ],
+)
+def test_targeted_seller_query_rejects_unsupported_identity_before_input(
+    item_key: str, request_id: str, message: str
+) -> None:
+    io = FakeIO(CollectMail(1))
+    lease = GuiLease(Path("test-gui-lock-fixture"))
+    lease.held = True
+    backend = DesktopBackend(config(), {}, {}, lease, io=io)
+
+    with pytest.raises(DesktopBackendError, match=message):
+        backend.observe_seller_market(item_key, request_id)
+
+    assert io.commands == []
+
+
+def test_market_id_commands_preserve_more_than_thirty_two_ids_with_byte_bounded_chunks() -> None:
+    managed_ids = frozenset(1_000_000_000_000_000 + index for index in range(97))
+
+    commands = _seller_market_id_commands("a" * 32, managed_ids)
+    emitted = [int(value) for command in commands for value in command.rsplit(" ", 1)[1].split(",")]
+
+    assert len(commands) > 1
+    assert emitted == sorted(managed_ids)
+    assert len(emitted) == 97
+    assert all(len(command[1:].encode("ascii")) + 7 <= 128 for command in commands)
+
+
+def test_collect_return_stages_only_exact_fingerprinted_attachment_token() -> None:
+    action = CollectReturn("123", 5, "a" * 64)
+
+    commands = DesktopBackend._stage_commands(action, "b" * 64, 0, 0, 2_000)
+
+    assert "/cauto kind collect_return" in commands
+    assert "/cauto arg quantity 5" in commands
+    assert f"/cauto arg mailFingerprint {'a' * 64}" in commands
+    assert "/cauto key 1 123" in commands
+    assert commands[-2:] == ("/cauto expires 2000", "/cauto seal")
+    assert all(len(command[1:].encode("ascii")) + 7 <= 128 for command in commands)
+    assert not any("collect_mail" in command for command in commands)
+
+
+def test_native_collect_return_capacity_preflight_has_typed_refusal_without_effect() -> None:
+    harness = NativeHarness()
+    harness.add_mail(attachments=[(123, 5)])
+    harness.fire("MAIL_SHOW")
+    assert harness.slash("inspect mail 0")
+    token = harness.snapshot["inspection"]["rows"][0]["attachments"][0]["selectionToken"]
+    harness.state.freeBagSlotsByBag[0] = 0
+    io = LuaBackendIO(harness)
+    lease = GuiLease(Path("seller-native-preflight-gui-lock-fixture"))
+    lease.held = True
+    backend = DesktopBackend(lua_config(), {}, {}, lease, io=io)
+    action = CollectReturn("123", 5, token)
+    digest = hashlib.sha256(canonical_json(action_object(action)).encode()).hexdigest()
+    backend.observe()
+    backend.set_deadline(int(io.wall_time()) + 90)
+
+    with pytest.raises(DesktopBackendError, match="insufficient_return_bag_slots") as refusal:
+        backend.stage(
+            action,
+            batch_id="a" * 64,
+            ordinal=0,
+            step_index=0,
+            action_digest=digest,
+        )
+
+    assert refusal.value.code == "insufficient_return_bag_slots"
+    assert harness.snapshot["operation"]["error"] == "insufficient_return_bag_slots"
+    assert harness.native_calls == []
+    assert io.emissions == []
+    assert lease.held
+
+
+def test_seller_revoke_during_command_typing_blocks_followup_and_cleanup_input(tmp_path: Path) -> None:
+    session = {"state": "active"}
+
+    class RevokingIO(FakeIO):
+        def type_text(self, text: str, guard: Callable[[], None]) -> None:
+            for index, char in enumerate(text):
+                guard()
+                self.typed += char
+                self.value["chatEdit"].update({"text": self.typed})  # type: ignore[union-attr]
+                if index == 0:
+                    session["state"] = "revoked"
+
+    io = RevokingIO(CollectMail(1))
+    lease = GuiLease(Path("test-gui-lock-fixture"))
+    lease.held = True
+    ah = TargetProfile("npc", "us-normal-horde", "Tester", "70938", 1, "ah", "Auctioneer", guid="npc-1")
+    backend = DesktopBackend(config(), {"auctioneer_main": ah}, {}, lease, io=io)
+
+    class Store:
+        def status(self, session_id: str):
+            assert session_id == "seller-session"
+            return SimpleNamespace(state=session["state"])
+
+    arm_seller_backend(
+        backend,
+        ledger=Ledger(tmp_path / "seller-revoke-test-ledger.sqlite3"),
+        seller_store=Store(),
+        session_id="seller-session",
+        policy_expires_at=2_000,
+        ah_target_id="auctioneer_main",
+    )
+
+    with pytest.raises(DesktopBackendError, match="durable stop"):
+        backend._send_command("/cauto clear")
+    with pytest.raises(DesktopBackendError, match="durable stop"):
+        backend.clear_stage()
+
+    assert io.typed == "/"
+    assert io.commands == []
+    assert backend.cleanup_state == "clear_not_confirmed"
 
 
 @pytest.mark.parametrize("unknown_field", ["callbackDelivered", "postcondition", "actionComplete"])
@@ -512,7 +641,7 @@ def test_unknown_native_receipt_interlocks_without_clearing_or_typing(unknown_fi
     io.value["operation"]["receipt"].update(  # type: ignore[index,union-attr]
         {"sequence": 1, unknown_field: "unknown"}
     )
-    lease = GuiLease(Path("/tmp/test-gui-lock"))
+    lease = GuiLease(Path("test-gui-lock-fixture"))
     lease.held = True
     backend = DesktopBackend(config(), {}, {}, lease, io=io)
 
@@ -577,6 +706,12 @@ def test_real_lua_frames_dispatch_two_posts_then_each_mail_step(tmp_path: Path, 
     live_config = lua_config()
     harness = NativeHarness()
     harness.add_item(count=8, commodity=True, available=8)
+    harness.lua.execute(
+        "local post = C_AuctionHouse.PostCommodity; "
+        "local _, state = debug.getupvalue(post, 1); "
+        "C_AuctionHouse.PostCommodity = function(...) "
+        "local result = post(...); state.money = state.money - state.deposit; return result end"
+    )
     harness.add_mail(money=300)
     harness.add_mail(sender="Second House", subject="Second settlement", money=500)
     harness.fire("AUCTION_HOUSE_SHOW")
@@ -736,7 +871,7 @@ def test_blocking_capture_rechecks_stop_and_deadline_before_return_input(change:
     io = LuaBackendIO(harness)
     stop = [False]
     backend = DesktopBackend(
-        lua_config(), {}, {}, GuiLease(Path("/tmp/stop-gui-lock")), io=io, stop_requested=lambda: stop[0]
+        lua_config(), {}, {}, GuiLease(Path("stop-gui-lock-fixture")), io=io, stop_requested=lambda: stop[0]
     )
     backend.lease.held = True
     expires = int(io.wall_time()) + 10

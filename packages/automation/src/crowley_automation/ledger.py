@@ -9,7 +9,7 @@ import os
 import sqlite3
 import stat
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -364,7 +364,10 @@ class Ledger:
             "actionComplete",
             "detail",
         }
-        if type(native_receipt) is not dict or set(native_receipt) != expected_fields:
+        if type(native_receipt) is not dict or set(native_receipt) not in (
+            expected_fields,
+            expected_fields | {"result"},
+        ):
             raise LedgerError("native receipt fields are not exact")
         if (
             type(boot_id) is not str
@@ -415,6 +418,26 @@ class Ledger:
             ):
                 raise LedgerError("native receipt sequence did not advance beyond dispatch")
             action_data = json.loads(action["action_json"])
+            result_value = native_receipt.get("result")
+            if result_value is False:
+                result_value = None
+            if result_value is not None:
+                if type(result_value) is not dict:
+                    raise LedgerError("native structured result must be an exact object or absent")
+                result_value = dict(result_value)
+                for field in ("depositCopper", "cancelCostCopper"):
+                    if result_value.get(field) is False:
+                        result_value[field] = None
+                from .model import _parse_action
+                from .runner import _validate_dispatch_result, dispatch_result_matches_action
+
+                try:
+                    result_value = _validate_dispatch_result(result_value)
+                    action_value = _parse_action(action_data)
+                except (TypeError, ValueError) as exc:
+                    raise LedgerError("native structured result is malformed") from exc
+                if not dispatch_result_matches_action(result_value, action_value):
+                    raise LedgerError("native structured result does not match the durable action")
             digest = hashlib.sha256(action["action_json"].encode("utf-8")).hexdigest()
             if native_receipt["postcondition"] is False:
                 if native_receipt["actionComplete"] is not False:
@@ -439,6 +462,18 @@ class Ledger:
                 db.execute(
                     "UPDATE batches SET state='failed',updated_at=? WHERE batch_id=?",
                     (timestamp, batch_id),
+                )
+                self._reconcile_seller_effect(
+                    db,
+                    batch_id,
+                    ordinal,
+                    step,
+                    action_data,
+                    native_receipt,
+                    None,
+                    "failed",
+                    "reconciled native precondition failure",
+                    timestamp,
                 )
                 return
             advance_step = not native_receipt["actionComplete"] and step + 1 < step_limit
@@ -479,6 +514,104 @@ class Ledger:
             db.execute(
                 "UPDATE batches SET state=?,updated_at=? WHERE batch_id=?", (next_state, timestamp, batch_id)
             )
+            self._sync_seller_child_state(db, batch_id)
+            if not advance_step:
+                self._reconcile_seller_effect(
+                    db,
+                    batch_id,
+                    ordinal,
+                    step,
+                    action_data,
+                    native_receipt,
+                    result_value,
+                    "succeeded",
+                    None,
+                    timestamp,
+                )
+
+    def _reconcile_seller_effect(
+        self,
+        db: sqlite3.Connection,
+        batch_id: str,
+        ordinal: int,
+        step: int,
+        action_data: dict[str, object],
+        native_receipt: dict[str, object],
+        result: dict[str, object] | None,
+        state: Literal["succeeded", "failed"],
+        reason: str | None,
+        now: int,
+    ) -> None:
+        table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='seller_children'"
+        ).fetchone()
+        if table is None:
+            return
+        child = db.execute(
+            "SELECT session_id,decision_id,phase FROM seller_children WHERE batch_id=?",
+            (batch_id,),
+        ).fetchone()
+        if child is None:
+            return
+        if (
+            state == "succeeded"
+            and action_data.get("kind")
+            in (
+                "post_commodity",
+                "cancel_auction",
+                "collect_return",
+            )
+            and result is None
+        ):
+            raise LedgerError("seller effect cannot be reconciled without its exact structured result")
+        from .model import Batch, _parse_action
+        from .seller_store import SellerStore
+
+        batch_row = db.execute("SELECT canonical_json FROM batches WHERE batch_id=?", (batch_id,)).fetchone()
+        if batch_row is None:
+            raise LedgerError("seller child batch is missing during reconciliation")
+        store = object.__new__(SellerStore)
+        store.ledger = self
+        receipt_data = {
+            "callback_delivered": native_receipt["callbackDelivered"],
+            "postcondition": native_receipt["postcondition"],
+            "result": result,
+        }
+        store.apply_terminal_step(
+            db,
+            session_id=child["session_id"],
+            decision_id=child["decision_id"],
+            phase=child["phase"],
+            batch=Batch.from_json(batch_row["canonical_json"]),
+            ordinal=ordinal,
+            action=_parse_action(action_data),
+            state=state,
+            receipt=receipt_data,
+            reason=reason,
+            now=now,
+        )
+
+    @staticmethod
+    def _sync_seller_child_state(db: sqlite3.Connection, batch_id: str) -> None:
+        table = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='seller_children'"
+        ).fetchone()
+        if table is None:
+            return
+        child = db.execute("SELECT 1 FROM seller_children WHERE batch_id=?", (batch_id,)).fetchone()
+        if child is None:
+            return
+        rows = db.execute("SELECT state FROM actions WHERE batch_id=?", (batch_id,)).fetchall()
+        states = [row["state"] for row in rows]
+        if any(state == "uncertain" for state in states):
+            state = "uncertain"
+        elif any(state == "failed" for state in states):
+            state = "failed"
+        elif states and all(item == "succeeded" for item in states):
+            state = "succeeded"
+        else:
+            state = "running"
+        db.execute("UPDATE seller_children SET state=? WHERE batch_id=?", (state, batch_id))
 
     def mark_expired(self, batch_id: str, *, now: int) -> None:
         with self._connect() as db:
@@ -560,6 +693,7 @@ class Ledger:
         receipt: dict[str, object] | None,
         continue_action: bool = False,
         reason: str | None = None,
+        transaction_hook: Callable[[sqlite3.Connection], None] | None = None,
     ) -> None:
         if any(
             type(value) not in (bool, type(None))
@@ -631,6 +765,29 @@ class Ledger:
                 "UPDATE batches SET state=?,updated_at=? WHERE batch_id=?",
                 (batch_state, now, batch_id),
             )
+            if transaction_hook is not None:
+                db.execute("SAVEPOINT seller_receipt_apply")
+                try:
+                    transaction_hook(db)
+                except Exception as exc:
+                    db.execute("ROLLBACK TO seller_receipt_apply")
+                    db.execute("RELEASE seller_receipt_apply")
+                    unresolved = f"seller receipt application failed: {type(exc).__name__}"
+                    db.execute(
+                        "UPDATE action_steps SET state='uncertain',reason=? "
+                        "WHERE batch_id=? AND ordinal=? AND step=?",
+                        (unresolved, batch_id, ordinal, step),
+                    )
+                    db.execute(
+                        "UPDATE actions SET state='uncertain',reason=? WHERE batch_id=? AND ordinal=?",
+                        (unresolved, batch_id, ordinal),
+                    )
+                    db.execute(
+                        "UPDATE batches SET state='uncertain',updated_at=? WHERE batch_id=?",
+                        (now, batch_id),
+                    )
+                else:
+                    db.execute("RELEASE seller_receipt_apply")
 
     def fail_before_dispatch(self, batch_id: str, ordinal: int, reason: str, *, now: int) -> None:
         with self._connect() as db:
@@ -674,6 +831,15 @@ class Ledger:
                 "'process restarted after dispatch marker')",
                 (timestamp,),
             )
+            seller_table = db.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='seller_children'"
+            ).fetchone()
+            if seller_table is not None:
+                db.execute(
+                    "UPDATE seller_children SET state='uncertain' WHERE batch_id IN "
+                    "(SELECT DISTINCT batch_id FROM actions WHERE state='uncertain' AND reason="
+                    "'process restarted after dispatch marker')",
+                )
         return len(batches)
 
 

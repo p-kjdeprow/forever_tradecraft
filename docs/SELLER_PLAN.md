@@ -1,14 +1,15 @@
 # Continuous seller plan
 
-Updated 2026-11-15. Planning and independent Sol review only; this document does not implement,
-deploy or authorize trades. The source refactor is complete; see [HANDOFF](HANDOFF.md) and
+Updated 2026-11-16. The user approved implementation through parallel Luna/Sol loops and landing
+on main and origin/main. This document does not authorize deployment or trades. The source
+refactor is complete; see [HANDOFF](HANDOFF.md) and
 [AUTOMATION](AUTOMATION.md) for the existing bounded execution interface.
 
 ## Confirmed behavior
 
 The operator loads a character with chosen stock. The seller posts small batches, checks the
 selected items every 60 seconds while at the AH, and posts another batch when a competitor
-displaces our eligible listing or our eligible stock sells out. It recycles unsold listings
+displaces our eligible listing, shares its price with unknown queue priority, or our eligible stock sells out. It recycles unsold listings
 through cancellation and mailbox collection when another batch is needed and bag stock is empty.
 
 The user's explicit decisions override earlier alternatives:
@@ -17,6 +18,10 @@ The user's explicit decisions override earlier alternatives:
   is no undercut mode, flag or fallback.
 - Recycling cancels only the seller-managed, currently active auctions for the exact item in
   question. Other items, variants, houses, characters and unrelated manual auctions are excluded.
+- The user additionally approved one fresh matched-price batch per item per 60 seconds when
+  competition shares our price and queue rank is unobservable. Do not claim verified rank.
+- Mail collection matches exact commodity identity against outstanding cancelled quantity, without
+  requiring an auction-to-mail link. Whole attachments must fit that pool; never admit extra stock.
 - Use the existing posting/cancellation/mail/movement primitives. Keep scanner and automation
   independent. Buying, crafting, vendors and a remote queue remain out of scope.
 
@@ -28,8 +33,9 @@ price, quantity and purchase-priority comparisons have equivalent verified contr
 ## Concrete example and timing
 
 With 200 admitted units and batch size 20, initially post 20. At each due observation, wait if
-our remaining listing has purchase priority. If a competitor displaces it, match the current
-best competing unit price and post another 20, subject to the configured minimum price and budget.
+our remaining listing is strictly cheaper than competitors. If a competitor is cheaper or shares
+our price, match the current competing price and post another 20, at most once per item per 60 seconds,
+subject to the configured minimum price and budget. Queue rank is not claimed.
 If our leading quantity sells out and bag stock remains, replenish even without an undercut.
 
 Posting the final 20 from bags does not itself trigger cancellation. Continue monitoring. Only
@@ -50,21 +56,23 @@ minute checks for a sell list too large to observe under native query limits.
 
 ## Selling rules and required native evidence
 
-"Lowest price" and "first to sell at that price" are separate facts. Before live execution,
-qualify the selected build's equal-price priority behavior and the evidence available to detect
-competitor displacement, including same-price arrivals, partial sales and self listings.
-A matching post must be shown to restore priority for the supported item kind. If priority cannot
-be established from native evidence, expose it as unknown and pause that item; do not substitute
-price subtraction, guessed row ordering or endless equal-price reposting. This is an acceptance
-gate, not a configurable assumption. Do not claim priority lasts after the observation.
+"Lowest price" and "first to sell at that price" are separate facts. The client does not expose
+reliable equal-price queue rank. The user explicitly chose scheduled replenishment rather than
+pausing on this missing fact: when a proven competing price matches our lowest managed price,
+post one fresh batch per item per 60 seconds, within every stock, floor, spending and expiry limit.
+A cheaper competing price is matched in the same way. When our listing is strictly cheaper, wait.
+Do not claim observed or restored queue priority. If the competing price itself is unknown, pause;
+never infer a price, subtract a copper or issue catch-up posts. Store/runner enforce the interval
+from persisted attempts/children, so fresh query IDs or a restart cannot bypass it.
 
 A fresh targeted result carries exact house/item identity, request provenance, completion/coverage,
 price levels, available ownership/priority facts, native boot/sequence and capture time. Exclude
 our own managed listings from competitor detection and identify other auctions of the same
-character so they cannot be mistaken for competitors. Repeated reads of unchanged results must
-not trigger more posts. After a confirmed post, refresh and establish its priority before accepting
-another displacement. A genuinely fresh displacement can trigger at most one new batch per
-scheduled item check; action failure does not generate a fresh batch for the same decision.
+character so they cannot be mistaken for competitors. Repeated cached reads must
+not trigger additional posts within the interval. After a confirmed post, refresh observations
+without issuing another post. A fresh scheduled query may authorize the next matched-price batch
+even when the competing price is unchanged; at most one post child/attempt per item per 60 seconds.
+Action failure does not generate a fresh batch for the same decision.
 
 Match the best currently buyable competing price exactly in integer copper. Do not match stale
 cached/dashboard prices or non-buyout bids. A competitor lowering price may lower our next match,
@@ -146,19 +154,26 @@ cost before each cancel. Sales or expirations during the sequence change the rem
 a missing row is reconciled, never blindly retried. Recycle progress persists per item and per
 primitive; a crash after dispatch retains the current uncertain-effect behavior.
 
-At the mailbox, collect only eligible auction returns admitted to this item's recycle pass.
-The existing collect_mail(messageLimit) can collect general non-COD mail; extend it with exact
-bounded eligibility/readback instead of using it unchanged for selective recycling. Establish the
-native evidence needed to identify returned exact variants, quantities and stable message/attachment
-identity across inbox reindexing. Item ID alone is insufficient for variant matching. Unknown return
-identity blocks collection; never collect unrelated mail or pay COD to recover inventory.
+At the mailbox, match exact commodity identity against the outstanding per-item cancellation
+quantity. The user explicitly waived per-auction mail linkage: identical units of that commodity
+are fungible. This does not assert that a particular message came from a particular auction.
+Never credit more than the recorded outstanding pool or increase admitted stock/spending limits.
+
+The existing collect_mail(messageLimit) is a general non-COD sweep and must not be used. An exact
+collect_return pins itemKey, full attachment quantity and an expiring one-use native selection token.
+Native inspection publishes sanitized attachment facts and opaque tokens; headers remain private.
+The callback freshly selects a matching non-COD/non-GM attachment and calls TakeInboxItem once for
+that attachment, never taking money or other attachments. Identical matching messages and inbox
+reindexing are supported without a unique message ID. Revalidate exact key/quantity before input.
+Skip an attachment larger than the remaining pool; the native API cannot take a partial quantity.
+Missing exact identity, expired/used token, COD, GM or changed quantity refuses the action.
 
 Cancellation completion, mail arrival and bag receipt are separate observations. Track expected
 remaining returns, partial arrivals, full bags, mailbox incompleteness and a bounded arrival deadline.
 Collect/reconcile incrementally; reserve enough bag capacity for observed attachments. Missing or
 delayed mail pauses the recycle pass with its outstanding quantities recorded. Do not loop travel
 indefinitely or infer a return because an auction disappeared. Only newly verified admitted stock
-may be reposted, after returning to the AH and refreshing current price and priority.
+may be reposted, after returning to the AH and refreshing current competing price facts.
 
 Different items keep independent progress. One item's exhaustion never cancels another item's
 auctions. The single controller may combine mailbox travel for items already awaiting returns,
@@ -169,13 +184,13 @@ without forcing unrelated items into cancellation. There are no concurrent GUI/m
 Use bounded Luna implementation and independent read-only Sol review loops. Parent owns contracts,
 integration and git. Assign disjoint files only after the preceding shared contract is stable.
 Each loop must reach READY, pass its meaningful regressions and parent verification before merging.
-This plan does not start those implementation loops or authorize live deployment/trades.
+The user has now started these implementation loops; live deployment/trades remain separate.
 
 1. **Native facts and exact result contracts.** Own the automation addon, common frame decoder,
    backend/receipt plumbing and their contract tests. Add targeted read-only market observations,
    causal created-auction identity and selective return facts. Verify modeled throttle/freshness,
-   self/competitor/variant discrimination, equal-price displacement, partial-sale continuity and
-   bounded frame size. Separately qualify actual selected-build ordering and protected primitives
+   self/competitor/variant discrimination, fixed same-price refresh, partial-sale continuity and
+   bounded frame size. Separately qualify actual selected-build protected primitives
    under specific live trial authorization; unsupported evidence is a gate, never a mock-only claim.
 2. **Pure policy, session authorization and durable progress.** Own new seller model/decisions,
    ledger/runner admission extensions, CLI policy preview and focused tests. Implement always-match,
@@ -188,7 +203,7 @@ This plan does not start those implementation loops or authorize live deployment
    user guide and end-to-end tests. Begin observation-only; report would-post/would-recycle without
    protected calls. Then qualify a small exact session with measured AH/mailbox travel. Test the
    full post/wait/displace/repost/recycle/return cycle, sale during cancel, delayed/partial returns,
-   full bags, moving mailbox indices, price changes during travel, stop/expiry/takeover and crash
+   full bags, identical matching mails/reindexing, pool caps, price changes during travel, stop/expiry/takeover and crash
    boundaries. Every protected effect must have the existing causal receipt and durable marker.
 4. **Multiple items and packaged operation.** Extend the same controller with serial fair scheduling
    and shared trips for independently ready items. Prove item A recycling never cancels B/variant A,
@@ -215,3 +230,10 @@ requested. Equal-price priority, partial-sale continuity and return identity rem
 unqualified implementation/live-evidence gates, not assumed native capabilities. The reviewer
 changed no files and performed no tests, service operations or game input. Parent verified local
 documentation links and whitespace; no application tests are needed for this planning-only change.
+
+
+User steering during implementation supersedes the original review's strict equal-rank/source-mail
+qualification gates. The user explicitly selected scheduled matched-price refresh and exact-commodity
+collection up to outstanding cancelled quantity. The implementation review must cover these final
+rules, all Sol recovery findings, and native token/quantity/one-use contracts. Actual protected-call
+behavior and route measurements still require live qualification; no live trade is authorized here.

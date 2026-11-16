@@ -103,3 +103,17 @@ function Identity.Canonical(nativeKey, link)
   if not Identity.Validate(result) then return nil end
   return result
 end
+
+-- Mailbox attachments expose an item link but not an ItemLocation/ItemKey. Seller returns are
+-- commodity-only, so accept the exact base item identity only when the link has no native variant
+-- fields that the item-link reader cannot map to a C_AuctionHouse ItemKey. The item's link-level
+-- field is not the native ItemKey itemLevel and is deliberately ignored here.
+function Identity.CommodityKeyFromLink(link, expectedItemID)
+  local itemID, suffix, bonuses = linkIdentity(link)
+  if itemID == nil or itemID ~= expectedItemID or suffix ~= 0 or #bonuses ~= 0 then return nil end
+  local body = type(link) == "string" and link:match(
+    "^|c[0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F][0-9a-fA-F]|Hitem:([^|]+)|h%b[]|h|r$"
+  ) or nil
+  if not body then return nil end
+  return tostring(itemID)
+end

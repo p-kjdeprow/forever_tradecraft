@@ -46,7 +46,7 @@ The public commands are:
 | crowley-watchlist | Manage the scanner catalog and canonical plan |
 | crowley-desktop | Independent game observation, presence, frame probe and Battle.net Play |
 | crowley-native | Build/verify the pinned XTEST tool |
-| crowley-automation | Inspect/prepare/run exact local operation batches and read receipts |
+| crowley-automation | Run exact operation batches or bounded commodity selling sessions and read receipts |
 | crowley-host | Scan-aware host loop and status |
 | crowley-ops | Install, doctor, health, image build and market backup/restore |
 
@@ -68,6 +68,12 @@ Python runtime. It supports exact commodity/item listing, cancellation, non-COD 
 known-location interaction and measured movement. A batch requires its full immutable digest
 and a separate expiring current-client session arm. Staging/dry-run cannot post. Missing causal
 receipts stay uncertain and prevent automatic retry or maintenance behind the operation.
+
+The [continuous seller](docs/SELLER.md) posts admitted commodities in small batches and checks
+each item every 60 seconds. It always matches prices, refreshes once per minute during tied-price
+competition, and recycles only that item's managed listings when more stock is needed. A session
+requires an approved immutable policy and an explicit current-boot arm; stock, costs and recycling
+remain bounded across pauses and resumes.
 
 Every automated click uses seeded curved pointer motion, a real press/release and the hard
 one-second global rate gate. Focus, target, identity and physical presence are checked before

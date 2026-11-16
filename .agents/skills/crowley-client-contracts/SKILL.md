@@ -18,6 +18,9 @@ limit are separate; measure varied real compositions and assert oversize publica
 
 Derive stub return shapes from the selected client's API/UI source; do not invent
 convenient fields or boolean success returns for APIs that return nothing.
+Copy enum names and numeric values from that source too.
+Absence from generated docs or one UI consumer does not establish a legacy global
+is unavailable; check primary callers and its actual guarded return contract.
 Lua API stubs must forward varargs to argument counters; fixed signatures discard
 unexpected arguments before the counter can detect them. Assert exact failure
 reasons and use distinct simultaneous failures when testing precedence.
@@ -43,6 +46,8 @@ client-reachable behavior.
   For listing identity, combine the native key with the full parsed item link;
   missing native `bonusIDs` does not establish an unmodified item. Preserve
   repeated sorted bonus IDs allowed by the canonical itemKey contract.
+  Item-link field 9 is link/player-level metadata, not native ItemKey itemLevel;
+  a nonzero linkLevel must not reject an otherwise exact commodity identity.
 - Preserve original failed payload bytes. Validate any internal normalization
   separately from the wire contract and ingestion identity. Never edit a game's
   SavedVariables file to make an upload pass.
@@ -52,6 +57,8 @@ client-reachable behavior.
   Use bounded diagnostics with sequence, item/attempt identity, dispatch, result
   and throttle events, readiness, quantity, and completion state. Diagnostics
   must not send extra queries or change scanner outcomes.
+  A matching cache update during chunked result aggregation invalidates that snapshot;
+  source row counts alone cannot establish a coherent observation.
 - An observation record does not prove an item was queried. Report attempted,
   unqueried, incomplete, and priced counts distinctly. Count attempts from query
   provenance, not reason codes alone: a sweep stop can mark both the active queried

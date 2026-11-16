@@ -18,6 +18,18 @@ local frames = {}
 _G.__frames = frames
 
 local function noOp() end
+local function pack(...) return { n = select("#", ...), ... } end
+function hooksecurefunc(owner, name, hook)
+  state.searchHookAttempts[#state.searchHookAttempts + 1] = name
+  if state.hookFailureName == name then error("injected secure hook failure") end
+  local original = owner[name]
+  if type(original) ~= "function" or type(hook) ~= "function" then error("invalid secure hook") end
+  owner[name] = function(...)
+    local results = pack(original(...))
+    hook(...)
+    return unpack(results, 1, results.n)
+  end
+end
 local function makeTexture()
   local texture = {}
   for _, name in ipairs({"SetSnapToPixelGrid", "SetTexelSnappingBias", "SetSize", "SetPoint", "SetTexture", "SetTexCoord", "Show", "Hide"}) do
@@ -83,7 +95,7 @@ GameTooltipTextLeft1 = { GetText = function() return state.tooltipText end }
 ChatFrameUtil = { GetActiveWindow = function() return nil end }
 SlashCmdList = {}
 
-function time() return state.now end
+function time() return math.floor(state.now) end
 function GetTime() return state.uptime end
 function GetBuildInfo() return "1.60.1", state.build, "", state.interface end
 function GetCurrentRegion() return state.region end
@@ -126,8 +138,9 @@ AuctionHouseFrame = { IsShown = function() return state.ahOpen end }
 MailFrame = { IsShown = function() return state.mailOpen end }
 Enum = {
   CompressionMethod = { Deflate = 0 },
-  ItemCommodityStatus = { Commodity = 1, NonCommodity = 2 },
+  ItemCommodityStatus = { Unknown = 0, Item = 1, Commodity = 2 },
   AuctionStatus = { Active = 1, Sold = 2 },
+  AuctionHouseSortOrder = { Price = 1 },
 }
 ItemLocation = {}
 function ItemLocation:CreateFromBagAndSlot(bag, slot)
@@ -160,13 +173,60 @@ C_Container = {
     return { itemID = entry.itemID, stackCount = entry.count, isLocked = entry.locked, hyperlink = entry.link }
   end,
 }
+C_Mail = { IsCommandPending = function() return state.mailCommandPending end }
 C_Item = {
   IsBound = function(location) return bagEntry(location).bound end,
 }
 C_AuctionHouse = {
+  MakeItemKey = function(itemID, itemLevel, itemSuffix, battlePetSpeciesID)
+    return {
+      itemID = itemID, itemLevel = itemLevel or 0, itemSuffix = itemSuffix or 0,
+      battlePetSpeciesID = battlePetSpeciesID or 0,
+    }
+  end,
+  GetItemKeyInfo = function(key)
+    return { itemID = key.itemID, isCommodity = state.marketIsCommodity }
+  end,
+  IsThrottledMessageSystemReady = function() return state.marketThrottleReady end,
+  SendSearchQuery = function(...)
+    state.marketSearchCalls[#state.marketSearchCalls + 1] = { kind = "send", args = {...} }
+    if state.marketCachedEventOnSend then __fire("COMMODITY_SEARCH_RESULTS_UPDATED", 123) end
+    return state.marketDispatchReturn
+  end,
+  SendSellSearchQuery = function(...)
+    state.marketSearchCalls[#state.marketSearchCalls + 1] = { kind = "sell", args = {...} }
+  end,
+  RequestMoreCommoditySearchResults = function(itemID)
+    state.marketSearchCalls[#state.marketSearchCalls + 1] = { kind = "more", args = {itemID} }
+    if state.marketCachedEventOnMore then __fire("COMMODITY_SEARCH_RESULTS_UPDATED", itemID) end
+    return state.marketFull
+  end,
+  RequestMoreItemSearchResults = function(itemKey)
+    state.marketSearchCalls[#state.marketSearchCalls + 1] = { kind = "more_item", args = {itemKey} }
+    return false
+  end,
+  RefreshCommoditySearchResults = function(itemID)
+    state.marketSearchCalls[#state.marketSearchCalls + 1] = { kind = "refresh", args = {itemID} }
+  end,
+  RefreshItemSearchResults = function(itemKey)
+    state.marketSearchCalls[#state.marketSearchCalls + 1] = { kind = "refresh_item", args = {itemKey} }
+  end,
+  HasFullCommoditySearchResults = function() return state.marketFull end,
+  GetNumCommoditySearchResults = function() return #state.marketRows end,
+  GetCommoditySearchResultsQuantity = function()
+    if state.marketTotalQuantity ~= nil then return state.marketTotalQuantity end
+    local total = 0
+    for _, row in ipairs(state.marketRows) do total = total + row.quantity end
+    return total
+  end,
+  GetCommoditySearchResultInfo = function(_, index)
+    state.marketRowReadIndices[#state.marketRowReadIndices + 1] = index
+    return state.marketRows[index]
+  end,
   GetItemKeyFromItem = function(location) return itemKey(bagEntry(location)) end,
   GetItemCommodityStatus = function(location)
-    return bagEntry(location).commodity and Enum.ItemCommodityStatus.Commodity or Enum.ItemCommodityStatus.NonCommodity
+    if state.unknownCommodityStatus then return Enum.ItemCommodityStatus.Unknown end
+    return bagEntry(location).commodity and Enum.ItemCommodityStatus.Commodity or Enum.ItemCommodityStatus.Item
   end,
   IsSellItemValid = function(location, skipTransient)
     state.sellValidCalls = state.sellValidCalls + 1
@@ -235,6 +295,11 @@ function GetInboxItem(index, attachment)
   if not item then return nil end
   return item.name, item.itemID, 0, item.count, 1, true, false
 end
+function GetInboxItemLink(index, attachment)
+  local row = mail(index)
+  local item = row and row.attachments[attachment]
+  return item and item.link or nil
+end
 function HasInboxItem(index, attachment)
   local row = mail(index)
   return row ~= nil and row.attachments[attachment] ~= nil
@@ -245,6 +310,9 @@ function InboxItemCanDelete(index)
 end
 function AutoLootMailItem(...)
   state.nativeCalls[#state.nativeCalls + 1] = { kind = "collect_mail", args = {...} }
+end
+function TakeInboxItem(...)
+  state.nativeCalls[#state.nativeCalls + 1] = { kind = "collect_return", args = {...} }
 end
 
 function __fire(event, ...)
@@ -274,6 +342,7 @@ class NativeHarness:
         mode_source: str | None = None,
         omit_mode: bool = False,
         defer_start: bool = False,
+        hook_failure_name: str = "",
     ):
         self.lua = lua51.LuaRuntime(unpack_returned_tuples=True, encoding="latin-1")
         self.state = self.lua.table_from(
@@ -337,6 +406,18 @@ class NativeHarness:
                 "queryOwnedArgs": self.lua.table(),
                 "queryOwnedResult": None,
                 "queryOwnedUnexpected": False,
+                "marketRows": self.lua.table(),
+                "marketFull": True,
+                "marketTotalQuantity": None,
+                "marketIsCommodity": True,
+                "marketThrottleReady": True,
+                "marketDispatchReturn": None,
+                "marketCachedEventOnSend": False,
+                "marketCachedEventOnMore": False,
+                "hookFailureName": hook_failure_name,
+                "searchHookAttempts": self.lua.table(),
+                "marketRowReadIndices": self.lua.table(),
+                "marketSearchCalls": self.lua.table(),
                 "cancelAllowed": self.lua.table(),
                 "cancelCosts": self.lua.table(),
                 "cancelCostCalls": 0,
@@ -345,6 +426,7 @@ class NativeHarness:
                 "nativeError": False,
                 "inbox": self.lua.table(),
                 "mailHeaderExtra": False,
+                "mailCommandPending": False,
             }
         )
         self.lua.execute("return function(...) " + _RUNTIME_STUBS + " end")(self.state)
@@ -544,11 +626,18 @@ class NativeHarness:
         can_delete: bool = True,
         is_gm: bool = False,
         days_left: float = 30.0,
+        link_level: int = 0,
+        link_suffix: int = 0,
     ) -> None:
         attachment_rows = []
         for item_id, count in attachments or []:
             attachment_rows.append(
-                {"name": f"item-{item_id}", "itemID": item_id, "count": count, "link": item_link(item_id)}
+                {
+                    "name": f"item-{item_id}",
+                    "itemID": item_id,
+                    "count": count,
+                    "link": item_link(item_id, level=link_level, suffix=link_suffix),
+                }
             )
         row = {
             "sender": sender,
@@ -564,6 +653,41 @@ class NativeHarness:
         }
         self.state.inbox[len(self.state.inbox) + 1] = self._to_lua(row)
 
+    def complete_take(self, mail_index: int, attachment_index: int) -> None:
+        mail_row = self.state.inbox[mail_index]
+        attachment = mail_row.attachments[attachment_index]
+        item_id, quantity, link = attachment.itemID, attachment.count, attachment.link
+        item_count = mail_row.itemCount
+        for index in range(attachment_index, item_count):
+            mail_row.attachments[index] = mail_row.attachments[index + 1]
+        mail_row.attachments[item_count] = None
+        mail_row.itemCount = item_count - 1
+
+        for bag in range(5):
+            for slot in range(1, int(self.state.bagSizes[bag]) + 1):
+                existing = self.state.bags[f"{bag}:{slot}"]
+                if existing is not None and existing.itemID == item_id:
+                    existing.count += quantity
+                    return
+        for bag in range(5):
+            for slot in range(1, int(self.state.bagSizes[bag]) + 1):
+                if self.state.bags[f"{bag}:{slot}"] is None:
+                    self.add_item(
+                        bag=bag,
+                        slot=slot,
+                        item_key={
+                            "itemID": item_id,
+                            "itemLevel": 0,
+                            "itemSuffix": 0,
+                            "battlePetSpeciesID": 0,
+                        },
+                        link=link,
+                        count=quantity,
+                        commodity=True,
+                    )
+                    return
+        raise AssertionError("harness cannot complete take without bag capacity")
+
     def fire(self, event: str, *args: Any) -> None:
         if event == "AUCTION_HOUSE_SHOW":
             self.state.ahOpen = True
@@ -577,6 +701,19 @@ class NativeHarness:
 
     def advance(self, seconds: float) -> None:
         self.lua.globals()["__advance"](seconds)
+
+    def set_market_rows(
+        self, rows: list[dict[str, Any]], *, full: bool = True, total_quantity: int | None = None
+    ) -> None:
+        self.state.marketRows = self._to_lua(rows)
+        self.state.marketFull = full
+        self.state.marketTotalQuantity = total_quantity
+
+    def publish_market(self, item_id: int = 123, *, added: bool = False) -> None:
+        if item_id == 123:
+            self.fire("AUCTION_HOUSE_THROTTLED_MESSAGE_SENT")
+            self.fire("AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED")
+        self.fire("COMMODITY_SEARCH_RESULTS_ADDED" if added else "COMMODITY_SEARCH_RESULTS_UPDATED", item_id)
 
     def slash(self, command: str) -> bool:
         result = self.lua.globals().SlashCmdList.CAUTO(command)

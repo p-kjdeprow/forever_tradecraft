@@ -10,7 +10,9 @@ and all gates have been rechecked.
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -21,6 +23,7 @@ from .model import (
     Batch,
     CancelAuction,
     CollectMail,
+    CollectReturn,
     Interact,
     MoveRoute,
     PostCommodity,
@@ -34,6 +37,115 @@ MAX_OBSERVATION_AGE_SECONDS = 3
 
 class AdmissionDenied(RuntimeError):
     """Current session or operator conditions do not permit a dispatch."""
+
+
+def _validate_dispatch_result(value: object) -> dict[str, object]:
+    if type(value) is not dict or type(value.get("kind")) is not str:
+        raise ValueError("structured dispatch result must be an exact object with a kind")
+    kind = value["kind"]
+    if kind == "post_commodity":
+        fields = {"kind", "auctionId", "itemKey", "quantity", "unitPriceCopper", "depositCopper"}
+        if set(value) != fields:
+            raise ValueError("post_commodity result fields are not exact")
+        if type(value["depositCopper"]) is not int and value["depositCopper"] is not None:
+            raise ValueError("depositCopper must be an exact integer or unknown")
+        PostCommodity(
+            value["itemKey"],  # type: ignore[arg-type]
+            value["quantity"],  # type: ignore[arg-type]
+            value["unitPriceCopper"],  # type: ignore[arg-type]
+            12,
+            0,
+        )
+        if type(value["auctionId"]) is not int or value["auctionId"] < 1:
+            raise ValueError("auctionId must be a positive exact integer")
+        if value["depositCopper"] is not None and (
+            type(value["depositCopper"]) is not int or value["depositCopper"] < 0
+        ):
+            raise ValueError("depositCopper must be non-negative")
+    elif kind == "post_item":
+        fields = {"kind", "auctionId", "itemKey", "quantity", "unitPriceCopper", "depositCopper"}
+        if set(value) != fields:
+            raise ValueError("post_item result fields are not exact")
+        PostItem(
+            value["itemKey"],  # type: ignore[arg-type]
+            value["quantity"],  # type: ignore[arg-type]
+            value["unitPriceCopper"],  # type: ignore[arg-type]
+            12,
+            0,
+        )
+        if type(value["auctionId"]) is not int or value["auctionId"] < 1:
+            raise ValueError("auctionId must be a positive exact integer")
+        if value["depositCopper"] is not None and (
+            type(value["depositCopper"]) is not int or value["depositCopper"] < 0
+        ):
+            raise ValueError("depositCopper must be non-negative")
+    elif kind == "cancel_auction":
+        fields = {"kind", "auctionId", "itemKey", "remainingQuantity", "cancelCostCopper"}
+        if set(value) != fields:
+            raise ValueError("cancel_auction result fields are not exact")
+        if (
+            type(value["auctionId"]) is not int
+            or value["auctionId"] < 1
+            or type(value["remainingQuantity"]) is not int
+            or not 0 <= value["remainingQuantity"] <= MAX_INTEGER
+            or (
+                value["cancelCostCopper"] is not None
+                and (
+                    type(value["cancelCostCopper"]) is not int
+                    or not 0 <= value["cancelCostCopper"] <= MAX_INTEGER
+                )
+            )
+        ):
+            raise ValueError("cancel result quantities and costs must be exact non-negative integers")
+        try:
+            from .model import validate_item_key
+
+            validate_item_key(value["itemKey"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("cancel result itemKey is invalid") from exc
+    elif kind == "collect_return":
+        fields = {"kind", "mailFingerprint", "itemKey", "quantity"}
+        if set(value) != fields:
+            raise ValueError("collect_return result fields are not exact")
+        action = CollectReturn(
+            value["itemKey"],  # type: ignore[arg-type]
+            value["quantity"],  # type: ignore[arg-type]
+            value["mailFingerprint"],  # type: ignore[arg-type]
+        )
+        if action.quantity > MAX_INTEGER:
+            raise ValueError("return quantity exceeds the safe-integer limit")
+    else:
+        raise ValueError("unsupported structured dispatch result kind")
+    return value
+
+
+def dispatch_result_matches_action(result: dict[str, object] | None, action: Action) -> bool:
+    if result is None:
+        return False
+    if isinstance(action, PostCommodity):
+        return (
+            result.get("kind") == "post_commodity"
+            and result.get("itemKey") == action.item_key
+            and result.get("quantity") == action.quantity
+            and result.get("unitPriceCopper") == action.unit_price_copper
+        )
+    if isinstance(action, PostItem):
+        return (
+            result.get("kind") == "post_item"
+            and result.get("itemKey") == action.item_key
+            and result.get("quantity") == action.quantity
+            and result.get("unitPriceCopper") == action.unit_price_copper
+        )
+    if isinstance(action, CancelAuction):
+        return result.get("kind") == "cancel_auction" and result.get("auctionId") == action.auction_id
+    if isinstance(action, CollectReturn):
+        return (
+            result.get("kind") == "collect_return"
+            and result.get("itemKey") == action.item_key
+            and result.get("quantity") == action.quantity
+            and result.get("mailFingerprint") == action.mail_fingerprint
+        )
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +195,7 @@ class Admission:
     staged_action_digest: str | None = None
     ready: bool | None = None
     receipt_sequence: int | None = None
+    client_build: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -93,6 +206,10 @@ class Admission:
             raise ValueError("session_boot_id must be a bounded non-empty string")
         if type(self.house) is not str or type(self.character) is not str:
             raise ValueError("admission identity must be text")
+        if self.client_build is not None and (
+            type(self.client_build) is not str or not self.client_build or len(self.client_build) > 64
+        ):
+            raise ValueError("client_build must be bounded non-empty text when present")
         if type(self.observed_at) is not int or not 0 <= self.observed_at <= MAX_INTEGER:
             raise ValueError("observed_at must be a non-negative exact integer")
         if any(
@@ -136,6 +253,7 @@ class DispatchReceipt:
     postcondition: bool | None
     action_complete: bool | None
     detail: str = ""
+    result: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
         if any(
@@ -162,6 +280,8 @@ class DispatchReceipt:
             raise ValueError("receipt evidence must be boolean or unknown")
         if type(self.detail) is not str or len(self.detail) > 240:
             raise ValueError("receipt detail must be bounded text")
+        if self.result is not None:
+            _validate_dispatch_result(self.result)
 
     def object(self) -> dict[str, object]:
         return {
@@ -174,6 +294,7 @@ class DispatchReceipt:
             "postcondition": self.postcondition,
             "action_complete": self.action_complete,
             "session_boot_id": self.session_boot_id,
+            "result": self.result,
         }
 
 
@@ -208,6 +329,53 @@ class Backend(Protocol):
     ) -> DispatchReceipt:
         """Send one primitive after an adapter-side device-gate check at the actual press."""
         ...
+
+
+class SellerAuthorizationStore(Protocol):
+    def validate_child(
+        self,
+        session_id: str,
+        decision_id: str,
+        batch: Batch,
+        admission: Admission | None,
+        *,
+        phase: str = "decision",
+        now: int | None = None,
+    ) -> None: ...
+
+    def release_before_dispatch(
+        self,
+        session_id: str,
+        decision_id: str,
+        phase: str,
+        batch: Batch,
+        *,
+        now: int,
+    ) -> None: ...
+
+    def apply_terminal_step(
+        self,
+        db: sqlite3.Connection,
+        *,
+        session_id: str,
+        decision_id: str,
+        phase: str,
+        batch: Batch,
+        ordinal: int,
+        action: Action,
+        state: Literal["succeeded", "failed", "uncertain"],
+        receipt: dict[str, object] | None,
+        reason: str | None,
+        now: int,
+    ) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _SellerRunContext:
+    store: SellerAuthorizationStore
+    session_id: str
+    decision_id: str
+    phase: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,14 +500,57 @@ class AutomationRunner:
                 backend=backend,
             )
 
+    def run_seller_child(
+        self,
+        batch: Batch,
+        *,
+        seller_store: SellerAuthorizationStore,
+        session_id: str,
+        decision_id: str,
+        phase: str = "decision",
+        backend: Backend,
+    ) -> BatchStatus:
+        """Run one durable policy-derived child without manufacturing manual auth or an arm."""
+        with self.ledger.runner_lock():
+            self.ledger.recover_interrupted(now=int(self.clock()))
+            status = self.ledger.status(batch.batch_id)
+            if status["state"] in ("succeeded", "failed", "uncertain"):
+                return status
+            if self.ledger.has_uncertain_effect():
+                raise UncertainEffectInterlock("an unresolved effect interlocks all new action batches")
+            if status["state"] == "expired":
+                seller_store.release_before_dispatch(
+                    session_id, decision_id, phase, batch, now=int(self.clock())
+                )
+                return status
+            if self.ledger.stop_requested():
+                raise AdmissionDenied("durable stop is active")
+            now = int(self.clock())
+            if now >= batch.expires_at:
+                self.ledger.mark_expired(batch.batch_id, now=now)
+                seller_store.release_before_dispatch(session_id, decision_id, phase, batch, now=now)
+                return self.ledger.status(batch.batch_id)
+            seller_store.validate_child(
+                session_id, decision_id, batch, None, phase=phase, now=int(self.clock())
+            )
+            return self._run_locked(
+                batch,
+                authorization=None,
+                session_arm=None,
+                confirmed_batch_id=None,
+                backend=backend,
+                seller_context=_SellerRunContext(seller_store, session_id, decision_id, phase),
+            )
+
     def _run_locked(
         self,
         batch: Batch,
         *,
-        authorization: BatchAuthorization,
-        session_arm: SessionArm,
-        confirmed_batch_id: str,
+        authorization: BatchAuthorization | None,
+        session_arm: SessionArm | None,
+        confirmed_batch_id: str | None,
         backend: Backend,
+        seller_context: _SellerRunContext | None = None,
     ) -> BatchStatus:
         """Dispatch each not-yet-sent action once, stopping on the first ambiguity."""
         now = int(self.clock())
@@ -348,18 +559,28 @@ class AutomationRunner:
             return status
         if now >= batch.expires_at:
             self.ledger.mark_expired(batch.batch_id, now=now)
+            if seller_context is not None:
+                seller_context.store.release_before_dispatch(
+                    seller_context.session_id,
+                    seller_context.decision_id,
+                    seller_context.phase,
+                    batch,
+                    now=now,
+                )
             return self.ledger.status(batch.batch_id)
         if self.ledger.has_uncertain_effect():
             raise UncertainEffectInterlock("an unresolved effect interlocks all new action batches")
-        self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, now)
+        self._check_run_context(
+            batch, authorization, session_arm, confirmed_batch_id, seller_context, None, now
+        )
 
         while True:
-            self._check_authorization(
-                batch, authorization, session_arm, confirmed_batch_id, int(self.clock())
-            )
             status = self.ledger.status(batch.batch_id)
             if status["state"] in ("succeeded", "failed", "uncertain", "expired"):
                 return status
+            self._check_run_context(
+                batch, authorization, session_arm, confirmed_batch_id, seller_context, None, int(self.clock())
+            )
             ready = self._next_ready_step(status)
             if ready is None:
                 return status
@@ -370,11 +591,17 @@ class AutomationRunner:
             digest = hashlib.sha256(canonical_json(action_object(action)).encode("utf-8")).hexdigest()
             observed = backend.observe()
             pre_stage_now = int(self.clock())
-            self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, pre_stage_now)
-            self._check_before_stage(batch, session_arm, observed, pre_stage_now)
+            self._check_run_context(
+                batch, authorization, session_arm, confirmed_batch_id, seller_context, observed, pre_stage_now
+            )
+            if seller_context is None:
+                assert session_arm is not None
+                self._check_before_stage(batch, session_arm, observed, pre_stage_now)
+            else:
+                self._check_seller_before_stage(batch, observed, pre_stage_now)
             set_deadline = getattr(backend, "set_deadline", None)
             if callable(set_deadline):
-                set_deadline(min(batch.expires_at, authorization.expires_at, session_arm.expires_at))
+                set_deadline(self._execution_deadline(batch, authorization, session_arm))
             try:
                 backend.stage(
                     action,
@@ -390,17 +617,43 @@ class AutomationRunner:
                         clear_stage()
                     except Exception:
                         pass
-                self.ledger.fail_before_dispatch(
-                    batch.batch_id, ordinal, f"stage failed: {type(exc).__name__}", now=int(self.clock())
+                refusal_code = self._native_stage_refusal_code(exc)
+                reason = (
+                    f"native preflight refused operation: {refusal_code}"
+                    if refusal_code is not None
+                    else f"stage failed: {type(exc).__name__}"
                 )
+                self.ledger.fail_before_dispatch(batch.batch_id, ordinal, reason, now=int(self.clock()))
+                if seller_context is not None:
+                    seller_context.store.release_before_dispatch(
+                        seller_context.session_id,
+                        seller_context.decision_id,
+                        seller_context.phase,
+                        batch,
+                        now=int(self.clock()),
+                    )
                 return self.ledger.status(batch.batch_id)
             try:
                 observed = backend.observe()
                 observed_now = int(self.clock())
-                self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, observed_now)
-                self._check_before_dispatch(
-                    batch, session_arm, observed, observed_now, action, ordinal, step_index, digest
+                self._check_run_context(
+                    batch,
+                    authorization,
+                    session_arm,
+                    confirmed_batch_id,
+                    seller_context,
+                    observed,
+                    observed_now,
                 )
+                if seller_context is None:
+                    assert session_arm is not None
+                    self._check_before_dispatch(
+                        batch, session_arm, observed, observed_now, action, ordinal, step_index, digest
+                    )
+                else:
+                    self._check_seller_before_dispatch(
+                        batch, observed, observed_now, action, ordinal, step_index, digest
+                    )
             except Exception:
                 clear_stage = getattr(backend, "clear_stage", None)
                 if callable(clear_stage):
@@ -411,7 +664,7 @@ class AutomationRunner:
                 raise
             set_deadline = getattr(backend, "set_deadline", None)
             if callable(set_deadline):
-                set_deadline(min(batch.expires_at, authorization.expires_at, session_arm.expires_at))
+                set_deadline(self._execution_deadline(batch, authorization, session_arm))
             self.ledger.claim_dispatch(
                 batch.batch_id,
                 ordinal,
@@ -423,17 +676,37 @@ class AutomationRunner:
             try:
                 current_admission = backend.observe()
                 dispatch_now = int(self.clock())
-                self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, dispatch_now)
-                self._check_before_dispatch(
+                self._check_run_context(
                     batch,
+                    authorization,
                     session_arm,
+                    confirmed_batch_id,
+                    seller_context,
                     current_admission,
                     dispatch_now,
-                    action,
-                    ordinal,
-                    step_index,
-                    digest,
                 )
+                if seller_context is None:
+                    assert session_arm is not None
+                    self._check_before_dispatch(
+                        batch,
+                        session_arm,
+                        current_admission,
+                        dispatch_now,
+                        action,
+                        ordinal,
+                        step_index,
+                        digest,
+                    )
+                else:
+                    self._check_seller_before_dispatch(
+                        batch,
+                        current_admission,
+                        dispatch_now,
+                        action,
+                        ordinal,
+                        step_index,
+                        digest,
+                    )
             except Exception as exc:
                 clear_stage = getattr(backend, "clear_stage", None)
                 if callable(clear_stage):
@@ -452,6 +725,15 @@ class AutomationRunner:
                     action_complete=None,
                     receipt=None,
                     reason=f"pre-dispatch revalidation failed: {type(exc).__name__}",
+                    transaction_hook=self._seller_hook(
+                        seller_context,
+                        batch,
+                        ordinal,
+                        action,
+                        "failed",
+                        None,
+                        f"pre-dispatch revalidation failed: {type(exc).__name__}",
+                    ),
                 )
                 return self.ledger.status(batch.batch_id)
             try:
@@ -475,6 +757,15 @@ class AutomationRunner:
                     action_complete=None,
                     receipt=None,
                     reason=f"dispatch raised {type(exc).__name__}; effect is uncertain",
+                    transaction_hook=self._seller_hook(
+                        seller_context,
+                        batch,
+                        ordinal,
+                        action,
+                        "uncertain",
+                        None,
+                        f"dispatch raised {type(exc).__name__}; effect is uncertain",
+                    ),
                 )
                 return self.ledger.status(batch.batch_id)
             result_state, continue_action = self._receipt_state(
@@ -486,6 +777,7 @@ class AutomationRunner:
                 current_admission.session_boot_id,
                 action,
                 self._step_limit(action),
+                require_structured_result=seller_context is not None,
             )
             if result_state is None:
                 receipt_data = receipt.object() if isinstance(receipt, DispatchReceipt) else None
@@ -503,6 +795,15 @@ class AutomationRunner:
                     action_complete=complete,
                     receipt=receipt_data,
                     reason="receipt is missing, contradictory, or not causally bound to this dispatch",
+                    transaction_hook=self._seller_hook(
+                        seller_context,
+                        batch,
+                        ordinal,
+                        action,
+                        "uncertain",
+                        receipt.object() if isinstance(receipt, DispatchReceipt) else None,
+                        "receipt is missing, contradictory, or not causally bound to this dispatch",
+                    ),
                 )
                 return self.ledger.status(batch.batch_id)
             self.ledger.finish_step(
@@ -517,6 +818,15 @@ class AutomationRunner:
                 receipt=receipt.object(),
                 continue_action=continue_action,
                 reason=None if result_state == "succeeded" else "operation did not reach verified completion",
+                transaction_hook=self._seller_hook(
+                    seller_context,
+                    batch,
+                    ordinal,
+                    action,
+                    result_state,
+                    receipt.object(),
+                    None if result_state == "succeeded" else "operation did not reach verified completion",
+                ),
             )
             if result_state == "succeeded" and not continue_action:
                 completed = self.ledger.status(batch.batch_id)
@@ -532,6 +842,15 @@ class AutomationRunner:
         if row is None:
             return None
         return {"ordinal": row["ordinal"], "step_index": row["next_step"]}
+
+    @staticmethod
+    def _native_stage_refusal_code(exc: Exception) -> str | None:
+        from .backend import DesktopBackendError
+
+        if type(exc) is not DesktopBackendError:
+            return None
+        code = getattr(exc, "code", None)
+        return code if code == "insufficient_return_bag_slots" else None
 
     def _check_authorization(
         self,
@@ -557,6 +876,108 @@ class AutomationRunner:
             raise AdmissionDenied("session arm is expired or invalid")
         if self.ledger.stop_requested():
             raise AdmissionDenied("durable stop is active")
+
+    def _check_run_context(
+        self,
+        batch: Batch,
+        authorization: BatchAuthorization | None,
+        session_arm: SessionArm | None,
+        confirmed_batch_id: str | None,
+        seller_context: _SellerRunContext | None,
+        observation: Admission | None,
+        now: int,
+    ) -> None:
+        if seller_context is not None:
+            seller_context.store.validate_child(
+                seller_context.session_id,
+                seller_context.decision_id,
+                batch,
+                observation,
+                phase=seller_context.phase,
+                now=now,
+            )
+            return
+        if authorization is None or session_arm is None or confirmed_batch_id is None:
+            raise AdmissionDenied("manual batch authorization is missing")
+        self._check_authorization(batch, authorization, session_arm, confirmed_batch_id, now)
+
+    @staticmethod
+    def _execution_deadline(
+        batch: Batch,
+        authorization: BatchAuthorization | None,
+        session_arm: SessionArm | None,
+    ) -> int:
+        if authorization is None or session_arm is None:
+            return batch.expires_at
+        return min(batch.expires_at, authorization.expires_at, session_arm.expires_at)
+
+    def _check_seller_before_stage(self, batch: Batch, observation: Admission, now: int) -> None:
+        if now >= batch.expires_at:
+            self.ledger.mark_expired(batch.batch_id, now=now)
+            raise AdmissionDenied("seller child expired before staging")
+        if (
+            observation.observed_at > now
+            or now - observation.observed_at > self.config.max_observation_age_seconds
+        ):
+            raise AdmissionDenied("session observation is stale")
+        if observation.human_present:
+            raise AdmissionDenied("human presence blocks dispatch")
+        if not observation.focused:
+            raise AdmissionDenied("game window is not focused")
+        if not observation.gui_lock_owned:
+            raise AdmissionDenied("GUI ownership lock is not held")
+
+    def _check_seller_before_dispatch(
+        self,
+        batch: Batch,
+        observation: Admission,
+        now: int,
+        action: Action,
+        ordinal: int,
+        step_index: int,
+        action_digest: str,
+    ) -> None:
+        self._check_seller_before_stage(batch, observation, now)
+        if (
+            observation.staged_batch_id != batch.batch_id
+            or observation.staged_ordinal != ordinal
+            or observation.staged_step_index != step_index
+            or observation.staged_action_digest != action_digest
+            or observation.ready is not True
+        ):
+            raise AdmissionDenied("staged operation identity or readiness readback does not match")
+        if isinstance(action, (PostCommodity, PostItem, CancelAuction)) and not observation.client_ah_owned:
+            raise AdmissionDenied("client-side auction-house ownership is not held")
+
+    def _seller_hook(
+        self,
+        context: _SellerRunContext | None,
+        batch: Batch,
+        ordinal: int,
+        action: Action,
+        state: Literal["succeeded", "failed", "uncertain"] | None,
+        receipt: dict[str, object] | None,
+        reason: str | None,
+    ) -> Callable[[sqlite3.Connection], None] | None:
+        if context is None or state is None:
+            return None
+
+        def apply(db: sqlite3.Connection) -> None:
+            context.store.apply_terminal_step(
+                db,
+                session_id=context.session_id,
+                decision_id=context.decision_id,
+                phase=context.phase,
+                batch=batch,
+                ordinal=ordinal,
+                action=action,
+                state=state,
+                receipt=receipt,
+                reason=reason,
+                now=int(self.clock()),
+            )
+
+        return apply
 
     def _check_session_and_gui(
         self,
@@ -645,6 +1066,8 @@ class AutomationRunner:
         session_boot_id: str,
         action: Action,
         step_limit: int,
+        *,
+        require_structured_result: bool = False,
     ) -> tuple[Literal["succeeded", "failed"] | None, bool]:
         if not isinstance(receipt, DispatchReceipt):
             return None, False
@@ -656,7 +1079,15 @@ class AutomationRunner:
             or receipt.session_boot_id != session_boot_id
         ):
             return None, False
+        if receipt.result is not None and not dispatch_result_matches_action(receipt.result, action):
+            return None, False
         if receipt.callback_delivered is True and receipt.postcondition is True:
+            if (
+                require_structured_result
+                and isinstance(action, (PostCommodity, CancelAuction, CollectReturn))
+                and not dispatch_result_matches_action(receipt.result, action)
+            ):
+                return None, False
             if receipt.action_complete is True:
                 return "succeeded", False
             if receipt.action_complete is False and isinstance(action, (CollectMail, MoveRoute)):

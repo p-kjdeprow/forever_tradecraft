@@ -7,7 +7,12 @@ import pytest
 from crowley_automation.cli import main
 from crowley_automation.ledger import Ledger, LedgerError, UncertainEffectInterlock
 from crowley_automation.model import Batch, CollectMail
-from crowley_automation.runtime import _operation_ledger, default_ledger_path, maintenance_blocker
+from crowley_automation.runtime import (
+    _operation_ledger,
+    arm_seller_backend,
+    default_ledger_path,
+    maintenance_blocker,
+)
 
 NOW = 1_000
 HOUSE = "us-normal-horde"
@@ -18,13 +23,17 @@ def make_batch() -> Batch:
     return Batch(HOUSE, CHARACTER, NOW + 200, (CollectMail(2),))
 
 
-def test_default_ledger_uses_xdg_state_home() -> None:
-    assert default_ledger_path(
-        {"HOME": "/home/worker", "XDG_STATE_HOME": "/state", "XDG_RUNTIME_DIR": "/run/user/1"}
-    ) == Path("/state/crowley/automation/ledger.sqlite3")
-    assert default_ledger_path({"HOME": "/home/worker"}) == Path(
-        "/home/worker/.local/state/crowley/automation/ledger.sqlite3"
+def test_default_ledger_uses_xdg_state_home(tmp_path: Path) -> None:
+    home = tmp_path / "synthetic-home"
+    state = tmp_path / "synthetic-state"
+    runtime = tmp_path / "synthetic-runtime"
+    assert (
+        default_ledger_path(
+            {"HOME": str(home), "XDG_STATE_HOME": str(state), "XDG_RUNTIME_DIR": str(runtime)}
+        )
+        == state / "crowley/automation/ledger.sqlite3"
     )
+    assert default_ledger_path({"HOME": str(home)}) == home / ".local/state/crowley/automation/ledger.sqlite3"
 
 
 def test_live_operation_requires_the_shared_ledger_but_fake_io_can_isolate(tmp_path: Path) -> None:
@@ -78,6 +87,45 @@ def test_durable_stop_survives_ledger_reopen_and_requires_explicit_clear(tmp_pat
     assert Ledger(path).stop_requested() is False
 
 
+def test_seller_backend_guard_checks_durable_revoke_and_policy_expiry(tmp_path: Path) -> None:
+    path = tmp_path / "ledger.sqlite3"
+    ledger = Ledger(path)
+    session = {"state": "active"}
+
+    class Backend:
+        deadline = 0
+        stop_requested = None
+
+        def set_deadline(self, expires_at: int) -> None:
+            self.deadline = expires_at
+
+        def bind_seller_ah_target(self, target_id: str) -> None:
+            self.target_id = target_id
+
+    class Store:
+        def status(self, session_id: str):
+            assert session_id == "seller-session"
+            return type("Status", (), session)()
+
+    backend = Backend()
+    arm_seller_backend(
+        backend,  # type: ignore[arg-type]
+        ledger=ledger,
+        seller_store=Store(),
+        session_id="seller-session",
+        policy_expires_at=NOW + 100,
+        ah_target_id="capital_auctioneer",
+    )
+
+    assert backend.deadline == NOW + 100
+    assert backend.target_id == "capital_auctioneer"
+    assert backend.stop_requested is not None and backend.stop_requested() is False
+    session["state"] = "completed"
+    assert backend.stop_requested is not None and backend.stop_requested() is False
+    session["state"] = "revoked"
+    assert backend.stop_requested is not None and backend.stop_requested() is True
+
+
 def test_causal_reconcile_requires_exact_later_receipt_and_boot(tmp_path: Path) -> None:
     path = tmp_path / "ledger.sqlite3"
     ledger = Ledger(path)
@@ -101,6 +149,7 @@ def test_causal_reconcile_requires_exact_later_receipt_and_boot(tmp_path: Path) 
         "postcondition": True,
         "actionComplete": True,
         "detail": "mail_state_and_settlement_changed",
+        "result": False,
     }
 
     with pytest.raises(LedgerError, match="boot"):
@@ -127,6 +176,7 @@ def test_final_mail_page_can_reconcile_as_action_success(tmp_path: Path) -> None
         "postcondition": True,
         "actionComplete": False,
         "detail": "mail_page_postcondition",
+        "result": False,
     }
 
     ledger.reconcile_receipt(batch.batch_id, 0, 0, receipt, boot_id="boot-a", step_limit=1, now=NOW + 2)
@@ -155,6 +205,7 @@ def test_final_route_step_cannot_reconcile_incomplete(tmp_path: Path) -> None:
         "postcondition": True,
         "actionComplete": False,
         "detail": "route_step_postcondition",
+        "result": False,
     }
 
     with pytest.raises(LedgerError, match="incomplete"):

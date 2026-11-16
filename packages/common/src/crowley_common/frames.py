@@ -24,6 +24,7 @@ MAX_PAYLOAD = 2000
 MAX_INFLATED = 16_384
 CELL_PHYSICAL = 2
 MAX_U32 = 0xFFFFFFFF
+MAX_SAFE_INTEGER = 9_007_199_254_740_991
 HALF_U32 = 0x80000000
 PLAN_COUNT = 807
 
@@ -340,12 +341,13 @@ def _validate_automation(value: dict[str, Any]) -> Snapshot:
         "chatEdit",
         "goldCopper",
         "operation",
+        "sellerMarket",
         "inspection",
         "motion",
         "mailOpen",
         "ownership",
     }
-    boot, sequence, wall_time, uptime_ms = _base(value, "automation", top_fields, schema_version=2)
+    boot, sequence, wall_time, uptime_ms = _base(value, "automation", top_fields, schema_version=3)
     context = _keys(
         value["context"],
         {
@@ -424,7 +426,7 @@ def _validate_automation(value: dict[str, Any]) -> Snapshot:
         raise _error("chatEdit.focused", "cannot be true when chat is inactive")
     if len(text.encode("utf-8")) > 128:
         raise _error("chatEdit.text", "UTF-8 value is too long")
-    _integer(value["goldCopper"], "goldCopper", maximum=9_007_199_254_740_991)
+    _integer(value["goldCopper"], "goldCopper", maximum=MAX_SAFE_INTEGER)
 
     operation = _keys(
         value["operation"],
@@ -467,17 +469,19 @@ def _validate_automation(value: dict[str, Any]) -> Snapshot:
             "postcondition",
             "actionComplete",
             "detail",
+            "result",
         },
         "operation.receipt",
     )
-    receipt_sequence = _integer(receipt["sequence"], "operation.receipt.sequence")
+    receipt_sequence = _integer(receipt["sequence"], "operation.receipt.sequence", maximum=MAX_SAFE_INTEGER)
     receipt_batch = _string(receipt["batchId"], "operation.receipt.batchId", empty=True, limit=64)
-    receipt_ordinal = _integer(receipt["ordinal"], "operation.receipt.ordinal")
-    receipt_step = _integer(receipt["stepIndex"], "operation.receipt.stepIndex")
+    receipt_ordinal = _integer(receipt["ordinal"], "operation.receipt.ordinal", maximum=MAX_SAFE_INTEGER)
+    receipt_step = _integer(receipt["stepIndex"], "operation.receipt.stepIndex", maximum=MAX_SAFE_INTEGER)
     for field in ("callbackDelivered", "postcondition", "actionComplete"):
         if type(receipt[field]) is not bool and receipt[field] != "unknown":
             raise _error(f"operation.receipt.{field}", "must be boolean or 'unknown'")
     _string(receipt["detail"], "operation.receipt.detail", empty=True, limit=240)
+    _validate_native_result(receipt["result"], "operation.receipt.result")
     if receipt_sequence == 0:
         if (
             receipt_batch
@@ -487,26 +491,73 @@ def _validate_automation(value: dict[str, Any]) -> Snapshot:
                 receipt[field] != "unknown"
                 for field in ("callbackDelivered", "postcondition", "actionComplete")
             )
+            or receipt["result"] is not False
         ):
             raise _error("operation.receipt", "empty receipt must use unknown outcomes and empty identity")
     elif not re.fullmatch(r"[0-9a-f]{64}", receipt_batch):
         raise _error("operation.receipt.batchId", "published receipt requires a lowercase SHA256 digest")
+    if receipt["result"] is not False and (
+        receipt["callbackDelivered"] is not True
+        or receipt["postcondition"] is not True
+        or receipt["actionComplete"] is not True
+    ):
+        raise _error(
+            "operation.receipt.result", "structured native result requires a verified completed action"
+        )
 
-    inspection = _keys(value["inspection"], {"kind", "page", "rows", "hasMore", "error"}, "inspection")
+    _validate_seller_market(value["sellerMarket"], wall_time)
+
+    inspection = _keys(
+        value["inspection"],
+        {"kind", "page", "rows", "hasMore", "error", "requestId", "capturedAt", "sourceCount"},
+        "inspection",
+    )
     inspection_kind = inspection["kind"]
     if inspection_kind not in {"none", "inventory", "owned", "mail"}:
         raise _error("inspection.kind", "invalid inspection kind")
     page = _integer(inspection["page"], "inspection.page", maximum=4_095)
-    if not isinstance(inspection["rows"], list) or len(inspection["rows"]) > 4:
-        raise _error("inspection.rows", "must be an array of at most four rows")
+    page_size = 1 if inspection_kind == "mail" else 4
+    if not isinstance(inspection["rows"], list) or len(inspection["rows"]) > page_size:
+        raise _error("inspection.rows", f"must be an array of at most {page_size} rows")
     for index, row in enumerate(inspection["rows"]):
         _validate_inspection_row(inspection_kind, row, f"inspection.rows[{index}]")
     _boolean(inspection["hasMore"], "inspection.hasMore")
     inspection_error = _string(inspection["error"], "inspection.error", empty=True, limit=128)
-    if inspection_kind == "none" and (page or inspection["rows"] or inspection["hasMore"]):
-        raise _error("inspection", "empty inspection must have no page or rows")
-    if inspection_error and (inspection["rows"] or inspection["hasMore"]):
-        raise _error("inspection", "failed inspection cannot publish rows")
+    inspection_request_id = _string(inspection["requestId"], "inspection.requestId", empty=True, limit=32)
+    if inspection_request_id and not re.fullmatch(r"[0-9a-f]{32}", inspection_request_id):
+        raise _error("inspection.requestId", "must be empty or 32 lowercase hexadecimal characters")
+    inspection_captured_at = _integer(inspection["capturedAt"], "inspection.capturedAt")
+    inspection_source_count = _integer(inspection["sourceCount"], "inspection.sourceCount", maximum=100_000)
+    if inspection_captured_at > wall_time:
+        raise _error("inspection.capturedAt", "cannot be later than the enclosing frame")
+    if inspection_kind == "none":
+        if (
+            page
+            or inspection["rows"]
+            or inspection["hasMore"]
+            or inspection_error
+            or inspection_request_id
+            or inspection_captured_at
+            or inspection_source_count
+        ):
+            raise _error("inspection", "empty inspection must have no identity, page, rows, or error")
+    elif inspection_error:
+        if (
+            inspection["rows"]
+            or inspection["hasMore"]
+            or inspection_request_id
+            or inspection_captured_at
+            or inspection_source_count
+        ):
+            raise _error("inspection", "failed inspection cannot publish rows or a snapshot identity")
+    else:
+        if not inspection_request_id or inspection_captured_at == 0:
+            raise _error("inspection", "successful inspection requires a snapshot identity and capture time")
+        expected_rows = min(page_size, max(0, inspection_source_count - page * page_size))
+        if page * page_size > inspection_source_count or len(inspection["rows"]) != expected_rows:
+            raise _error("inspection.rows", "page does not match the frozen source row count")
+        if inspection["hasMore"] != ((page + 1) * page_size < inspection_source_count):
+            raise _error("inspection.hasMore", "does not match the frozen source row count")
 
     motion = _keys(
         value["motion"],
@@ -581,6 +632,161 @@ def _validate_automation(value: dict[str, Any]) -> Snapshot:
     return Snapshot(dict(value))
 
 
+def _validate_seller_market(value: Any, wall_time: int) -> None:
+    row = _keys(
+        value,
+        {
+            "requestId",
+            "itemKey",
+            "complete",
+            "coverage",
+            "resultCount",
+            "bestCompetitorUnitPriceCopper",
+            "bestCompetitorQuantity",
+            "bestCompetitorResultCount",
+            "ambiguousOwnerUnitPriceCopper",
+            "managedUnitPriceCopper",
+            "managedAuctionCount",
+            "managedQuantity",
+            "error",
+            "capturedAt",
+        },
+        "sellerMarket",
+    )
+    request_id = _string(row["requestId"], "sellerMarket.requestId", empty=True, limit=32)
+    if request_id and not re.fullmatch(r"[0-9a-f]{32}", request_id):
+        raise _error("sellerMarket.requestId", "must be empty or 32 lowercase hexadecimal characters")
+    item_key = _string(row["itemKey"], "sellerMarket.itemKey", empty=True, limit=128)
+    if item_key:
+        try:
+            validate_item_key(item_key)
+        except (ScanFormatError, TypeError) as exc:
+            raise _error("sellerMarket.itemKey", "invalid canonical item key") from exc
+    complete = _boolean(row["complete"], "sellerMarket.complete")
+    if row["coverage"] not in {"none", "full", "incomplete", "truncated"}:
+        raise _error("sellerMarket.coverage", "invalid native market coverage")
+    result_count = _integer(row["resultCount"], "sellerMarket.resultCount", maximum=100_000)
+    best_price = row["bestCompetitorUnitPriceCopper"]
+    best_quantity = _integer(
+        row["bestCompetitorQuantity"], "sellerMarket.bestCompetitorQuantity", maximum=MAX_SAFE_INTEGER
+    )
+    best_rows = _integer(row["bestCompetitorResultCount"], "sellerMarket.bestCompetitorResultCount")
+    if best_price is not False:
+        _integer(
+            best_price, "sellerMarket.bestCompetitorUnitPriceCopper", minimum=1, maximum=MAX_SAFE_INTEGER
+        )
+        if best_rows < 1 or best_quantity < 1:
+            raise _error("sellerMarket.bestCompetitor", "known price requires quantity and result count")
+    elif best_quantity or best_rows:
+        raise _error("sellerMarket.bestCompetitor", "unknown price requires zero quantity and result count")
+    ambiguous = row["ambiguousOwnerUnitPriceCopper"]
+    if ambiguous is not False:
+        _integer(ambiguous, "sellerMarket.ambiguousOwnerUnitPriceCopper", minimum=1, maximum=MAX_SAFE_INTEGER)
+    managed_price = row["managedUnitPriceCopper"]
+    managed_count = _integer(
+        row["managedAuctionCount"], "sellerMarket.managedAuctionCount", maximum=MAX_SAFE_INTEGER
+    )
+    managed_quantity = _integer(
+        row["managedQuantity"], "sellerMarket.managedQuantity", maximum=MAX_SAFE_INTEGER
+    )
+    if managed_price is not False:
+        _integer(managed_price, "sellerMarket.managedUnitPriceCopper", minimum=1, maximum=MAX_SAFE_INTEGER)
+        if managed_count < 1 or managed_quantity < 1:
+            raise _error("sellerMarket.managed", "known price requires active auction count and quantity")
+    elif managed_count or managed_quantity:
+        raise _error("sellerMarket.managed", "unknown price requires zero count and quantity")
+    error = _string(row["error"], "sellerMarket.error", empty=True, limit=128)
+    captured_at = _integer(row["capturedAt"], "sellerMarket.capturedAt")
+    if captured_at > wall_time:
+        raise _error("sellerMarket.capturedAt", "cannot be later than the enclosing frame")
+    if not request_id:
+        if (
+            item_key
+            or complete
+            or row["coverage"] != "none"
+            or result_count
+            or best_price is not False
+            or best_quantity
+            or best_rows
+            or ambiguous is not False
+            or managed_price is not False
+            or managed_count
+            or managed_quantity
+            or error
+            or captured_at
+        ):
+            raise _error("sellerMarket", "idle observation must be empty")
+    elif not item_key:
+        raise _error("sellerMarket", "requested observation requires item identity")
+    elif (complete or error or row["coverage"] != "none") and captured_at == 0:
+        raise _error("sellerMarket", "finished observation requires capture time")
+    if complete and (
+        row["coverage"] != "full" or error or result_count < best_rows or result_count < managed_count
+    ):
+        raise _error("sellerMarket", "complete observation requires full matching coverage and aggregate")
+    if not complete and row["coverage"] == "full":
+        raise _error("sellerMarket.coverage", "full coverage must be complete")
+    if error and complete:
+        raise _error("sellerMarket", "failed query cannot be complete")
+    if best_rows > result_count:
+        raise _error("sellerMarket.bestCompetitorResultCount", "cannot exceed native result count")
+    if complete and best_price is False and best_rows:
+        raise _error("sellerMarket.bestCompetitor", "empty competitor fact is malformed")
+
+
+def _validate_native_result(value: Any, path: str) -> None:
+    if value is False:
+        return
+    if not isinstance(value, dict) or not isinstance(value.get("kind"), str):
+        raise _error(path, "expected false or a structured native result")
+    kind = value["kind"]
+    if kind in {"post_commodity", "post_item"}:
+        row = _keys(
+            value,
+            {"kind", "auctionId", "itemKey", "quantity", "unitPriceCopper", "depositCopper"},
+            path,
+        )
+        _integer(row["auctionId"], f"{path}.auctionId", minimum=1, maximum=MAX_SAFE_INTEGER)
+        try:
+            validate_item_key(row["itemKey"])
+        except (ScanFormatError, TypeError) as exc:
+            raise _error(f"{path}.itemKey", "invalid canonical item key") from exc
+        quantity = _integer(row["quantity"], f"{path}.quantity", minimum=1, maximum=200)
+        unit_price = _integer(
+            row["unitPriceCopper"], f"{path}.unitPriceCopper", minimum=1, maximum=MAX_SAFE_INTEGER
+        )
+        if unit_price > MAX_SAFE_INTEGER // quantity:
+            raise _error(path, "posting total exceeds the exact integer range")
+        if row["depositCopper"] is not False:
+            _integer(row["depositCopper"], f"{path}.depositCopper", maximum=MAX_SAFE_INTEGER)
+    elif kind == "cancel_auction":
+        row = _keys(value, {"kind", "auctionId", "itemKey", "remainingQuantity", "cancelCostCopper"}, path)
+        _integer(row["auctionId"], f"{path}.auctionId", minimum=1, maximum=MAX_SAFE_INTEGER)
+        try:
+            validate_item_key(row["itemKey"])
+        except (ScanFormatError, TypeError) as exc:
+            raise _error(f"{path}.itemKey", "invalid canonical item key") from exc
+        _integer(row["remainingQuantity"], f"{path}.remainingQuantity", minimum=1, maximum=MAX_SAFE_INTEGER)
+        if row["cancelCostCopper"] is not False:
+            _integer(row["cancelCostCopper"], f"{path}.cancelCostCopper", maximum=MAX_SAFE_INTEGER)
+    elif kind == "collect_return":
+        row = _keys(
+            value,
+            {"kind", "mailFingerprint", "itemKey", "quantity"},
+            path,
+        )
+        fingerprint = _string(row["mailFingerprint"], f"{path}.mailFingerprint", limit=64)
+        if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise _error(f"{path}.mailFingerprint", "must be a lowercase 64-hex native selection token")
+        try:
+            validate_item_key(row["itemKey"])
+        except (ScanFormatError, TypeError) as exc:
+            raise _error(f"{path}.itemKey", "invalid canonical item key") from exc
+        _integer(row["quantity"], f"{path}.quantity", minimum=1, maximum=MAX_SAFE_INTEGER)
+    else:
+        raise _error(f"{path}.kind", "unsupported structured native result")
+
+
 def _finite_number(value: Any, path: str) -> float | int:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
         raise _error(path, "expected a finite number")
@@ -620,6 +826,22 @@ def _validate_native_action(value: Any) -> None:
     elif kind == "collect_mail":
         row = _keys(value, {"kind", "messageLimit"}, "operation.action")
         _action_integer(row["messageLimit"], "operation.action.messageLimit", minimum=1, maximum=50)
+    elif kind == "collect_return":
+        row = _keys(
+            value,
+            {"kind", "itemKey", "quantity", "mailFingerprint"},
+            "operation.action",
+        )
+        try:
+            validate_item_key(row["itemKey"])
+        except (ScanFormatError, TypeError) as exc:
+            raise _error("operation.action.itemKey", "invalid canonical item key") from exc
+        _action_integer(row["quantity"], "operation.action.quantity", minimum=1)
+        fingerprint = _string(row["mailFingerprint"], "operation.action.mailFingerprint", limit=64)
+        if not re.fullmatch(r"[0-9a-f]{64}", fingerprint):
+            raise _error(
+                "operation.action.mailFingerprint", "must be a lowercase 64-hex native selection token"
+            )
     elif kind in {"interact", "move_route"}:
         field = "targetId" if kind == "interact" else "routeId"
         row = _keys(value, {"kind", field}, "operation.action")
@@ -642,7 +864,7 @@ def _validate_inspection_row(kind: str, value: Any, path: str) -> None:
         except (ScanFormatError, TypeError) as exc:
             raise _error(f"{path}.itemKey", "invalid canonical item key") from exc
         _string(row["itemLink"], f"{path}.itemLink", limit=512)
-        _integer(row["count"], f"{path}.count", minimum=1, maximum=9_007_199_254_740_991)
+        _integer(row["count"], f"{path}.count", minimum=1, maximum=MAX_SAFE_INTEGER)
         for field in ("locked", "bound", "commodity"):
             _boolean(row[field], f"{path}.{field}")
     elif kind == "owned":
@@ -662,22 +884,22 @@ def _validate_inspection_row(kind: str, value: Any, path: str) -> None:
             },
             path,
         )
-        _integer(row["auctionId"], f"{path}.auctionId", minimum=1)
+        _integer(row["auctionId"], f"{path}.auctionId", minimum=1, maximum=MAX_SAFE_INTEGER)
         try:
             validate_item_key(row["itemKey"])
         except (ScanFormatError, TypeError) as exc:
             raise _error(f"{path}.itemKey", "invalid canonical item key") from exc
         _string(row["itemLink"], f"{path}.itemLink", limit=512)
-        _integer(row["quantity"], f"{path}.quantity", minimum=1, maximum=9_007_199_254_740_991)
+        _integer(row["quantity"], f"{path}.quantity", minimum=1, maximum=MAX_SAFE_INTEGER)
         buyout_known = _boolean(row["buyoutKnown"], f"{path}.buyoutKnown")
-        buyout = _integer(row["buyoutCopper"], f"{path}.buyoutCopper")
+        buyout = _integer(row["buyoutCopper"], f"{path}.buyoutCopper", maximum=MAX_SAFE_INTEGER)
         if not buyout_known and buyout != 0:
             raise _error(f"{path}.buyoutCopper", "unknown buyout must be zero")
         if row["status"] not in {"active", "sold"}:
             raise _error(f"{path}.status", "invalid owned auction status")
         _boolean(row["cancelAllowed"], f"{path}.cancelAllowed")
         cost_known = _boolean(row["cancelCostKnown"], f"{path}.cancelCostKnown")
-        cost = _integer(row["cancelCostCopper"], f"{path}.cancelCostCopper")
+        cost = _integer(row["cancelCostCopper"], f"{path}.cancelCostCopper", maximum=MAX_SAFE_INTEGER)
         if not cost_known and cost != 0:
             raise _error(f"{path}.cancelCostCopper", "unknown cancellation cost must be zero")
     elif kind == "mail":
@@ -692,20 +914,70 @@ def _validate_inspection_row(kind: str, value: Any, path: str) -> None:
                 "returned",
                 "canDelete",
                 "daysLeft",
+                "isGM",
+                "attachments",
             },
             path,
         )
         _integer(row["index"], f"{path}.index", minimum=1, maximum=1_000_000)
-        _integer(row["moneyCopper"], f"{path}.moneyCopper")
-        _integer(row["codCopper"], f"{path}.codCopper")
+        _integer(row["moneyCopper"], f"{path}.moneyCopper", maximum=MAX_SAFE_INTEGER)
+        _integer(row["codCopper"], f"{path}.codCopper", maximum=MAX_SAFE_INTEGER)
         attachment_count = _integer(row["attachmentCount"], f"{path}.attachmentCount", maximum=16)
         item_ids = row["attachmentItemIDs"]
         if not isinstance(item_ids, list) or len(item_ids) != attachment_count:
             raise _error(f"{path}.attachmentItemIDs", "must exactly describe the attachment count")
         for index, item_id in enumerate(item_ids):
-            _integer(item_id, f"{path}.attachmentItemIDs[{index}]", minimum=1)
+            _integer(item_id, f"{path}.attachmentItemIDs[{index}]", minimum=1, maximum=MAX_SAFE_INTEGER)
         _boolean(row["returned"], f"{path}.returned")
         _boolean(row["canDelete"], f"{path}.canDelete")
+        _boolean(row["isGM"], f"{path}.isGM")
+        attachments = row["attachments"]
+        if not isinstance(attachments, list) or len(attachments) != attachment_count:
+            raise _error(f"{path}.attachments", "must exactly describe every attachment")
+        previous_attachment = 0
+        for index, attachment in enumerate(attachments):
+            part = _keys(
+                attachment,
+                {"attachment", "itemID", "itemKey", "quantity", "selectionToken"},
+                f"{path}.attachments[{index}]",
+            )
+            attachment_index = _integer(
+                part["attachment"], f"{path}.attachments[{index}].attachment", minimum=1, maximum=16
+            )
+            if attachment_index <= previous_attachment:
+                raise _error(f"{path}.attachments", "attachment indices must be strictly increasing")
+            previous_attachment = attachment_index
+            item_id = _integer(
+                part["itemID"], f"{path}.attachments[{index}].itemID", minimum=1, maximum=MAX_SAFE_INTEGER
+            )
+            if item_id != item_ids[index]:
+                raise _error(f"{path}.attachments[{index}].itemID", "does not match attachmentItemIDs")
+            item_key = part["itemKey"]
+            if item_key is not False:
+                try:
+                    validate_item_key(item_key)
+                except (ScanFormatError, TypeError) as exc:
+                    raise _error(
+                        f"{path}.attachments[{index}].itemKey", "invalid canonical item key"
+                    ) from exc
+                if item_key.split(":", 1)[0] != str(item_id):
+                    raise _error(f"{path}.attachments[{index}].itemKey", "does not match itemID")
+            _integer(
+                part["quantity"], f"{path}.attachments[{index}].quantity", minimum=1, maximum=MAX_SAFE_INTEGER
+            )
+            selection = part["selectionToken"]
+            if selection is not False:
+                token = _string(selection, f"{path}.attachments[{index}].selectionToken", limit=64)
+                if not re.fullmatch(r"[0-9a-f]{64}", token):
+                    raise _error(
+                        f"{path}.attachments[{index}].selectionToken",
+                        "must be false or a lowercase 64-hex native selection token",
+                    )
+                if row["isGM"] or row["codCopper"] != 0 or item_key is False:
+                    raise _error(
+                        f"{path}.attachments[{index}].selectionToken",
+                        "token requires a non-GM non-COD exact attachment",
+                    )
         days_left = _finite_number(row["daysLeft"], f"{path}.daysLeft")
         if not 0 <= days_left <= 365:
             raise _error(f"{path}.daysLeft", "must be within the one year bound")

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
+from typing import cast
 
 from crowley_common.house import House
 from crowley_common.scanformat import ScanFormatError
@@ -109,6 +111,19 @@ class CollectMail:
 
 
 @dataclass(frozen=True, slots=True)
+class CollectReturn:
+    item_key: str
+    quantity: int
+    mail_fingerprint: str
+
+    def __post_init__(self) -> None:
+        validate_item_key(self.item_key)
+        _integer(self.quantity, "quantity", minimum=1, maximum=MAX_INTEGER)
+        if type(self.mail_fingerprint) is not str or not re.fullmatch(r"[0-9a-f]{64}", self.mail_fingerprint):
+            raise BatchError("mailFingerprint must be a full lowercase 64-hex selection token")
+
+
+@dataclass(frozen=True, slots=True)
 class Interact:
     target_id: str
 
@@ -124,8 +139,8 @@ class MoveRoute:
         _target_id(self.route_id, "routeId")
 
 
-type Action = PostCommodity | PostItem | CancelAuction | CollectMail | Interact | MoveRoute
-_ACTION_TYPES = (PostCommodity, PostItem, CancelAuction, CollectMail, Interact, MoveRoute)
+type Action = PostCommodity | PostItem | CancelAuction | CollectMail | CollectReturn | Interact | MoveRoute
+_ACTION_TYPES = (PostCommodity, PostItem, CancelAuction, CollectMail, CollectReturn, Interact, MoveRoute)
 
 
 def action_object(action: Action) -> dict[str, object]:
@@ -147,6 +162,13 @@ def action_object(action: Action) -> dict[str, object]:
         }
     if isinstance(action, CollectMail):
         return {"kind": "collect_mail", "messageLimit": action.message_limit}
+    if isinstance(action, CollectReturn):
+        return {
+            "kind": "collect_return",
+            "itemKey": action.item_key,
+            "mailFingerprint": action.mail_fingerprint,
+            "quantity": action.quantity,
+        }
     if isinstance(action, Interact):
         return {"kind": "interact", "targetId": action.target_id}
     if isinstance(action, MoveRoute):
@@ -189,6 +211,13 @@ def _parse_action(value: object) -> Action:
     if kind == "collect_mail":
         row = _exact_keys(value, {"kind", "messageLimit"}, kind)
         return CollectMail(row["messageLimit"])  # type: ignore[arg-type]
+    if kind == "collect_return":
+        row = _exact_keys(value, {"kind", "itemKey", "quantity", "mailFingerprint"}, kind)
+        return CollectReturn(
+            cast(str, row["itemKey"]),
+            cast(int, row["quantity"]),
+            cast(str, row["mailFingerprint"]),
+        )
     if kind == "interact":
         row = _exact_keys(value, {"kind", "targetId"}, kind)
         return Interact(row["targetId"])  # type: ignore[arg-type]

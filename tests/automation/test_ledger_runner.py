@@ -18,6 +18,7 @@ from crowley_automation.model import (
     CollectMail,
     MoveRoute,
     PostCommodity,
+    PostItem,
     action_object,
     canonical_json,
 )
@@ -534,6 +535,47 @@ def test_success_requires_callback_and_verified_postcondition(tmp_path: Path) ->
     assert backend.dispatched == [(0, 0)]
     assert run_batch(runner, batch, backend)["state"] == "succeeded"
     assert backend.dispatched == [(0, 0)]
+
+
+def test_manual_post_item_accepts_its_structured_native_result(tmp_path: Path) -> None:
+    ledger, runner = runner_for(tmp_path / "ledger.sqlite3")
+    batch = make_batch(PostItem("456:p7", 1, 999, 12, 12))
+
+    class PostItemBackend(FakeBackend):
+        def dispatch(
+            self,
+            action: object,
+            *,
+            batch_id: str,
+            ordinal: int,
+            step_index: int,
+            action_digest: str,
+            admission: Admission,
+        ) -> DispatchReceipt:
+            receipt = super().dispatch(
+                action,
+                batch_id=batch_id,
+                ordinal=ordinal,
+                step_index=step_index,
+                action_digest=action_digest,
+                admission=admission,
+            )
+            return replace(
+                receipt,
+                result={
+                    "kind": "post_item",
+                    "auctionId": 77,
+                    "itemKey": "456:p7",
+                    "quantity": 1,
+                    "unitPriceCopper": 999,
+                    "depositCopper": 2,
+                },
+            )
+
+    status = run_batch(runner, batch, PostItemBackend())
+
+    assert status["state"] == "succeeded"
+    assert ledger.status(batch.batch_id)["actions"][0]["state"] == "succeeded"
 
 
 @pytest.mark.parametrize(

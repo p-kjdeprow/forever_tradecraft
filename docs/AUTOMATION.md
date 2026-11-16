@@ -5,6 +5,11 @@ harness tests do not deploy an addon or qualify protected calls on the selected 
 The CLI reports runtimeImplemented separately from liveQualification. Current live client
 qualification is unverified, and no qualified route/target profiles are shipped.
 
+For continuous commodity selling under an explicitly approved bounded policy, read
+[SELLER](SELLER.md). That interface always matches price, uses small posting batches and
+recycles only the exact managed item. Its policy/session approval is separate from the
+manual exact-batch interface below.
+
 Read HANDOFF.md and check the installed version before operating. Do not assemble raw GUI
 clicks, call protected APIs, type /cauto commands manually, or resurrect Queue.lua. Runtime
 owns staging, exact argument readback, rate limits, receipts and scanner coordination.
@@ -23,7 +28,8 @@ crowley-automation status
 
 observe captures native identity, boot, publication sequence, relevant UI, gold, movement,
 target/hover/bindings, native operation and ownership. It sends no protected action.
-Inspection pages contain at most four rows; follow hasMore with the next page. The owned
+Inventory/owned inspection pages contain at most four rows; mail pages contain one message.
+Follow hasMore with the next page. The owned
 view requests fresh native data under exclusive AH ownership and does not depend on a
 scanner-populated cache. Inspection can type a bounded read-only command, so it still needs
 focus, physical idleness and the GUI lease. It never pays COD or sends mail.
@@ -39,14 +45,19 @@ the batch ID; any field change changes the ID and requires matching authorizatio
 | post_commodity / post_item | itemKey, quantity, unitPriceCopper, durationHours, maxDepositCopper |
 | cancel_auction | auctionId, maxCancelCostCopper |
 | collect_mail | messageLimit |
+| collect_return | itemKey, quantity, mailFingerprint |
 | interact | targetId |
 | move_route | routeId |
 
-Each action includes kind. Prices/cost caps are integer copper, quantity is 1..200, duration
+Each action includes kind. Prices/cost caps are integer copper, posting quantity is 1..200, duration
 is 12/24/48 hours, and messageLimit is 1..50. Posting matches the full canonical itemKey and
 actual bag identity. Item prices are unit prices in the public spec; native item posting
 uses total bid/buyout. The native callback recomputes stock, variant, costs, funds and
 ownership. Unavailable facts refuse; no names or older observations substitute for identity.
+
+collect_return is a selective full-attachment take. Its mailFingerprint is a fresh opaque native
+selection token, not a message or auction ID. Quantity must match the full attachment and can
+exceed the 200-unit posting limit. It cannot take COD, money, GM mail or a different item.
 
 Prepare records immutable intent without executing it. It does not arm a session. Save
 specs and evidence privately. Runtime uses the canonical XDG state ledger shared with host;
@@ -96,7 +107,7 @@ validated files and reference those IDs in a batch. Changing measurements change
 Missing profiles disable only referenced interaction/movement actions; there are no guessed
 stock profiles or default coordinates.
 
-Both profiles bind house, character, actual numeric native clientBuild and instanceId.
+Both profiles bind house, character, the actual native clientBuild string and instanceId.
 NPC targets pin exact name/GUID and expected AH UI. Mailbox profiles pin the exact Mailbox
 world-object hover, measured screen rect, and a reviewed raw player-position anchor/radius.
 The runtime moves the pointer without clicking, then verifies fresh hover/cursor, native

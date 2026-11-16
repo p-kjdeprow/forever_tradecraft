@@ -92,9 +92,25 @@ def test_observe_exposes_motion_and_operation_without_private_chat_or_mail_text(
     value["inspection"] = {
         "kind": "mail",
         "page": 0,
-        "rows": [{"subject": "private mail header"}],
+        "rows": [
+            {
+                "index": 1,
+                "moneyCopper": 0,
+                "codCopper": 0,
+                "attachmentCount": 0,
+                "attachmentItemIDs": [],
+                "returned": False,
+                "canDelete": True,
+                "daysLeft": 30.0,
+                "isGM": False,
+                "attachments": [],
+            }
+        ],
         "hasMore": False,
         "error": "",
+        "requestId": "a" * 32,
+        "capturedAt": value["wallTime"],
+        "sourceCount": 1,
     }
 
     @contextmanager

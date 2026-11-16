@@ -61,8 +61,8 @@ snapshots require the new image contract. See [MARKET_RECOVERY](MARKET_RECOVERY.
 
 Scanner and automation publish independent CRS byte canvases with distinct kind/schema,
 boot/sequence epochs and screen crops. Scanner schema 1 carries plan, progress, timing,
-persistence and ACK facts. Automation schema 2 carries native context/UI, motion, staged
-arguments, bounded inspections and receipts. Malformed automation facts cannot invalidate
+persistence and ACK facts. Automation schema 3 carries native context/UI, motion, staged
+arguments, bounded inspections, targeted seller queries and structured native receipts. Malformed automation facts cannot invalidate
 scanner bytes. A decoder rejects unknown boots unless an explicitly expected reload arms
 that transition; cached observations keep their original capture times.
 
@@ -72,6 +72,13 @@ the digest before admission. A visible button callback consumes staging exactly 
 makes one bounded native posting/cancellation/mail call. Real pointer press and release,
 not a command exit code, establish dispatch. Native completion requires a causal verified
 postcondition; missing or contradictory evidence remains uncertain.
+
+Continuous commodity selling adds one foreground controller, pure pricing/stock decisions,
+native fresh-fact collection and session tables in the same private SQLite ledger. Immutable
+policy approval authorizes only derived child batches; the runner revalidates those derivations,
+stock and cost reservations before effects. Sessions retain their caps across explicit re-arm.
+No scanner history, market database, second queue or workflow service drives selling.
+See [SELLER](SELLER.md) and [SELLER_IMPLEMENTATION](SELLER_IMPLEMENTATION.md).
 
 The local ledger stores immutable batch identity, action progress and per-primitive dispatch
 markers/receipts. Exact batch confirmation and a separate expiring current-boot session arm
@@ -103,6 +110,7 @@ Client assumptions are explicit and bounded by their evidence:
 | Native PostCommodity(location,duration,quantity,unitPrice) and PostItem(location,duration,quantity,minBid,buyout) signatures | Installed Auctionator source and historical 70862 API probe; actual protected behavior on 70938 still needs live qualification |
 | Empty native Lua tables serialize as arrays | Captured scanner fixtures; keyed collections normalize only through the strict scan contract |
 | Search events lack request IDs and foreign same-key work is ambiguous | Native scanner evidence; overlapping queries become incomplete |
+| Equal-price commodity purchase rank and cancellation-to-mail linkage are unavailable | Explicit seller policy uses one matched-price refresh per item per 60 seconds and exact commodity returns bounded by outstanding cancellation quantity |
 | Item result IDs can change after partial sales or reposts | Native evidence; market comparison uses owner/price continuity, not disappearing IDs alone |
 | Mutter IdleMonitor measures physical input without counting XTEST | Existing host qualification; unavailable presence fails input admission |
 | XTEST delivery can lag about a second and compositor focus matters | Existing host qualification; commands wait for fresh chat readback before Return |

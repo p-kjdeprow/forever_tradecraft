@@ -1,6 +1,6 @@
 # Current handoff
 
-Updated 2026-11-15. The user authorized the repository refactor, parallel Luna implementation
+Updated 2026-11-16. The user authorized the repository refactor, parallel Luna implementation
 and independent Sol review loops, commits on main, and cleanup of task worktrees/temp files.
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
@@ -23,11 +23,18 @@ reviews after Luna implementation/fix loops. The canonical source is in packages
 the old src/crowley and root addon/deploy resource copies are removed. Installed addons are
 copies, not links, and this work did not deploy packages or change running services.
 
-The next feature is the [continuous seller](SELLER_PLAN.md), currently planning only. The user
-requires small posting batches, 60-second market checks, always matching price without undercutting,
-and recycling only the managed active listings for the exact item that runs out of bag stock.
-Native priority observations, durable selling-session authorization and selective return collection
-are planned extensions, not capabilities of the current released automation CLI.
+The [continuous seller](SELLER.md) is implemented in source through parallel Luna/Sol loops.
+See the [completion record](SELLER_IMPLEMENTATION.md) and [approved plan](SELLER_PLAN.md).
+It posts small commodity batches, checks each item every 60 seconds, always matches price without
+undercutting, and recycles only managed active listings of the exact item when another batch is
+needed and admitted bag stock is exhausted. The user approved one matched-price batch per item
+per 60 seconds during tied-price competition despite unobservable queue rank, and exact-commodity
+mail collection up to outstanding cancelled quantity without an auction-to-mail link.
+No priority/source identity is invented. Session authorization binds the full immutable policy
+digest and explicit current boot; runner-derived children preserve stock, expiry, spending and
+session-total recycle limits across explicit resume. Native automation schema is 3, addon version
+0.3.0. Scanner schema and scheduling are independent. Source changes do not update installed CLI,
+addons or services. All three independent Sol source reviews are READY with no remaining findings.
 
 Before this refactor, the deployed scanner used catalog revision 9 on Forever build 70938,
 interface 16001. Its periodic scan plan is unchanged by this task. The dashboard's minimum-turnover
@@ -54,14 +61,17 @@ house, character, calibrated signed turn rates and measured waypoints. Do not re
 coordinates. Stored native API probes establish 70862 availability, not 70938 protected behavior.
 Current-client qualification is still required before a real operation is armed.
 
-Final parent verification: full default suite 1203 passed / 31 skipped; disposable Timescale
-migration/ingestion/item-loader/house/client-data checks 37 passed; real packaged-migration
-backup inventory 1 passed. Ruff check and format pass, Pyright reports zero errors, and generated
-target validation passes. The full suite includes isolated wheel/SDIST rebuilds, exact package
-resources, installation of all five wheels outside the checkout, forbidden-import checks and
-all eight CLI help commands. All 12 applied migration files retain their original bytes.
-No production database, real game input or live trading was used. Task-owned test resources are
-removed at completion; main is the only worktree. The pre-existing private .archive is retained.
+Final seller verification: full default suite 1323 passed / 31 skipped; parent automation suite
+283 passed, plus Store 35 passed after the final message-only edit. Ruff check and format pass,
+Pyright reports zero errors, and generated target validation passes. The full suite includes
+isolated wheel/SDIST rebuilds, exact package resources, installation of all five wheels outside
+the checkout, forbidden-import checks, all eight CLI help commands and every seller subcommand.
+Both updated skills validate. All 12 applied migration files retain their original bytes;
+this seller work changes no market SQL. The earlier refactor separately passed 37 disposable
+Timescale checks and one real packaged-migration backup inventory check.
+No production database, real game input, deployment or live trading was used. No task-owned
+temporary artifacts remain; main is the only worktree. Pre-existing private .archive evidence
+and distribution artifacts are retained.
 
 Operational docs: [AUTOMATION](AUTOMATION.md), [GAME_SETUP](GAME_SETUP.md), [REPEATING_SCANS](REPEATING_SCANS.md),
 [LAUNCH_TARGET](LAUNCH_TARGET.md), [WATCHLIST](WATCHLIST.md), [MARKET_RECOVERY](MARKET_RECOVERY.md)

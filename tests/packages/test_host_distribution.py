@@ -223,3 +223,9 @@ assert 'Crowley_Host/Host.lua' in addons
     for script in _SCRIPTS:
         result = _run([str(venv / "bin" / script), "--help"], env=environment)
         assert "usage:" in result.stdout.lower(), script
+
+    for command in ("inspect", "preview", "start", "status", "revoke", "release-expired"):
+        result = _run([str(venv / "bin/crowley-automation"), "seller", command, "--help"], env=environment)
+        assert "usage:" in result.stdout.lower(), command
+        if command in {"start", "release-expired"}:
+            assert "--confirm-policy-id" in result.stdout and "--arm" in result.stdout

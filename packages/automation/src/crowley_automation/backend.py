@@ -1,4 +1,4 @@
-"""One guarded desktop adapter for the schema-2 local operation contract."""
+"""One guarded desktop adapter for the schema-3 local operation contract."""
 
 from __future__ import annotations
 
@@ -52,11 +52,17 @@ COMMAND_TIMEOUT_SECONDS = 5.0
 STAGE_TIMEOUT_SECONDS = 90.0
 RECEIPT_TIMEOUT_SECONDS = 45.0
 _HEX_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_SELLER_REQUEST_ID = re.compile(r"[0-9a-f]{32}\Z")
+_MAX_SELLER_MANAGED_AUCTION_IDS = 1024
 _RECEIPT_FIELDS = ("callbackDelivered", "postcondition", "actionComplete")
 
 
 class DesktopBackendError(RuntimeError):
     """Desktop state or a protected input did not satisfy the operation contract."""
+
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,12 +353,48 @@ class DesktopBackend:
         self._staged_receipt_sequence = 0
         self._deadline_wall = 0
         self._snapshot: CapturedFrame | None = None
+        self._seller_ah_target_id: str | None = None
+        self._inspection_snapshots: dict[str, tuple[str, int, int, str]] = {}
         self.preflight_gold: int | None = None
         self.cleanup_state = "not_needed"
         self.evidence_state = "not_written"
 
     def set_deadline(self, expires_at: int) -> None:
         self._deadline_wall = expires_at
+
+    def bind_seller_ah_target(self, target_id: str) -> None:
+        """Bind seller queries and AH clicks to one configured, reviewed AH NPC."""
+        profile = self.targets.get(target_id)
+        if (
+            profile is None
+            or profile.kind != "npc"
+            or profile.expected_ui != "ah"
+            or (profile.house, profile.character) != (self.config.house, self.config.character)
+        ):
+            raise DesktopBackendError("seller Auction House target is not a matching configured NPC profile")
+        self._seller_ah_target_id = target_id
+
+    def _check_seller_ah_source(self, value: dict[str, Any]) -> None:
+        target_id = self._seller_ah_target_id
+        profile = None if target_id is None else self.targets.get(target_id)
+        if profile is None:
+            raise DesktopBackendError("seller Auction House source profile has not been bound")
+        target = value["motion"]["target"]
+        auctioneer = value["auctioneer"]
+        if (
+            value["ahOpen"] is not True
+            or value["motion"]["instance"] != profile.instance_id
+            or not target["present"]
+            or target["guid"] != profile.guid
+            or target["name"] != profile.name
+            or not target["rangeAvailable"]
+            or not target["withinRange"]
+            or not auctioneer["targetPresent"]
+            or auctioneer["targetName"] != profile.name
+            or not auctioneer["rangeAvailable"]
+            or not auctioneer["withinTradeRange"]
+        ):
+            raise DesktopBackendError("open Auction House is not bound to the measured seller NPC source")
 
     def _fresh(self, *, timeout: float = 5.0) -> CapturedFrame:
         captured = self.io.capture(timeout=timeout)
@@ -439,11 +481,95 @@ class DesktopBackend:
             staged_action_digest=digest,
             ready=operation["ready"] if operation["batchId"] else None,
             receipt_sequence=operation["receipt"]["sequence"],
+            client_build=value["context"]["clientBuild"],
         )
 
     def observe_native(self) -> dict[str, Any]:
-        """Return one fresh, identity-checked schema-2 observation for read-only CLI output."""
+        """Return one fresh, identity-checked automation observation for read-only CLI output."""
         return self._fresh().value
+
+    def observe_seller_market(
+        self, item_key: str, request_id: str, managed_ids: frozenset[int] = frozenset()
+    ) -> dict[str, object]:
+        """Request one targeted commodity query and return only its matching complete result."""
+        from .model import validate_item_key
+
+        try:
+            validate_item_key(item_key)
+        except ValueError as exc:
+            raise DesktopBackendError("seller market item key is not canonical") from exc
+        if ":" in item_key:
+            raise DesktopBackendError("targeted seller search supports canonical commodity identities only")
+        if type(request_id) is not str or _SELLER_REQUEST_ID.fullmatch(request_id) is None:
+            raise DesktopBackendError("seller market request ID must be 32 lowercase hexadecimal characters")
+        if (
+            type(managed_ids) is not frozenset
+            or len(managed_ids) > _MAX_SELLER_MANAGED_AUCTION_IDS
+            or any(type(auction_id) is not int or auction_id < 1 for auction_id in managed_ids)
+        ):
+            raise DesktopBackendError("seller managed auction IDs exceed the exact bounded query contract")
+
+        before = self._fresh_guard()
+        if not before.value["ahOpen"]:
+            raise DesktopBackendError("targeted seller market query requires the auction house to be open")
+        self._check_seller_ah_source(before.value)
+        boot = before.value["boot"]
+        baseline_sequence = before.sample.frame.sequence if before.sample.frame is not None else 0
+        item_id = item_key
+        self._send_command(f"/cauto market {request_id} {item_id}", require_seller_ah=True)
+        for command in _seller_market_id_commands(request_id, managed_ids):
+            self._send_command(command, require_seller_ah=True)
+        self._send_command(f"/cauto market_start {request_id} {len(managed_ids)}", require_seller_ah=True)
+
+        def completed(value: dict[str, Any]) -> bool:
+            result = value["sellerMarket"]
+            return result["requestId"] == request_id and (result["complete"] is True or bool(result["error"]))
+
+        captured = self._wait(completed, 20.0)
+        value = captured.value
+        result = value["sellerMarket"]
+        frame = captured.sample.frame
+        if (
+            frame is None
+            or frame.sequence <= baseline_sequence
+            or value["boot"] != boot
+            or result["requestId"] != request_id
+            or result["itemKey"] != item_key
+        ):
+            raise DesktopBackendError(
+                "seller market result does not match the current request and client boot"
+            )
+        if result["coverage"] not in {"none", "full", "incomplete", "truncated"}:
+            raise DesktopBackendError("seller market result has unknown native coverage")
+        captured_at = result["capturedAt"]
+        if (
+            type(captured_at) is not int
+            or captured_at > value["wallTime"]
+            or value["wallTime"] - captured_at > int(MAX_FRAME_AGE_SECONDS)
+        ):
+            raise DesktopBackendError("seller market result is stale or has invalid capture time")
+        if result["error"]:
+            if result["complete"] is not False or result["coverage"] != "none":
+                raise DesktopBackendError("seller market error result has contradictory coverage")
+        elif result["complete"] is not True or result["coverage"] != "full":
+            raise DesktopBackendError("seller market query did not establish complete full coverage")
+        managed_count = result["managedAuctionCount"]
+        managed_quantity = result["managedQuantity"]
+        managed_price = result["managedUnitPriceCopper"]
+        if (
+            type(managed_count) is not int
+            or not 0 <= managed_count <= len(managed_ids)
+            or type(managed_quantity) is not int
+            or managed_quantity < 0
+            or (managed_price is not False and (type(managed_price) is not int or managed_price < 1))
+        ):
+            raise DesktopBackendError("seller market result has malformed managed-listing aggregates")
+        return {
+            "boot": value["boot"],
+            "sequence": frame.sequence,
+            "wallTime": value["wallTime"],
+            "sellerMarket": result,
+        }
 
     def stage(
         self,
@@ -470,7 +596,7 @@ class DesktopBackend:
             self._send_command("/cauto clear")
         for command in self._stage_commands(action, batch_id, ordinal, step_index, expires):
             self._send_command(command)
-        from .model import Interact, MoveRoute
+        from .model import CollectReturn, Interact, MoveRoute
 
         while self.io.monotonic() < deadline:
             captured = self._fresh(timeout=COMMAND_TIMEOUT_SECONDS)
@@ -484,7 +610,13 @@ class DesktopBackend:
                 if actual is False or _action_digest(actual) != action_digest:
                     raise DesktopBackendError("native staged arguments differ from immutable batch intent")
                 if operation["error"]:
-                    raise DesktopBackendError(f"native preflight refused operation: {operation['error']}")
+                    error = operation["error"]
+                    if isinstance(action, CollectReturn) and error == "insufficient_return_bag_slots":
+                        raise DesktopBackendError(
+                            f"native preflight refused operation: {error}",
+                            code="insufficient_return_bag_slots",
+                        )
+                    raise DesktopBackendError(f"native preflight refused operation: {error}")
                 if operation["ready"]:
                     if isinstance(action, Interact):
                         profile = self.targets.get(action.target_id)
@@ -518,7 +650,15 @@ class DesktopBackend:
     def _stage_commands(
         action: object, batch_id: str, ordinal: int, step: int, expires: int
     ) -> tuple[str, ...]:
-        from .model import CancelAuction, CollectMail, Interact, MoveRoute, PostCommodity, PostItem
+        from .model import (
+            CancelAuction,
+            CollectMail,
+            CollectReturn,
+            Interact,
+            MoveRoute,
+            PostCommodity,
+            PostItem,
+        )
 
         rows = [f"/cauto begin {batch_id} {ordinal} {step}"]
         if isinstance(action, (PostCommodity, PostItem)):
@@ -542,6 +682,14 @@ class DesktopBackend:
                     f"/cauto arg maxCancelCostCopper {action.max_cancel_cost_copper}",
                 )
             )
+        elif isinstance(action, CollectReturn):
+            rows += [
+                "/cauto kind collect_return",
+                f"/cauto arg quantity {action.quantity}",
+                f"/cauto arg mailFingerprint {action.mail_fingerprint}",
+            ]
+            for index in range(0, len(action.item_key), 60):
+                rows.append(f"/cauto key {index // 60 + 1} {action.item_key[index : index + 60]}")
         elif isinstance(action, CollectMail):
             rows.extend(("/cauto kind collect_mail", f"/cauto arg messageLimit {action.message_limit}"))
         elif isinstance(action, Interact):
@@ -556,8 +704,19 @@ class DesktopBackend:
                 raise DesktopBackendError("native command exceeds its 128-byte grammar bound")
         return tuple(rows)
 
-    def _send_command(self, command: str) -> CapturedFrame:
-        captured = self._fresh_guard()
+    def _send_command(self, command: str, *, require_seller_ah: bool = False) -> CapturedFrame:
+        def checked_fresh() -> CapturedFrame:
+            current = self._fresh_guard()
+            if require_seller_ah:
+                self._check_seller_ah_source(current.value)
+            return current
+
+        def command_input_guard() -> None:
+            current = self._guard()
+            if require_seller_ah:
+                self._check_seller_ah_source(current.value)
+
+        captured = checked_fresh()
         chat = captured.value["chatEdit"]
         if chat["active"]:
             if not chat["focused"] or chat["text"]:
@@ -565,7 +724,8 @@ class DesktopBackend:
         else:
 
             def open_chat_guard() -> None:
-                current = self._fresh_guard().value["chatEdit"]
+                guarded = checked_fresh()
+                current = guarded.value["chatEdit"]
                 if current["active"] or current["focused"] or current["text"]:
                     raise DesktopBackendError("chat state changed before opening command input")
 
@@ -576,7 +736,7 @@ class DesktopBackend:
             if captured.value["chatEdit"]["text"]:
                 raise DesktopBackendError("chat opened with unexpected text")
 
-        self.io.type_text(command, self._input_guard)
+        self.io.type_text(command, command_input_guard)
         typed = self._wait(
             lambda value: (
                 value["chatEdit"]["active"]
@@ -589,7 +749,8 @@ class DesktopBackend:
             raise DesktopBackendError("exact command text was not published")
 
         def submit_guard() -> None:
-            current = self._fresh_guard().value["chatEdit"]
+            guarded = checked_fresh()
+            current = guarded.value["chatEdit"]
             if not current["active"] or not current["focused"] or current["text"] != command:
                 raise DesktopBackendError("exact focused chat command changed before Return")
 
@@ -627,9 +788,17 @@ class DesktopBackend:
             or admission.session_boot_id != captured.value["boot"]
         ):
             raise DesktopBackendError("last-moment native staging or session identity changed")
-        from .model import CancelAuction, CollectMail, Interact, MoveRoute, PostCommodity, PostItem
+        from .model import (
+            CancelAuction,
+            CollectMail,
+            CollectReturn,
+            Interact,
+            MoveRoute,
+            PostCommodity,
+            PostItem,
+        )
 
-        if isinstance(action, (PostCommodity, PostItem, CancelAuction, CollectMail)):
+        if isinstance(action, (PostCommodity, PostItem, CancelAuction, CollectMail, CollectReturn)):
             return self._click_native(action, batch_id, ordinal, step_index, action_digest, captured)
         if isinstance(action, Interact):
             return self._interact(action, batch_id, ordinal, step_index, action_digest, captured)
@@ -640,7 +809,7 @@ class DesktopBackend:
     def _click_native(
         self, action: object, batch_id: str, ordinal: int, step: int, digest: str, staged: CapturedFrame
     ) -> DispatchReceipt:
-        from .model import CollectMail
+        from .model import CollectMail, CollectReturn
 
         value = staged.value
         rect = value["operation"]["buttonRect"]
@@ -652,8 +821,8 @@ class DesktopBackend:
             ordinal=ordinal,
             step=step,
             digest=digest,
-            required_ui="mail" if isinstance(action, CollectMail) else "ah",
-            requires_ah=not isinstance(action, CollectMail),
+            required_ui="mail" if isinstance(action, (CollectMail, CollectReturn)) else "ah",
+            requires_ah=not isinstance(action, (CollectMail, CollectReturn)),
         )
 
     def _click(
@@ -838,6 +1007,8 @@ class DesktopBackend:
             or (requires_ah and value["ownership"]["ahOwner"] != "automation")
         ):
             raise DesktopBackendError("staged action, UI, ownership, or target changed before press")
+        if required_ui == "ah" and self._seller_ah_target_id is not None:
+            self._check_seller_ah_source(value)
 
     def _check_mailbox_hover(
         self, captured: CapturedFrame, profile: TargetProfile, endpoint: tuple[int, int]
@@ -900,6 +1071,7 @@ class DesktopBackend:
                     receipt["postcondition"],
                     receipt["actionComplete"],
                     receipt["detail"],
+                    _structured_receipt_result(receipt.get("result", False)),
                 )
                 self._expected = None
                 return result
@@ -1155,22 +1327,52 @@ class DesktopBackend:
     def inspect(self, kind: str, page: int) -> dict[str, Any]:
         if kind not in {"inventory", "owned", "mail"} or type(page) is not int or not 0 <= page <= 4095:
             raise DesktopBackendError("inspection kind or page is invalid")
+        before = self._fresh_guard()
+        before_frame = before.sample.frame
+        if before_frame is None:
+            raise DesktopBackendError("native inspection baseline has no frame sequence")
+        baseline_sequence = before_frame.sequence
+        baseline_request_id = before.value["inspection"]["requestId"]
         command = f"/cauto inspect {kind} {page}"
         captured = self._send_command(command)
         deadline = self.io.monotonic() + 8.0
         while self.io.monotonic() < deadline:
             captured = self._fresh()
             inspection = captured.value["inspection"]
-            if inspection["kind"] == kind and inspection["page"] == page:
+            frame = captured.sample.frame
+            if (
+                frame is not None
+                and frame.sequence > baseline_sequence
+                and inspection["kind"] == kind
+                and inspection["page"] == page
+                and (page != 0 or inspection["requestId"] != baseline_request_id)
+            ):
+                snapshot = (
+                    inspection["requestId"],
+                    inspection["capturedAt"],
+                    inspection["sourceCount"],
+                    captured.value["boot"],
+                )
+                prior_snapshot = self._inspection_snapshots.get(kind)
+                if page > 0 and prior_snapshot is not None and snapshot != prior_snapshot:
+                    raise DesktopBackendError("native inspection page changed its frozen snapshot identity")
+                if page == 0:
+                    self._inspection_snapshots[kind] = snapshot
                 return {
+                    "boot": captured.value["boot"],
+                    "capturedAt": inspection["capturedAt"],
                     "kind": kind,
                     "page": page,
                     "rows": inspection["rows"],
                     "hasMore": inspection["hasMore"],
                     "error": inspection["error"],
+                    "requestId": inspection["requestId"],
+                    "sequence": frame.sequence,
+                    "sourceCount": inspection["sourceCount"],
+                    "wallTime": captured.value["wallTime"],
                 }
             self.io.sleep(0.05)
-        raise DesktopBackendError("native inspection page was not published")
+        raise DesktopBackendError("a fresh native inspection page was not published for this request")
 
     def clear_stage(self) -> None:
         try:
@@ -1221,6 +1423,51 @@ def _action_digest(value: object) -> str:
     from .model import canonical_json
 
     return hashlib.sha256(canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def _structured_receipt_result(value: object) -> dict[str, object] | None:
+    """Translate the native false sentinel to Python's explicit unknown value."""
+    if value is False:
+        return None
+    if type(value) is not dict:
+        raise DesktopBackendError("native structured receipt result is malformed")
+    result = dict(value)
+    for field in ("depositCopper", "cancelCostCopper"):
+        if result.get(field, None) is False:
+            result[field] = None
+        elif field in result and result[field] is not None and type(result[field]) is not int:
+            raise DesktopBackendError(f"native receipt {field} is not an exact integer or unknown")
+    return result
+
+
+def _seller_market_id_commands(request_id: str, managed_ids: frozenset[int]) -> tuple[str, ...]:
+    """Chunk every managed ID by the native command's actual encoded-byte limit."""
+    if type(request_id) is not str or _SELLER_REQUEST_ID.fullmatch(request_id) is None:
+        raise DesktopBackendError("seller market request ID is malformed")
+    if type(managed_ids) is not frozenset or len(managed_ids) > _MAX_SELLER_MANAGED_AUCTION_IDS:
+        raise DesktopBackendError("seller managed auction IDs exceed the bounded query contract")
+    if any(type(auction_id) is not int or auction_id < 1 for auction_id in managed_ids):
+        raise DesktopBackendError("seller managed auction IDs must be positive exact integers")
+    chunks: list[str] = []
+    current: list[int] = []
+    chunk_index = 1
+    for auction_id in sorted(managed_ids):
+        candidate = [*current, auction_id]
+        command = f"/cauto market_ids {request_id} {chunk_index} {','.join(map(str, candidate))}"
+        if len(command[1:].encode("ascii")) + 7 > 128:
+            if not current:
+                raise DesktopBackendError("one seller managed auction ID exceeds the native command bound")
+            chunks.append(f"/cauto market_ids {request_id} {chunk_index} {','.join(map(str, current))}")
+            chunk_index += 1
+            current = [auction_id]
+            command = f"/cauto market_ids {request_id} {chunk_index} {auction_id}"
+            if len(command[1:].encode("ascii")) + 7 > 128:
+                raise DesktopBackendError("one seller managed auction ID exceeds the native command bound")
+        else:
+            current = candidate
+    if current:
+        chunks.append(f"/cauto market_ids {request_id} {chunk_index} {','.join(map(str, current))}")
+    return tuple(chunks)
 
 
 __all__ = ["BackendIO", "CapturedFrame", "DesktopBackend", "DesktopBackendError", "DesktopIO"]

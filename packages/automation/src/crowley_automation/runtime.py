@@ -7,6 +7,7 @@ import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from .backend import BackendIO, DesktopBackend
 from .config import AutomationConfig, load_config
@@ -44,6 +45,16 @@ def _runtime(
     lease: GuiLease,
     io: BackendIO | None,
 ) -> tuple[AutomationRunner, DesktopBackend]:
+    return _runtime_components(config=config, ledger=ledger, lease=lease, io=io)
+
+
+def _runtime_components(
+    *,
+    config: AutomationConfig,
+    ledger: Ledger,
+    lease: GuiLease,
+    io: BackendIO | None,
+) -> tuple[AutomationRunner, DesktopBackend]:
     targets, routes = load_profiles(config)
     limits = tuple(sorted((route_id, len(route.waypoints)) for route_id, route in routes.items()))
     runner_config = RunnerConfig(frozenset(targets), limits)
@@ -56,6 +67,74 @@ def _runtime(
         stop_requested=ledger.stop_requested,
     )
     return AutomationRunner(ledger, runner_config), backend
+
+
+@contextmanager
+def seller_runtime(
+    *,
+    ledger_path: str | Path | None = None,
+    gui_lease: GuiLease | None = None,
+    config: AutomationConfig | None = None,
+    io: BackendIO | None = None,
+) -> Iterator[tuple[Ledger, AutomationRunner, DesktopBackend, GuiLease]]:
+    """Hold the shared GUI lease for one complete foreground seller session."""
+    ledger = _operation_ledger(ledger_path, io)
+    selected_config = load_config() if config is None else config
+    lease = gui_lease or GuiLease(gui_lock_path())
+    runner, backend = _runtime_components(config=selected_config, ledger=ledger, lease=lease, io=io)
+    try:
+        with _lease_scope(lease):
+            yield ledger, runner, backend, lease
+    finally:
+        backend.close()
+
+
+def run_seller_child(
+    batch: Batch,
+    *,
+    runner: AutomationRunner,
+    seller_store: Any,
+    session_id: str,
+    decision_id: str,
+    phase: str,
+    backend: DesktopBackend,
+) -> dict[str, object]:
+    """Dispatch one policy-derived child through the runner's session gate."""
+    result = runner.run_seller_child(
+        batch,
+        seller_store=seller_store,
+        session_id=session_id,
+        decision_id=decision_id,
+        phase=phase,
+        backend=backend,
+    )
+    return dict(result)
+
+
+def arm_seller_backend(
+    backend: DesktopBackend,
+    *,
+    ledger: Ledger,
+    seller_store: Any,
+    session_id: str,
+    policy_expires_at: int,
+    ah_target_id: str,
+) -> None:
+    """Bind all preparatory and protected backend input to one active seller session."""
+
+    def stopped() -> bool:
+        try:
+            return ledger.stop_requested() or seller_store.status(session_id).state not in {
+                "active",
+                "completed",
+            }
+        except Exception:
+            # A broken ledger or session lookup must fail closed at every input gate.
+            return True
+
+    backend.stop_requested = stopped
+    backend.bind_seller_ah_target(ah_target_id)
+    backend.set_deadline(policy_expires_at)
 
 
 @contextmanager

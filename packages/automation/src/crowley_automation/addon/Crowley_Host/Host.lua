@@ -31,7 +31,7 @@ end
 
 local function register()
   local automation = _G.CrowleyAutomation
-  if type(automation) ~= "table" or automation.protocol ~= 2 or type(automation.setHostBridge) ~= "function" then
+  if type(automation) ~= "table" or automation.protocol ~= 3 or type(automation.setHostBridge) ~= "function" then
     return false
   end
   return automation.setHostBridge(coordinator()) == true

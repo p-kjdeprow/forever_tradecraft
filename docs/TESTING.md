@@ -24,7 +24,11 @@ directories. Type checking requires zero errors across the five workspace source
 Tests cover retained dashboard economics/activity/caching, canonical scan formats and
 migration ledger, native scanner lifecycle and transport/ACK behavior, host policy/input,
 private filesystem and backup contracts, strict operation batches, crash/receipt ambiguity,
-client operation staging and bounded measured movement. Package tests build wheels and
+client operation staging and bounded measured movement. Seller tests cover matched-price
+cadence, conserved stock/spending, selective commodity returns, cancellation chunks, explicit
+resume and interrupted-route/mail recovery. Native tests exercise query barriers, frozen
+inspection generations, cache invalidation, attachment reindexing and actual-charge receipts.
+Package tests build wheels and
 sdists, check exact owned resources, and reject forbidden component imports.
 
 The Lua harness models native behavior; it does not prove actual protected-call semantics.

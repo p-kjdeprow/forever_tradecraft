@@ -182,7 +182,13 @@ def test_crowley_toc_version_equals_the_addon_ns_version() -> None:
         / "Crowley_Automation"
         / "Crowley_Automation.toc"
     )
-    assert config.addon_version(automation) == "0.2.0"
+    automation_version = re.search(
+        r'^local VERSION = "([^"]+)"',
+        (automation.parent / "Automation.lua").read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert automation_version is not None
+    assert config.addon_version(automation) == automation_version.group(1)
 
 
 def test_help_is_quiet() -> None:

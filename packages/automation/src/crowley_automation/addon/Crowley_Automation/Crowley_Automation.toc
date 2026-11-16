@@ -2,7 +2,7 @@
 ## Title: Crowley Automation
 ## Notes: Strict local operation staging and independent game observations.
 ## Author: Kyle DeProw
-## Version: 0.2.0
+## Version: 0.3.0
 ## SavedVariables: CrowleyAutomationDB
 
 Mode.lua

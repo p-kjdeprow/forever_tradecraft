@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-local VERSION = "0.2.0"
+local VERSION = "0.3.0"
 local WIDTH, HEIGHT = 128, 128
 local CROP_X, CROP_Y = 352, 48
 local ATLAS_PATH = "Interface\\AddOns\\Crowley_Automation\\Textures\\ByteAtlas"
@@ -214,7 +214,7 @@ local function snapshot()
   local context = clientContext()
   sequence = sequence + 1
   local value = {
-    schema = 2,
+    schema = 3,
     kind = "automation",
     boot = boot,
     sequence = sequence,
@@ -227,6 +227,7 @@ local function snapshot()
     chatEdit = chatEdit(),
     goldCopper = GetMoney(),
     operation = operations:Snapshot(buttonRect(), buttonAvailable()),
+    sellerMarket = operations:SellerMarket(),
     inspection = operations:Inspection(),
     motion = motion(),
     mailOpen = operations.mailOpen,
@@ -303,9 +304,17 @@ for _, event in ipairs({
   "AUCTION_HOUSE_AUCTION_CREATED",
   "OWNED_AUCTIONS_UPDATED",
   "AUCTION_CANCELED",
+  "COMMODITY_SEARCH_RESULTS_UPDATED",
+  "COMMODITY_SEARCH_RESULTS_ADDED",
+  "AUCTION_HOUSE_THROTTLED_MESSAGE_SENT",
+  "AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED",
+  "PLAYER_MONEY",
   "MAIL_SHOW",
   "MAIL_CLOSED",
   "MAIL_INBOX_UPDATE",
+  "MAIL_SUCCESS",
+  "MAIL_FAILED",
+  "BAG_UPDATE_DELAYED",
 }) do
   events:RegisterEvent(event)
 end
@@ -323,7 +332,7 @@ events:SetScript("OnEvent", function(_, event, ...)
 end)
 
 _G.CrowleyAutomation = {
-  protocol = 2,
+  protocol = 3,
   snapshot = function() return operations and snapshot() or nil end,
   frameBytes = function() return frameBytes end,
   setHostBridge = function(value)

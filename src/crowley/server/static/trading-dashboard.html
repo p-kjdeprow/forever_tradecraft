@@ -125,9 +125,6 @@
       <h1>Crowley crafting board</h1>
       <p class="muted">Positive 24-hour observed activity · read only</p>
     </div>
-    <nav class="header-links" aria-label="Other dashboard views">
-      <a href="/dashboard/advanced">Advanced research &amp; paper runs</a>
-    </nav>
   </header>
   <main>
     <section class="panel scan-panel" aria-labelledby="scan-heading">
@@ -158,7 +155,7 @@
     <div class="main-heading">
       <div>
         <h2>Top 10 crafting strategies</h2>
-        <p class="muted">Batches sized from observed market depth and the assumed 10 g budget.</p>
+        <p class="muted">At least 6 observed market units/hour over usable intervals in the last 24 hours. Batches use the assumed 10 g budget.</p>
       </div>
       <div id="profile" class="profile">Alchemy 225 · Tailoring 150 (planning through 225) · 10 g assumed</div>
     </div>
@@ -206,6 +203,7 @@
     const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap225-budget100000-owned";
     const MIN_PROFIT_THRESHOLDS = [50, 100, 300, 500, 1000];
     const DEFAULT_MIN_PROFIT_COPPER = 50;
+    const MIN_MARKET_UNITS_PER_HOUR = 6;
     const MIN_PROFIT_PREFERENCE_KEY = "crowley.dashboard.minimum-profit-per-item.v1";
     const POLL_MS = 60_000;
     const STALE_SECONDS = 45 * 60;
@@ -702,8 +700,8 @@
       }
       function renderSummary(summary, { fromCache = false, preserveStatus = false, filterChange = false } = {}) {
         const nextPriceAgeEntries = [];
-        const filtered = summary.candidates.filter((item) => profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
-        let emptyMessage = "No strategies meet this minimum net profit per item with positive observed activity in the 24-hour window. Unknown or zero activity remains hidden.";
+        const filtered = summary.candidates.filter((item) => positiveKnownActivity(item) && item.market_units_per_hour >= MIN_MARKET_UNITS_PER_HOUR && profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
+        let emptyMessage = "No strategies meet this minimum net profit per item and at least 6 observed market units/hour in the 24-hour window. Unknown or slower activity remains hidden.";
         if (!summary.candidatePoolComplete && filtered.length === 0) {
           emptyMessage = "No saved top-ten strategies meet this minimum. Lower-ranked results are unavailable until the complete candidate pool refreshes.";
         }

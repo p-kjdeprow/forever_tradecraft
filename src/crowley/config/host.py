@@ -91,6 +91,7 @@ class HostConfig(BaseModel):
         "window_client_offset",
         "canvas_origin",
         "canvas_crop",
+        "automation_canvas_crop",
         "model_crop",
     )
 
@@ -110,6 +111,7 @@ class HostConfig(BaseModel):
     window_client_offset: tuple[StrictInt, StrictInt]
     canvas_origin: tuple[StrictInt, StrictInt]
     canvas_crop: tuple[StrictInt, StrictInt, StrictInt, StrictInt]
+    automation_canvas_crop: tuple[StrictInt, StrictInt, StrictInt, StrictInt]
     model_crop: tuple[StrictInt, StrictInt, StrictInt, StrictInt]
 
     @field_validator("wine_prefix", "game_root")
@@ -143,7 +145,7 @@ class HostConfig(BaseModel):
     def validate_pair(cls, value: object, info: ValidationInfo) -> tuple[int, int]:
         return _pair(value, _field_name(info))
 
-    @field_validator("canvas_crop", "model_crop", mode="before")
+    @field_validator("canvas_crop", "automation_canvas_crop", "model_crop", mode="before")
     @classmethod
     def validate_crop(cls, value: object, info: ValidationInfo) -> tuple[int, int, int, int]:
         return _crop(value, _field_name(info))
@@ -170,7 +172,12 @@ class HostConfig(BaseModel):
         origin_x, origin_y = self.canvas_origin
         if origin_x < 0 or origin_y < 0:
             raise ValueError("canvas_origin must be non-negative")
-        for name, crop in (("canvas_crop", self.canvas_crop), ("model_crop", self.model_crop)):
+        crops = (
+            ("canvas_crop", self.canvas_crop),
+            ("automation_canvas_crop", self.automation_canvas_crop),
+            ("model_crop", self.model_crop),
+        )
+        for name, crop in crops:
             left, top, width, height = crop
             if left < 0 or top < 0 or width <= 0 or height <= 0:
                 raise ValueError(f"{name} must have a positive rectangle within the client")
@@ -178,6 +185,15 @@ class HostConfig(BaseModel):
                 raise ValueError(f"{name} exceeds client geometry")
         if self.model_crop == self.canvas_crop:
             raise ValueError("model_crop must be separate from canvas_crop")
+        scan_left, scan_top, scan_width, scan_height = self.canvas_crop
+        automation_left, automation_top, automation_width, automation_height = self.automation_canvas_crop
+        if (
+            scan_left < automation_left + automation_width
+            and automation_left < scan_left + scan_width
+            and scan_top < automation_top + automation_height
+            and automation_top < scan_top + scan_height
+        ):
+            raise ValueError("automation_canvas_crop must not overlap canvas_crop")
         if self.model_crop[2] < 640 or self.model_crop[3] < 480:
             raise ValueError("model_crop must be at least 640x480")
         return self

@@ -47,6 +47,7 @@ def _write_host(config_home: Path, game_root: Path, wine_prefix: Path) -> None:
                 "window_client_offset = [0, 0]",
                 "canvas_origin = [80, 48]",
                 "canvas_crop = [80, 48, 256, 256]",
+                "automation_canvas_crop = [352, 48, 256, 256]",
                 "model_crop = [80, 48, 1760, 984]",
                 "",
             )
@@ -83,8 +84,6 @@ def test_rendered_units_parse_and_have_no_checkout_paths() -> None:
         "crowley-health.timer",
         "crowley-market-backup.service",
         "crowley-market-backup.timer",
-        "crowley-paper-trading.service",
-        "crowley-paper-trading.timer",
         "crowley-scan.service",
     }
     for name, raw in units.items():
@@ -443,7 +442,6 @@ def test_legacy_data_symlink_is_replaced_without_writing_through_it(
     legacy.mkdir()
     (legacy / "Crowley_Data.toc").write_text("legacy", encoding="utf-8")
     (legacy / "Data.lua").write_text('CROWLEY_DATA = { ["generatedAt"] = 99 }\n', encoding="utf-8")
-    (legacy / "Queue.lua").write_text('CROWLEY_QUEUE = { ["scan"] = true }\n', encoding="utf-8")
     addons = game_root / "_classic_beta_" / "Interface" / "AddOns"
     (addons / "Crowley_Data").symlink_to(legacy, target_is_directory=True)
     _no_systemd(monkeypatch)
@@ -452,7 +450,6 @@ def test_legacy_data_symlink_is_replaced_without_writing_through_it(
     assert target.is_dir() and not target.is_symlink()
     assert (legacy / "Crowley_Data.toc").read_text(encoding="utf-8") == "legacy"
     assert (target / "Data.lua").read_text(encoding="utf-8") == ('CROWLEY_DATA = { ["generatedAt"] = 99 }\n')
-    assert (target / "Queue.lua").read_text(encoding="utf-8") == ('CROWLEY_QUEUE = { ["scan"] = true }\n')
 
 
 def test_runtime_owned_lua_is_preserved_and_not_digest_checked(
@@ -462,14 +459,11 @@ def test_runtime_owned_lua_is_preserved_and_not_digest_checked(
     _no_systemd(monkeypatch)
     install.install(install.InstallRequest(game_root=game_root), environment)
     data = game_root / "_classic_beta_" / "Interface" / "AddOns" / "Crowley_Data" / "Data.lua"
-    queue = data.with_name("Queue.lua")
     data.write_text('CROWLEY_DATA = { ["generatedAt"] = 42 }\n', encoding="utf-8")
-    queue.write_text("CROWLEY_QUEUE = false\n", encoding="utf-8")
     install.install(install.InstallRequest(game_root=game_root), environment)
     assert 'generatedAt"] = 42' in data.read_text(encoding="utf-8")
     manifest = json.loads((tmp_path / "state/crowley/install/manifest.json").read_text(encoding="utf-8"))
     assert "sha256" not in manifest["files"]["addon/Crowley_Data/Data.lua"]
-    assert "sha256" not in manifest["files"]["addon/Crowley_Data/Queue.lua"]
 
 
 def test_runtime_owned_lua_directory_is_foreign_without_force(

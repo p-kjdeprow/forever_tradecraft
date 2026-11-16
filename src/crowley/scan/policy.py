@@ -5,35 +5,19 @@ No I/O and no clocks: every time comes from the Observation.  The plan's policy 
 sequence and relaunch/reload rate limits are state transitions carried in `LoopState`.
 Row 6 (blocking UI) is evaluated before row 5 (chat) so no key is ever sent over a popup.
 
-Snapshot field mapping (schema-6 frame, `addon/Crowley/Agent.lua` Snapshot, validated by
-`session/protocol.py`; the runtime slice builds Snapshot from the decoded frame):
+Snapshot combines independent `AutomationFrame` and `ScanFrame` publications:
 
-    boot                    boot                         (string; "native-construction:*" = not ordinary)
-    native_phase/_ordinal   render.nativePhase / render.nativeOrdinal  (ordinary = "normal", 0)
-    wall_time               wallTime
-    character, realm        context.character / context.realm
-    faction                 context.playerFaction
-    zone                    context.zone
-    build, interface        context.clientBuild / context.interface
-    addon_version           context.addonVersion
-    house_key               house.key
-    plan_hash               plan.hash
-    ah_open                 ahOpen
-    target_present          auctioneer.targetPresent
-    auctioneer_name         auctioneer.targetName        ("" when absent)
-    range_available         auctioneer.rangeAvailable
-    in_range                auctioneer.withinTradeRange
-    binding_available       auctioneer.bindingAvailable
-    binding_action          auctioneer.ctrlF12Action     ("", "INTERACTTARGET" or another action)
-    interaction_mode        auctioneer.interactionMode
-    blocking_ui             "" when staticPopup/gameMenu are available and hidden, else a reason
-                            built by the runtime from blockingUI.*
-    phase, due_at           scanner.phase / scanner.dueAt  (due_at in the same epoch seconds as wall)
-    last_saved_uid          lastSaved.memoryUid
-    pending_*               pending.ids / count / cap / blocked / reason
-    loaded_acked_ids        loaded.ackedIds
-    chat_active/_focused/_text   chatEdit.active / focused / text
-    received_at             wall time the canvas frame was captured (runtime)
+    boot                    automation.boot
+    wall_time               automation.wallTime
+    character, realm        automation.context.character / realm
+    faction, zone           automation.context.playerFaction / zone
+    build, interface        automation.context.clientBuild / interface
+    addon_version           automation.context.addonVersion
+    scanner_addon_version   scanner.addonVersion
+    house_key, plan_hash     scanner.house.key / scanner.plan.hash
+    game facts              automation.ahOpen / auctioneer / blockingUI / chatEdit
+    scan facts              scanner.scanner / lastSaved / pending / loaded
+    received_at             older of the two canvas frame capture times
 
 Presence (`human_active`) comes from the runtime (Mutter IdleMonitor); it is an input here.
 """
@@ -46,7 +30,6 @@ from typing import Any
 
 STORMWIND = "Stormwind City"
 SWEEP_PHASES = frozenset({"item", "owned"})
-CONSTRUCTION_PREFIX = "native-construction:"
 # Copied from session/driver.py CONDITIONAL_INTERACTION_BINDING_COMMAND.
 SET_BINDING_COMMAND = (
     "/run local a=GetBindingAction('CTRL-F12'); "
@@ -118,8 +101,6 @@ class Step(StrEnum):
 @dataclass(frozen=True)
 class Snapshot:
     boot: str
-    native_phase: str
-    native_ordinal: int
     wall_time: int
     received_at: float
     character: str
@@ -129,6 +110,7 @@ class Snapshot:
     build: str
     interface: int
     addon_version: str
+    scanner_addon_version: str
     house_key: str
     plan_hash: str
     ah_open: bool
@@ -166,6 +148,7 @@ class Target:
     build: str
     interface: int
     addon_version: str
+    scanner_addon_version: str
     auctioneer: str
 
 
@@ -357,7 +340,8 @@ def _pins_detail(snap: Snapshot, pins: Target) -> str:
         ("plan_hash", snap.plan_hash, pins.plan_hash),
         ("build", snap.build, pins.build),
         ("interface", snap.interface, pins.interface),
-        ("addon_version", snap.addon_version, pins.addon_version),
+        ("automation_addon_version", snap.addon_version, pins.addon_version),
+        ("scanner_addon_version", snap.scanner_addon_version, pins.scanner_addon_version),
     )
     return ",".join(name for name, got, want in pairs if got != want)
 
@@ -444,8 +428,6 @@ def _decide(obs: Observation) -> Decision:
         return _fault(st, "pin_mismatch", mismatch)
     if snap.pending_blocked and snap.pending_reason == "plan_invalid":
         return _fault(st, "plan_invalid")
-    if snap.boot.startswith(CONSTRUCTION_PREFIX) or snap.native_phase != "normal" or snap.native_ordinal != 0:
-        return _fault(st, "construction_marker")
 
     if snap.blocking_ui:  # 6, before 5: no key is ever sent over a popup
         since = now if st.blocking_since is None else st.blocking_since

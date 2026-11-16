@@ -34,7 +34,13 @@ from crowley.platform.paths import XdgDirs
 PACKAGE_DATA = "package_data"
 MANIFEST_SCHEMA = "crowley-install-v2"
 MAX_RESOURCE_BYTES = 32 * 1024 * 1024
-_MUTABLE_ADDON_FILES = frozenset({"addon/Crowley_Data/Data.lua", "addon/Crowley_Data/Queue.lua"})
+_MUTABLE_ADDON_FILES = frozenset({"addon/Crowley_Data/Data.lua"})
+_ADDON_ROOTS = {
+    "Crowley": "addon_crowley",
+    "Crowley_Data": "addon_data",
+    "Crowley_Automation": "addon_automation",
+    "Crowley_Host": "addon_host",
+}
 _CONFIG_FILES = ("companion.toml",)
 _LAUNCHER_NAME = "crowley-world-of-warcraft"
 _DOCKER_TAG_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\Z")
@@ -520,7 +526,7 @@ def _tree_paths(root: Path) -> Iterator[tuple[str, Path]]:
 def _legacy_data_tree_is_owned(path: Path) -> bool:
     if not path.is_dir() or path.is_symlink():
         return False
-    expected = {"Crowley_Data.toc", "Data.lua", "Queue.lua"}
+    expected = {"Crowley_Data.toc", "Data.lua"}
     entries = tuple(_tree_paths(path))
     if {relative for relative, _ in entries} != expected:
         return False
@@ -543,10 +549,7 @@ def _check_tree_foreign(destination_set: DestinationSet, previous: Mapping[str, 
     if not destination.is_dir():
         raise InstallError(f"refusing to overwrite foreign file: {destination}")
     managed = _managed_names(previous, destination_set.root_key)
-    prefixes = {
-        "addon_crowley": "addon/Crowley/",
-        "addon_data": "addon/Crowley_Data/",
-    }
+    prefixes = {root_key: f"addon/{name}/" for name, root_key in _ADDON_ROOTS.items()}
     prefix = prefixes.get(destination_set.root_key, "")
     allowed = {name.removeprefix(prefix) for name in managed if name.startswith(prefix)}
     mutable = {name.removeprefix(prefix) for name in _MUTABLE_ADDON_FILES if name.startswith(prefix)}
@@ -577,7 +580,7 @@ def _check_foreign(plan: InstallPlan, previous: Mapping[str, object], force: boo
             if not _destination_exists(destination):
                 continue
             if destination.is_symlink():
-                if destination_set.root_key in {"addon_crowley", "addon_data"} or force:
+                if destination_set.root_key in _ADDON_ROOTS.values() or force:
                     continue
                 raise InstallError(f"refusing to overwrite foreign file: {destination}")
             if roots_match and _managed_names(previous, destination_set.root_key):
@@ -692,10 +695,14 @@ def _build_plan(
     addon_files = tuple(packaged_addon_files())
     crowley_files: list[PlannedFile] = []
     data_files: list[PlannedFile] = []
+    extra_addon_files: dict[str, list[PlannedFile]] = {}
     for name, data in addon_files:
         relative = _safe_relative(name)
         destination = addons_dir / relative
-        root_key = "addon_crowley" if relative.parts[0] == "Crowley" else "addon_data"
+        addon_name = relative.parts[0]
+        if addon_name not in _ADDON_ROOTS:
+            raise InstallError(f"unknown packaged addon: {addon_name}")
+        root_key = _ADDON_ROOTS[addon_name]
         planned = _plan_file(
             destination,
             f"addon/{name}",
@@ -705,8 +712,10 @@ def _build_plan(
         )
         if root_key == "addon_crowley":
             crowley_files.append(planned)
-        else:
+        elif root_key == "addon_data":
             data_files.append(planned)
+        else:
+            extra_addon_files.setdefault(addon_name, []).append(planned)
 
     addon_mode = "packaged"
     if request.dev_addon_from is not None:
@@ -746,6 +755,10 @@ def _build_plan(
         DestinationSet("config", config_dir, tuple(config_files), "file-set"),
         crowley_set,
         data_set,
+        *(
+            DestinationSet(_ADDON_ROOTS[name], addons_dir / name, tuple(files), "tree")
+            for name, files in sorted(extra_addon_files.items())
+        ),
         DestinationSet("launcher", launcher_dir, (launcher,), "file-set"),
     )
     all_files = tuple(item for destination_set in destination_sets for item in destination_set.files)

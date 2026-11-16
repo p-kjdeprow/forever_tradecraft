@@ -10,7 +10,7 @@ from crowley.core.watchlist import load_catalog
 
 from .config import get_settings
 from .db import create_pool, verify_current
-from .routes import account, addon, advice, dashboard, health, houses, paper, queues, reference, scans
+from .routes import addon, dashboard, health, houses, scans
 
 
 @asynccontextmanager
@@ -18,7 +18,6 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     catalog = load_catalog()  # Fail at startup if the shipped plan is invalid.
     app.state.canonical_scan_plan = target_scan_plan(cast(CatalogLike, catalog), packaged_game_target())
-    app.state.reference_item_ids = tuple(sorted(item.item_id for item in catalog.items))
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     pool = create_pool(settings.database_url)
     try:
@@ -35,12 +34,7 @@ def create_app() -> FastAPI:
     application.include_router(health.router)
     application.include_router(scans.router)
     application.include_router(houses.router)
-    application.include_router(advice.router)
-    application.include_router(reference.router)
-    application.include_router(account.router)
     application.include_router(addon.router)
-    application.include_router(queues.router)
-    application.include_router(paper.router)
     application.include_router(dashboard.router)
     return application
 

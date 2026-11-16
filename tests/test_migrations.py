@@ -21,7 +21,6 @@ from crowley.server.db import (
     migration_status,
     verify_current,
 )
-from crowley.trading import paper
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
@@ -363,8 +362,6 @@ def test_upgrade_fixture_preserves_rows_and_drops_009_defaults() -> None:
         assert conn.execute(
             "SELECT engine_contract FROM paper_runs WHERE name='upgrade-paper-run'"
         ).fetchone() == ("legacy",)
-        with pytest.raises(paper.PaperError, match="legacy paper runs are read-only and cannot be resumed"):
-            paper.step_run(DB_URL, "upgrade-paper-run")
         paper_run = conn.execute(
             "SELECT capabilities, capabilities_hash FROM paper_runs WHERE name='upgrade-paper-run'"
         ).fetchone()

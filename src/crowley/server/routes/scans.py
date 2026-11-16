@@ -8,7 +8,6 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, StrictInt
 from starlette.concurrency import run_in_threadpool
 
-from crowley.advisor import service as advisor_service
 from crowley.analysis.trading_summary import load_trading_summary
 from crowley.core.scanformat import ScanFormatError
 from crowley.store.sweeps import record_probe
@@ -16,7 +15,6 @@ from crowley.store.sweeps import record_probe
 from ..deps import Authed, Settings
 from ..encoding import _strict_json_object
 from ..ingest import SweepConflictError, _persist_market_sweep
-from .advice import ADVICE_CACHE
 
 router = APIRouter()
 
@@ -46,8 +44,6 @@ async def upload_scan(
     if result.status == "created":
         pool = request.app.state.pool
         background_tasks.add_task(_warm_trading_summary, pool, result.house)
-        if settings.warm_advice:
-            background_tasks.add_task(_warm_advice, pool, result.house)
     return result.__dict__
 
 
@@ -59,15 +55,6 @@ def _warm_trading_summary(pool: Any, house_key: str) -> None:
             load_trading_summary(conn, house_key)
     except Exception:
         logging.getLogger(__name__).exception("Failed to warm trading summary for house %s", house_key)
-
-
-def _warm_advice(pool: Any, house_key: str) -> None:
-    """Warm default advice off the event loop; failed warming does not affect ingest."""
-
-    try:
-        advisor_service.warm(pool, ADVICE_CACHE, house_key)
-    except Exception:
-        logging.getLogger(__name__).exception("Failed to warm advice for house %s", house_key)
 
 
 def _persist_market_sweep_request(pool: Any, raw: dict[str, Any], data_dir: Any) -> Any:

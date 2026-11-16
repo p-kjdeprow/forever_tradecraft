@@ -14,18 +14,15 @@ from dataclasses import dataclass
 from fractions import Fraction
 from typing import Any
 
-from crowley.advisor.cache import AdviceCache
 from crowley.analysis.books import Book, load_commodity_books, valid_intervals
 from crowley.analysis.item_books import ItemBook, item_intervals, load_item_books
-from crowley.analysis.rank import item_names
 from crowley.core.auction_rules import AuctionHouseRules, rules_for_house
 from crowley.core.errors import MarketDataNotFound
 from crowley.core.house import House
-from crowley.trading.api import ItemFacts, Recipe
-from crowley.trading.data import load_client_data
-from crowley.trading.fees import deposit
-from crowley.trading.strategies.common import vendor_purchase
-from crowley.trading.strategies.pricing import recipe_requirements
+from crowley.market.cache import MarketCache
+from crowley.market.client_data import item_names, load_client_data
+from crowley.market.economics import deposit, recipe_requirements, vendor_purchase
+from crowley.market.models import ItemFacts, Recipe
 
 ALCHEMY_SKILL = 225
 TAILORING_SKILL = 150
@@ -37,9 +34,10 @@ ACTIVITY_WINDOW_HOURS = 24
 ACTIVITY_WINDOW_SECONDS = ACTIVITY_WINDOW_HOURS * 3600
 LISTING_HOURS = 12
 MAX_CRAFTS = 5
+MIN_MARKET_UNITS_PER_HOUR = Fraction(6)
 PROFILE_KEY = ("alchemy", ALCHEMY_SKILL, "tailoring", TAILORING_SKILL, TAILORING_PLANNING_CAP, BUDGET_COPPER)
 
-TRADING_SUMMARY_CACHE: AdviceCache[dict[str, Any]] = AdviceCache(max_entries=8, ttl_seconds=900)
+TRADING_SUMMARY_CACHE: MarketCache[dict[str, Any]] = MarketCache(max_entries=8, ttl_seconds=900)
 
 
 @dataclass(frozen=True)
@@ -503,7 +501,11 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
         if output_fact is None or output_fact.bonding not in (0, 2, 3):
             continue
         activity = _activity(inputs, item_id, output_quote, list_price)
-        if activity.status != "observed_activity" or activity.rate is None or activity.rate <= 0:
+        if (
+            activity.status != "observed_activity"
+            or activity.rate is None
+            or activity.rate < MIN_MARKET_UNITS_PER_HOUR
+        ):
             continue
         result = _opportunity(inputs, recipe, eligibility, output_quote, activity, list_price)
         if result is None:
@@ -540,9 +542,8 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
             "grouped, stale, and historically unsupported intervals are excluded.",
             "Current listing targets undercut the lowest observed price by one copper. "
             "Tools, categories, and focus requirements are shown per recipe.",
-            "Only positive-margin opportunities with positive observed listing depletion "
-            "and usable 24-hour evidence "
-            "are shown; unknown or zero activity is excluded. "
+            "Only positive-margin opportunities with at least 6 observed market units per hour "
+            "and usable 24-hour evidence are shown; unknown or slower activity is excluded. "
             "All skill planning stays within 225.",
             "Batch sizing and ranking assume a 10% share of observed market activity; "
             "this is not a personal sales forecast.",
@@ -614,7 +615,7 @@ def _load_sweep_sampling_plans(
 
 def _load_summary_in_snapshot(conn: Any, inputs: tuple[str, str, int, int, dict[str, int]]) -> dict[str, Any]:
     house_key, build, sweep_id, finished_epoch, scan = inputs
-    facts, recipes_all = load_client_data(conn, house_key, build)
+    facts, recipes_all = load_client_data(conn, build)
     recipes = tuple(recipe for recipe in recipes_all if recipe.professions & {"alchemy", "tailoring"})
     item_ids = sorted({item_id for recipe in recipes for item_id, _ in (*recipe.outputs, *recipe.reagents)})
     start_t = max(0, finished_epoch - ACTIVITY_WINDOW_SECONDS)

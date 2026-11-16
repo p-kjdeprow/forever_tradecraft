@@ -17,4 +17,5 @@ outer_height = 1092
 window_client_offset = [0, 0]
 canvas_origin = [80, 48]
 canvas_crop = [80, 48, 256, 256]
+automation_canvas_crop = [352, 48, 256, 256]
 model_crop = [80, 48, 1760, 984]

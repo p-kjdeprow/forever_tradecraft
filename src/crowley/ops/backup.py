@@ -579,10 +579,10 @@ def _run(
     if binary:
         return proc
     try:
-        proc.stdout = proc.stdout.decode("utf-8") if isinstance(proc.stdout, bytes) else proc.stdout
+        decoded_stdout = proc.stdout.decode("utf-8") if isinstance(proc.stdout, bytes) else proc.stdout
     except UnicodeDecodeError as exc:
         raise BackupError("command returned non-UTF-8 metadata") from exc
-    return proc
+    return subprocess.CompletedProcess(proc.args, proc.returncode, decoded_stdout, proc.stderr)
 
 
 def _stream_to_process(args: list[str], source: BinaryIO) -> int:
@@ -782,7 +782,7 @@ def _inspect_container(container_id: str) -> dict[str, Any]:
     fields = _docker(["inspect", "--format", fmt, container_id]).stdout.rstrip("\n").split("|", 7)
     if len(fields) != 8:
         raise BackupError("container identity inspection failed")
-    result = dict(
+    result: dict[str, Any] = dict(
         zip(
             ("id", "image_id", "config_image", "labels", "mounts", "networks", "ports", "state"),
             (_json_output(field, "container") for field in fields),
@@ -798,7 +798,7 @@ def _inspect_volume(name: str) -> dict[str, Any]:
     fields = _docker(["volume", "inspect", "--format", fmt, name]).stdout.rstrip("\n").split("|", 2)
     if len(fields) != 3:
         raise BackupError("volume identity inspection failed")
-    result = dict(
+    result: dict[str, Any] = dict(
         zip(
             ("name", "mountpoint", "labels"), (_json_output(field, "volume") for field in fields), strict=True
         )
@@ -812,7 +812,7 @@ def _inspect_network(network_id: str) -> dict[str, Any]:
     fields = _docker(["network", "inspect", "--format", fmt, network_id]).stdout.rstrip("\n").split("|", 2)
     if len(fields) != 3:
         raise BackupError("network identity inspection failed")
-    result = dict(
+    result: dict[str, Any] = dict(
         zip(("id", "name", "labels"), (_json_output(field, "network") for field in fields), strict=True)
     )
     result["labels"] = _labels(result["labels"])
@@ -1227,12 +1227,12 @@ def raw_reference_path(raw_path: str, inventory: set[str]) -> str:
 def validate_format2_member(
     member_bytes: bytes, row: dict[str, Any], plans: dict[str, str]
 ) -> dict[str, Any]:
-    from crowley.core.scanformat import decode_strict_json, validate_v2_envelope
+    from crowley.core.scanformat import decode_strict_json, validate_envelope
     from crowley.server.ingest import _logical_digest
 
     try:
         envelope = decode_strict_json(gzip.decompress(member_bytes))
-        validated = validate_v2_envelope(envelope)
+        validated = validate_envelope(envelope)
         digest = _logical_digest(envelope, validated["decoded"])
     except Exception as exc:
         raise BackupError("format-2 raw member failed strict validation") from exc
@@ -2083,9 +2083,9 @@ def _raw_references(
             try:
                 data = by_path[path]
                 env = strict_json(gzip.decompress(data))
-                from crowley.core.scanformat import validate_v2_envelope
+                from crowley.core.scanformat import validate_envelope
 
-                validated = validate_v2_envelope(env)
+                validated = validate_envelope(env)
                 from crowley.server.ingest import _logical_digest
 
                 digest = _logical_digest(env, validated["decoded"])

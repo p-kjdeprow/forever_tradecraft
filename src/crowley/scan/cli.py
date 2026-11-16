@@ -32,12 +32,13 @@ def build_observer(config: ScanConfig, presence: Presence) -> Observer:
     return Observer(
         process=ProcProcessSource(config.matcher),
         window=X11Window(config.window_class, config.window_title, x11_runner(env)),
-        canvas=ScreenCanvas(config.canvas_crop, scratch),
+        canvas=ScreenCanvas(scratch),
         disk=FileDiskSource(config.saved_variables, config.companion_state, config.data_lua),
         presence=presence,
         target=config.target,
         contract=config.contract,
         canvas_crop=config.canvas_crop,
+        automation_canvas_crop=config.automation_canvas_crop,
     )
 
 

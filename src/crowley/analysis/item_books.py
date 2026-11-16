@@ -36,7 +36,6 @@ from dataclasses import dataclass, field
 from fractions import Fraction
 from typing import Any
 
-from crowley.analysis.metrics import FAIR_WINDOW_SECONDS, percentile
 from crowley.core.volume import MAX_INTERVAL_SECONDS, compare_observations_detailed
 
 
@@ -82,18 +81,13 @@ class ItemInterval:
     consumed: tuple[tuple[Fraction, int], ...]  # (unit price, units) in walk order
 
 
-def floor_price(book: ItemBook, item_key: str | None) -> Fraction | None:
-    prices = [auction.unit for auction in book.scoped(item_key)]
-    return min(prices) if prices else None
-
-
 def item_intervals(
     books: Sequence[ItemBook], item_key: str | None, *, max_interval_seconds: int | None = None
 ) -> list[ItemInterval | None]:
     """One slot per adjacent pair; ``None`` where ``core.volume`` finds no usable evidence.
 
-    ``max_interval_seconds`` overrides ``core.volume``'s 1800 s limit; only the cold-tier
-    promotion view passes it, to read depletion across the long gaps between cold observations.
+    ``max_interval_seconds`` overrides ``core.volume``'s 1800 s limit when the immutable scan
+    plan proves that a longer interval is expected.
     """
 
     result: list[ItemInterval | None] = []
@@ -149,76 +143,6 @@ def _walk(
         if units_after[key] > 0:
             break  # the owner still lists units at this price
     return consumed
-
-
-def cheapest_cost(book: ItemBook, item_key: str | None, quantity: int) -> tuple[Fraction, int] | None:
-    """Exact cost of the cheapest ``quantity`` buyable units and the highest buyout used.
-
-    Our own auctions are not supply.  ``None`` when fewer than ``quantity`` units are listed.
-    """
-
-    need = quantity
-    cost = Fraction(0)
-    limit = 0
-    for auction in sorted(book.scoped(item_key), key=lambda a: (a.unit, a.result_id)):
-        if auction.own:
-            continue
-        take = min(need, auction.quantity)
-        cost += auction.unit * take
-        limit = max(limit, int(auction.unit))
-        need -= take
-        if need == 0:
-            return cost, limit
-    return None
-
-
-def item_fair(
-    books: Sequence[ItemBook], floors: Sequence[Fraction | None], index: int, *, min_books: int
-) -> dict[str, Any]:
-    """Strictly-past 24 h fair value of the item-kind floor (median of per-book lowest buyouts)."""
-
-    current = books[index].t
-    refs = [
-        floor
-        for book, floor in zip(books, floors, strict=True)
-        if current - FAIR_WINDOW_SECONDS <= book.t < current and floor is not None
-    ]
-    if len(refs) < min_books:
-        return {"value": None, "band": {"p25": None, "p75": None}, "n": len(refs)}
-    return {
-        "value": percentile(refs, Fraction(1, 2)),
-        "band": {"p25": percentile(refs, Fraction(1, 4)), "p75": percentile(refs, Fraction(3, 4))},
-        "n": len(refs),
-    }
-
-
-def replay_item_listing(
-    books: Sequence[ItemBook],
-    intervals: Sequence[ItemInterval | None],
-    start: int,
-    price: int,
-    quantity: int,
-    horizon: float,
-) -> bool | None:
-    """Whether a hypothetical listing of ``quantity`` units at ``price`` sold within ``horizon``.
-
-    ``None`` when ``[t, t + horizon]`` is not an unbroken run of usable intervals; that is decided
-    from the structure alone, before and regardless of any outcome.  Otherwise units consumed by
-    each interval's walk strictly above ``price`` (ties never fill) accumulate until the whole
-    listing is filled, as in ``time_to_sale``.
-    """
-
-    start_t = books[start].t
-    end = next((i for i in range(start, len(books)) if books[i].t >= start_t + horizon), None)
-    if end is None or any(interval is None for interval in intervals[start:end]):
-        return None
-    filled = 0
-    for interval in intervals[start:end]:
-        assert interval is not None
-        filled += sum(units for unit, units in interval.consumed if unit > price)
-        if filled >= quantity:
-            return interval.after.t - start_t <= horizon
-    return False
 
 
 def load_item_books(

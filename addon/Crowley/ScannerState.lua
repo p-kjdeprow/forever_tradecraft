@@ -141,5 +141,3 @@ function State.Reduce(previous, event)
   end
   return nextState
 end
-
-ns.RegisterModule("ScannerState", { requires = { "Core" }, onLoad = function() end })

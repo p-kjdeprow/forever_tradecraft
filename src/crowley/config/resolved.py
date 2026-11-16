@@ -55,7 +55,6 @@ class CompanionResolvedConfig:
     account_dir: Path
     saved_variables: Path
     data_lua: Path
-    queue_lua: Path
     state_file: Path
     state_dir: Path
     server_url: str
@@ -77,7 +76,6 @@ class OpsResolvedConfig:
     data_addon_dir: Path
     saved_variables: Path
     data_lua: Path
-    queue_lua: Path
     addons_dir: Path
     state_dir: Path
     runtime_dir: Path
@@ -111,7 +109,6 @@ def resolve_companion(
         account_dir=account_dir,
         saved_variables=account_dir / "SavedVariables" / "Crowley.lua",
         data_lua=addon / "Data.lua",
-        queue_lua=addon / "Queue.lua",
         state_file=state / "companion.json",
         state_dir=state,
         server_url=host.server_url,
@@ -151,7 +148,6 @@ def resolve_ops(
         data_addon_dir=data_addon_dir,
         saved_variables=account_dir / "SavedVariables" / "Crowley.lua",
         data_lua=data_addon_dir / "Data.lua",
-        queue_lua=data_addon_dir / "Queue.lua",
         addons_dir=addons_dir,
         state_dir=_state_dir(target, host, dirs),
         runtime_dir=dirs.crowley_runtime,

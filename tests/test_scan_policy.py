@@ -26,15 +26,13 @@ from crowley.scan.policy import (
 WALL = 1_000_000.0
 MONO = 500.0
 JAXON = "Auctioneer Jaxon"
-TARGET = Target("Char", "Realm", "Alliance", "house-a", "plan-1", "70862", 11500, "1.0", JAXON)
+TARGET = Target("Char", "Realm", "Alliance", "house-a", "plan-1", "70862", 11500, "0.1.0", "0.3.0", JAXON)
 S1, S2, S3 = "uid-1", "uid-2", "uid-3"
 
 
 def snap(**kw: object) -> Snapshot:
     base = Snapshot(
         boot="boot-1",
-        native_phase="normal",
-        native_ordinal=0,
         wall_time=1,
         received_at=WALL - 1,
         character="Char",
@@ -43,7 +41,8 @@ def snap(**kw: object) -> Snapshot:
         zone="Stormwind City",
         build="70862",
         interface=11500,
-        addon_version="1.0",
+        addon_version="0.1.0",
+        scanner_addon_version="0.3.0",
         house_key="house-a",
         plan_hash="plan-1",
         ah_open=True,
@@ -172,7 +171,8 @@ def test_unfocused_window_is_activated_before_any_key() -> None:
         ({"plan_hash": "zz"}, "plan_hash"),
         ({"build": "1"}, "build"),
         ({"interface": 1}, "interface"),
-        ({"addon_version": "9"}, "addon_version"),
+        ({"addon_version": "9"}, "automation_addon_version"),
+        ({"scanner_addon_version": "9"}, "scanner_addon_version"),
     ],
 )
 def test_row_4_pin_mismatch_faults_without_input(change: dict[str, object], name: str) -> None:
@@ -181,12 +181,9 @@ def test_row_4_pin_mismatch_faults_without_input(change: dict[str, object], name
     assert d.detail == name
 
 
-def test_row_4_plan_invalid_and_construction_marker() -> None:
+def test_row_4_plan_invalid_faults_without_input() -> None:
     bad = snap(pending_blocked=True, pending_reason="plan_invalid", phase="blocked", pending_count=0)
     check(decide(obs(bad)), Action.FAULT, "plan_invalid")
-    check(decide(obs(snap(boot="native-construction:abc"))), Action.FAULT, "construction_marker")
-    check(decide(obs(snap(native_phase="held"))), Action.FAULT, "construction_marker")
-    check(decide(obs(snap(native_ordinal=3, native_phase="updates"))), Action.FAULT, "construction_marker")
 
 
 # --- row 5 and typed-command transactions ----------------------------------------------

@@ -27,18 +27,14 @@ from crowley.core.companion_state import (
     STATE_VERSION,
     CompanionState,
     CompanionStateError,
-    LegacyCompanionStateError,
     dump_bytes,
     parse_bytes,
-    upgrade_legacy_state_bytes,
 )
 from crowley.core.game_target import load_game_target, target_scan_plan
 from crowley.core.luawriter import render_assignment
-from crowley.core.queue import build_queue, render_queue_lua
 from crowley.core.watchlist import load_catalog
 
 from .test_core import raw_scan
-from .wow_harness import WowClient
 
 FIXTURE = Path(__file__).parent / "fixtures/native-construction-unknown-savedvars.lua"
 TARGET_FIXTURE = Path(__file__).parent / "fixtures/targets/verified-beta.json"
@@ -49,7 +45,6 @@ def _settings_for(
     *,
     target=None,
     account: str = "Test",
-    house_key: str | None = None,
     wow_dir: Path | None = None,
 ) -> CompanionSettings:
     selected = load_game_target(TARGET_FIXTURE) if target is None else target
@@ -68,25 +63,17 @@ def _settings_for(
         server_url="http://test",
         api_token="test-token",
         wtf_account=account,
-        house_key=house_key,
         state_file=root / "state" / "companion.json",
         saved_variables=account_dir / "SavedVariables" / "Crowley.lua",
         data_lua=addon / "Data.lua",
-        queue_lua=addon / "Queue.lua",
         addons_dir=flavor / "Interface" / "AddOns",
     )
 
 
-def write_savedvars(path, scans, probe=None, reference=None, account=None, executions=None):
+def write_savedvars(path, scans, probe=None):
     db = {"scans": {scan["id"]: scan for scan in scans}}
     if probe is not None:
         db["probe"] = probe
-    if reference is not None:
-        db["reference"] = reference
-    if account is not None:
-        db["account"] = account
-    if executions is not None:
-        db["executions"] = executions
     path.write_text(render_assignment("CrowleyDB", db, header="test"))
 
 
@@ -112,8 +99,9 @@ def test_companion_settings_reject_stale_target_identity():
     expected_wow_dir = Path("fixture") / target.product_dir
     with pytest.raises(ValueError, match="wow_dir"):
         _settings_for(Path("fixture"), target=target, wow_dir=Path("stale-wow"))
-    with pytest.raises(ValueError, match="house_key"):
-        _settings_for(Path("fixture"), target=target, wow_dir=expected_wow_dir, house_key="us-normal-horde")
+    settings = _settings_for(Path("fixture"), target=target, wow_dir=expected_wow_dir)
+    assert not hasattr(settings, "house_key")
+    assert not hasattr(settings, "queue_lua")
 
 
 @pytest.mark.parametrize("failure", ["s1", "s2", "probe"])
@@ -164,10 +152,10 @@ def test_retries_failed_file_without_reuploading_successful_scans(companion, fai
     assert set(persisted.uploaded) == {"s1", "s2"}
     assert persisted.probes == [probe["at"]]
     data = savedvars.load_file(instance.settings.data_lua)["CROWLEY_DATA"]
+    assert set(data) == {"generatedAt", "ackedScans", "scanPlan"}
     assert data["ackedScans"] == ["s1", "s2"]
     # A Lua table cannot tell an empty array from an empty object, so the empty cold pool loads as {}.
     assert data["scanPlan"] == {**plan, "pools": {**plan["pools"], "cold": {}}}
-    assert "shoppingLists" not in data
 
     instance.tick()
     assert len(attempts) == 4  # Completed files stay processed.
@@ -225,264 +213,6 @@ def test_unknown_native_marker_fixture_preserves_scan_wire_and_is_not_uploaded(c
     assert len(uploaded) == 1
     assert uploaded[0]["payload"] == original_payload
     assert "nativeConstruction" not in uploaded[0]
-
-
-def test_item_reference_upload_is_remembered_and_retried_on_error(companion):
-    instance, saved = companion
-    reference = {
-        "format": 1,
-        "id": "us-normal-alliance-1760000000-Tester-0001",
-        "house": {
-            "region": "us",
-            "ruleset": "normal",
-            "faction": "alliance",
-            "source": "auto",
-            "key": "us-normal-alliance",
-        },
-        "context": {
-            "character": "Tester",
-            "realm": "Normal",
-            "playerFaction": "Alliance",
-            "zone": "Orgrimmar",
-            "subzone": "",
-            "locale": "enUS",
-            "clientVersion": "1.60.1",
-            "clientBuild": "70450",
-            "interface": 16001,
-            "addonVersion": "0.2.0",
-        },
-        "startedAt": 1760000000,
-        "finishedAt": 1760000000,
-        "ahOpen": False,
-        "items": {
-            "2589": {
-                "itemID": 2589,
-                "status": "ok",
-                "info": {
-                    "quality": 1,
-                    "itemLevel": 0,
-                    "minLevel": 0,
-                    "classID": 7,
-                    "subclassID": 0,
-                    "maxStack": 20,
-                    "sellPrice": 3,
-                    "bindType": 0,
-                    "expansionID": 1,
-                    "isCraftingReagent": True,
-                },
-                "deposit": {"kind": "unqueried", "reason": "ah_closed"},
-            }
-        },
-    }
-    write_savedvars(saved, [], reference=reference)
-    calls = []
-
-    def respond(request):
-        if request.url.path == "/v1/item-reference":
-            calls.append(json.loads(request.content))
-            return httpx.Response(200, json={"status": "created", "items": 1})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
-
-    instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
-    instance.once()
-    instance.once()
-    assert len(calls) == 1
-    assert State.load(instance.state_file).references == [reference["id"]]
-
-    failure = httpx.Client(
-        base_url="http://test",
-        transport=httpx.MockTransport(
-            lambda request: (
-                httpx.Response(302, text="redirect")
-                if request.url.path == "/v1/item-reference"
-                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
-            )
-        ),
-    )
-    instance.client.close()
-    instance.client = failure
-    new_reference = dict(reference, id="us-normal-alliance-1760000000-Tester-0002")
-    write_savedvars(saved, [], reference=new_reference)
-    with pytest.raises(RuntimeError, match="server rejected item-reference"):
-        instance.once()
-    assert State.load(instance.state_file).references == [reference["id"]]
-
-    successful_calls = []
-
-    def succeed(request):
-        if request.url.path == "/v1/item-reference":
-            successful_calls.append(json.loads(request.content)["id"])
-            return httpx.Response(200, json={"status": "created", "items": 1})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
-
-    instance.client.close()
-    instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(succeed))
-    instance.once()
-    assert successful_calls == [new_reference["id"]]
-    assert State.load(instance.state_file).references == [reference["id"], new_reference["id"]]
-    # once() reprocesses the file unconditionally, so only the remembered id prevents a second upload.
-    instance.once()
-    assert successful_calls == [new_reference["id"]]
-
-
-def test_account_upload_is_remembered_and_retried_on_error(companion):
-    instance, saved = companion
-    wow = WowClient(money=321)
-    wow.login()
-    account = savedvars.loads(wow.saved_variables())["CrowleyDB"]["account"]
-    write_savedvars(saved, [], account=account)
-    attempts = []
-    failed = False
-
-    def respond(request):
-        nonlocal failed
-        if request.url.path == "/v1/account-state":
-            attempts.append(json.loads(request.content)["id"])
-            if not failed:
-                failed = True
-                raise httpx.ConnectError("temporary outage", request=request)
-            return httpx.Response(200, json={"status": "created", "items": 0})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
-
-    instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
-    with pytest.raises(httpx.ConnectError):
-        instance.once()
-    assert State.load(instance.state_file).accounts == []
-
-    instance.once()
-    instance.once()
-    assert attempts == [account["id"], account["id"]]
-    assert State.load(instance.state_file).accounts == [account["id"]]
-
-
-def test_account_upload_permanent_rejection_waits_for_operator_retry(companion):
-    instance, saved = companion
-    wow = WowClient(money=654)
-    wow.login()
-    account = savedvars.loads(wow.saved_variables())["CrowleyDB"]["account"]
-    write_savedvars(saved, [], account=account)
-    attempts = 0
-
-    def respond(request):
-        nonlocal attempts
-        if request.url.path == "/v1/account-state":
-            attempts += 1
-            if attempts == 1:
-                return httpx.Response(422, text="malformed account")
-            return httpx.Response(200, json={"status": "created", "items": 0})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
-
-    instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
-    instance.once()
-    assert State.load(instance.state_file).accounts == []
-
-    instance.once()
-    assert attempts == 1
-    assert len(State.load(instance.state_file).rejections) == 1
-
-    instance.retry_rejected(account["id"])
-    assert attempts == 2
-    assert State.load(instance.state_file).accounts == [account["id"]]
-
-
-def test_queue_lua_is_written_only_when_content_changes(companion, monkeypatch):
-    instance, _ = companion
-    instance.settings.house_key = instance.settings.target.house
-    instance.settings.character = "Tester"
-    queue = build_queue(
-        {
-            "house": "us-normal-alliance",
-            "character": "Tester",
-            "generatedAt": 1_700_000_000,
-            "expiresAt": 1_700_000_600,
-            "actions": [{"seq": 1, "kind": "vendor_buy", "itemID": 1, "quantity": 1}],
-        }
-    )
-    writes = []
-    seen_characters = []
-
-    def record_write(path, text):
-        writes.append((path, text))
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text)
-
-    monkeypatch.setattr("crowley.companion.sync.atomic_write", record_write)
-    instance.client = httpx.Client(
-        base_url="http://test",
-        transport=httpx.MockTransport(
-            lambda request: (
-                seen_characters.append(request.url.params["character"]) or httpx.Response(200, json=queue)
-            )
-        ),
-    )
-    instance.write_queue()
-    instance.write_queue()
-    assert len(writes) == 1
-    assert seen_characters == ["Tester", "Tester"]
-    assert savedvars.load_file(instance.settings.queue_lua)["CROWLEY_QUEUE"] == queue
-
-
-def test_unconfigured_queue_is_cleared_even_when_addon_data_fails(companion):
-    instance, saved = companion
-    write_savedvars(saved, [])
-    stale = build_queue(
-        {
-            "house": "us-normal-alliance",
-            "character": "Tester",
-            "generatedAt": 1_700_000_000,
-            "expiresAt": 1_700_000_600,
-            "actions": [{"seq": 1, "kind": "vendor_buy", "itemID": 1, "quantity": 1}],
-        }
-    )
-    instance.settings.queue_lua.write_text(render_queue_lua(stale))
-
-    def respond(request):
-        if request.url.path == "/v1/addon-data":
-            raise httpx.ConnectError("temporary outage", request=request)
-        raise AssertionError(f"unexpected request {request.url}")
-
-    instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
-    with pytest.raises(httpx.ConnectError):
-        instance.once()
-    assert savedvars.load_file(instance.settings.queue_lua) == {"CROWLEY_QUEUE": False}
-
-
-def test_execution_upload_retries_then_is_remembered(companion):
-    instance, saved = companion
-    queue = build_queue(
-        {
-            "house": "us-normal-alliance",
-            "character": "Tester",
-            "generatedAt": 1_700_000_000,
-            "expiresAt": 1_700_000_600,
-            "actions": [{"seq": 1, "kind": "vendor_buy", "itemID": 1, "quantity": 1}],
-        }
-    )
-    execution = {
-        "queueId": queue["queueId"],
-        "house": queue["house"],
-        "character": queue["character"],
-        "results": [],
-    }
-    write_savedvars(saved, [], executions={queue["queueId"]: execution})
-    attempts = 0
-
-    def respond(request):
-        nonlocal attempts
-        if request.url.path == "/v1/executions":
-            attempts += 1
-            if attempts == 1:
-                raise httpx.ConnectError("temporary outage", request=request)
-            return httpx.Response(200, json={"status": "created"})
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
-
-    instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
-    with pytest.raises(httpx.ConnectError):
-        instance.once()
-    instance.once()
-    instance.once()
-    assert attempts == 2
-    assert queue["queueId"] in State.load(instance.state_file).executions
 
 
 @pytest.mark.parametrize(
@@ -589,16 +319,12 @@ def test_state_save_preserves_history_bounds_and_upload_retention(tmp_path):
             **{f"scan-{i}": int(now) for i in range(3)},
         },
         probes=list(range(MAX_HISTORY_ENTRIES + 3)),
-        references=[f"reference-{i}" for i in range(MAX_HISTORY_ENTRIES + 3)],
-        accounts=[f"account-{i}" for i in range(MAX_HISTORY_ENTRIES + 3)],
     )
     path = tmp_path / "state.json"
     state.save(path)
     loaded = State.load(path)
     assert loaded.uploaded == {"scan-0": int(now), "scan-1": int(now), "scan-2": int(now)}
     assert loaded.probes == list(range(3, MAX_HISTORY_ENTRIES + 3))
-    assert loaded.references == [f"reference-{i}" for i in range(3, MAX_HISTORY_ENTRIES + 3)]
-    assert loaded.accounts == [f"account-{i}" for i in range(3, MAX_HISTORY_ENTRIES + 3)]
 
 
 def test_observing_rejected_record_refreshes_last_seen(tmp_path):
@@ -929,7 +655,6 @@ def test_config_is_strict_and_requires_account_selection(companion):
             api_token="test-token",
             saved_variables=settings.saved_variables,
             data_lua=settings.data_lua,
-            queue_lua=settings.queue_lua,
             addons_dir=settings.addons_dir,
         )
     with pytest.raises(ValidationError, match="unknown"):
@@ -945,13 +670,12 @@ def test_config_is_strict_and_requires_account_selection(companion):
             wtf_account="Test",
             saved_variables=settings.saved_variables,
             data_lua=settings.data_lua,
-            queue_lua=settings.queue_lua,
             addons_dir=settings.addons_dir,
             unknown="value",
         )
 
 
-def test_state_errors_are_strict_and_legacy_state_is_upgraded(tmp_path):
+def test_state_errors_are_strict_and_version_two_state_is_upgraded(tmp_path):
     unknown_version = tmp_path / "unknown.json"
     unknown_version.write_text(json.dumps({"version": 99}), encoding="utf-8")
     with pytest.raises(StateError, match="unsupported companion state version 99"):
@@ -962,14 +686,61 @@ def test_state_errors_are_strict_and_legacy_state_is_upgraded(tmp_path):
     with pytest.raises(StateError, match="missing key"):
         State.load(missing_key)
 
-    legacy = tmp_path / "legacy.json"
-    legacy.write_text(json.dumps({"uploaded": {"scan": int(time.time())}, "probes": []}), encoding="utf-8")
-    state = State.load(legacy)
+    old_key = RejectionKey("Test", "WTF/Account/Test/SavedVariables/Crowley.lua", "scan", "bad", "a" * 64)
+    retired_key = RejectionKey(
+        "Test", "WTF/Account/Test/SavedVariables/Crowley.lua", "execution", "queue", "b" * 64
+    )
+
+    def old_rejection(key):
+        return {
+            "account": key.account,
+            "saved_variables_file": key.saved_variables_file,
+            "record_kind": key.record_kind,
+            "record_id": key.record_id,
+            "content_digest": key.content_digest,
+            "status": 422,
+            "error_code": "contract",
+            "error_message": "rejected",
+            "first_seen": 1.0,
+            "last_seen": 2.0,
+            "configuration_digest": "c" * 64,
+            "contract_version": 1,
+        }
+
+    previous = tmp_path / "previous.json"
+    previous.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "uploaded": {"scan": int(time.time())},
+                "probes": [101],
+                "references": ["retired-reference"],
+                "accounts": ["retired-account"],
+                "executions": {"queue": "d" * 64},
+                "rejections": {
+                    old_key.storage_key(): old_rejection(old_key),
+                    retired_key.storage_key(): old_rejection(retired_key),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    state = State.load(previous)
     assert state.uploaded == {"scan": pytest.approx(time.time(), abs=5)}
-    assert json.loads(legacy.read_text(encoding="utf-8"))["version"] == 2
+    assert state.probes == [101]
+    assert state.rejection_for(old_key) is not None
+    assert state.rejection_for(retired_key) is None
+    stored = json.loads(previous.read_text(encoding="utf-8"))
+    assert stored["version"] == STATE_VERSION
+    assert set(stored) == {"version", "uploaded", "probes", "rejections"}
 
     unknown_key = tmp_path / "unknown-key.json"
-    unknown_key.write_text(json.dumps({"uploaded": {}, "probes": [], "surprise": True}), encoding="utf-8")
+    unknown_key.write_text(
+        json.dumps(
+            {"version": STATE_VERSION, "uploaded": {}, "probes": [], "rejections": {}, "surprise": True}
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(StateError, match="unknown key"):
         State.load(unknown_key)
 
@@ -979,9 +750,6 @@ def test_companion_state_contract_round_trip_and_canonical_bytes():
         version=STATE_VERSION,
         uploaded={"scan": 100},
         probes=(101,),
-        references=("reference",),
-        accounts=("account",),
-        executions={"queue": "a" * 64},
         rejections={},
     )
     raw = dump_bytes(state)
@@ -995,9 +763,6 @@ def test_companion_state_contract_refuses_unknown_keys_versions_and_legacy_shape
             version=STATE_VERSION,
             uploaded={},
             probes=(),
-            references=(),
-            accounts=(),
-            executions={},
             rejections={},
         )
     )
@@ -1010,9 +775,6 @@ def test_companion_state_contract_refuses_unknown_keys_versions_and_legacy_shape
     with pytest.raises(CompanionStateError, match="unsupported companion state version"):
         parse_bytes(json.dumps(document).encode())
 
-    legacy = b'{"uploaded":{"scan":100},"probes":[]}'
-    with pytest.raises(LegacyCompanionStateError):
-        parse_bytes(legacy)
-    upgraded = upgrade_legacy_state_bytes(legacy)
-    assert upgraded.version == STATE_VERSION
-    assert dict(upgraded.uploaded) == {"scan": 100}
+    unversioned = b'{"uploaded":{"scan":100},"probes":[]}'
+    with pytest.raises(CompanionStateError, match="missing version"):
+        parse_bytes(unversioned)

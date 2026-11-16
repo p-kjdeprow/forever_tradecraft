@@ -25,7 +25,6 @@ class AddonDataResponse(BaseModel):
     generatedAt: int
     ackedScans: list[str]
     scanPlan: dict[str, object]
-    referenceItemIDs: list[int]
 
 
 @router.get("/v1/scan-plan", dependencies=[Authed])
@@ -44,5 +43,4 @@ def addon_data(body: AddonDataRequest, request: Request) -> AddonDataResponse:
         generatedAt=int(time.time()),
         ackedScans=sorted(acked, key=lambda item: item.encode()),
         scanPlan=dict(request.app.state.canonical_scan_plan),
-        referenceItemIDs=list(request.app.state.reference_item_ids),
     )

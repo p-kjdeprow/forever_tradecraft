@@ -9,12 +9,11 @@ from crowley.core.luawriter import render_assignment, to_lua
 from crowley.core.scanformat import (
     MAX_SAFE_INTEGER,
     ScanFormatError,
-    decode_json_envelope,
     decode_json_payload,
+    decode_strict_json,
     encode_json_payload,
     normalize_observation,
     validate_envelope,
-    validate_v2_envelope,
 )
 
 WOW_STYLE = b"""
@@ -195,7 +194,7 @@ def raw_scan(**overrides):
 def test_format2_validates_exact_payload_and_counts():
     raw = raw_scan()
     original_payload = raw["payload"]
-    parsed = validate_v2_envelope(raw)
+    parsed = validate_envelope(raw)
     assert parsed["plan"]["cadenceSeconds"] == 900
     assert parsed["decoded"]["observations"]["10"]["rowCount"] == 1
     assert parsed["decoded"]["observations"]["10"]["rows"]["row:1"]["rawItemKey"]["bonusIDs"] == {}
@@ -230,7 +229,7 @@ def test_native_keyed_collections_reject_non_native_empty_and_array_shapes(colle
         payload["owned"]["rowCount"] = 0
     raw["payload"] = encode_json_payload(payload)
     with pytest.raises(ScanFormatError, match="empty array or non-empty object"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 def test_generic_payload_encoder_does_not_repair_an_empty_object():
@@ -239,15 +238,15 @@ def test_generic_payload_encoder_does_not_repair_an_empty_object():
     payload["owned"]["rows"] = {}
     raw["payload"] = encode_json_payload(payload)
     with pytest.raises(ScanFormatError, match="empty array or non-empty object"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 def test_format2_rejects_old_format_and_malformed_scope():
     with pytest.raises(ScanFormatError, match="formats 2 and 3"):
-        validate_v2_envelope(raw_scan(format=1))
+        validate_envelope(raw_scan(format=1))
     malformed = raw_scan(numRows=2)
     with pytest.raises(ScanFormatError, match="counts"):
-        validate_v2_envelope(malformed)
+        validate_envelope(malformed)
 
 
 def test_format4_is_rejected():
@@ -257,23 +256,23 @@ def test_format4_is_rejected():
 
 def test_format2_rejects_fraction_not_reduced_and_unknown_fields():
     raw = raw_scan()
-    decoded = validate_v2_envelope(raw)["decoded"]
+    decoded = validate_envelope(raw)["decoded"]
     row = decoded["observations"]["10"]["rows"]["row:1"]
     row["unitPrice"] = {"numerator": 2, "denominator": 2}
     raw["payload"] = _encode_native_payload(decoded)
     with pytest.raises(ScanFormatError, match="not reduced"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 def test_outer_json_decoder_rejects_duplicate_keys():
     with pytest.raises(ScanFormatError, match="duplicate"):
-        decode_json_envelope('{"id":"a","id":"b"}')
+        decode_strict_json('{"id":"a","id":"b"}')
 
 
 def test_unqueried_abort_tail_preserves_reason_and_invariants():
     raw = raw_scan()
     plan_json, plan_hash = _plan([10, 11])
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     payload["planJSON"] = plan_json
     payload["planHash"] = plan_hash
     payload["observations"]["10"]["ordinal"] = 1
@@ -292,12 +291,12 @@ def test_unqueried_abort_tail_preserves_reason_and_invariants():
     }
     raw["numObservations"] = 2
     raw["payload"] = _encode_native_payload(payload)
-    assert validate_v2_envelope(raw)["decoded"]["observations"]["11"]["reasonCode"] == "logout"
+    assert validate_envelope(raw)["decoded"]["observations"]["11"]["reasonCode"] == "logout"
 
 
 def test_full_depth_over_plan_is_rejected():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     observation = payload["observations"]["10"]
     rows = {}
     for index in range(1, 22):
@@ -311,19 +310,19 @@ def test_full_depth_over_plan_is_rejected():
     raw["numRows"] = 21
     raw["payload"] = _encode_native_payload(payload)
     with pytest.raises(ScanFormatError, match="plan depth"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 @pytest.mark.parametrize("field,value", [("context", None), ("startedAt", "bad"), ("numRows", None)])
 def test_malformed_wire_types_raise_scan_format_error(field, value):
     raw = raw_scan(**{field: value})
     with pytest.raises(ScanFormatError):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 def test_item_buyout_quantity_uses_reduced_fraction_without_float_division():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     observation = payload["observations"]["10"]
     observation["kind"] = "item"
     row = observation["rows"]["row:1"]
@@ -339,7 +338,7 @@ def test_item_buyout_quantity_uses_reduced_fraction_without_float_division():
         "identityKind": "individual",
     }
     raw["payload"] = _encode_native_payload(payload)
-    assert validate_v2_envelope(raw)["decoded"]["observations"]["10"]["rows"]["row:1"]["unitPrice"] == {
+    assert validate_envelope(raw)["decoded"]["observations"]["10"]["rows"]["row:1"]["unitPrice"] == {
         "numerator": 3,
         "denominator": 2,
     }
@@ -444,7 +443,7 @@ def test_format2_bounded_item_observation_cannot_be_normalized():
 
 def test_numeric_range_partial_preserves_safe_fractional_rows_without_cross_product():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     observation = payload["observations"]["10"]
     observation.update(
         {
@@ -497,14 +496,14 @@ def test_numeric_range_partial_preserves_safe_fractional_rows_without_cross_prod
     observation["rowCount"] = 2
     raw["numRows"] = 2
     raw["payload"] = _encode_native_payload(payload)
-    parsed = validate_v2_envelope(raw)
+    parsed = validate_envelope(raw)
     assert parsed["decoded"]["observations"]["10"]["reasonCode"] == "numeric_range"
     assert parsed["decoded"]["observations"]["10"]["rowCount"] == 2
 
 
 def test_successful_scope_rejects_unsafe_nonadjacent_price_product():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     observation = payload["observations"]["10"]
     observation["kind"] = "item"
     link = {"kind": "known", "value": "|Hitem:10:0:0:0:0:0:0:0:1:0:0:0:0|h[x]|h"}
@@ -539,12 +538,12 @@ def test_successful_scope_rejects_unsafe_nonadjacent_price_product():
     raw["numRows"] = len(rows)
     raw["payload"] = _encode_native_payload(payload)
     with pytest.raises(ScanFormatError, match="unsafe"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 def test_incomplete_partial_may_exceed_depth_and_preserve_unordered_rows():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     observation = payload["observations"]["10"]
     observation.update(
         {
@@ -566,12 +565,12 @@ def test_incomplete_partial_may_exceed_depth_and_preserve_unordered_rows():
     observation["rowCount"] = len(rows)
     raw["numRows"] = len(rows)
     raw["payload"] = _encode_native_payload(payload)
-    assert validate_v2_envelope(raw)["decoded"]["observations"]["10"]["rowCount"] == 21
+    assert validate_envelope(raw)["decoded"]["observations"]["10"]["rowCount"] == 21
 
 
 def test_successful_equal_price_rows_use_numeric_ordinals_and_allow_any_tie_order():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     observation = payload["observations"]["10"]
     rows = {}
     for index in range(1, 13):
@@ -582,12 +581,12 @@ def test_successful_equal_price_rows_use_numeric_ordinals_and_allow_any_tie_orde
     observation["rowCount"] = len(rows)
     raw["numRows"] = len(rows)
     raw["payload"] = _encode_native_payload(payload)
-    assert validate_v2_envelope(raw)["decoded"]["observations"]["10"]["rowCount"] == 12
+    assert validate_envelope(raw)["decoded"]["observations"]["10"]["rowCount"] == 12
 
 
 def test_bounded_success_requires_ok_and_exact_plan_depth():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     observation = payload["observations"]["10"]
     observation.update(
         {
@@ -608,26 +607,26 @@ def test_bounded_success_requires_ok_and_exact_plan_depth():
     observation["rowCount"] = len(rows)
     raw["numRows"] = len(rows)
     raw["payload"] = _encode_native_payload(payload)
-    assert validate_v2_envelope(raw)["decoded"]["observations"]["10"]["coverage"] == "bounded"
+    assert validate_envelope(raw)["decoded"]["observations"]["10"]["coverage"] == "bounded"
     last_row = dict(rows["row:20"])
     del observation["rows"]["row:20"]
     observation["rowCount"] = 19
     raw["numRows"] = 19
     raw["payload"] = _encode_native_payload(payload)
     with pytest.raises(ScanFormatError, match="bounded"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
     observation["rows"]["row:20"] = last_row
     observation["rowCount"] = 20
     raw["numRows"] = 20
     observation["reasonCode"] = "page_limit"
     raw["payload"] = _encode_native_payload(payload)
     with pytest.raises(ScanFormatError, match="bounded"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 def test_owned_house_changed_is_an_incomplete_queried_batch():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     payload["owned"] = {
         "status": "incomplete",
         "query": {"kind": "queried", "startedAt": 1759999990, "finishedAt": 1760000000},
@@ -636,21 +635,21 @@ def test_owned_house_changed_is_an_incomplete_queried_batch():
         "rows": [],
     }
     raw["payload"] = _encode_native_payload(payload)
-    assert validate_v2_envelope(raw)["decoded"]["owned"]["reasonCode"] == "house_changed"
+    assert validate_envelope(raw)["decoded"]["owned"]["reasonCode"] == "house_changed"
 
 
 def test_owned_unqueried_status_requires_unqueried_query():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     payload["owned"]["query"] = {"kind": "queried", "startedAt": 1759999990, "finishedAt": 1760000000}
     raw["payload"] = _encode_native_payload(payload)
     with pytest.raises(ScanFormatError, match="unqueried"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)
 
 
 def test_owned_queried_status_requires_queried_query():
     raw = raw_scan()
-    payload = validate_v2_envelope(raw)["decoded"]
+    payload = validate_envelope(raw)["decoded"]
     payload["owned"] = {
         "status": "incomplete",
         "query": {"kind": "unqueried"},
@@ -660,4 +659,4 @@ def test_owned_queried_status_requires_queried_query():
     }
     raw["payload"] = _encode_native_payload(payload)
     with pytest.raises(ScanFormatError, match="unqueried"):
-        validate_v2_envelope(raw)
+        validate_envelope(raw)

@@ -428,9 +428,9 @@ def test_restored_raw_reference_verifier_fails_closed_for_legacy_and_missing_mem
 
 def test_format2_reference_matches_restored_rows_and_rejects_identity_drift():
     envelope = raw_scan()
-    from crowley.core.scanformat import validate_v2_envelope
+    from crowley.core.scanformat import validate_envelope
 
-    decoded = validate_v2_envelope(envelope)["decoded"]
+    decoded = validate_envelope(envelope)["decoded"]
     digest = _logical_digest(envelope, decoded)
     plan = decoded["planJSON"]
     path = f"raw/format2/{digest[:2]}/{digest}.json.gz"

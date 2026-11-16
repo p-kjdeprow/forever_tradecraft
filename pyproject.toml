@@ -22,9 +22,6 @@ crowley-companion = "crowley.companion.__main__:main"
 crowley-watchlist = "crowley.core.watchlist:main"
 crowley-scan = "crowley.scan.cli:main"
 crowley-ops = "crowley.ops.cli:main"
-crowley-trading = "crowley.trading.__main__:main"
-crowley-advise = "crowley.advisor.cli:main"
-crowley-paper-step = "crowley.ops.paper_step:main"
 crowley-native = "crowley.native.build:main"
 
 [build-system]
@@ -87,11 +84,8 @@ exclude = ["tests", ".archive"]
 pythonVersion = "3.12"
 typeCheckingMode = "basic"
 strict = [
-    "src/crowley/advisor",
-    "src/crowley/forecast",
     "src/crowley/config",
     "src/crowley/platform",
-    "src/crowley/domain",
     "src/crowley/store",
     "src/crowley/core/auction_rules.py",
 ]

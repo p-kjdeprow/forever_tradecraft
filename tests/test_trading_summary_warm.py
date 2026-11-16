@@ -1,4 +1,4 @@
-"""Background warming of the shared trading-summary cache after new scan ingest."""
+"""Background warming of the retained trading-summary cache after new scan ingest."""
 
 from __future__ import annotations
 
@@ -41,40 +41,37 @@ class FakePool:
         yield self.connection_object
 
 
-def _settings(*, warm_advice: bool) -> SimpleNamespace:
-    return SimpleNamespace(warm_advice=warm_advice, data_dir=Path("/unused"))
+def _settings() -> SimpleNamespace:
+    return SimpleNamespace(data_dir=Path("/unused"))
 
 
-def _upload(pool: Any, tasks: BackgroundTasks, *, warm_advice: bool) -> dict[str, Any]:
-    return asyncio.run(scans.upload_scan(FakeRequest(pool), tasks, _settings(warm_advice=warm_advice)))
+def _upload(pool: Any, tasks: BackgroundTasks) -> dict[str, Any]:
+    return asyncio.run(scans.upload_scan(FakeRequest(pool), tasks, _settings()))
 
 
-def test_created_upload_schedules_summary_before_advice_and_duplicate_schedules_neither(monkeypatch) -> None:
+def test_created_upload_schedules_summary_and_duplicate_schedules_neither(monkeypatch) -> None:
     pool = object()
-    events: list[tuple[str, Any, str]] = []
+    events: list[tuple[Any, str]] = []
     results = iter([IngestResult("created", HOUSE), IngestResult("duplicate", HOUSE)])
     monkeypatch.setattr(scans, "_persist_market_sweep_request", lambda *args: next(results))
     monkeypatch.setattr(
         scans,
         "_warm_trading_summary",
-        lambda active_pool, house: events.append(("summary", active_pool, house)),
-    )
-    monkeypatch.setattr(
-        scans, "_warm_advice", lambda active_pool, house: events.append(("advice", active_pool, house))
+        lambda active_pool, house: events.append((active_pool, house)),
     )
 
     created_tasks = BackgroundTasks()
-    created = _upload(pool, created_tasks, warm_advice=True)
+    created = _upload(pool, created_tasks)
     assert created["status"] == "created"
-    assert [task.func for task in created_tasks.tasks] == [scans._warm_trading_summary, scans._warm_advice]
+    assert [task.func for task in created_tasks.tasks] == [scans._warm_trading_summary]
     asyncio.run(created_tasks())
-    assert events == [("summary", pool, HOUSE), ("advice", pool, HOUSE)]
+    assert events == [(pool, HOUSE)]
 
     duplicate_tasks = BackgroundTasks()
-    duplicate = _upload(pool, duplicate_tasks, warm_advice=True)
+    duplicate = _upload(pool, duplicate_tasks)
     assert duplicate["status"] == "duplicate"
     assert duplicate_tasks.tasks == []
-    assert events == [("summary", pool, HOUSE), ("advice", pool, HOUSE)]
+    assert events == [(pool, HOUSE)]
 
 
 def test_summary_warms_through_pool_connection_using_shared_loader(monkeypatch) -> None:
@@ -88,26 +85,7 @@ def test_summary_warms_through_pool_connection_using_shared_loader(monkeypatch) 
     assert pool.connection_count == 1
 
 
-def test_summary_warm_is_independent_of_advice_setting(monkeypatch) -> None:
-    pool = object()
-    monkeypatch.setattr(scans, "_persist_market_sweep_request", lambda *args: IngestResult("created", HOUSE))
-    summary_calls: list[tuple[Any, str]] = []
-    monkeypatch.setattr(
-        scans, "_warm_trading_summary", lambda active_pool, house: summary_calls.append((active_pool, house))
-    )
-    monkeypatch.setattr(
-        scans, "_warm_advice", lambda *args: (_ for _ in ()).throw(AssertionError("advice should stay off"))
-    )
-
-    tasks = BackgroundTasks()
-    response = _upload(pool, tasks, warm_advice=False)
-    assert response["status"] == "created"
-    assert [task.func for task in tasks.tasks] == [scans._warm_trading_summary]
-    asyncio.run(tasks())
-    assert summary_calls == [(pool, HOUSE)]
-
-
-def test_summary_warm_failure_is_logged_and_does_not_skip_advice(monkeypatch, caplog) -> None:
+def test_summary_warm_failure_is_logged_without_changing_upload_status(monkeypatch, caplog) -> None:
     pool = FakePool()
     monkeypatch.setattr(scans, "_persist_market_sweep_request", lambda *args: IngestResult("created", HOUSE))
 
@@ -115,18 +93,12 @@ def test_summary_warm_failure_is_logged_and_does_not_skip_advice(monkeypatch, ca
         raise RuntimeError("summary warm failed")
 
     monkeypatch.setattr(scans, "load_trading_summary", fail_load)
-    advice_calls: list[tuple[Any, str]] = []
-    monkeypatch.setattr(
-        scans, "_warm_advice", lambda active_pool, house: advice_calls.append((active_pool, house))
-    )
-
     tasks = BackgroundTasks()
-    response = _upload(pool, tasks, warm_advice=True)
+    response = _upload(pool, tasks)
     assert response["status"] == "created"
     asyncio.run(tasks())
 
     assert pool.connection_count == 1
-    assert advice_calls == [(pool, HOUSE)]
     assert any(
         record.name == "crowley.server.routes.scans"
         and f"Failed to warm trading summary for house {HOUSE}" in record.getMessage()

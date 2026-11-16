@@ -110,6 +110,7 @@ def loaded_config(root: Path) -> config.ScanConfig:
         window_title="World of Warcraft",
         display=":0",
         canvas_crop=(80, 48, 256, 256),
+        automation_canvas_crop=(352, 48, 256, 256),
         saved_variables=root / "Crowley.lua",
         companion_state=root / "companion.json",
         data_lua=root / "Data.lua",
@@ -126,6 +127,9 @@ def test_load_scan_config_pins_come_from_target_host_and_installed_addon(
     toc = game_root / game.product_dir / "Interface" / "AddOns" / "Crowley" / "Crowley.toc"
     toc.parent.mkdir(parents=True)
     toc.write_text("## Interface: 16001\n## Version: 0.2.0\n", encoding="utf-8")
+    automation_toc = toc.parent.parent / "Crowley_Automation" / "Crowley_Automation.toc"
+    automation_toc.parent.mkdir(parents=True)
+    automation_toc.write_text("## Interface: 16001\n## Version: 0.1.0\n", encoding="utf-8")
     _write_host(env / "config", game_root, env / "wine")
     loaded = config.load_scan_config()
     target = loaded.target
@@ -135,7 +139,8 @@ def test_load_scan_config_pins_come_from_target_host_and_installed_addon(
         game.native_build,
         game.interface,
     )
-    assert target.addon_version == "0.2.0" and target.auctioneer == "Auctioneer Jaxon"
+    assert target.addon_version == "0.1.0" and target.scanner_addon_version == "0.2.0"
+    assert target.auctioneer == "Auctioneer Jaxon"
     assert len(target.plan_hash) == 64
     assert (
         loaded.window_title == "World of Warcraft"
@@ -143,6 +148,7 @@ def test_load_scan_config_pins_come_from_target_host_and_installed_addon(
         and loaded.display == ":crowley-test"
     )
     assert loaded.canvas_crop == (80, 48, 256, 256)
+    assert loaded.automation_canvas_crop == (352, 48, 256, 256)
     assert loaded.matcher.comm == game.executable[:15] and loaded.matcher.argv0 == game.windows_argv0
     assert loaded.matcher.wine_prefix == str(env / "wine")
     assert loaded.saved_variables.name == "Crowley.lua" and loaded.data_lua.name == "Data.lua"
@@ -189,6 +195,8 @@ def test_crowley_toc_version_equals_the_addon_ns_version() -> None:
     toc = config.addon_version(root / "Crowley.toc")
     match = re.search(r'^ns\.VERSION = "([^"]+)"', (root / "Core.lua").read_text(encoding="utf-8"), re.M)
     assert match is not None and match.group(1) == toc
+    automation = root.parent / "Crowley_Automation" / "Crowley_Automation.toc"
+    assert config.addon_version(automation) == "0.1.0"
 
 
 def test_help_is_quiet() -> None:

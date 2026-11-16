@@ -94,7 +94,6 @@ def _check_units(xdg: XdgDirs, environ: Mapping[str, str], problems: list[str]) 
         "crowley-companion.service": "%h/.local/bin/crowley-companion",
         "crowley-health.service": "%h/.local/bin/crowley-ops",
         "crowley-market-backup.service": "%h/.local/bin/crowley-ops",
-        "crowley-paper-trading.service": "%h/.local/bin/crowley-paper-step",
         "crowley-scan.service": "%h/.local/bin/crowley-scan",
     }
     for name in sorted(expected):
@@ -250,7 +249,6 @@ def _check_addon(
         problems.append(f"packaged addon directory missing or is a symlink: {crowley}")
 
     _check_runtime_lua(resolved.data_lua, "CROWLEY_DATA", problems)
-    _check_runtime_lua(resolved.queue_lua, "CROWLEY_QUEUE", problems)
     toc = crowley / "Crowley.toc"
     try:
         toc_text = privfs.read_bounded(toc, 128 * 1024).decode("utf-8")

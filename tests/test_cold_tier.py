@@ -425,7 +425,9 @@ def test_scanner_planned_must_equal_hot_plus_one_slice() -> None:
 
 def replace_contract(contract: ProtocolContract) -> ProtocolContract:
     """The real contract with the default fixture's cadence/cap/levels (the snapshot fixture's values)."""
-    return ProtocolContract(contract.plan_count, 900, 600, 20, contract.plan_item_ids, contract.planned_sizes)
+    return ProtocolContract(
+        contract.plan_count, 900, 600, 20, contract.plan_item_ids, contract.planned_sizes, "a" * 64
+    )
 
 
 def test_scanner_planned_is_exactly_plan_count_without_cold_items() -> None:

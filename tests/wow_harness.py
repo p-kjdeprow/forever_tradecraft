@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import math
 import shutil
 import tempfile
 import zlib
@@ -13,17 +12,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from lupa import lua51
-from PIL import Image
 
 from crowley.core.game_target import GameTarget, load_game_target, target_scan_plan
-from crowley.core.watchlist import Catalog, load_catalog
+from crowley.core.watchlist import Catalog
 from tools.generate_launch_target import render_generated_lua
 
 ADDONS = Path(__file__).resolve().parents[1] / "addon"
-TARGET = load_game_target(Path(__file__).parent / "fixtures" / "targets" / "verified-beta.json")
+FIXTURES = Path(__file__).parent / "fixtures"
+TARGET = load_game_target(FIXTURES / "targets" / "verified-beta.json")
+DEFAULT_CATALOG = Catalog.model_validate_json(
+    (FIXTURES / "catalogs" / "verified-beta.json").read_text(encoding="utf-8")
+)
 _NEXT_AUCTION_ID = 1
-_BYTE_ATLAS_PATH = ADDONS / "Crowley" / "Textures" / "ByteAtlas.tga"
-_BYTE_ATLAS: Image.Image | None = None
 _ADDON_TREES: dict[tuple[str, str, str, str], Path] = {}
 _ADDON_TEMPORARIES: dict[tuple[str, str, str, str], tempfile.TemporaryDirectory[str]] = {}
 
@@ -57,28 +57,11 @@ _profile_ms = 0
 function time() return _now end
 function GetTime() return _now - 1760000000 end
 function GetBuildInfo() return harness.clientVersion, harness.clientBuild, "Oct 1 2026", harness.interface end
-function debugprofilestop() _profile_ms = _profile_ms + 0.01 return _profile_ms end
-function collectgarbage(option)
-  harness.gcCalls = (harness.gcCalls or 0) + 1
-  if option ~= "count" then
-    harness.gcMutations = (harness.gcMutations or 0) + 1
-    error("harness only exposes the read-only count diagnostic")
-  end
-  if harness.luaHeapAvailable == false then return nil end
-  local values = harness.luaHeapValues
-  if values and #values > 0 then
-    harness.luaHeapIndex = (harness.luaHeapIndex or 0) + 1
-    return values[math.min(harness.luaHeapIndex, #values)]
-  end
-  return harness.luaHeapValue or 512
-end
 function UnitExists(unit)
-  if unit == "mouseover" then return harness.mouseoverExists == true end
   if unit == "target" then return harness.targetPresent == true end
   return unit == "player"
 end
 function UnitName(unit)
-  if unit == "mouseover" then return harness.mouseoverName end
   if unit == "target" then
     if harness.targetPresent == true then return harness.targetName end
     return nil
@@ -120,94 +103,6 @@ function GetSubZoneText() return harness.subzone end
 function GetCurrentRegionName() return harness.regionName end
 function GetCurrentRegion() return harness.region end
 function GetLocale() return "enUS" end
-if harness.accountFakes then
-  function GetMoney() return harness.money end
-  function GetProfessions()
-    local values = harness.professionIndices or {}
-    return values[1], values[2], values[3], values[4], values[5]
-  end
-  function GetProfessionInfo(index)
-    local info = harness.professions and harness.professions[index]
-    if not info then return nil end
-    return info.name, nil, info.level, info.maxLevel, nil, nil, info.skillLineID
-  end
-end
-
--- Native movement telemetry APIs.  These return the same value shapes the
--- installed client exposes; Agent.lua is responsible for rejecting absent or
--- malformed values rather than filling in safety defaults.
-function UnitPosition(unit)
-  if unit ~= "player" then return nil end
-  return harness.positionX, harness.positionY, harness.positionZ, harness.positionInstance
-end
-function GetPlayerFacing() return harness.facing end
-function GetUnitSpeed(unit)
-  if unit ~= "player" then return nil end
-  harness.speedCalls = (harness.speedCalls or 0) + 1
-  local tuple = harness.speedTuple
-  if tuple then return tuple[1], tuple[2], tuple[3], tuple[4] end
-  return harness.speed, harness.speedRun or 0, harness.speedFlight or 0, harness.speedSwim or 0
-end
-function UnitAffectingCombat(unit)
-  if unit ~= "player" then return nil end
-  return harness.combat
-end
-function UnitIsDeadOrGhost(unit)
-  if unit ~= "player" then return nil end
-  return harness.deadOrGhost
-end
-function GetBindingKey(action)
-  local bindings = harness.bindings
-  return bindings and bindings[action]
-end
-
-if not harness.ctmMissing then
-  C_CVar = {
-    GetCVarBool = function(name)
-      assert(name == "autointeract", "documented CVar accessor signature")
-      harness.ctmCalls = (harness.ctmCalls or 0) + 1
-      local mode = harness.ctmMode or "false"
-      if mode == "error" then error("CVar accessor error") end
-      if mode == "nil" then return nil end
-      if mode == "wrong_type" then return "false" end
-      return mode == "true"
-    end,
-  }
-end
-
-local function nativePredicate(field, mode, ...)
-  harness.groundCalls = harness.groundCalls or {}
-  harness.groundArgCounts = harness.groundArgCounts or {}
-  harness.groundCalls[field] = (harness.groundCalls[field] or 0) + 1
-  harness.groundArgCounts[field] = (harness.groundArgCounts[field] or 0) + select("#", ...)
-  mode = mode or "false"
-  if mode == "error" then error("native predicate error") end
-  if mode == "nil" then return nil end
-  if mode == "wrong_type" then return "false" end
-  return mode == "true"
-end
-if not (harness.groundModes and harness.groundModes.flying == "missing") then
-  function IsFlying(...) return nativePredicate("flying", harness.groundModes and harness.groundModes.flying, ...) end
-end
-if not (harness.groundModes and harness.groundModes.falling == "missing") then
-  function IsFalling(...) return nativePredicate("falling", harness.groundModes and harness.groundModes.falling, ...) end
-end
-if not (harness.groundModes and harness.groundModes.swimming == "missing") then
-  function IsSwimming(...) return nativePredicate("swimming", harness.groundModes and harness.groundModes.swimming, ...) end
-end
-if not (harness.groundModes and harness.groundModes.submerged == "missing") then
-  function IsSubmerged(...) return nativePredicate("submerged", harness.groundModes and harness.groundModes.submerged, ...) end
-end
-if not (harness.groundModes and harness.groundModes.mounted == "missing") then
-  function IsMounted(...) return nativePredicate("mounted", harness.groundModes and harness.groundModes.mounted, ...) end
-end
-if not (harness.groundModes and harness.groundModes.taxi == "missing") then
-  function UnitOnTaxi(unit, ...)
-    assert(unit == "player", "documented UnitOnTaxi signature")
-    return nativePredicate("taxi", harness.groundModes and harness.groundModes.taxi, unit, ...)
-  end
-end
-
 if harness.realmInfo then
   C_RealmInfo = { GetRealmInfo = function() end }
 end
@@ -239,20 +134,14 @@ function UIParent:GetWidth() return self.width end
 function UIParent:GetHeight() return self.height end
 function UIParent:GetEffectiveScale() return self.effectiveScale end
 
-GameTooltip = {}
-function GameTooltip:IsShown() return harness.tooltipShown == true end
-function GameTooltip:GetOwner()
-  if harness.tooltipOwnerUIParent == true then return UIParent end
-  return harness.otherTooltipOwner
-end
-GameTooltipTextLeft1 = {}
-function GameTooltipTextLeft1:GetText() return harness.tooltipName end
-
 local chatEdit = harness.chatEdit
 function chatEdit:IsShown() return self.shown end
 function chatEdit:HasFocus() return self.focused end
 function chatEdit:GetText() return self.text end
 ChatFrameUtil = { GetActiveWindow = function() return chatEdit.shown and chatEdit or nil end }
+AuctionHouseFrame = {
+  IsShown = function() return harness.auctionHouseOpen == true end,
+}
 
 function CreateFrame(_, name, parent, template)
   local frame = { events = {}, name = name, parent = parent or UIParent, template = template }
@@ -331,6 +220,8 @@ function CreateFrame(_, name, parent, template)
 end
 
 function _fire(event, ...)
+  if event == "AUCTION_HOUSE_SHOW" then harness.auctionHouseOpen = true end
+  if event == "AUCTION_HOUSE_CLOSED" then harness.auctionHouseOpen = false end
   for _, frame in ipairs(_events) do
     if frame.events[event] and frame.onEvent then frame.onEvent(frame, event, ...) end
   end
@@ -345,92 +236,15 @@ function hooksecurefunc(target, name, callback)
   end
 end
 
-local function callArgs(...)
-  local args = {}
-  for index = 1, select("#", ...) do args[index] = select(index, ...) end
-  return args, select("#", ...)
-end
-
-local function recordTradeCall(name, ...)
-  harness.tradeCalls = harness.tradeCalls or {}
-  table.insert(harness.tradeCalls, name)
-  harness.tradeCallRecords = harness.tradeCallRecords or {}
-  local args, argc = callArgs(...)
-  table.insert(harness.tradeCallRecords, { name = name, argc = argc, args = args })
-end
-
-local function recordProtectedCall(name, ...)
-  recordTradeCall(name, ...)
-  harness.protectedCalls = harness.protectedCalls or {}
-  table.insert(harness.protectedCalls, name)
-  harness.protectedCallRecords = harness.protectedCallRecords or {}
-  local args, argc = callArgs(...)
-  table.insert(harness.protectedCallRecords, { name = name, argc = argc, args = args })
-end
-
-local function isProtectedCall(name)
-  return name == "C_AuctionHouse.StartCommoditiesPurchase" or
-    name == "C_AuctionHouse.ConfirmCommoditiesPurchase" or
-    name == "C_AuctionHouse.CancelCommoditiesPurchase" or
-    name == "C_AuctionHouse.PostCommodity" or name == "C_AuctionHouse.CancelAuction" or
-    name == "C_Container.UseContainerItem" or name == "BuyMerchantItem" or
-    name == "AutoLootMailItem" or name == "C_TradeSkillUI.CraftRecipe"
-end
-
-local function installTradeNamespace(name, functions)
-  _G[name] = {}
-  for _, functionName in ipairs(functions) do
-    _G[name][functionName] = function(...)
-      local fullName = name .. "." .. functionName
-      if isProtectedCall(fullName) then recordProtectedCall(fullName, ...) else recordTradeCall(fullName, ...) end
+C_Timer = {
+  After = function(delay, fn)
+    local timer = { at = _now + delay, fn = fn }
+    table.insert(_timers, timer)
+    if delay == 30 and harness.suppressOwnedTimeout == true then
+      harness.ownedTimeoutCandidate = timer
     end
-  end
-end
-
-local tradeNamespaces = harness.tradeNamespaces or {}
-local tradeGlobals = harness.tradeGlobals or {}
-if tradeNamespaces.C_Timer == false then
-  C_Timer = nil
-elseif tradeNamespaces.C_Timer ~= nil then
-  installTradeNamespace("C_Timer", tradeNamespaces.C_Timer)
-else
-  C_Timer = {
-    After = function(delay, fn)
-      local timer = { at = _now + delay, fn = fn }
-      table.insert(_timers, timer)
-      if delay == 30 and harness.suppressOwnedTimeout == true then
-        harness.ownedTimeoutCandidate = timer
-      end
-    end,
-  }
-end
-if harness.accountFakes and tradeNamespaces.C_Spell == nil then
-  C_Spell = {
-    GetSpellCooldown = function(spellID)
-      return harness.tradeSkill and harness.tradeSkill.cooldowns and harness.tradeSkill.cooldowns[spellID]
-    end,
-  }
-end
-if harness.accountFakes or (harness.tradeFrames and harness.tradeFrames.MailFrame) then
-  MailFrame = {
-    IsShown = function() return harness.mailOpen == true end,
-  }
-end
-for name, functions in pairs(tradeNamespaces) do
-  if name ~= "C_Timer" and functions ~= false then installTradeNamespace(name, functions) end
-end
-
-for name, present in pairs(harness.tradeGlobals or {}) do
-  if present then
-    _G[name] = function(...)
-      if isProtectedCall(name) then recordProtectedCall(name, ...) else recordTradeCall(name, ...) end
-    end
-  end
-end
-
-for name, present in pairs(harness.tradeFrames or {}) do
-  if present and name ~= "MailFrame" then _G[name] = {} end
-end
+  end,
+}
 
 function _nextTimerAt()
   local earliest
@@ -490,7 +304,7 @@ C_Item = {
     return itemID, "Item", "", "", 1, nativeClassID(itemID)
   end,
   GetItemInfo = function(itemID)
-    if harness.referenceInfoPending and harness.referenceInfoPending[itemID] then return nil end
+    if harness.itemInfoPending and harness.itemInfoPending[itemID] then return nil end
     local override = harness.itemInfo and harness.itemInfo[itemID]
     local auction = lookupAuction(itemID)
     if override then
@@ -511,16 +325,16 @@ C_Item = {
   end,
   RequestLoadItemDataByID = function(id)
     harness.requested[id] = true
-    harness.referenceInfoPending = harness.referenceInfoPending or {}
-    harness.referenceInfoPending[id] = true
-    if harness.referenceNever and harness.referenceNever[id] then return end
-    C_Timer.After(harness.referenceDelay or harness.metadataDelay or 0, function()
+    harness.itemInfoPending = harness.itemInfoPending or {}
+    harness.itemInfoPending[id] = true
+    if harness.itemInfoNever and harness.itemInfoNever[id] then return end
+    C_Timer.After(harness.itemInfoDelay or harness.metadataDelay or 0, function()
       if harness.metadataPending then harness.metadataPending[id] = nil end
-      if harness.referenceInfoPending then harness.referenceInfoPending[id] = nil end
+      if harness.itemInfoPending then harness.itemInfoPending[id] = nil end
       harness.keyWarm = harness.keyWarm or {}
       harness.keyWarm[id] = true
       _fire("ITEM_KEY_ITEM_INFO_RECEIVED", id)
-      if harness.referenceFailures and harness.referenceFailures[id] then
+      if harness.itemInfoFailures and harness.itemInfoFailures[id] then
         _fire("ITEM_DATA_LOAD_RESULT", id, false)
       else
         _fire("ITEM_DATA_LOAD_RESULT", id, true)
@@ -771,205 +585,8 @@ C_AuctionHouse = {
       bidAmount = a.bid > 0 and a.bid or nil, buyoutAmount = a.buyout > 0 and a.buyout or nil }
   end,
   GetTimeLeftBandInfo = function(band) return band * 3600, band * 3600 + 3600 end,
-  StartCommoditiesPurchase = function(...)
-    local itemID, quantity = ...
-    recordProtectedCall("C_AuctionHouse.StartCommoditiesPurchase", ...)
-    harness.commodityPurchase = { itemID = itemID, quantity = quantity }
-  end,
-  ConfirmCommoditiesPurchase = function(...)
-    local itemID, quantity = ...
-    recordProtectedCall("C_AuctionHouse.ConfirmCommoditiesPurchase", ...)
-    harness.commodityConfirmation = { itemID = itemID, quantity = quantity }
-  end,
-  CancelCommoditiesPurchase = function(...)
-    local itemID = ...
-    recordProtectedCall("C_AuctionHouse.CancelCommoditiesPurchase", ...)
-    harness.commodityCancellation = { itemID = itemID }
-  end,
-  IsSellItemValid = function(location)
-    return harness.sellItemValid ~= false and type(location) == "table"
-  end,
-  PostCommodity = function(...)
-    local location, duration, quantity, unitPrice = ...
-    recordProtectedCall("C_AuctionHouse.PostCommodity", ...)
-    harness.postedCommodity = { location = location, duration = duration, quantity = quantity, unitPrice = unitPrice }
-  end,
-  CanCancelAuction = function(auctionID)
-    return not (harness.uncancellable and harness.uncancellable[auctionID])
-  end,
-  GetCancelCost = function(auctionID)
-    harness.cancelCostCalls = harness.cancelCostCalls or {}
-    table.insert(harness.cancelCostCalls, auctionID)
-    return harness.cancelCost or 0
-  end,
-  CancelAuction = function(...)
-    local auctionID = ...
-    recordProtectedCall("C_AuctionHouse.CancelAuction", ...)
-    harness.cancelledAuction = auctionID
-  end,
-  CalculateCommodityDeposit = function(itemID, duration, quantity)
-    harness.depositCalls = harness.depositCalls or {}
-    table.insert(harness.depositCalls, { itemID = itemID, duration = duration, quantity = quantity })
-    local overrides = harness.depositReturns and harness.depositReturns[itemID]
-    local durationValues = overrides and overrides[duration]
-    if durationValues and durationValues[quantity] ~= nil then return durationValues[quantity] end
-    if harness.depositRaises and harness.depositRaises[itemID] ~= nil then
-      error(harness.depositRaises[itemID])
-    end
-    if harness.depositErrors and harness.depositErrors[itemID] ~= nil then return harness.depositErrors[itemID] end
-    local auction = lookupAuction(itemID, true)
-    if not auction then return nil end
-    return (auction.sellPrice or 1) * duration * quantity
-  end,
+
 }
-
-ItemLocation = {}
-function ItemLocation:CreateFromBagAndSlot(bag, slot) return { bag = bag, slot = slot } end
-
-local function addBagItems(itemID, quantity)
-  if harness.autoPostconditions == false then return end
-  harness.bags = harness.bags or {}
-  local bag = harness.bags[0]
-  if not bag then
-    bag = { numSlots = 0, freeSlots = 0, slots = {} }
-    harness.bags[0] = bag
-  end
-  bag.slots = bag.slots or {}
-  local emptySlot
-  for slot = 1, (bag.numSlots or 0) do
-    local info = bag.slots[slot]
-    if info and info.itemID == itemID then
-      info.stackCount = (info.stackCount or info.quantity or info.count or 0) + quantity
-      return
-    end
-    if not info and not emptySlot then emptySlot = slot end
-  end
-  local slot = emptySlot
-  if not slot then
-    slot = (bag.numSlots or 0) + 1
-    bag.numSlots = slot
-  end
-  bag.slots[slot] = { itemID = itemID, stackCount = quantity }
-  if bag.freeSlots and bag.freeSlots > 0 then bag.freeSlots = bag.freeSlots - 1 end
-end
-
-if tradeNamespaces.C_Container == nil then
-  C_Container = {
-    GetContainerNumSlots = function(bag)
-      local value = harness.bags and harness.bags[bag]
-      return value and value.numSlots or 0
-    end,
-    GetContainerNumFreeSlots = function(bag)
-      local value = harness.bags and harness.bags[bag]
-      return value and value.freeSlots or 0
-    end,
-    GetContainerItemInfo = function(bag, slot)
-      local value = harness.bags and harness.bags[bag]
-      return value and value.slots and value.slots[slot] or nil
-    end,
-    UseContainerItem = function(...)
-      local bag, slot = ...
-      recordProtectedCall("C_Container.UseContainerItem", ...)
-      harness.usedContainerItems = harness.usedContainerItems or {}
-      table.insert(harness.usedContainerItems, { bag = bag, slot = slot })
-      if harness.autoPostconditions ~= false and harness.bags and harness.bags[bag] then
-        local value = harness.bags[bag]
-        local previous = value.slots and value.slots[slot]
-        if previous and (value.freeSlots or 0) < (value.numSlots or 0) then
-          value.freeSlots = (value.freeSlots or 0) + 1
-        end
-        value.slots[slot] = {}
-      end
-    end,
-  }
-end
-
-if tradeGlobals.GetMerchantNumItems == nil then
-  function GetMerchantNumItems() return harness.merchantItems and #harness.merchantItems or 0 end
-end
-if tradeGlobals.GetMerchantItemID == nil then
-  function GetMerchantItemID(index)
-    local item = harness.merchantItems and harness.merchantItems[index]
-    return item and item.itemID or nil
-  end
-end
-if tradeGlobals.BuyMerchantItem == nil then
-  function BuyMerchantItem(...)
-    local index, quantity = ...
-    recordProtectedCall("BuyMerchantItem", ...)
-    harness.merchantPurchase = { index = index, quantity = quantity }
-    local item = harness.merchantItems and harness.merchantItems[index]
-    if item and item.itemID then addBagItems(item.itemID, quantity) end
-  end
-end
-
-if tradeGlobals.GetInboxNumItems == nil then
-  function GetInboxNumItems() return harness.mail and #harness.mail or 0 end
-end
-if tradeGlobals.GetInboxHeaderInfo == nil then
-  function GetInboxHeaderInfo(index)
-    local message = harness.mail and harness.mail[index]
-    if not message then return nil end
-    if message.headerAvailable == false then return nil end
-    local items = message.items or {}
-    local hasItem = message.hasItem
-    if hasItem == nil then hasItem = #items > 0 end
-    return nil, nil, message.sender, message.subject, message.money or 0, message.codAmount or 0,
-      message.daysLeft or 0, hasItem == true
-  end
-end
-if tradeGlobals.GetInboxItem == nil then
-  function GetInboxItem(index, attachment)
-    local message = harness.mail and harness.mail[index]
-    local item = message and message.items and message.items[attachment]
-    if not item then return nil end
-    return nil, item.itemID, nil, item.count or item.stackCount or item.itemCount, item.quality or 1, true
-  end
-end
-if tradeGlobals.AutoLootMailItem == nil then
-  function AutoLootMailItem(...)
-    local index = ...
-    recordProtectedCall("AutoLootMailItem", ...)
-    harness.lootedMail = harness.lootedMail or {}
-    table.insert(harness.lootedMail, index)
-    if harness.autoPostconditions ~= false then
-      local message = harness.mail and harness.mail[index]
-      if message and message.removeOnLoot then
-        table.remove(harness.mail, index)
-      elseif message then
-        message.money, message.hasItem, message.items, message.empty = 0, false, {}, true
-      else
-        -- A count-only fixture is represented by synthetic messages, so this
-        -- branch is only reachable when a native implementation mutates the
-        -- inbox behind the harness.
-      end
-    end
-  end
-end
-
-if tradeNamespaces.C_TradeSkillUI == nil then
-  C_TradeSkillUI = {
-    IsTradeSkillReady = function() return harness.tradeSkill and harness.tradeSkill.ready == true end,
-    GetBaseProfessionInfo = function()
-      return harness.tradeSkill and { skillLineID = harness.tradeSkill.skillLineID } or nil
-    end,
-    GetAllRecipeIDs = function() return harness.tradeSkill and harness.tradeSkill.recipeIDs or {} end,
-    GetRecipeInfo = function(recipeID)
-      return harness.tradeSkill and harness.tradeSkill.recipeInfos and harness.tradeSkill.recipeInfos[recipeID] or nil
-    end,
-    GetCraftableCount = function(recipeID)
-      return harness.tradeSkill and harness.tradeSkill.craftableCounts and
-        harness.tradeSkill.craftableCounts[recipeID] or 0
-    end,
-    CraftRecipe = function(...)
-      local recipeID, times = ...
-      recordProtectedCall("C_TradeSkillUI.CraftRecipe", ...)
-      harness.craftedRecipe = { recipeID = recipeID, times = times }
-      local recipe = harness.tradeSkill and harness.tradeSkill.recipeInfos and harness.tradeSkill.recipeInfos[recipeID]
-      addBagItems(recipe and (recipe.resultItemID or recipe.itemID) or recipeID, times)
-    end,
-  }
-end
 
 function _serialize(name, value)
   local out = {}
@@ -995,9 +612,6 @@ function _serialize(name, value)
   return table.concat(out)
 end
 
-function ReloadUI()
-  harness.reloadCalls = (harness.reloadCalls or 0) + 1
-end
 """
 
 
@@ -1082,69 +696,14 @@ class WowClient:
     current_region_name: str | None = "US"
     realm_info: bool = False
     game_rules: bool = True
-    trade_namespaces: dict[str, list[str] | bool] = field(default_factory=dict)
-    trade_globals: dict[str, bool] = field(default_factory=dict)
-    trade_frames: dict[str, bool] = field(default_factory=dict)
-    queue: dict | bool | None = None
     suppress_owned_timeout: bool = False
-    bags: dict[int, dict] = field(default_factory=dict)
-    merchant_items: list[dict] = field(default_factory=list)
-    sell_item_valid: bool = True
-    cancel_cost: int = 0
-    auto_postconditions: bool = True
     presentation_width: int = 1920
     presentation_height: int = 1080
     root_ui_scale: float = 1.0
     root_width: float | None = None
     root_height: float | None = None
     root_effective_scale: float | None = None
-    position: tuple[float, float, float, int] = (100.25, 200.5, 30.75, 1)
-    facing: float = 1.25
-    speed: float = 0.0
-    speed_run: float = 7.0
-    speed_flight: float = 7.0
-    speed_swim: float = 4.7222218513489
-    ctm_mode: str = "false"
-    ctm_missing: bool = False
-    ground_modes: dict[str, str] = field(
-        default_factory=lambda: {
-            "flying": "false",
-            "falling": "false",
-            "swimming": "false",
-            "submerged": "false",
-            "mounted": "false",
-            "taxi": "false",
-        }
-    )
-    combat: bool = False
-    dead_or_ghost: bool = False
-    bindings: dict[str, str] = field(
-        default_factory=lambda: {
-            "MOVEFORWARD": "W",
-            "MOVEBACKWARD": "S",
-            "STRAFELEFT": "A",
-            "STRAFERIGHT": "D",
-            "TURNLEFT": "Q",
-            "JUMP": "SPACE",
-            "TURNRIGHT": "E",
-        }
-    )
-    money: int = 12345
-    professions: list[dict] = field(default_factory=list)
-    trade_ready: bool = False
-    trade_skill_line_id: int = 171
-    recipe_ids: list[int] = field(default_factory=list)
-    recipe_infos: dict[int, dict] = field(default_factory=dict)
-    cooldowns: dict[int, dict] = field(default_factory=dict)
-    mail_open: bool = False
     player_name: str = "Tester"
-    mouseover_exists: bool = False
-    mouseover_name: str | None = None
-    tooltip_shown: bool = False
-    tooltip_name: str = ""
-    tooltip_owner_ui_parent: bool = True
-    mail: list[dict] = field(default_factory=list)
-    account_fakes: bool | None = None
     target_present: bool = False
     target_name: str = ""
     range_available: bool = True
@@ -1158,7 +717,9 @@ class WowClient:
     game_menu_shown: bool = False
     initial_savedvars: dict | None = None
     target: GameTarget = TARGET
-    catalog: Catalog | None = None
+    catalog: Catalog = field(default_factory=lambda: DEFAULT_CATALOG)
+    load_scanner: bool = True
+    load_automation: bool = True
 
     def __post_init__(self) -> None:
         if self.realm is None:
@@ -1169,8 +730,6 @@ class WowClient:
             raise ValueError("the harness models only the pinned 1920x1080 presentation")
         if self.root_ui_scale <= 0:
             raise ValueError("root_ui_scale must be positive")
-        if self.account_fakes is None:
-            self.account_fakes = not self.trade_globals and not self.trade_namespaces
         if self.root_effective_scale is None:
             self.root_effective_scale = self.root_ui_scale
         if self.root_height is None:
@@ -1191,39 +750,9 @@ class WowClient:
                 "regionName": self.current_region_name,
                 "realmInfo": self.realm_info,
                 "gameRules": self.game_rules,
-                "tradeNamespaces": self._to_lua(self.trade_namespaces),
-                "tradeGlobals": self._to_lua(self.trade_globals),
-                "tradeFrames": self._to_lua(self.trade_frames),
-                "tradeCalls": self.lua.table(),
-                "protectedCalls": self.lua.table(),
-                "tradeCallRecords": self.lua.table(),
-                "protectedCallRecords": self.lua.table(),
-                "bags": self._to_lua(self.bags),
-                "merchantItems": self._to_lua(self.merchant_items),
-                "sellItemValid": self.sell_item_valid,
-                "cancelCost": self.cancel_cost,
-                "autoPostconditions": self.auto_postconditions,
                 "rootWidth": self.root_width,
                 "rootHeight": self.root_height,
                 "rootEffectiveScale": self.root_effective_scale,
-                "positionX": self.position[0],
-                "positionY": self.position[1],
-                "positionZ": self.position[2],
-                "positionInstance": self.position[3],
-                "facing": self.facing,
-                "speed": self.speed,
-                "speedRun": self.speed_run,
-                "speedFlight": self.speed_flight,
-                "speedSwim": self.speed_swim,
-                "speedTuple": self.lua.table_from(
-                    {1: self.speed, 2: self.speed_run, 3: self.speed_flight, 4: self.speed_swim}
-                ),
-                "ctmMode": self.ctm_mode,
-                "ctmMissing": self.ctm_missing,
-                "groundModes": self._to_lua(self.ground_modes),
-                "groundArgCounts": self.lua.table(),
-                "combat": self.combat,
-                "deadOrGhost": self.dead_or_ghost,
                 "targetPresent": self.target_present,
                 "targetName": self.target_name,
                 "rangeAvailable": self.range_available,
@@ -1236,43 +765,13 @@ class WowClient:
                 "staticPopupShown": self.static_popup_shown,
                 "gameMenuAvailable": self.game_menu_available,
                 "gameMenuShown": self.game_menu_shown,
-                "bindings": self.lua.table(),
-                "money": self.money,
-                "professionIndices": self._to_lua(
-                    {index: index for index in range(1, len(self.professions) + 1)}
-                ),
-                "professions": self._to_lua(
-                    {index: profession for index, profession in enumerate(self.professions, start=1)}
-                ),
-                "tradeSkill": self._to_lua(
-                    {
-                        "ready": self.trade_ready,
-                        "skillLineID": self.trade_skill_line_id,
-                        "recipeIDs": self.recipe_ids,
-                        "recipeInfos": self.recipe_infos,
-                        "cooldowns": self.cooldowns,
-                        "craftableCounts": {},
-                    }
-                ),
-                "mailOpen": self.mail_open,
+                "auctionHouseOpen": False,
                 "playerName": self.player_name,
-                "mouseoverExists": self.mouseover_exists,
-                "mouseoverName": self.mouseover_name,
-                "tooltipShown": self.tooltip_shown,
-                "tooltipName": self.tooltip_name,
-                "tooltipOwnerUIParent": self.tooltip_owner_ui_parent,
-                "otherTooltipOwner": self.lua.table(),
-                "mail": self._to_lua(self.mail),
-                "accountFakes": self.account_fakes,
                 "requested": self.lua.table(),
                 "itemInfo": self.lua.table(),
-                "referenceInfoPending": self.lua.table(),
-                "referenceNever": self.lua.table(),
-                "referenceFailures": self.lua.table(),
-                "depositReturns": self.lua.table(),
-                "depositRaises": self.lua.table(),
-                "depositErrors": self.lua.table(),
-                "depositCalls": self.lua.table(),
+                "itemInfoPending": self.lua.table(),
+                "itemInfoNever": self.lua.table(),
+                "itemInfoFailures": self.lua.table(),
                 "queryCalls": 0,
                 "queryMethods": self.lua.table(),
                 "ignoredCommoditySellQueries": 0,
@@ -1289,22 +788,14 @@ class WowClient:
                 "missingClass": self.lua.table(),
                 "textures": self.lua.table(),
                 "chatEdit": self.lua.table_from({"shown": False, "focused": False, "text": ""}),
-                "luaHeapAvailable": True,
-                "luaHeapValue": 512,
-                "luaHeapValues": self.lua.table(),
-                "luaHeapIndex": 0,
-                "gcCalls": 0,
-                "gcMutations": 0,
-                "reloadCalls": 0,
                 "textureCreateCount": 0,
                 "textureFailureAt": 0,
             }
         )
-        for action, key in self.bindings.items():
-            self.state.bindings[action] = key
         self.lua.execute("return function(...) " + STUBS + " end")(self.state)
         self._install_codec()
         self.ns = self.lua.table()
+        self.automation_ns = self.lua.table()
         if self.initial_savedvars is not None:
             self.lua.globals().CrowleyDB = self._to_lua(self.initial_savedvars)
         self._load_addon()
@@ -1343,6 +834,11 @@ class WowClient:
                 if all(isinstance(key, (int, float)) for key, _ in pairs):
                     return [from_lua(child) for _, child in sorted(pairs)]
                 return {str(key): from_lua(child) for key, child in pairs}
+            if isinstance(value, str):
+                try:
+                    return value.encode("latin-1").decode("utf-8")
+                except UnicodeDecodeError:
+                    pass
             return value
 
         g = self.lua.globals()
@@ -1358,94 +854,40 @@ class WowClient:
         )
 
     def _load_addon(self) -> None:
-        # Load order mirrors the client: dependency Crowley_Data first, then Crowley's TOC.
-        catalog = self.catalog if self.catalog is not None else load_catalog()
-        addon_root = _temporary_addon_tree(self.target, catalog)
-        self.run_file(addon_root / "Crowley_Data" / "Data.lua")
-        self.run_file(addon_root / "Crowley_Data" / "Queue.lua")
-        if self.queue is not None:
-            self.lua.globals().CROWLEY_QUEUE = self._to_lua(self.queue)
-        for line in (addon_root / "Crowley" / "Crowley.toc").read_text().splitlines():
-            if line.endswith(".lua"):
-                self.run_file(addon_root / "Crowley" / line)
+        # Load order mirrors the client: scanner data, scanner, then independent observations.
+        addon_root = _temporary_addon_tree(self.target, self.catalog) if self.load_scanner else ADDONS
+        if self.load_scanner:
+            self.run_file(addon_root / "Crowley_Data" / "Data.lua")
+            for line in (addon_root / "Crowley" / "Crowley.toc").read_text().splitlines():
+                if line.endswith(".lua"):
+                    self.run_file(addon_root / "Crowley" / line)
+        if self.load_automation:
+            for line in (
+                (addon_root / "Crowley_Automation" / "Crowley_Automation.toc").read_text().splitlines()
+            ):
+                if line.endswith(".lua"):
+                    self.run_file(
+                        addon_root / "Crowley_Automation" / line,
+                        self.automation_ns,
+                        addon_name="Crowley_Automation",
+                    )
 
     def inject_saved_variables(self, value: dict) -> None:
         """Inject SavedVariables after file execution and before ADDON_LOADED."""
 
         self.lua.globals().CrowleyDB = self._to_lua(value)
 
-    def run_file(self, path: Path) -> None:
+    def run_file(self, path: Path, namespace=None, *, addon_name: str = "Crowley") -> None:
         chunk = self.lua.globals().loadstring(path.read_text(), "@" + path.name)
         if chunk is None:
             raise SyntaxError(f"failed to load {path}")
-        chunk("Crowley", self.ns)
+        chunk(addon_name, namespace if namespace is not None else self.ns)
 
     def set_auctions(self, auctions: list[Auction]) -> None:
         table = self.lua.table()
         for i, auction in enumerate(auctions, start=1):
             table[i] = self._to_lua(auction.__dict__)
         self.state.auctions = table
-
-    def set_money(self, copper: int) -> None:
-        self.state.money = copper
-
-    def set_bags(self, bags: dict[int, dict]) -> None:
-        self.state.bags = self._to_lua(bags)
-
-    def set_professions(self, professions: list[dict]) -> None:
-        self.state.professionIndices = self._to_lua(
-            {index: index for index in range(1, len(professions) + 1)}
-        )
-        self.state.professions = self._to_lua(
-            {index: profession for index, profession in enumerate(professions, start=1)}
-        )
-
-    def set_trade_skill(
-        self,
-        *,
-        ready: bool,
-        skill_line_id: int = 171,
-        recipe_ids: list[int] | None = None,
-        recipe_infos: dict[int, dict] | None = None,
-        cooldowns: dict[int, dict] | None = None,
-        craftable_counts: dict[int, int] | None = None,
-    ) -> None:
-        trade = self.state.tradeSkill
-        trade.ready = ready
-        trade.skillLineID = skill_line_id
-        trade.recipeIDs = self._to_lua(recipe_ids or [])
-        trade.recipeInfos = self._to_lua(recipe_infos or {})
-        trade.cooldowns = self._to_lua(cooldowns or {})
-        trade.craftableCounts = self._to_lua(craftable_counts or {})
-
-    def set_mail(self, *, open: bool, messages: list[dict] | None = None) -> None:
-        self.state.mailOpen = open
-        self.state.mail = self._to_lua(messages or [])
-
-    def set_player_name(self, name: str) -> None:
-        self.state.playerName = name
-
-    def set_hover_unit(self, name: str | None) -> None:
-        self.state.mouseoverExists = name is not None
-        self.state.mouseoverName = name
-
-    def set_hover_unit_bytes(self, name: bytes) -> None:
-        self.state.mouseoverExists = True
-        self.state.mouseoverName = name.decode("latin-1")
-
-    def set_hover_object(self, name: str, *, shown: bool = True, owner_ui_parent: bool = True) -> None:
-        self.state.mouseoverExists = False
-        self.state.mouseoverName = None
-        self.state.tooltipShown = shown
-        self.state.tooltipName = name
-        self.state.tooltipOwnerUIParent = owner_ui_parent
-
-    def clear_hover(self) -> None:
-        self.state.mouseoverExists = False
-        self.state.mouseoverName = None
-        self.state.tooltipShown = False
-        self.state.tooltipName = ""
-        self.state.tooltipOwnerUIParent = True
 
     def set_source_incomplete(self, incomplete: bool = True) -> None:
         self.state.forceIncomplete = incomplete
@@ -1509,42 +951,6 @@ class WowClient:
         if throttled:
             self.state.fastCanonical = False
 
-    def set_lua_heap(
-        self, *, available: bool = True, values: list[float] | None = None, value: float = 512
-    ) -> None:
-        self.state.luaHeapAvailable = available
-        self.state.luaHeapValue = value
-        self.state.luaHeapValues = self._to_lua(values or [])
-        self.state.luaHeapIndex = 0
-
-    def set_motion(
-        self,
-        *,
-        position: tuple[float, float, float, int] | None = None,
-        facing: float | None = None,
-        speed: float | None = None,
-        combat: bool | None = None,
-        dead_or_ghost: bool | None = None,
-        bindings: dict[str, str] | None = None,
-    ) -> None:
-        """Mutate the native movement APIs exposed by this client fixture."""
-
-        if position is not None:
-            self.state.positionX, self.state.positionY, self.state.positionZ, self.state.positionInstance = (
-                position
-            )
-        if facing is not None:
-            self.state.facing = facing
-        if speed is not None:
-            self.state.speed = speed
-            self.state.speedTuple[1] = speed
-        if combat is not None:
-            self.state.combat = combat
-        if dead_or_ghost is not None:
-            self.state.deadOrGhost = dead_or_ghost
-        if bindings is not None:
-            self.state.bindings = self._to_lua(bindings)
-
     def set_auctioneer_state(
         self,
         *,
@@ -1562,7 +968,7 @@ class WowClient:
         self.state.ctrlF12Action = ctrl_f12_action
 
     def set_soft_target_interact(self, value: str | None) -> None:
-        """Set the native SoftTargetInteract CVar exposed to Agent.lua."""
+        """Set the native interaction-mode CVar exposed to automation observations."""
 
         self.state.softTargetInteract = value
 
@@ -1584,14 +990,6 @@ class WowClient:
         return self._json_table(self.lua.globals().CrowleyDB.probe)
 
     @property
-    def gc_calls(self) -> int:
-        return int(self.state.gcCalls or 0)
-
-    @property
-    def gc_mutations(self) -> int:
-        return int(self.state.gcMutations or 0)
-
-    @property
     def send_log(self) -> list[dict]:
         return [dict(entry.items()) for entry in self.state.sendLog.values()]
 
@@ -1602,93 +1000,6 @@ class WowClient:
     @property
     def ignored_commodity_sell_queries(self) -> int:
         return self.state.ignoredCommoditySellQueries
-
-    @property
-    def trade_calls(self) -> list[str]:
-        return list(self.state.tradeCalls.values())
-
-    @property
-    def protected_calls(self) -> list[str]:
-        return list(self.state.protectedCalls.values())
-
-    @property
-    def protected_call_records(self) -> list[dict]:
-        return [self._json_table(entry) for entry in self.state.protectedCallRecords.values()]
-
-    @property
-    def executor_button(self):
-        return self.lua.globals().CrowleyTradeExecutorButton
-
-    def click_executor(self, *, force: bool = False) -> None:
-        button = self.executor_button
-        if button is None:
-            raise AssertionError("trade executor button is unavailable")
-        if force:
-            self.ns.Executor.Click()
-        else:
-            button.Click(button)
-
-    def set_merchant_items(self, items: list[dict]) -> None:
-        self.state.merchantItems = self._to_lua(items)
-
-    def set_mail_count(self, count: int) -> None:
-        self.state.mail = self._to_lua(
-            [
-                {
-                    "money": 0,
-                    "daysLeft": 0,
-                    "hasItem": False,
-                    "items": [],
-                    "headerAvailable": False,
-                    "removeOnLoot": True,
-                }
-                for _ in range(count)
-            ]
-        )
-
-    def set_mail_items(self, items: list[dict]) -> None:
-        self.state.mail = self._to_lua(
-            [
-                {
-                    **item,
-                    "daysLeft": item.get("daysLeft", 0),
-                    "hasItem": item.get("hasItem", (item.get("itemCount", 0) or 0) > 0),
-                    "items": item.get("items", []),
-                    "removeOnLoot": False,
-                }
-                for item in items
-            ]
-        )
-
-    def set_auto_postconditions(self, enabled: bool) -> None:
-        self.state.autoPostconditions = enabled
-
-    def set_cancel_cost(self, cost: int) -> None:
-        self.state.cancelCost = cost
-
-    def set_frame_open(self, frame: str, opened: bool = True) -> None:
-        events = {
-            "ah": ("AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED"),
-            "merchant": ("MERCHANT_SHOW", "MERCHANT_CLOSED"),
-            "mailbox": ("MAIL_SHOW", "MAIL_CLOSED"),
-            "profession": ("TRADE_SKILL_SHOW", "TRADE_SKILL_CLOSE"),
-        }
-        if frame not in events:
-            raise ValueError(f"unknown frame: {frame}")
-        if frame == "mailbox":
-            # Executor admission reads the native MailFrame:IsShown() fact.
-            # Keep the fixture's native visibility and event stream aligned;
-            # tests may still deliberately mutate MAIL_CLOSED independently.
-            self.state.mailOpen = opened
-        self.fire(events[frame][0 if opened else 1])
-
-    def execution(self, queue_id: str | None = None) -> dict | None:
-        executions = self.lua.globals().CrowleyDB.executions
-        if executions is None:
-            return None
-        if queue_id is None:
-            queue_id = self.lua.globals().CROWLEY_QUEUE.queueId
-        return self._json_table(executions[queue_id])
 
     def _json_table(self, value) -> dict | None:
         if value is None:
@@ -1713,46 +1024,6 @@ class WowClient:
         else:
             raise ValueError(f"unknown readiness API mode: {mode}")
 
-    def set_texture_failure(self, index: int | None) -> None:
-        """Fail the actual CreateTexture callback at a deterministic ordinal."""
-
-        self.state.textureCreateCount = 0
-        self.state.textureFailureAt = int(index or 0)
-
-    def set_reference_items(self, item_ids: list[int]) -> None:
-        self.lua.globals().CROWLEY_DATA.referenceItemIDs = self._to_lua(item_ids)
-
-    def set_reference_load_behavior(
-        self,
-        *,
-        delay: int = 0,
-        never: list[int] | None = None,
-        failures: list[int] | None = None,
-    ) -> None:
-        self.state.referenceDelay = delay
-        self.state.referenceNever = self._to_lua({item_id: True for item_id in (never or [])})
-        self.state.referenceFailures = self._to_lua({item_id: True for item_id in (failures or [])})
-
-    def set_reference_item_info(self, item_id: int, info: dict) -> None:
-        self.state.itemInfo[item_id] = self._to_lua(info)
-
-    def set_reference_info_pending(self, item_ids: list[int]) -> None:
-        self.state.referenceInfoPending = self._to_lua({item_id: True for item_id in item_ids})
-
-    def set_deposit_error(self, item_id: int, value) -> None:
-        self.state.depositErrors[item_id] = value
-
-    def set_deposit_raise(self, item_id: int, message: str = "native failure") -> None:
-        self.state.depositRaises[item_id] = message
-
-    @property
-    def deposit_calls(self) -> list[dict]:
-        return [dict(entry.items()) for entry in self.state.depositCalls.values()]
-
-    @property
-    def visible_native_textures(self) -> list[bool]:
-        return [bool(texture.shown) for texture in self.state.textures.values()]
-
     def set_plan(self, item_ids: list[int]) -> None:
         body = {
             "schemaVersion": 2,
@@ -1775,9 +1046,7 @@ class WowClient:
     def set_canonical_plan(self) -> None:
         """Load the exact packaged plan into the native fixture."""
 
-        self.lua.globals().CROWLEY_DATA.scanPlan = self._to_lua(
-            target_scan_plan(self.catalog or load_catalog(), self.target)
-        )
+        self.lua.globals().CROWLEY_DATA.scanPlan = self._to_lua(target_scan_plan(self.catalog, self.target))
         # This is a harness clock convenience only.  It advances to the next
         # real timer deadline after the current callbacks drain, while the
         # production scanner still enforces its 100/60s send window.  Tests
@@ -1788,7 +1057,7 @@ class WowClient:
     def focus_item(self, item_id: int) -> None:
         """Rotate the canonical order so an adversarial fixture starts here."""
 
-        plan = target_scan_plan(self.catalog or load_catalog(), self.target)
+        plan = target_scan_plan(self.catalog, self.target)
         ids = plan["itemIDs"]
         index = ids.index(item_id)
         previous = ids[index - 1] if index else ids[-1]
@@ -1821,207 +1090,6 @@ class WowClient:
 
         self.set_chat_edit(active=active, focused=focused, text=text.decode("latin-1"))
 
-    def publish_agent(self) -> dict:
-        return self._json_table(self.ns.Agent.Publish())
-
-    def snapshot_agent(self) -> dict:
-        return self._json_table(self.ns.Agent.Snapshot())
-
-    def update_agent(self, seconds: float = 1.0) -> None:
-        surface = self.ns.Agent.Surface()
-        surface.onUpdate(surface, seconds)
-
-    @property
-    def agent_frame(self) -> bytes:
-        value = self.ns.Agent.FrameBytes()
-        return value.encode("latin-1") if isinstance(value, str) else bytes(value)
-
-    @property
-    def texture_count(self) -> int:
-        return len(list(self.state.textures.values()))
-
-    @staticmethod
-    def _byte_atlas() -> Image.Image:
-        global _BYTE_ATLAS
-        if _BYTE_ATLAS is None:
-            _BYTE_ATLAS = Image.open(_BYTE_ATLAS_PATH).convert("RGBA")
-            if _BYTE_ATLAS.size != (16, 512):
-                raise AssertionError("ByteAtlas.tga has an unexpected size")
-            if any(_BYTE_ATLAS.getpixel((x, y))[3] != 255 for y in range(512) for x in range(16)):
-                raise AssertionError("ByteAtlas.tga contains transparent glyph pixels")
-        return _BYTE_ATLAS
-
-    @staticmethod
-    def _point_component(value, index: int) -> float:
-        if value is None:
-            raise AssertionError("native texture/frame point is missing")
-        result = value[index]
-        if (
-            isinstance(result, bool)
-            or not isinstance(result, (int, float))
-            or not math.isfinite(float(result))
-        ):
-            raise AssertionError("native texture/frame point is malformed")
-        return float(result)
-
-    @staticmethod
-    def _assert_frame_point(point, *, name: str, relative_name: str) -> None:
-        if point is None or point[1] != "TOPLEFT" or point[3] != "TOPLEFT":
-            raise AssertionError(f"native {name} is not anchored TOPLEFT to TOPLEFT")
-        if getattr(point[2], "name", None) != relative_name:
-            raise AssertionError(f"native {name} has an unexpected relative frame")
-        for index in (4, 5):
-            value = point[index]
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(float(value))
-            ):
-                raise AssertionError(f"native {name} offset is malformed")
-
-    @classmethod
-    def _sample_bilinear(cls, atlas: Image.Image, u: float, v: float) -> tuple[int, int, int]:
-        """Sample the recorded atlas UV using the native linear texture model."""
-
-        width, height = atlas.size
-        if not 0 <= u <= 1 or not 0 <= v <= 1:
-            raise AssertionError("native atlas UV is outside 0..1")
-        source_x = u * width - 0.5
-        source_y = v * height - 0.5
-        x0 = max(0, min(width - 1, math.floor(source_x)))
-        y0 = max(0, min(height - 1, math.floor(source_y)))
-        x1 = max(0, min(width - 1, x0 + 1))
-        y1 = max(0, min(height - 1, y0 + 1))
-        fx = source_x - math.floor(source_x)
-        fy = source_y - math.floor(source_y)
-        top_left = atlas.getpixel((x0, y0))
-        top_right = atlas.getpixel((x1, y0))
-        bottom_left = atlas.getpixel((x0, y1))
-        bottom_right = atlas.getpixel((x1, y1))
-        return tuple(
-            round(
-                top_left[channel] * (1 - fx) * (1 - fy)
-                + top_right[channel] * fx * (1 - fy)
-                + bottom_left[channel] * (1 - fx) * fy
-                + bottom_right[channel] * fx * fy
-            )
-            for channel in range(3)
-        )
-
-    @staticmethod
-    def _sample_nearest(atlas: Image.Image, u: float, v: float) -> tuple[int, int, int]:
-        """Sample the recorded atlas UV using the native nearest model."""
-
-        width, height = atlas.size
-        if not 0 <= u <= 1 or not 0 <= v <= 1:
-            raise AssertionError("native atlas UV is outside 0..1")
-        x = max(0, min(width - 1, math.floor(u * width)))
-        y = max(0, min(height - 1, math.floor(v * height)))
-        pixel = atlas.getpixel((x, y))
-        return pixel[:3]
-
-    def render_agent_screenshot(self) -> Image.Image:
-        """Rasterize the actual recorded frame, texture rectangles, and atlas UVs."""
-
-        atlas = self._byte_atlas()
-        screenshot = Image.new("RGB", (self.presentation_width, self.presentation_height), (17, 17, 17))
-        surface = self.ns.Agent.Surface()
-        if surface is None or not surface.shown:
-            raise AssertionError("native telemetry surface is not shown")
-        root_factor = float(self.root_height) * float(self.root_effective_scale) / self.presentation_height
-        if root_factor <= 0 or not math.isfinite(root_factor):
-            raise AssertionError("native root geometry is invalid")
-        surface_point = surface.point
-        self._assert_frame_point(surface_point, name="telemetry surface", relative_name="UIParent")
-        if (
-            abs(self._point_component(surface_point, 4)) > 1e-6
-            or abs(self._point_component(surface_point, 5)) > 1e-6
-        ):
-            raise AssertionError("native telemetry surface must have a zero UIParent offset")
-        if surface.width != 336 or surface.height != 304:
-            raise AssertionError("native telemetry surface does not include the pinned crop offset")
-        surface_scale = float(surface.scale)
-        if not math.isfinite(surface_scale) or surface_scale <= 0:
-            raise AssertionError("native telemetry surface scale is invalid")
-        if abs(surface.GetEffectiveScale(surface) - surface_scale) > 1e-6:
-            raise AssertionError("native telemetry surface effective scale ignores its parent incorrectly")
-        # The harness models anchored-frame coordinates in the frame's own
-        # effective scale.  The production surface deliberately uses a zero
-        # UIParent offset, removing the unresolved client offset convention.
-        surface_x = self._point_component(surface_point, 4) * surface_scale / root_factor
-        surface_y = -self._point_component(surface_point, 5) * surface_scale / root_factor
-        for texture in self.state.textures.values():
-            texture_args = texture.textureArgs
-            if (
-                not texture.shown
-                or texture_args is None
-                or texture_args.textureAsset != "Interface\\AddOns\\Crowley\\Textures\\ByteAtlas"
-            ):
-                raise AssertionError("native glyph texture is missing its atlas")
-            if (
-                texture_args.wrapHorizontal != "CLAMP"
-                or texture_args.wrapVertical != "CLAMP"
-                or texture_args.filterMode not in {"NEAREST", "LINEAR"}
-            ):
-                raise AssertionError("native glyph texture has an unsupported sampling contract")
-            filter_mode = texture_args.filterMode
-            point = texture.point
-            self._assert_frame_point(point, name="glyph texture", relative_name="CrowleyAgentSurface")
-            if texture.snap is not True or texture.bias != 0.5:
-                raise AssertionError("native glyph texture is missing the pinned pixel snapping")
-            local_x = self._point_component(point, 4) * surface_scale / root_factor
-            local_y = -self._point_component(point, 5) * surface_scale / root_factor
-            width = float(texture.width) * surface_scale / root_factor
-            height = float(texture.height) * surface_scale / root_factor
-            if not math.isfinite(width) or not math.isfinite(height) or width <= 0 or height <= 0:
-                raise AssertionError("native glyph texture geometry is invalid")
-            left = surface_x + local_x
-            top = surface_y + local_y
-            x0 = math.floor(left + 0.5)
-            y0 = math.floor(top + 0.5)
-            x1 = math.floor(left + width + 0.5)
-            y1 = math.floor(top + height + 0.5)
-            if x1 <= x0 or y1 <= y0:
-                raise AssertionError("native glyph texture has no rasterized pixels")
-            uv = texture.texCoord
-            u0 = self._point_component(uv, 1)
-            u1 = self._point_component(uv, 2)
-            v0 = self._point_component(uv, 3)
-            v1 = self._point_component(uv, 4)
-            if not (0 <= u0 < u1 <= 1 and 0 <= v0 < v1 <= 1):
-                raise AssertionError("native glyph texture has unsafe atlas UVs")
-            pixels = screenshot.load()
-            for dy in range(y1 - y0):
-                v = v0 + (dy + 0.5) / (y1 - y0) * (v1 - v0)
-                for dx in range(x1 - x0):
-                    u = u0 + (dx + 0.5) / (x1 - x0) * (u1 - u0)
-                    pixel_x, pixel_y = x0 + dx, y0 + dy
-                    if 0 <= pixel_x < self.presentation_width and 0 <= pixel_y < self.presentation_height:
-                        if filter_mode == "NEAREST":
-                            sample = self._sample_nearest(atlas, u, v)
-                        else:
-                            sample = self._sample_bilinear(atlas, u, v)
-                        pixels[pixel_x, pixel_y] = sample
-        return screenshot
-
-    def assert_native_geometry(self) -> None:
-        """Assert the requested effective scale for a valid native geometry proof."""
-
-        surface = self.ns.Agent.Surface()
-        root_factor = float(self.root_height) * float(self.root_effective_scale) / self.presentation_height
-        if surface is None or not surface.shown:
-            raise AssertionError("native telemetry surface is not shown")
-        if not math.isfinite(float(surface.scale)) or float(surface.scale) <= 0:
-            raise AssertionError("native telemetry surface scale is invalid")
-        if abs(float(surface.scale) - root_factor) > 1e-6:
-            raise AssertionError("native telemetry surface scale does not match the requested native factor")
-
-    def render_agent_capture(self) -> Image.Image:
-        """Return the pinned crop from an actual full-presentation raster."""
-
-        screenshot = self.render_agent_screenshot()
-        return screenshot.crop((80, 48, 80 + 256, 48 + 256))
-
     def run_timers(self) -> None:
         g = self.lua.globals()
         if not self.state.fastCanonical:
@@ -2046,7 +1114,7 @@ class WowClient:
         """Advance the fake clock while dispatching timers at their deadlines.
 
         ``advance`` intentionally leaves due callbacks queued so tests can model a
-        late event.  Lifecycle tests that need real deadline ordering should use
+        late event. Timer-order tests that need real deadline ordering should use
         this helper instead of jumping straight to the target timestamp.
         """
         g = self.lua.globals()
@@ -2072,22 +1140,25 @@ class WowClient:
         return g._serialize("CrowleyDB", g.CrowleyDB).encode("latin-1")
 
     def login(self) -> None:
-        self.fire("ADDON_LOADED", "Crowley")
+        if self.load_scanner:
+            self.fire("ADDON_LOADED", "Crowley")
+        if self.load_automation:
+            self.fire("ADDON_LOADED", "Crowley_Automation")
         self.fire("PLAYER_LOGIN")
         self.fire("PLAYER_ENTERING_WORLD")
 
-    @property
-    def reload_calls(self) -> int:
-        return int(self.state.reloadCalls or 0)
+    def scanner_snapshot(self) -> dict:
+        return self._json_table(self.ns.ScanStatusSnapshot())
 
-    def click_native(self, role: str) -> None:
-        names = {
-            "construct": "CrowleyNativeConstructionConstruct",
-            "restore": "CrowleyNativeConstructionRestore",
-        }
-        if role not in names:
-            raise ValueError(f"unknown native construction control {role}")
-        control = self.lua.globals()[names[role]]
-        if control is None:
-            raise AssertionError(f"native construction {role} control is unavailable")
-        control.Click(control)
+    def automation_snapshot(self) -> dict:
+        return self._json_table(self.automation_ns.Automation.snapshot())
+
+    @property
+    def scanner_frame(self) -> bytes:
+        value = self.ns.ScanStatusFrameBytes()
+        return value.encode("latin-1") if isinstance(value, str) else bytes(value)
+
+    @property
+    def automation_frame(self) -> bytes:
+        value = self.automation_ns.Automation.frameBytes()
+        return value.encode("latin-1") if isinstance(value, str) else bytes(value)

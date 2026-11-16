@@ -101,5 +101,3 @@ function Native.EncodeBase64(value)
   if type(C_EncodingUtil) ~= "table" or C_EncodingUtil.EncodeBase64 == nil then error("Crowley requires C_EncodingUtil.EncodeBase64") end
   return C_EncodingUtil.EncodeBase64(value)
 end
-
-ns.RegisterModule("ScannerNative", { requires = { "Core" }, onLoad = function() end })

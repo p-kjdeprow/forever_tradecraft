@@ -41,7 +41,7 @@ def test_resolvers_derive_every_service_path_from_one_identity(tmp_path: Path) -
     assert companion.flavor_dir == flavor
     assert companion.saved_variables == flavor / "WTF/Account/account#1/SavedVariables/Crowley.lua"
     assert companion.data_lua == flavor / "Interface/AddOns/Crowley_Data/Data.lua"
-    assert companion.queue_lua == flavor / "Interface/AddOns/Crowley_Data/Queue.lua"
+    assert not hasattr(companion, "queue_lua")
     assert companion.state_file == state / "companion.json"
     assert ops.flavor_dir == flavor
     assert ops.state_dir == state
@@ -56,6 +56,7 @@ def test_host_loader_reports_all_missing_keys_and_rejects_unknown(tmp_path: Path
     assert "unknown" in message
     assert "wine_prefix" in message
     assert "game_root" in message
+    assert "automation_canvas_crop" in message
     assert "model_crop" in message
 
 
@@ -113,4 +114,11 @@ def test_host_geometry_rejects_equal_canvas_and_model_crops(tmp_path: Path) -> N
     values["canvas_crop"] = (0, 0, 640, 480)
     values["model_crop"] = (0, 0, 640, 480)
     with pytest.raises(ValueError, match="model_crop must be separate from canvas_crop"):
+        HostConfig.model_validate(values)
+
+
+def test_host_geometry_requires_disjoint_scan_and_automation_canvases(tmp_path: Path) -> None:
+    values = fixture_host(tmp_path).model_dump()
+    values["automation_canvas_crop"] = values["canvas_crop"]
+    with pytest.raises(ValueError, match="automation_canvas_crop must not overlap canvas_crop"):
         HostConfig.model_validate(values)

@@ -11,7 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
-from crowley.core import companion_state, queue, scanformat
+from crowley.core import companion_state, scanformat
 from crowley.core.game_target import (
     GameTarget,
     GameTargetError,
@@ -73,59 +73,12 @@ def _validator_named_literal_sets(module_path: Path, function_name: str) -> dict
     return result
 
 
-def _action_literal_sets(module_path: Path) -> dict[str, set[str]]:
-    try:
-        tree = ast.parse(module_path.read_text(encoding="utf-8"), filename=str(module_path))
-    except (OSError, SyntaxError) as exc:
-        raise GenerationError(f"cannot read wire contract source {module_path}: {exc}") from exc
-    function = next(
-        (
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "_validate_action"
-        ),
-        None,
-    )
-    if function is None:
-        raise GenerationError("queue wire contract source is missing _validate_action")
-    assignment = next(
-        (
-            node
-            for node in ast.walk(function)
-            if (
-                isinstance(node, ast.Assign)
-                and any(isinstance(target, ast.Name) and target.id == "fields" for target in node.targets)
-            )
-            or (
-                isinstance(node, ast.AnnAssign)
-                and isinstance(node.target, ast.Name)
-                and node.target.id == "fields"
-            )
-        ),
-        None,
-    )
-    if assignment is None or not isinstance(assignment.value, ast.Dict):
-        raise GenerationError("queue _validate_action fields must be a literal mapping")
-    result: dict[str, set[str]] = {}
-    for key, value in zip(assignment.value.keys, assignment.value.values, strict=True):
-        if not isinstance(key, ast.Constant) or not isinstance(key.value, str):
-            raise GenerationError("queue action field names must be string literals")
-        result[key.value] = _literal_string_set(value, f"queue action {key.value}")
-    return result
-
-
 def _wire_schema_sets() -> dict[str, object]:
     """Return wire keys from the Python validators and addon-data writer contract."""
 
     scan_sets = _validator_named_literal_sets(Path(scanformat.__file__), "validate_envelope")
     if not {"raw", "decoded"}.issubset(scan_sets):
         raise GenerationError("scan validate_envelope must validate raw and decoded envelope keys")
-    action_kinds = sorted(queue.ACTION_KINDS)
-    action_fields = _action_literal_sets(Path(queue.__file__))
-    if set(action_fields) != set(action_kinds):
-        raise GenerationError(
-            "queue action validator fields do not match ACTION_KINDS; update the contract parser"
-        )
     data_fields = set(AddonDataResponse.model_fields)
     if not data_fields:
         raise GenerationError("addon-data response has no fields")
@@ -135,11 +88,7 @@ def _wire_schema_sets() -> dict[str, object]:
         "savedScanEnvelope": scan_sets["raw"] | {"coldSlice"},
         "scanPayload": scan_sets["decoded"],
         "crowleyData": data_fields,
-        "crowleyQueue": set(queue.QUEUE_FIELDS),
-        "execution": set(queue.EXECUTION_FIELDS),
-        "result": set(queue.RESULT_FIELDS),
         "companionState": companion_fields,
-        "actionFields": action_fields,
     }
 
 
@@ -149,7 +98,6 @@ def _render_lua_key_set(value: set[str]) -> str:
 
 def render_generated_schemas() -> str:
     schemas = _wire_schema_sets()
-    action_fields = schemas.pop("actionFields")
     lines = [
         "local _, ns = ...",
         "",
@@ -161,23 +109,9 @@ def render_generated_schemas() -> str:
         if not isinstance(value, set):
             raise GenerationError(f"wire schema {name} is not a string set")
         lines.append(f"  {name} = {_render_lua_key_set(value)},")
-    lines.append("  actionFields = {")
-    if not isinstance(action_fields, Mapping):
-        raise GenerationError("wire action fields are not a mapping")
-    for action in sorted(action_fields):
-        fields = action_fields[action]
-        if not isinstance(fields, set):
-            raise GenerationError(f"wire action schema {action} is not a string set")
-        lines.append(f"    {action} = {_render_lua_key_set(fields)},")
     lines.extend(
         [
-            "  },",
             "}",
-            "",
-            'ns.RegisterModule("GeneratedWireSchemas", {',
-            '  requires = { "Core" },',
-            "  onLoad = function() end,",
-            "})",
             "",
         ]
     )

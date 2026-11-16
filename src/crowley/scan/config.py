@@ -33,6 +33,7 @@ class ScanConfig:
     window_title: str
     display: str
     canvas_crop: tuple[int, int, int, int]
+    automation_canvas_crop: tuple[int, int, int, int]
     saved_variables: Path
     companion_state: Path
     data_lua: Path
@@ -61,7 +62,8 @@ def load_scan_config() -> ScanConfig:
     plan_hash = resolved.canonical_plan.get("planHash")
     if not isinstance(plan_hash, str) or not plan_hash:
         raise ScanConfigError("selected target canonical plan has no planHash")
-    version = addon_version(resolved.addons_dir / "Crowley" / "Crowley.toc")
+    scanner_version = addon_version(resolved.addons_dir / "Crowley" / "Crowley.toc")
+    automation_version = addon_version(resolved.addons_dir / "Crowley_Automation" / "Crowley_Automation.toc")
     target = Target(
         character=host.character,
         realm=game.realm,
@@ -70,7 +72,8 @@ def load_scan_config() -> ScanConfig:
         plan_hash=plan_hash,
         build=game.native_build,
         interface=game.interface,
-        addon_version=version,
+        addon_version=automation_version,
+        scanner_addon_version=scanner_version,
         auctioneer=AUCTIONEER_NAME,
     )
     matcher = OwnedGameMatcher.for_game(
@@ -85,6 +88,7 @@ def load_scan_config() -> ScanConfig:
         window_title=host.window_title,
         display=host.display,
         canvas_crop=host.canvas_crop,
+        automation_canvas_crop=host.automation_canvas_crop,
         saved_variables=resolved.saved_variables,
         companion_state=resolved.state_file,
         data_lua=resolved.data_lua,

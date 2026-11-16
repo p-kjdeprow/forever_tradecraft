@@ -1,31 +1,21 @@
 """Format-2 API tests against the temporary TimescaleDB when configured."""
 
-import asyncio
 import gzip
 import hashlib
 import json
 import os
-import threading
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor
-from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
 from psycopg.rows import dict_row
-from psycopg.types.json import Jsonb
 
-from crowley.core.queue import build_queue
 from crowley.core.scanformat import decode_json_payload, encode_json_payload, validate_envelope
-from crowley.trading import paper
-from crowley.trading.api import CraftingCapabilities
-from crowley.trading.requirements import capabilities_hash
 
 DB_URL = os.environ.get("CROWLEY_TEST_DATABASE_URL")
 pytestmark = pytest.mark.skipif(not DB_URL, reason="CROWLEY_TEST_DATABASE_URL not set")
@@ -111,7 +101,6 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "false")
     from crowley.server.app import app
     from crowley.server.config import get_settings
 
@@ -167,7 +156,6 @@ def legacy_client(tmp_path, monkeypatch):
     monkeypatch.setenv("CROWLEY_API_TOKEN", TOKEN)
     monkeypatch.setenv("CROWLEY_HOST", "test-server")
     monkeypatch.setenv("CROWLEY_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "false")
     from crowley.server.app import app
     from crowley.server.config import get_settings
 
@@ -702,273 +690,16 @@ def test_houses_are_kept_separate(client):
     assert houses["us-normal-horde"]["sweeps"] == 1
 
 
-def test_trade_queue_publish_supersede_active_and_execution_append_only(client):
-    assert client.get("/v1/houses/us-normal-alliance/queue/active?character=Tester").json() is None
-    body = {
-        "house": "us-normal-alliance",
-        "character": "Tester",
-        "expiresAt": int(time.time()) + 600,
-        "actions": [{"seq": 1, "kind": "buy_commodity", "itemID": 2589, "quantity": 2, "maxUnitPrice": 25}],
-    }
-    assert client.post("/v1/queues", json=dict(body, armed="false")).status_code == 422
-    assert client.post("/v1/queues", json={**body, "confirmRealTrades": "anything"}).status_code == 422
-    assert client.post("/v1/queues", json={**body, "confirmRealTrades": None}).status_code == 422
-    first = client.post("/v1/queues", json=body)
-    assert first.status_code == 200, first.text
-    queue = first.json()
-    assert client.get("/v1/houses/us-normal-alliance/queue/active?character=Tester").json() == queue
-
-    second = client.post("/v1/queues", json=body)
-    assert second.status_code == 200, second.text
-    replacement = second.json()
-    assert replacement["queueId"] != queue["queueId"]
-    assert client.get("/v1/houses/us-normal-alliance/queue/active?character=Tester").json() == replacement
-
-    now = int(time.time())
-    record = {
-        "queueId": replacement["queueId"],
-        "house": replacement["house"],
-        "character": replacement["character"],
-        "results": [
-            {"seq": 1, "kind": "buy_commodity", "status": "started", "at": now, "detail": {}},
-        ],
-    }
-    assert client.post("/v1/executions", json=record).status_code == 200
-    assert client.post("/v1/executions", json=record).json()["status"] == "duplicate"
-    superset = dict(
-        record,
-        results=record["results"]
-        + [
-            {
-                "seq": 1,
-                "kind": "buy_commodity",
-                "status": "succeeded",
-                "at": now + 1,
-                "detail": {"unitPrice": 20, "totalPrice": 40},
-            }
-        ],
-    )
-    assert client.post("/v1/executions", json=superset).json()["status"] == "appended"
-    changed = dict(
-        superset,
-        results=[dict(superset["results"][0], detail={"reason": "changed"})] + superset["results"][1:],
-    )
-    assert client.post("/v1/executions", json=changed).status_code == 409
-
-
-def test_trade_queue_armed_requires_full_queue_id_confirmation(client):
-    now = int(time.time())
-    queue = build_queue(
-        {
-            "house": "us-normal-alliance",
-            "character": "ArmedTester",
-            "generatedAt": now,
-            "expiresAt": now + 600,
-            "armed": True,
-            "actions": [{"seq": 1, "kind": "vendor_buy", "itemID": 1, "quantity": 1}],
-        }
-    )
-    assert client.post("/v1/queues", json=queue).status_code == 422
-    assert (
-        client.post("/v1/queues", json={**queue, "confirmRealTrades": queue["queueId"][:8]}).status_code
-        == 422
-    )
-    assert (
-        client.post("/v1/queues", json={**queue, "confirmRealTrades": "wrong-full-queue-id"}).status_code
-        == 422
-    )
-    published = client.post("/v1/queues", json={**queue, "confirmRealTrades": queue["queueId"]})
-    assert published.status_code == 200, published.text
-    assert published.json()["armed"] is True
-    assert (
-        client.get("/v1/houses/us-normal-alliance/queue/active?character=ArmedTester").json()
-        == published.json()
-    )
-
-
 def test_uploads_are_idempotent_and_acked(client):
     upload = scan("dup", "horde")
     assert client.post("/v1/scans", json=upload).json()["status"] == "created"
     assert client.post("/v1/scans", json=upload).json()["status"] == "duplicate"
     data = client.post("/v1/addon-data", json={"scan_ids": ["dup", "unknown"]}).json()
     assert data["ackedScans"] == ["dup"]
-    assert set(data) == {"generatedAt", "ackedScans", "scanPlan", "referenceItemIDs"}
+    assert set(data) == {"generatedAt", "ackedScans", "scanPlan"}
     plan = client.get("/v1/scan-plan").json()
     assert plan["schemaVersion"] == 2
     assert plan["planHash"] and plan["planJSON"]
-
-
-def test_item_reference_ingest_is_typed_idempotent_and_exposed_in_latest_view(client):
-    from crowley.core.watchlist import load_catalog
-
-    from .test_reference import capture
-    from .wow_harness import Auction
-
-    addon = _us_horde_addon()
-    addon.set_auctions([Auction(2589, "Linen Cloth", 20, 100, isCommodity=True, sellPrice=3)])
-    raw = capture(addon, [2589])
-    first = client.post("/v1/item-reference", json=raw)
-    assert first.status_code == 200, first.text
-    assert first.json()["status"] == "created"
-    duplicate = client.post("/v1/item-reference", json=raw)
-    assert duplicate.status_code == 200
-    assert duplicate.json()["status"] == "duplicate"
-
-    changed = dict(raw, finishedAt=raw["finishedAt"] + 1)
-    conflict = client.post("/v1/item-reference", json=changed)
-    assert conflict.status_code == 409, conflict.text
-
-    with psycopg.connect(DB_URL) as conn:
-        capture_row = conn.execute(
-            "SELECT client_build, ah_open, content_digest FROM item_reference_captures"
-        ).fetchone()
-        typed = conn.execute(
-            "SELECT status, max_stack, sell_price, deposit_kind FROM item_reference"
-        ).fetchone()
-        deposits = conn.execute("SELECT count(*) FROM item_deposits").fetchone()[0]
-    assert capture_row[:2] == ("70450", True)
-    assert len(capture_row[2]) == 64
-    assert typed == ("ok", 20, 3, "commodity")
-    assert deposits == 6
-
-    latest = client.get("/v1/houses/us-normal-horde/item-reference")
-    assert latest.status_code == 200
-    assert latest.json()["items"][0]["item_id"] == 2589
-    addon_data = client.post("/v1/addon-data", json={"scan_ids": []}).json()
-    assert addon_data["referenceItemIDs"] == sorted(item.item_id for item in load_catalog().items)
-
-
-def test_account_state_ingest_is_typed_idempotent_and_exposed_in_latest_view(client):
-    from crowley.core import savedvars
-
-    addon = _us_horde_addon(
-        money=9876,
-        bags={
-            0: {
-                "numSlots": 1,
-                "freeSlots": 0,
-                "slots": {1: {"itemID": 2589, "stackCount": 4, "isBound": True, "quality": 1}},
-            }
-        },
-        professions=[{"name": "Alchemy", "skillLineID": 171, "level": 50, "maxLevel": 300}],
-        trade_ready=True,
-        recipe_ids=[11],
-        recipe_infos={11: {"learned": True}},
-        cooldowns={11: {"startTime": 100, "duration": 30}},
-        mail_open=True,
-        mail=[{"money": 20, "daysLeft": 2, "hasItem": True, "items": [{"itemID": 100, "count": 2}]}],
-    )
-    addon.login()
-    raw = savedvars.loads(addon.saved_variables())["CrowleyDB"]["account"]
-    first = client.post("/v1/account-state", json=raw)
-    assert first.status_code == 200, first.text
-    assert first.json()["status"] == "created"
-    duplicate = client.post("/v1/account-state", json=raw)
-    assert duplicate.status_code == 200
-    assert duplicate.json()["status"] == "duplicate"
-
-    with psycopg.connect(DB_URL) as conn:
-        capture_id = conn.execute(
-            "SELECT id FROM account_captures WHERE capture_uid=%s", (raw["id"],)
-        ).fetchone()[0]
-        assert (
-            conn.execute("SELECT gold FROM account_captures WHERE id=%s", (capture_id,)).fetchone()[0] == 9876
-        )
-        assert conn.execute(
-            "SELECT location, container, slot, item_id, count, bound "
-            "FROM account_items WHERE capture_id=%s ORDER BY location, container, slot",
-            (capture_id,),
-        ).fetchall() == [
-            ("bag", "0", 1, 2589, 4, True),
-            ("mail", "1", 1, 100, 2, None),
-        ]
-        assert conn.execute(
-            "SELECT skill_line_id, name, level, max_level FROM account_professions WHERE capture_id=%s",
-            (capture_id,),
-        ).fetchall() == [(171, "Alchemy", 50, 300)]
-        assert conn.execute(
-            "SELECT skill_line_id, spell_id FROM account_recipes WHERE capture_id=%s",
-            (capture_id,),
-        ).fetchall() == [(171, 11)]
-        assert conn.execute(
-            "SELECT spell_id, start_seconds, duration_seconds FROM account_cooldowns WHERE capture_id=%s",
-            (capture_id,),
-        ).fetchall() == [(11, Decimal("100"), Decimal("30"))]
-
-    newer = deepcopy(raw)
-    newer["capturedAt"] += 1
-    newer["id"] = f"{newer['house']['key']}-{newer['context']['character']}-{newer['capturedAt']}-9999"
-    newer["gold"] = 12_345
-    second = client.post("/v1/account-state", json=newer)
-    assert second.status_code == 200, second.text
-    assert second.json()["status"] == "created"
-
-    latest = client.get("/v1/houses/us-normal-horde/account-state/latest?character=Tester")
-    assert latest.status_code == 200
-    assert latest.json()["capture"]["raw"]["gold"] == 12_345
-    assert latest.json()["capture"]["capture_uid"] == newer["id"]
-
-    changed = dict(raw, gold=9877)
-    assert client.post("/v1/account-state", json=changed).status_code == 409
-    malformed = dict(raw, gold=-1)
-    assert client.post("/v1/account-state", json=malformed).status_code == 422
-    assert (
-        client.post("/v1/account-state", json=raw, headers={"Authorization": "Bearer wrong"}).status_code
-        == 401
-    )
-
-
-def test_item_reference_auth_storage_limits_and_latest_selection(client):
-    from .test_reference import capture
-    from .wow_harness import Auction
-
-    addon = _us_horde_addon()
-    addon.set_auctions([Auction(2589, "Linen Cloth", 20, 100, isCommodity=True, sellPrice=3)])
-    raw = capture(addon, [2589])
-
-    assert (
-        client.post(
-            "/v1/item-reference",
-            json=raw,
-            headers={"Authorization": "Bearer nope"},
-        ).status_code
-        == 401
-    )
-    assert (
-        client.get(
-            "/v1/houses/us-normal-horde/item-reference",
-            headers={"Authorization": "Bearer nope"},
-        ).status_code
-        == 401
-    )
-
-    too_large = deepcopy(raw)
-    too_large["id"] = "us-normal-horde-1760000000-Tester-overflow"
-    too_large["items"]["2589"]["info"]["quality"] = 32768
-    assert client.post("/v1/item-reference", json=too_large).status_code == 422
-
-    assert client.post("/v1/item-reference", json=raw).status_code == 200
-    other_build = deepcopy(raw)
-    other_build["id"] = "us-normal-horde-1760000001-Tester-build2"
-    other_build["startedAt"] += 1
-    other_build["finishedAt"] += 1
-    other_build["context"]["clientBuild"] = "70451"
-    assert client.post("/v1/item-reference", json=other_build).status_code == 200
-
-    newer_not_ok = deepcopy(raw)
-    newer_not_ok["id"] = "us-normal-horde-1760000002-Tester-not-ok"
-    newer_not_ok["startedAt"] += 2
-    newer_not_ok["finishedAt"] += 2
-    newer_not_ok["items"]["2589"] = {"itemID": 2589, "status": "not_found"}
-    assert client.post("/v1/item-reference", json=newer_not_ok).status_code == 200
-
-    latest = client.get("/v1/houses/us-normal-horde/item-reference")
-    assert latest.status_code == 200
-    rows = latest.json()["items"]
-    assert {(row["client_build"], row["status"]) for row in rows} == {
-        ("70450", "ok"),
-        ("70451", "ok"),
-    }
 
 
 def test_v1_and_malformed_v2_are_rejected(client):
@@ -979,15 +710,8 @@ def test_v1_and_malformed_v2_are_rejected(client):
     assert client.post("/v1/scans", json=bad).status_code == 422
     assert client.get("/v1/houses", headers={"Authorization": ""}).status_code == 200
     assert client.get("/v1/houses", headers={"Authorization": "Bearer nope"}).status_code == 200
-    for path in (
-        "/v1/houses/eu-normal-alliance/latest",
-        "/v1/houses/eu-normal-alliance/items/123/history",
-        "/v1/houses/eu-normal-alliance/items/123/volume",
-        "/v1/houses/eu-normal-alliance/advice",
-        "/v1/houses/eu-normal-alliance/sweeps/latest",
-    ):
+    for path in ("/v1/houses/eu-normal-alliance/sweeps/latest",):
         assert client.get(path, headers={"Authorization": ""}).status_code == 404
-    assert client.get("/v1/houses/us-normal-orcs/latest").status_code == 400
 
 
 def test_probe_body_is_strictly_validated(client):
@@ -997,53 +721,7 @@ def test_probe_body_is_strictly_validated(client):
     assert client.post("/v1/probes", json={"at": int(time.time()), "surface": {}}).status_code == 200
 
 
-def test_volume_route_uses_market_rows_only(client):
-    now = int(time.time())
-    assert client.post("/v1/scans", json=scan("v1", "horde", at=now - 30)).status_code == 200
-    assert client.post("/v1/scans", json=scan("v2", "horde", price=120, at=now)).status_code == 200
-    response = client.get("/v1/houses/us-normal-horde/items/2589/volume?hours=24")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["intervals"][0]["kind"] == "commodity"
-    assert body["marketActualSalesEstimate"] is None
-
-
-def test_volume_route_depletion_matches_analysis_books(client):
-    """The HTTP route and the analysis package must report one bottom-walk."""
-
-    from crowley.analysis.books import load_commodity_books, valid_intervals
-
-    now = int(time.time())
-    for index, (quantity, at) in enumerate([(10, now - 90), (6, now - 60), (2, now - 30), (2, now)]):
-        response = client.post("/v1/scans", json=scan(f"p{index}", "horde", quantity=quantity, at=at))
-        assert response.status_code == 200, response.text
-    body = client.get("/v1/houses/us-normal-horde/items/2589/volume?hours=24").json()
-    route = [entry["commodityDepletionUnits"] for entry in body["intervals"]]
-    with psycopg.connect(DB_URL) as conn:
-        books = load_commodity_books(conn, "us-normal-horde")[2589]
-    walked = [sum(units for _, units in interval.consumed) for interval in valid_intervals(books) if interval]
-    assert route == walked == [4, 4, 0]
-
-
-def test_volume_route_fails_loudly_on_malformed_commodity_time_left(client):
-    now = int(time.time())
-    assert client.post("/v1/scans", json=scan("m1", "horde", at=now - 30)).status_code == 200
-    assert client.post("/v1/scans", json=scan("m2", "horde", quantity=5, at=now)).status_code == 200
-    with psycopg.connect(DB_URL, autocommit=True) as conn:
-        conn.execute(
-            "UPDATE market_observations SET observation = jsonb_set("
-            "observation, '{rows,row:1,timeLeft}', '{\"kind\": \"unknown\"}')"
-        )
-    # compare_observations deliberately fails the whole report when any row in the
-    # read margin is malformed (fail loudly) instead of skipping the interval.
-    with TestClient(
-        client.app, raise_server_exceptions=False, headers={"Authorization": f"Bearer {TOKEN}"}
-    ) as strict:
-        response = strict.get("/v1/houses/us-normal-horde/items/2589/volume?hours=24")
-    assert response.status_code >= 500
-
-
-def test_real_addon_envelope_reaches_archive_history_and_volume(client):
+def test_real_addon_envelope_reaches_strict_ingestion_and_archive(client):
     from .test_addon import envelope, run_sweep
 
     addon = _us_horde_addon()
@@ -1067,54 +745,6 @@ def test_real_addon_envelope_reaches_archive_history_and_volume(client):
         "own_sale_evidence": len(persistence_expected["own_sale_evidence"]),
     }
     assert persistence_actual == persistence_expected
-
-    history_response = client.get("/v1/houses/us-normal-horde/items/2589/history?days=365")
-    assert history_response.status_code == 200, history_response.text
-    history = history_response.json()
-    assert len(history["observations"]) == 1
-    assert history["observations"][0]["observation"]["rows"]
-    volume_response = client.get("/v1/houses/us-normal-horde/items/2589/volume?hours=168")
-    assert volume_response.status_code == 200, volume_response.text
-    volume = volume_response.json()
-    assert volume["latestObservation"]["itemID"] == 2589
-    assert volume["marketActualSalesEstimate"] is None
-
-
-def test_volume_latest_uses_observation_effective_end_for_stale_overlaps(client):
-    base = int(time.time()) - 30 * 24 * 60 * 60
-
-    outerly_latest = scan("stale-outerly-latest", "horde", at=base + 200)
-    outerly_latest_payload = decode_json_payload(outerly_latest["payload"])
-    outerly_latest_payload["observations"]["2589"]["query"] = {
-        "kind": "queried",
-        "startedAt": base + 100,
-        "finishedAt": base + 110,
-    }
-    outerly_latest["startedAt"] = base + 100
-    outerly_latest["finishedAt"] = base + 200
-    outerly_latest["payload"] = encode_json_payload(outerly_latest_payload)
-
-    query_latest = scan("stale-query-latest", "horde", at=base + 150)
-    query_latest_payload = decode_json_payload(query_latest["payload"])
-    query_latest_payload["observations"]["2589"]["query"] = {
-        "kind": "queried",
-        "startedAt": base,
-        "finishedAt": base + 140,
-    }
-    query_latest["startedAt"] = base
-    query_latest["finishedAt"] = base + 150
-    query_latest["payload"] = encode_json_payload(query_latest_payload)
-
-    assert client.post("/v1/scans", json=outerly_latest).status_code == 200
-    assert client.post("/v1/scans", json=query_latest).status_code == 200
-
-    before = int(time.time())
-    response = client.get("/v1/houses/us-normal-horde/items/2589/volume?hours=168")
-    after = int(time.time())
-    assert response.status_code == 200, response.text
-    volume = response.json()
-    assert volume["latestObservation"]["query"]["finishedAt"] == base + 140
-    assert before - (base + 140) <= volume["freshness"] <= after - (base + 140)
 
 
 def test_ingest_normalizes_format2_but_keeps_received_payload_and_accepts_format3(client):
@@ -1272,100 +902,6 @@ def test_uid_conflict_including_changed_payload_is_409(client):
     assert houses[0]["sweeps"] == 1
 
 
-def test_variant_history_projects_exact_canonical_rows(client):
-    now = int(time.time())
-    base = scan("base-variant", "horde", at=now - 60)
-    variant = scan("level-variant", "horde", at=now - 30)
-    decoded = decode_json_payload(variant["payload"])
-    row = decoded["observations"]["2589"]["rows"]["row:1"]
-    row["rawItemKey"] = dict(row["rawItemKey"], itemLevel=17)
-    row["itemKey"] = "2589:l17"
-    variant["payload"] = _encode_native_payload(decoded)
-    assert client.post("/v1/scans", json=base).status_code == 200
-    assert client.post("/v1/scans", json=variant).status_code == 200
-
-    plain = client.get("/v1/houses/us-normal-horde/items/2589/history?days=365").json()
-    level = client.get("/v1/houses/us-normal-horde/items/2589:l17/history?days=365").json()
-    assert [len(entry["observation"]["rows"]) for entry in plain["observations"]] == [1, 0]
-    assert [len(entry["observation"]["rows"]) for entry in level["observations"]] == [0, 1]
-
-
-def test_variant_projection_sorts_numeric_jsonb_row_ordinals(client):
-    raw = scan("numeric-rows", "horde")
-    decoded = decode_json_payload(raw["payload"])
-    observation = decoded["observations"]["2589"]
-    template = observation["rows"]["row:1"]
-    rows = {}
-    variant_rows = {2, 10, 12}
-    for index in range(1, 13):
-        row = deepcopy(template)
-        row["resultID"] = index
-        row["price"] = {"kind": "unit", "copper": index * 10}
-        row["unitPrice"] = {"numerator": index * 10, "denominator": 1}
-        if index in variant_rows:
-            row["rawItemKey"] = dict(row["rawItemKey"], itemLevel=17)
-            row["itemKey"] = "2589:l17"
-        rows[f"row:{index}"] = row
-    observation["rows"] = rows
-    observation["rowCount"] = len(rows)
-    raw["numRows"] = len(rows)
-    raw["payload"] = _encode_native_payload(decoded)
-    response = client.post("/v1/scans", json=raw)
-    assert response.status_code == 200, response.text
-
-    history = client.get("/v1/houses/us-normal-horde/items/2589:l17/history?days=365").json()
-    projected = history["observations"][0]["observation"]
-    assert list(projected["rows"]) == ["row:1", "row:2", "row:3"]
-    assert [row["unitPrice"]["numerator"] for row in projected["rows"].values()] == [20, 100, 120]
-    volume = client.get("/v1/houses/us-normal-horde/items/2589:l17/volume?hours=24").json()
-    latest = volume["latestObservation"]
-    assert [row["unitPrice"]["numerator"] for row in latest["rows"].values()] == [20, 100, 120]
-
-
-def test_owned_sold_uses_owned_window_and_excludes_inconsistent_evidence(client):
-    link = "item:2589:0:0:0:0:0:0:0:0:0:0:0:0"
-
-    def owned(raw: dict, auction_id: int, quantity: int, *, earlier: int) -> dict:
-        decoded = decode_json_payload(raw["payload"])
-        decoded["owned"] = {
-            "status": "full",
-            "query": {"kind": "queried", "startedAt": earlier - 4, "finishedAt": earlier - 2},
-            "reasonCode": "ok",
-            "rowCount": 1,
-            "rows": {
-                str(auction_id): {
-                    "auctionID": auction_id,
-                    "itemID": 2589,
-                    "itemKey": "2589",
-                    "rawItemKey": {
-                        "itemID": 2589,
-                        "itemLevel": 0,
-                        "itemSuffix": 0,
-                        "battlePetSpeciesID": 0,
-                        "bonusIDs": [],
-                    },
-                    "itemLink": link,
-                    "quantity": quantity,
-                    "buyout": {"kind": "known", "copper": 100},
-                    "status": "sold",
-                }
-            },
-        }
-        raw["payload"] = _encode_native_payload(decoded)
-        return raw
-
-    now = int(time.time())
-    first = owned(scan("owned-first", "horde", at=now - 10), 77, 2, earlier=now - 15)
-    second = owned(scan("owned-earlier", "horde", at=now - 30), 77, 3, earlier=now - 35)
-    response = client.post("/v1/scans", json=first)
-    assert response.status_code == 200, response.text
-    assert client.post("/v1/scans", json=second).status_code == 200
-    report = client.get("/v1/houses/us-normal-horde/items/2589/volume?hours=24").json()
-    assert report["ownConfirmed"]["units"] == 0
-    assert report["ownConfirmed"]["evidence"][0]["inconsistent"] is True
-    assert report["ownConfirmed"]["evidence"][0]["observation_window"]["finishedAt"] == now - 37
-
-
 def test_concurrent_connections_claim_one_uid_and_archive(client):
     from crowley.server.config import get_settings
     from crowley.server.ingest import SweepConflictError, ingest_market_sweep
@@ -1441,319 +977,3 @@ def test_uid_path_is_content_addressed(client):
     archives = list(data_dir.glob("raw/format2/*/*.json.gz"))
     assert len(archives) == 1
     assert archives[0].resolve().is_relative_to(data_dir.resolve())
-
-
-def test_created_upload_warms_once_for_the_ingested_house_and_duplicate_does_not(client, monkeypatch):
-    from crowley.advisor import service
-    from crowley.server.config import get_settings
-
-    calls = []
-    monkeypatch.setattr(service, "warm", lambda pool, cache, house: calls.append((pool, cache, house)))
-    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "true")
-    get_settings.cache_clear()
-
-    raw = scan("warm-created-and-duplicate", "horde")
-    created = client.post("/v1/scans", json=raw)
-    assert created.status_code == 200, created.text
-    assert created.json()["status"] == "created"
-    assert [call[2] for call in calls] == ["us-normal-horde"]
-
-    duplicate = client.post("/v1/scans", json=raw)
-    assert duplicate.status_code == 200, duplicate.text
-    assert duplicate.json()["status"] == "duplicate"
-    assert [call[2] for call in calls] == ["us-normal-horde"]
-
-
-def test_warm_advice_false_disables_warming(client, monkeypatch):
-    from crowley.advisor import service
-
-    calls = []
-    monkeypatch.setattr(service, "warm", lambda *args: calls.append(args))
-    response = client.post("/v1/scans", json=scan("warm-disabled", "horde"))
-    assert response.status_code == 200, response.text
-    assert response.json()["status"] == "created"
-    assert calls == []
-
-
-def test_warm_failure_is_logged_and_does_not_change_upload_response(client, monkeypatch, caplog):
-    from crowley.advisor import service
-    from crowley.server.config import get_settings
-
-    def fail_warm(pool, cache, house):
-        raise RuntimeError("warm failed")
-
-    monkeypatch.setattr(service, "warm", fail_warm)
-    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "true")
-    get_settings.cache_clear()
-    response = client.post("/v1/scans", json=scan("warm-failure", "horde"))
-    assert response.status_code == 200, response.text
-    assert response.json()["status"] == "created"
-    assert any(
-        record.name == "crowley.server.routes.scans"
-        and "Failed to warm advice for house us-normal-horde" in record.getMessage()
-        for record in caplog.records
-    )
-
-
-def test_sync_warm_runs_after_upload_body_and_does_not_block_another_request(client, monkeypatch):
-    from crowley.advisor import service
-    from crowley.server.config import get_settings
-
-    warm_started = threading.Event()
-    release_warm = threading.Event()
-
-    def blocking_warm(pool, cache, house):
-        warm_started.set()
-        if not release_warm.wait(timeout=10):
-            raise RuntimeError("test did not release advice warmer")
-
-    monkeypatch.setattr(service, "warm", blocking_warm)
-    monkeypatch.setenv("CROWLEY_WARM_ADVICE", "true")
-    get_settings.cache_clear()
-    application = client.app
-
-    def scope(method, path):
-        return {
-            "type": "http",
-            "asgi": {"version": "3.0", "spec_version": "2.3"},
-            "http_version": "1.1",
-            "method": method,
-            "scheme": "http",
-            "path": path,
-            "raw_path": path.encode(),
-            "query_string": b"",
-            "root_path": "",
-            "headers": [
-                (b"authorization", f"Bearer {TOKEN}".encode()),
-                (b"content-type", b"application/json"),
-            ],
-            "client": ("testclient", 12345),
-            "server": ("testserver", 80),
-        }
-
-    async def invoke(method, path, body=b"", on_send=None):
-        messages = [{"type": "http.request", "body": body, "more_body": False}]
-        events = []
-
-        async def receive():
-            return messages.pop(0) if messages else {"type": "http.disconnect"}
-
-        async def send(event):
-            events.append(event)
-            if on_send is not None:
-                on_send(event)
-
-        await application(scope(method, path), receive, send)
-        return events
-
-    async def exercise():
-        upload_body_sent = asyncio.Event()
-
-        def capture_upload(event):
-            if event["type"] == "http.response.body":
-                upload_body_sent.set()
-
-        raw = scan(f"warm-nonblocking-{uuid.uuid4().hex}", "horde")
-        upload = asyncio.create_task(invoke("POST", "/v1/scans", json.dumps(raw).encode(), capture_upload))
-        try:
-            assert await asyncio.wait_for(asyncio.to_thread(warm_started.wait, 5), timeout=6)
-            await asyncio.wait_for(upload_body_sent.wait(), timeout=2)
-            assert not release_warm.is_set()
-            health_events = await asyncio.wait_for(invoke("GET", "/healthz"), timeout=2)
-            assert any(
-                event.get("status") == 200
-                for event in health_events
-                if event["type"] == "http.response.start"
-            )
-            assert not release_warm.is_set()
-        finally:
-            release_warm.set()
-        upload_events = await upload
-        assert any(
-            event.get("status") == 200 for event in upload_events if event["type"] == "http.response.start"
-        )
-
-    asyncio.run(exercise())
-
-
-def test_paper_run_api_and_dashboard(client):
-    suffix = uuid.uuid4().hex
-    house_key = f"paper-dashboard-{suffix}"
-    run_name = f"paper-dashboard-{suffix}"
-    with psycopg.connect(DB_URL) as conn:
-        with conn.transaction():
-            house_id = conn.execute(
-                """
-                INSERT INTO houses (key, region, ruleset, faction)
-                VALUES (%s, 'test', 'normal', %s)
-                RETURNING id
-                """,
-                (house_key, suffix),
-            ).fetchone()[0]
-            capabilities = CraftingCapabilities()
-            run_id = conn.execute(
-                """
-                INSERT INTO paper_runs
-                    (name, house_id, client_build, start_t, capital_copper, strategies,
-                     weights, demand_share, engine_digest, capabilities, capabilities_hash,
-                     engine_contract)
-                VALUES (%s, %s, '1.60.1.70450', 100, 9007199254740993, %s, %s, '1/2', %s, %s, %s,
-                        'replay-v1')
-                RETURNING id
-                """,
-                (
-                    run_name,
-                    house_id,
-                    Jsonb(["alpha", "beta"]),
-                    Jsonb(["1", "2"]),
-                    "0" * 64,
-                    Jsonb(capabilities.canonical),
-                    capabilities_hash(capabilities),
-                ),
-            ).fetchone()[0]
-            steps = [
-                (100, {"alpha": 40000, "beta": 60000, "total": 100000}),
-                (200, {"alpha": 50000, "beta": 70000, "total": 120000}),
-            ]
-            previous_digest = "0" * 64
-            for replay_ordinal, (step_t, equity) in enumerate(steps):
-                realized = {"alpha": step_t, "beta": step_t * 2, "total": step_t * 3}
-                cash = {"alpha": 39000, "beta": 59000, "total": 98000}
-                chain_record = {
-                    "replay_ordinal": replay_ordinal,
-                    "t": step_t,
-                    "sweep_key": f"sweep-{step_t}",
-                    "equity": equity,
-                    "realized": realized,
-                    "cash": cash,
-                }
-                step_digest = paper._step_chain_digest(previous_digest, chain_record)
-                conn.execute(
-                    """
-                    INSERT INTO paper_steps
-                        (run_id, replay_ordinal, step_t, sweep_key, equity, realized, cash,
-                         previous_digest, step_digest)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        run_id,
-                        replay_ordinal,
-                        step_t,
-                        f"sweep-{step_t}",
-                        Jsonb(equity),
-                        Jsonb(realized),
-                        Jsonb(cash),
-                        previous_digest,
-                        step_digest,
-                    ),
-                )
-                previous_digest = step_digest
-            for ordinal in range(205):
-                conn.execute(
-                    """
-                    INSERT INTO paper_intents
-                        (run_id, step_t, strategy, ordinal, intent, outcome, detail)
-                    VALUES (%s, 200, 'alpha', %s, %s, 'executed', %s)
-                    """,
-                    (
-                        run_id,
-                        ordinal,
-                        Jsonb({"type": "Buy", "item_id": 2319, "max_unit_price": 27000, "quantity": 24}),
-                        Jsonb({"filled": 24}),
-                    ),
-                )
-            conn.execute(
-                """
-                INSERT INTO paper_pending (run_id, replay_ordinal, step_t, sweep_key, intents)
-                VALUES (%s, %s, 300, 'pending-sweep', %s)
-                """,
-                (
-                    run_id,
-                    len(steps),
-                    Jsonb(
-                        {"beta": [{"type": "Buy", "item_id": 2319, "max_unit_price": 27000, "quantity": 3}]}
-                    ),
-                ),
-            )
-
-    try:
-        listing_without_credentials = client.get("/v1/paper/runs", headers={"Authorization": ""})
-        assert listing_without_credentials.status_code == 200, listing_without_credentials.text
-        detail_without_credentials = client.get(f"/v1/paper/runs/{run_name}", headers={"Authorization": ""})
-        assert detail_without_credentials.status_code == 200, detail_without_credentials.text
-
-        listing = client.get("/v1/paper/runs")
-        assert listing.status_code == 200, listing.text
-        summary = next(run for run in listing.json() if run["name"] == run_name)
-        assert summary["house"] == house_key
-        assert summary["capital_copper"] == "9007199254740993"
-        assert summary["latest_step_t"] == 200
-        assert summary["latest_total_equity"] == "120000"
-        assert summary["latest_total_realized"] == "600"
-        assert summary["pending_step_t"] == 300
-
-        detail_response = client.get(f"/v1/paper/runs/{run_name}")
-        assert detail_response.status_code == 200, detail_response.text
-        detail = detail_response.json()
-        assert detail["capital_copper"] == "9007199254740993"
-
-        # End to end: the API's raw JSON text goes through the page's own parsing, validation and
-        # performance model, so a lossy number anywhere on that path would break the exact shares.
-        from crowley.trading.engine import _allocate_capital
-
-        from .test_dashboard import _emit_script, _node
-
-        model = _node(
-            _emit_script(
-                f"""
-                const detail = JSON.parse({json.dumps(detail_response.text)});
-                validateRunDetail(detail);
-                emit(buildPerformanceModel(detail).rows.map((row) => row.start.numerator.toString()));
-                """
-            )
-        )
-        assert model == [str(share) for share in _allocate_capital(9007199254740993, detail["weights"])]
-        assert detail["curve"] == [
-            {
-                "t": 100,
-                "equity": {"alpha": "40000", "beta": "60000", "total": "100000"},
-                "realized": {"alpha": "100", "beta": "200", "total": "300"},
-                "cash": {"alpha": "39000", "beta": "59000", "total": "98000"},
-            },
-            {
-                "t": 200,
-                "equity": {"alpha": "50000", "beta": "70000", "total": "120000"},
-                "realized": {"alpha": "200", "beta": "400", "total": "600"},
-                "cash": {"alpha": "39000", "beta": "59000", "total": "98000"},
-            },
-        ]
-        assert len(detail["recent_intents"]) == 200
-        assert detail["recent_intents"][0]["t"] == 200
-        assert detail["recent_intents"][0]["ordinal"] == 204
-        assert detail["recent_intents"][0]["intent"]["max_unit_price"] == "27000"
-        assert detail["pending"] == {
-            "t": 300,
-            "sweep_key": "pending-sweep",
-            "intents": {"beta": [{"type": "Buy", "item_id": 2319, "max_unit_price": "27000", "quantity": 3}]},
-        }
-        assert client.get(f"/v1/paper/runs/{run_name}-missing").status_code == 404
-
-        dashboard_response = client.get("/dashboard", headers={"Authorization": ""})
-        assert dashboard_response.status_code == 200
-        assert dashboard_response.headers["content-security-policy"] == (
-            "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self'"
-        )
-        assert dashboard_response.headers["x-content-type-options"] == "nosniff"
-        assert "http://" not in dashboard_response.text
-        assert "https://" not in dashboard_response.text
-
-        with psycopg.connect(DB_URL) as conn:
-            conn.execute("DELETE FROM paper_pending WHERE run_id = %s", (run_id,))
-            conn.commit()
-        assert client.get(f"/v1/paper/runs/{run_name}").json()["pending"] is None
-    finally:
-        with psycopg.connect(DB_URL) as conn:
-            with conn.transaction():
-                conn.execute("DELETE FROM paper_runs WHERE id = %s", (run_id,))
-                conn.execute("DELETE FROM houses WHERE id = %s", (house_id,))

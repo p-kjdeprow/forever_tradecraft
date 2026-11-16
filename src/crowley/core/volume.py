@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from copy import deepcopy
 from fractions import Fraction
 from typing import Any
 
@@ -32,49 +31,6 @@ def _query_window(observation: dict[str, Any]) -> tuple[int, int] | None:
     if not isinstance(query.get("startedAt"), int) or not isinstance(query.get("finishedAt"), int):
         return None
     return query["startedAt"], query["finishedAt"]
-
-
-def _record_window(record: dict[str, Any]) -> tuple[int, int] | None:
-    """Return the scope window used for report filtering.
-
-    Queried observations use their actual query window. Failed/unqueried records
-    have no query window, so their envelope sweep bounds keep the failure in the
-    ordered interval stream without inventing a query.
-    """
-    observed = _query_window(_observation(record))
-    if observed is not None:
-        return observed
-    meta = _record_meta(record)
-    started = meta.get("startedAt")
-    finished = meta.get("finishedAt")
-    if isinstance(started, int) and isinstance(finished, int):
-        return started, finished
-    return None
-
-
-def _record_start(record: dict[str, Any]) -> int:
-    window = _record_window(record)
-    return window[0] if window else 0
-
-
-def _record_end(record: dict[str, Any]) -> int:
-    window = _record_window(record)
-    return window[1] if window else -1
-
-
-def _sweep_start(record: dict[str, Any]) -> int:
-    value = _record_meta(record).get("startedAt")
-    return value if isinstance(value, int) else _record_start(record)
-
-
-def _sweep_end(record: dict[str, Any]) -> int:
-    value = _record_meta(record).get("finishedAt")
-    return value if isinstance(value, int) else _record_end(record)
-
-
-def _ordinal(record: dict[str, Any]) -> int:
-    value = _observation(record).get("ordinal", 0)
-    return value if isinstance(value, int) else 0
 
 
 def _cutoff(observation: dict[str, Any]) -> Fraction | None:
@@ -113,28 +69,6 @@ def _matches_variant(row: dict[str, Any], item_key: str | None, raw_identity: di
     if item_key is not None and row.get("itemKey") != item_key:
         return False
     return raw_identity is None or row.get("rawItemKey") == raw_identity
-
-
-def project_observation_variant(
-    observation: dict[str, Any], requested_item_key: str, *, raw_identity: dict[str, Any] | None = None
-) -> dict[str, Any]:
-    """Project a whole observation onto one exact canonical variant.
-
-    The coverage, failure, and query metadata remain those of the original item
-    scope. Only captured rows are filtered, so an empty projection still means
-    absence within the proved prefix rather than an unqueried item.
-    """
-    result = deepcopy(observation)
-    rows = _rows(observation)
-    selected = [deepcopy(row) for row in rows if row.get("itemKey") == requested_item_key]
-    if raw_identity is not None:
-        selected = [row for row in selected if row.get("rawItemKey") == raw_identity]
-    result["rows"] = {f"row:{index}": row for index, row in enumerate(selected, 1)}
-    result["rowCount"] = len(selected)
-    return result
-
-
-project_variant = project_observation_variant
 
 
 def _common_ceiling(left: dict[str, Any], right: dict[str, Any]) -> tuple[Fraction | None, str | None]:
@@ -229,26 +163,6 @@ def _base_result(*, elapsed: int = 0, expiry_gap: int = 0) -> dict[str, Any]:
     }
 
 
-PER_AUCTION_KEYS = ("removedClasses", "inconsistentResultIds")
-
-
-def compare_observations(
-    previous: dict[str, Any],
-    current: dict[str, Any],
-    *,
-    item_key: str | None = None,
-    raw_identity: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Compare two consecutive observations and return conservative evidence.
-
-    The HTTP-facing result: it carries no per-auction detail.
-    """
-    result = compare_observations_detailed(previous, current, item_key=item_key, raw_identity=raw_identity)
-    for key in PER_AUCTION_KEYS:
-        result.pop(key, None)
-    return result
-
-
 def compare_observations_detailed(
     previous: dict[str, Any],
     current: dict[str, Any],
@@ -257,8 +171,7 @@ def compare_observations_detailed(
     raw_identity: dict[str, Any] | None = None,
     max_interval_seconds: int = MAX_INTERVAL_SECONDS,
 ) -> dict[str, Any]:
-    """``compare_observations`` plus, for item intervals, ``removedClasses`` (resultID to
-    disappearance class) and ``inconsistentResultIds``.  For in-process analysis only."""
+    """Compare consecutive observations and retain per-auction disappearance evidence."""
     left = _observation(previous)
     right = _observation(current)
     left_meta = _record_meta(previous)
@@ -515,105 +428,3 @@ def _empty_result(exclusions: list[str], *, elapsed: int = 0) -> dict[str, Any]:
     result = _base_result(elapsed=elapsed)
     result["excludedIntervals"] = exclusions
     return result
-
-
-def volume_report(
-    records: Iterable[dict[str, Any]],
-    *,
-    hours: int = 24,
-    end: int | None = None,
-    item_key: str | None = None,
-    raw_identity: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Build a report ordered by envelope sweep start and ordinal.
-
-    Every failed/unqueried record in the requested window remains in the sequence;
-    a comparison touching it is an excluded interval rather than a manufactured
-    zero-rate sample. Latest/freshness are computed independently of the window.
-    """
-    if hours < 1 or hours > 168:
-        raise ValueError("hours must be between 1 and 168")
-    ordered = sorted(records, key=lambda record: (_sweep_start(record), _ordinal(record)))
-    if end is None:
-        end = max((_record_end(record) for record in ordered), default=0)
-    start = end - hours * 3600
-    comparisons: list[dict[str, Any]] = []
-    for left, right in zip(ordered, ordered[1:], strict=False):
-        comparison = compare_observations(left, right, item_key=item_key, raw_identity=raw_identity)
-        prior_end = _record_end(left)
-        current_end = _record_end(right)
-        prior_in_window = start <= prior_end <= end
-        current_in_window = start <= current_end <= end
-        if not (prior_in_window or current_in_window):
-            continue
-        if not (prior_in_window and current_in_window):
-            comparison["valid"] = False
-            comparison["excludedIntervals"] = [
-                *comparison.get("excludedIntervals", []),
-                "outside_window",
-            ]
-        comparisons.append(comparison)
-    valid = [entry for entry in comparisons if entry.get("valid")]
-    elapsed = sum(entry.get("comparedSeconds", 0) for entry in valid)
-    candidates = sum(entry.get("eligibleIndividualSaleCandidateUnits", 0) or 0 for entry in valid)
-    latest_record = (
-        max(ordered, key=lambda record: (_record_end(record), _sweep_start(record), _ordinal(record)))
-        if ordered
-        else None
-    )
-    latest = _observation(latest_record) if latest_record else None
-    if latest is not None and item_key is not None:
-        latest = project_observation_variant(latest, item_key, raw_identity=raw_identity)
-    individual_intervals = [entry for entry in valid if entry.get("individualRateAvailable")]
-    individual_exposure = sum(
-        entry.get("individualExposureSeconds", 0) or 0 for entry in individual_intervals
-    )
-    commodity_depletion = sum(entry.get("commodityDepletionUnits", 0) for entry in valid)
-    commodity_replenishment = sum(entry.get("commodityReplenishmentUnits", 0) for entry in valid)
-    commodity_intervals = [entry for entry in valid if entry.get("kind") == "commodity"]
-    commodity_exposure = sum(entry.get("comparedSeconds", 0) for entry in commodity_intervals)
-    removed = sum(entry.get("observedIndividualRemovedUnits", 0) for entry in valid)
-    added = sum(entry.get("observedIndividualAddedUnits", 0) for entry in valid)
-    expiry = sum(entry.get("expirationPossibleUnits", 0) for entry in valid)
-    unknown = sum(entry.get("unknownUnits", 0) for entry in valid)
-    inconsistent = sum(entry.get("inconsistentUnits", 0) for entry in valid)
-    return {
-        "latestObservation": latest,
-        "freshness": None if latest_record is None else end - _record_end(latest_record),
-        "coverage": None if latest is None else latest.get("coverage"),
-        "comparedSeconds": elapsed,
-        "comparedHours": elapsed / 3600,
-        "intervals": comparisons,
-        "excludedIntervals": [
-            reason for entry in comparisons for reason in entry.get("excludedIntervals", [])
-        ],
-        "eligibleIndividualSaleCandidateUnits": candidates if individual_intervals else None,
-        "saleCandidateUnitsPerHour": candidates / (individual_exposure / 3600)
-        if individual_exposure
-        else None,
-        "saleCandidateRateLabel": "UNCALIBRATED",
-        "individualExposureSeconds": individual_exposure if individual_intervals else None,
-        "individualRateDenominatorHours": individual_exposure / 3600 if individual_intervals else None,
-        "observedIndividualRemovedUnits": removed,
-        "observedIndividualAddedUnits": added,
-        "expirationPossibleUnits": expiry,
-        "timeLeftUnknownUnits": sum(entry.get("timeLeftUnknownUnits", 0) for entry in valid),
-        "unknownUnits": unknown,
-        "inconsistentUnits": inconsistent,
-        "commodityDepletionUnits": commodity_depletion,
-        "commodityReplenishmentUnits": commodity_replenishment,
-        "aggregateCommodityChurnUnits": commodity_depletion + commodity_replenishment,
-        "commodityExposureSeconds": commodity_exposure if commodity_intervals else None,
-        "commodityDepletionUnitsPerHour": (
-            commodity_depletion / (commodity_exposure / 3600) if commodity_exposure else None
-        ),
-        "commodityReplenishmentUnitsPerHour": (
-            commodity_replenishment / (commodity_exposure / 3600) if commodity_exposure else None
-        ),
-        "marketActualSalesEstimate": None,
-        "marketActualSalesConfidenceInterval": None,
-        "ownConfirmed": {"units": 0, "evidence": []},
-    }
-
-
-compare = compare_observations

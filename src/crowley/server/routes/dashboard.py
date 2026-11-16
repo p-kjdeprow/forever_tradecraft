@@ -10,10 +10,11 @@ from crowley.analysis.trading_summary import load_trading_summary
 from crowley.core.errors import MarketDataNotFound
 from crowley.core.house import House
 
+from ._shared import _house_id
+
 router = APIRouter()
 
 _STATIC = Path(__file__).parent.parent / "static"
-_ADVANCED_DASHBOARD_HTML = (_STATIC / "dashboard.html").read_text(encoding="utf-8")
 _TRADING_DASHBOARD_HTML = (_STATIC / "trading-dashboard.html").read_text(encoding="utf-8")
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
@@ -32,9 +33,31 @@ def dashboard() -> HTMLResponse:
     )
 
 
-@router.get("/dashboard/advanced", response_class=HTMLResponse)
-def advanced_dashboard() -> HTMLResponse:
-    return HTMLResponse(_ADVANCED_DASHBOARD_HTML, headers=_SECURITY_HEADERS)
+@router.get("/v1/houses/{key}/sweeps/latest")
+def latest_house_sweep(key: str, request: Request, build: str | None = None) -> dict[str, object]:
+    """Return the latest scan identity used by the main dashboard."""
+
+    with request.app.state.pool.connection() as conn:
+        house_id = _house_id(conn, key)
+        row = conn.execute(
+            """
+            SELECT id, EXTRACT(EPOCH FROM finished_at), client_version || '.' || client_build
+            FROM market_sweeps
+            WHERE house_id = %s
+              AND (%s::text IS NULL OR client_version || '.' || client_build = %s)
+            ORDER BY finished_at DESC, id DESC
+            LIMIT 1
+            """,
+            (house_id, build, build),
+        ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"no market sweep for house {key!r} build {build!r}")
+    return {
+        "house": key,
+        "sweep_id": int(row[0]),
+        "finished_epoch": float(row[1]),
+        "client_build": str(row[2]),
+    }
 
 
 @router.get("/v1/houses/{key}/trading-summary")

@@ -39,6 +39,7 @@ def fixture_host(root: Path) -> HostConfig:
             "window_client_offset": [0, 0],
             "canvas_origin": [80, 48],
             "canvas_crop": [80, 48, 256, 256],
+            "automation_canvas_crop": [352, 48, 256, 256],
             "model_crop": [80, 48, 1760, 984],
         }
     )
@@ -88,6 +89,7 @@ def write_host_toml(path: Path, host: HostConfig) -> None:
         f"window_client_offset = {list(host.window_client_offset)}",
         f"canvas_origin = {list(host.canvas_origin)}",
         f"canvas_crop = {list(host.canvas_crop)}",
+        f"automation_canvas_crop = {list(host.automation_canvas_crop)}",
         f"model_crop = {list(host.model_crop)}",
     )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")

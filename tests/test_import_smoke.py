@@ -66,11 +66,7 @@ def test_gui_modules_are_listed() -> None:
     } <= set(GUI_MODULES)
 
 
-# crowley-paper-step is configured only through the environment and has no argument parser.
-NO_ARGUMENT_PARSER = frozenset({"crowley-paper-step"})
-
-
-@pytest.mark.parametrize("script", sorted(set(SCRIPTS) - NO_ARGUMENT_PARSER))
+@pytest.mark.parametrize("script", sorted(SCRIPTS))
 def test_console_script_help_exits_zero(script: str) -> None:
     executable = Path(sys.executable).parent / script
     assert executable.is_file(), f"console script {script} is not installed next to the interpreter"
@@ -89,8 +85,5 @@ def test_session_stack_is_gone() -> None:
         "crowley-watchlist",
         "crowley-scan",
         "crowley-ops",
-        "crowley-trading",
-        "crowley-advise",
-        "crowley-paper-step",
         "crowley-native",
     }

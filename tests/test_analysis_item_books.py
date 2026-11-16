@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from fractions import Fraction
 from typing import Any
 
-from crowley.analysis.item_books import ItemBook, item_intervals, load_item_books
+from crowley.analysis.item_books import Auction, ItemBook, item_intervals, load_item_books
 
 HOUSE = "us-normal-alliance"
 BUILD = "1.60.1.70938"
@@ -219,3 +219,161 @@ def test_item_books_and_variant_intervals_ignore_database_row_order() -> None:
         assert "mo.item_id = ANY(%s)" in conn.sql
         assert "ms.client_version || '.' || ms.client_build = %s" in conn.sql
         assert conn.parameters == (HOUSE, [3001, 3002], BUILD)
+
+
+STEP = 900
+QUERY_SECONDS = 60
+
+
+def _wire_row(
+    result_id: int,
+    price: int,
+    quantity: int = 1,
+    time_left: int | None = LONG,
+    *,
+    item_key: str = "3001",
+    owner: str | None = None,
+    own: bool = False,
+) -> dict[str, Any]:
+    """Build one item-kind row with explicit auction and owner identity."""
+
+    owner_name = owner or f"seller-{result_id}"
+    return {
+        "resultID": result_id,
+        "quantity": quantity,
+        "unitPrice": {"numerator": price, "denominator": 1},
+        "itemKey": item_key,
+        "rawItemKey": {"itemID": int(item_key)},
+        "owners": {
+            "names": {owner_name: True},
+            "identityKind": "individual",
+            "containsOwnerItem": own,
+            "containsAccountItem": False,
+            "totalNumberOfOwners": 1,
+        },
+        "timeLeft": (
+            {"kind": "band", "minimumSeconds": time_left, "maximumSeconds": time_left + 1}
+            if time_left is not None
+            else {"kind": "unknown"}
+        ),
+    }
+
+
+def _interval_book(
+    index: int,
+    rows: list[dict[str, Any]],
+    *,
+    started_at: int | None = None,
+    plan_hash: str = "plan",
+) -> ItemBook:
+    started = index * STEP if started_at is None else started_at
+    observation = {
+        "kind": "item",
+        "coverage": "full",
+        "sourceComplete": True,
+        "cutoff": {"kind": "unbounded"},
+        "query": {
+            "kind": "queried",
+            "startedAt": started,
+            "finishedAt": started + QUERY_SECONDS,
+        },
+        "itemID": 3001,
+        "rows": rows,
+    }
+    auctions = tuple(
+        Auction(
+            row["resultID"],
+            Fraction(row["unitPrice"]["numerator"], row["unitPrice"]["denominator"]),
+            row["quantity"],
+            row["itemKey"],
+            next(iter(row["owners"]["names"])),
+            row["owners"]["containsOwnerItem"],
+        )
+        for row in rows
+    )
+    record = {
+        "observation": observation,
+        "envelope": {
+            "house": {"key": HOUSE},
+            "context": {"clientVersion": "1.60.1", "clientBuild": "70938"},
+            "planHash": plan_hash,
+        },
+    }
+    return ItemBook(float(started), 3001, index + 1, auctions, record)
+
+
+def test_item_intervals_walk_skips_possible_expiry_and_stops_at_unknown_time():
+    cheap_sale = _wire_row(11, 90)
+    expiring = _wire_row(12, 91, time_left=0)
+    sold_out = _wire_row(13, 92, quantity=3, owner="Trader")
+    unknown_time = _wire_row(14, 93, time_left=None)
+    after_sale = _wire_row(15, 94)
+    stays = _wire_row(1, 100)
+    before = _interval_book(0, [cheap_sale, expiring, sold_out, unknown_time, after_sale, stays])
+    after = _interval_book(1, [stays])
+
+    (interval,) = item_intervals([before, after], "3001")
+    assert interval is not None
+    assert interval.consumed == ((Fraction(90), 1), (Fraction(92), 3))
+    assert interval.dt == STEP and interval.exposure == STEP
+
+    (skipped,) = item_intervals([_interval_book(0, [expiring, stays]), after], "3001")
+    assert skipped is not None and skipped.consumed == ()
+
+
+def test_item_intervals_reconcile_same_price_relisting_by_owner_quantity():
+    stays = _wire_row(1, 100)
+    before = _interval_book(0, [_wire_row(51, 90, quantity=12, owner="Seller"), stays])
+    after = _interval_book(1, [_wire_row(52, 90, quantity=10, owner="Seller"), stays])
+    (sold,) = item_intervals([before, after], "3001")
+    assert sold is not None and sold.consumed == ((Fraction(90), 2),)
+
+    prior = _interval_book(
+        0,
+        [
+            _wire_row(51, 90, quantity=12, owner="Seller"),
+            _wire_row(55, 95, owner="Seller"),
+            stays,
+        ],
+    )
+    relisted = _interval_book(
+        1,
+        [
+            _wire_row(53, 90, quantity=12, owner="Seller"),
+            _wire_row(54, 95, owner="Seller"),
+            stays,
+        ],
+    )
+    (unchanged,) = item_intervals([prior, relisted], "3001")
+    assert unchanged is not None and unchanged.consumed == ()
+
+
+def test_item_intervals_reject_reposts_grouped_scopes_and_untouched_cheapest_rows():
+    stays = _wire_row(1, 100)
+    before = _interval_book(0, [_wire_row(61, 30, quantity=6, owner="Poster"), stays])
+    reposted = _interval_book(1, [_wire_row(62, 37, quantity=6, owner="Poster"), stays])
+    (repost_interval,) = item_intervals([before, reposted], "3001")
+    assert repost_interval is not None and repost_interval.consumed == ()
+
+    rows = [_wire_row(21, 90), _wire_row(22, 95), stays]
+    (blocked,) = item_intervals([_interval_book(0, rows), _interval_book(1, [rows[0], stays])], "3001")
+    assert blocked is not None and blocked.consumed == ()
+
+    grouped = _wire_row(72, 90, quantity=8)
+    grouped["owners"].update(identityKind="grouped", totalNumberOfOwners=3, names={"Seller": True, "A": True})
+    assert item_intervals([_interval_book(0, [grouped]), _interval_book(1, [])], "3001") == [None]
+
+
+def test_item_intervals_require_stable_metadata_and_nonoverlapping_bounded_gaps():
+    rows = [_wire_row(1, 100)]
+    first = _interval_book(0, rows)
+    assert item_intervals([first, _interval_book(1, rows, started_at=STEP + 2400)], "3001") == [None]
+    assert item_intervals([first, _interval_book(1, rows, plan_hash="other")], "3001") == [None]
+    assert item_intervals([first, _interval_book(1, rows, started_at=30)], "3001") == [None]
+
+
+def test_item_intervals_count_all_units_in_a_genuine_sellout():
+    before = _interval_book(0, [_wire_row(81, 90, quantity=7, owner="Gone"), _wire_row(1, 100)])
+    after = _interval_book(1, [_wire_row(1, 100)])
+    (interval,) = item_intervals([before, after], "3001")
+    assert interval is not None and interval.consumed == ((Fraction(90), 7),)

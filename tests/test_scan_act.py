@@ -12,7 +12,7 @@ from crowley.gui.keyboard import KeyStep
 from crowley.scan import act
 from crowley.scan.policy import SET_BINDING_COMMAND, Action, Decision, LoopState, Target
 
-TARGET = Target("Arthur", "R", "Alliance", "h", "p" * 64, "1", 1, "0.2.0", "Auctioneer Jaxon")
+TARGET = Target("Arthur", "R", "Alliance", "h", "p" * 64, "1", 1, "0.2.0", "0.3.0", "Auctioneer Jaxon")
 XMODMAP = """\
 keycode   9 = Escape NoSymbol Escape
 keycode  36 = Return NoSymbol Return

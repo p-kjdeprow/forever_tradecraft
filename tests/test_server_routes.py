@@ -21,26 +21,12 @@ EXPECTED_ROUTES = frozenset(
         ("POST", "/v1/scans", "require_token"),
         ("POST", "/v1/probes", "require_token"),
         ("GET", "/v1/houses", None),
-        ("GET", "/v1/houses/{key}/latest", None),
-        ("GET", "/v1/houses/{key}/items/{item_key}/history", None),
-        ("GET", "/v1/houses/{key}/items/{item_key}/volume", None),
-        ("GET", "/v1/houses/{key}/advice", None),
         ("GET", "/v1/houses/{key}/sweeps/latest", None),
         ("GET", "/v1/houses/{key}/trading-summary", None),
         ("GET", "/v1/houses/{key}/recipe-watch", None),
-        ("POST", "/v1/item-reference", "require_token"),
-        ("GET", "/v1/houses/{key}/item-reference", "require_token"),
-        ("POST", "/v1/account-state", "require_token"),
-        ("GET", "/v1/houses/{key}/account-state/latest", "require_token"),
         ("GET", "/v1/scan-plan", "require_token"),
         ("POST", "/v1/addon-data", "require_token"),
-        ("POST", "/v1/queues", "require_token"),
-        ("GET", "/v1/houses/{key}/queue/active", "require_token"),
-        ("POST", "/v1/executions", "require_token"),
-        ("GET", "/v1/paper/runs", None),
-        ("GET", "/v1/paper/runs/{name}", None),
         ("GET", "/dashboard", None),
-        ("GET", "/dashboard/advanced", None),
     }
 )
 
@@ -72,7 +58,6 @@ def test_addon_data_contract_excludes_shopping_lists() -> None:
         "generatedAt",
         "ackedScans",
         "scanPlan",
-        "referenceItemIDs",
     }
     with pytest.raises(ValidationError, match="shoppingLists"):
         AddonDataRequest.model_validate({"shoppingLists": []})
@@ -80,12 +65,9 @@ def test_addon_data_contract_excludes_shopping_lists() -> None:
 
 def test_dashboard_paths_and_summary_route_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
     trading = dashboard_routes.dashboard()
-    advanced = dashboard_routes.advanced_dashboard()
     assert trading.status_code == 200
     assert "Top 10 crafting strategies" in trading.body.decode()
-    assert advanced.status_code == 200
-    assert "Paper runs" in advanced.body.decode()
-    assert trading.headers["content-security-policy"] == advanced.headers["content-security-policy"]
+    assert "dashboard/advanced" not in trading.body.decode()
 
     class Pool:
         def connection(self):
@@ -97,6 +79,43 @@ def test_dashboard_paths_and_summary_route_behavior(monkeypatch: pytest.MonkeyPa
     with pytest.raises(HTTPException) as invalid:
         dashboard_routes.trading_summary("invalid-house", request)
     assert invalid.value.status_code == 400
+
+
+def test_latest_sweep_route_returns_the_dashboard_scan_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    class Connection:
+        def execute(self, query, parameters):
+            assert "ORDER BY finished_at DESC, id DESC" in query
+            assert parameters[0] == 17 and parameters[1] == parameters[2]
+            return self
+
+        def fetchone(self):
+            return (42, 1_800_000_000.5, "1.60.1.70938")
+
+    class Pool:
+        def connection(self):
+            return nullcontext(Connection())
+
+    monkeypatch.setattr(dashboard_routes, "_house_id", lambda conn, key: 17)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(pool=Pool())))
+    assert dashboard_routes.latest_house_sweep("us-normal-alliance", request, "1.60.1.70938") == {
+        "house": "us-normal-alliance",
+        "sweep_id": 42,
+        "finished_epoch": 1_800_000_000.5,
+        "client_build": "1.60.1.70938",
+    }
+
+    class EmptyConnection(Connection):
+        def fetchone(self):
+            return None
+
+    class EmptyPool:
+        def connection(self):
+            return nullcontext(EmptyConnection())
+
+    request.app.state.pool = EmptyPool()
+    with pytest.raises(HTTPException) as absent:
+        dashboard_routes.latest_house_sweep("us-normal-alliance", request)
+    assert absent.value.status_code == 404
 
 
 def test_recipe_watch_route_is_read_only_public_get(monkeypatch: pytest.MonkeyPatch) -> None:

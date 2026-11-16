@@ -14,14 +14,15 @@ from crowley.scan import loop, observe, policy
 from crowley.scan.act import ActError
 from crowley.scan.observe import ObserveError
 from crowley.scan.policy import Action, Decision, LoopState, Observation
-from tests.support.scan_frames import snapshot
+from tests.support.scan_frames import automation_snapshot, snapshot
 from tests.test_scan_observe import TARGET
 
 
 def observation(state: LoopState, *, chat: str = "", **kw: Any) -> Observation:
-    value = snapshot(1)
-    value["chatEdit"] = {"active": bool(chat), "focused": bool(chat), "text": chat}
-    snap = observe.to_snapshot(value, 1000.0)
+    scanner = snapshot(1)
+    game = automation_snapshot(1)
+    game["chatEdit"] = {"active": bool(chat), "focused": bool(chat), "text": chat}
+    snap = observe.to_snapshot(scanner, game, 1000.0)
     base: dict[str, Any] = dict(
         wall=1000.0,
         mono=50.0,

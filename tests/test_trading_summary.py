@@ -12,7 +12,8 @@ from crowley.analysis.books import Book, Group
 from crowley.analysis.item_books import Auction, ItemBook
 from crowley.core.auction_rules import rules_for_house
 from crowley.core.house import House
-from crowley.trading.api import (
+from crowley.market import client_data
+from crowley.market.models import (
     ItemFacts,
     Recipe,
     RecipeAcquisition,
@@ -384,7 +385,7 @@ def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
         _recipe(spell_id=item_id, output_id=item_id, reagent_id=2000)
         for item_id in (*qualified_ids, *unknown_ids)
     ]
-    books = {item_id: _commodity_history(item_id, units_removed=1) for item_id in qualified_ids}
+    books = {item_id: _commodity_history(item_id, units_removed=2) for item_id in qualified_ids}
     books.update(
         {
             item_id: [
@@ -410,7 +411,24 @@ def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
     assert result["opportunities"] == result["candidates"][:10]
     assert {row["item_id"] for row in result["opportunities"]} == set(range(1000, 1010))
     assert all(row["volume_status"] == "observed_activity" for row in result["opportunities"])
-    assert all(row["market_units_per_hour"] > 0 for row in result["opportunities"])
+    assert all(row["market_units_per_hour"] >= 6 for row in result["opportunities"])
+
+
+@pytest.mark.parametrize("interval_seconds, accepted", [(3601, False), (3600, True), (3599, True)])
+def test_six_units_per_hour_floor_uses_exact_rate_before_rounding(interval_seconds, accepted):
+    # 6 units / 3601 seconds rounds to 6.00, but is still below the hard floor.
+    books = _commodity_points(1000, [(-interval_seconds, 100), (0, 94)])
+    plans = {int(book.sweep_id): summary.SweepSamplingPlan(900, 4, frozenset({1000})) for book in books}
+    result = summary.build_trading_summary(
+        _inputs(
+            [_recipe()],
+            books={1000: books},
+            sweep_plans=plans,
+            facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
+        )
+    )
+    assert bool(result["candidates"]) is accepted
+    assert bool(result["opportunities"]) is accepted
 
 
 def test_usable_24h_history_with_zero_depletion_is_excluded():
@@ -483,7 +501,7 @@ def test_cold_item_books_qualify_but_hot_gaps_and_multi_hour_outages_do_not():
         1: summary.SweepSamplingPlan(900, 6, frozenset({1000})),
         2: summary.SweepSamplingPlan(900, 6, frozenset({1000})),
     }
-    cold_books = [_item_book(0, ASOF - 5_400, quantity=2), _item_book(1, ASOF, quantity=1)]
+    cold_books = [_item_book(0, ASOF - 5_400, quantity=10), _item_book(1, ASOF, quantity=1)]
     cold = summary.build_trading_summary(
         _inputs(
             [recipe],
@@ -494,6 +512,7 @@ def test_cold_item_books_qualify_but_hot_gaps_and_multi_hour_outages_do_not():
     )["opportunities"][0]
     assert cold["volume_status"] == "observed_activity"
     assert cold["usable_hours"] == 1.5
+    assert cold["market_units_per_hour"] == 6
 
     hot_books = _commodity_points(1000, [(-5_400, 100), (0, 90)])
     hot = summary._activity(
@@ -625,7 +644,7 @@ def test_summary_loader_uses_fact_recipe_loader_return_order(monkeypatch):
         commodity_loads.append(kwargs)
         return books
 
-    monkeypatch.setattr(summary, "load_client_data", lambda conn, house, build: (facts, (recipe,)))
+    monkeypatch.setattr(summary, "load_client_data", lambda conn, build: (facts, (recipe,)))
     monkeypatch.setattr(summary, "load_commodity_books", load_books)
     monkeypatch.setattr(summary, "load_item_books", lambda *args, **kwargs: {})
     monkeypatch.setattr(
@@ -645,3 +664,148 @@ def test_summary_loader_uses_fact_recipe_loader_return_order(monkeypatch):
     assert result["opportunities"][0]["reagents"][0]["cost"] == "80"
     assert result["scan"] == {"planned": 484, "queried": 484, "successful": 483}
     assert commodity_loads[0]["start_t"] == ASOF - 24 * 3600
+
+
+def test_client_fact_loader_filters_status_and_rejects_missing_required_facts():
+    class Cursor:
+        def __init__(self, rows=(), one=None):
+            self.rows = rows
+            self.one = one
+
+        def fetchone(self):
+            return self.one
+
+        def fetchall(self):
+            return self.rows
+
+    class Connection:
+        def __init__(self, rows):
+            self.rows = rows
+            self.queries = []
+
+        def execute(self, query, _params):
+            self.queries.append(query)
+            if "latest_client_export" in query:
+                return Cursor(one=(1, "build"))
+            return Cursor(rows=self.rows)
+
+    good = Connection([(1000, 100, None, None, 20, 0)])
+    loaded = client_data._load_facts(good, BUILD)
+    assert loaded[1000].sell_price == 100
+    assert "status = 'ok'" in good.queries[-1]
+
+    missing = Connection([(1000, None, None, None, 20, 0)])
+    with pytest.raises(ValueError, match="status ok but missing facts"):
+        client_data._load_facts(missing, BUILD)
+
+
+def test_recipe_loader_collapses_identical_skill_rows_and_rejects_conflicts():
+    class Cursor:
+        def __init__(self, rows=(), one=None):
+            self.rows = rows
+            self.one = one
+
+        def fetchall(self):
+            return self.rows
+
+        def fetchone(self):
+            return self.one
+
+    class Connection:
+        def __init__(self, skill_rows):
+            self.skill_rows = skill_rows
+
+        def execute(self, query, _params):
+            if "latest_client_export" in query:
+                return Cursor(one=(7, "1.0.1"))
+            if "FROM client_recipes" in query:
+                return Cursor(rows=[(1, 0, 0, None, "no_teaching_item")])
+            if "client_recipe_skill_lines" in query:
+                return Cursor(rows=self.skill_rows)
+            if "client_recipe_reagents" in query:
+                return Cursor(rows=[(1, 10, 1)])
+            if "client_recipe_outputs" in query:
+                return Cursor(rows=[(1, 11, 1, "fixed")])
+            return Cursor()
+
+    row = (1, 202, "engineering", 1, 105, 130, 155, 0)
+    loaded = client_data._load_recipes(Connection([row, row]), "1.0.1")
+    assert loaded[0].acquisition.skill_lines == (SkillRequirement(202, "engineering", 1, 105, 130, 155, 0),)
+
+    conflicting = (1, 202, "engineering", 5, 105, 130, 155, 0)
+    with pytest.raises(ValueError, match="conflicting requirements in skill line 202"):
+        client_data._load_recipes(Connection([row, conflicting]), "1.0.1")
+
+
+def test_recipe_loader_preserves_tool_focus_and_teaching_requirements():
+    class Cursor:
+        def __init__(self, rows=(), one=None):
+            self.rows = rows
+            self.one = one
+
+        def fetchall(self):
+            return self.rows
+
+        def fetchone(self):
+            return self.one
+
+    class Connection:
+        def execute(self, query, _params):
+            if "latest_client_export" in query:
+                return Cursor(one=(7, "1.0.1"))
+            if "FROM client_recipes" in query:
+                return Cursor(rows=[(1, 0, 0, None, "teaching_item_with_item_data")])
+            if "client_recipe_skill_lines" in query:
+                return Cursor(rows=[(1, 202, "engineering", 100, 110, 120, 130, 1)])
+            if "client_recipe_teachers" in query:
+                return Cursor(rows=[(1, 55, 202, 300), (1, 77, 202, 225)])
+            if "client_recipe_reagents" in query:
+                return Cursor(rows=[(1, 10, 1)])
+            if "client_recipe_outputs" in query:
+                return Cursor(rows=[(1, 11, 1, "fixed")])
+            if "client_recipe_totems" in query:
+                return Cursor(rows=[(1, 0, 3938)])
+            if "client_recipe_totem_categories" in query:
+                return Cursor(rows=[(1, 0, 162)])
+            if "client_recipe_spell_focus" in query:
+                return Cursor(rows=[(1, 1)])
+            raise AssertionError(query)
+
+    loaded = client_data._load_recipes(Connection(), "1.0.1")
+    recipe = loaded[0]
+    assert recipe.totems == (3938,)
+    assert recipe.totem_categories == (162,)
+    assert recipe.spell_focus == 1
+    assert recipe.acquisition == RecipeAcquisition(
+        (55, 77),
+        (SkillRequirement(202, "engineering", 100, 110, 120, 130, 1),),
+        (TeachingRequirement(55, 202, 300), TeachingRequirement(77, 202, 225)),
+    )
+
+
+def test_vendor_bundle_catalog_still_covers_retained_vendor_costs():
+    assert client_data.vendor_supply_ids() == {
+        814,
+        2320,
+        2321,
+        2324,
+        2325,
+        2604,
+        2605,
+        2678,
+        2692,
+        2880,
+        3371,
+        3372,
+        4289,
+        4291,
+        4340,
+        4341,
+        4470,
+        6260,
+        6261,
+        8343,
+        8925,
+        10290,
+        14341,
+    }

@@ -8,7 +8,6 @@ import pytest
 
 from crowley.core.game_target import load_game_target
 from crowley.core.luawriter import render_assignment
-from crowley.core.queue import render_queue_lua
 from crowley.ops import doctor, install
 from crowley.server.db import MigrationStatus
 
@@ -52,6 +51,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
                 "window_client_offset = [0, 0]",
                 "canvas_origin = [80, 48]",
                 "canvas_crop = [80, 48, 256, 256]",
+                "automation_canvas_crop = [352, 48, 256, 256]",
                 "model_crop = [80, 48, 1760, 984]",
                 "",
             )
@@ -79,7 +79,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
     monkeypatch.setattr(doctor.input_tool, "verify_artifact", lambda *_args, **_kwargs: None)
     entrypoints = tmp_path / "home" / ".local" / "bin"
     entrypoints.mkdir(parents=True)
-    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan"):
+    for name in ("crowley-companion", "crowley-ops", "crowley-scan"):
         path = entrypoints / name
         path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         path.chmod(0o700)
@@ -204,21 +204,17 @@ def test_doctor_requires_the_selected_saved_variables_file(
     assert any("SavedVariables/Crowley.lua" in problem for problem in report.problems)
 
 
-def test_doctor_accepts_companion_rendered_data_and_queue_lua(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_doctor_accepts_companion_rendered_data(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     environment, game_root = _setup(tmp_path, monkeypatch)
     data_lua = game_root / "_classic_beta_" / "Interface" / "AddOns" / "Crowley_Data" / "Data.lua"
-    queue_lua = data_lua.with_name("Queue.lua")
     data_lua.write_text(
         render_assignment(
             "CROWLEY_DATA",
-            {"generatedAt": 1, "ackedScans": [], "scanPlan": False, "referenceItemIDs": []},
+            {"generatedAt": 1, "ackedScans": [], "scanPlan": False},
             header="companion test",
         ),
         encoding="utf-8",
     )
-    queue_lua.write_text(render_queue_lua(None), encoding="utf-8")
 
     report = doctor.doctor(environment, database_status=_current)
     assert report.ok, report.problems
@@ -231,7 +227,7 @@ def test_doctor_accepts_uv_tool_symlinked_entrypoints(
     entrypoints = tmp_path / "home" / ".local" / "bin"
     tool_bin = tmp_path / "home" / ".local" / "share" / "uv" / "tools" / "crowley" / "bin"
     tool_bin.mkdir(parents=True)
-    for name in ("crowley-companion", "crowley-ops", "crowley-paper-step", "crowley-scan"):
+    for name in ("crowley-companion", "crowley-ops", "crowley-scan"):
         target = tool_bin / name
         (entrypoints / name).rename(target)
         (entrypoints / name).symlink_to(target)

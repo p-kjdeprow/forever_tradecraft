@@ -17,7 +17,13 @@ from crowley.gui.capture import CaptureError
 from crowley.gui.frames import PLAN_COUNT
 from crowley.scan import observe
 from crowley.scan.policy import LoopState, Target
-from tests.support.scan_frames import render, snapshot
+from tests.support.scan_frames import (
+    AUTOMATION_CROP,
+    SCANNER_CROP,
+    automation_snapshot,
+    render_screen,
+    snapshot,
+)
 
 TARGET = Target(
     character="Arthur",
@@ -27,7 +33,8 @@ TARGET = Target(
     plan_hash="a" * 64,
     build="70450",
     interface=16001,
-    addon_version="0.2.0",
+    addon_version="0.1.0",
+    scanner_addon_version="0.3.0",
     auctioneer="Auctioneer Jaxon",
 )
 DISPLAY = (1920, 1080)
@@ -106,8 +113,9 @@ def make(
         disk=FakeDisk(),
         presence=presence or FakePresence(),
         target=TARGET,
-        contract=ProtocolContract(PLAN_COUNT, 900, 600, 20, ()),
-        canvas_crop=(0, 0, 256, 256),
+        contract=ProtocolContract(PLAN_COUNT, 900, 600, 20, (), plan_hash="a" * 64),
+        canvas_crop=SCANNER_CROP,
+        automation_canvas_crop=AUTOMATION_CROP,
         clock=clock,
         monotonic=clock,
     )
@@ -115,26 +123,32 @@ def make(
 
 
 def test_snapshot_mapping_covers_every_policy_field() -> None:
-    value = snapshot(5)
-    value["ahOpen"] = False
-    value["auctioneer"].update(targetPresent=True, targetName="Auctioneer Jaxon", rangeAvailable=True)
-    value["auctioneer"]["withinTradeRange"] = True
-    value["scanner"].update(phase="scheduled", dueAt=1_900)
-    value["lastSaved"]["memoryUid"] = "uid-1"
-    value["pending"].update(ids=["uid-1"], count=1)
-    value["loaded"]["ackedIds"] = ["a1"]
-    value["chatEdit"] = {"active": True, "focused": True, "text": "/rel"}
-    snap = observe.to_snapshot(value, 1234.5)
-    assert (snap.boot, snap.wall_time, snap.received_at) == ("boot-1", 1_000, 1234.5)
+    scanner = snapshot(5)
+    game = automation_snapshot(7)
+    game["ahOpen"] = False
+    game["auctioneer"].update(targetPresent=True, targetName="Auctioneer Jaxon", rangeAvailable=True)
+    game["auctioneer"]["withinTradeRange"] = True
+    scanner["scanner"].update(phase="scheduled", dueAt=1_900)
+    scanner["lastSaved"]["memoryUid"] = "uid-1"
+    scanner["lastSaved"].update(finishedAt=900, planned=100, attempted=100, failures=0, rows=10)
+    scanner["pending"].update(ids=["uid-1"], count=1)
+    scanner["loaded"]["ackedIds"] = ["a1"]
+    game["chatEdit"] = {"active": True, "focused": True, "text": "/rel"}
+    snap = observe.to_snapshot(scanner, game, 1234.5)
+    assert (snap.boot, snap.wall_time, snap.received_at) == ("automation-boot-1", 1_000, 1234.5)
     assert (snap.character, snap.realm, snap.faction, snap.zone) == (
         "Arthur",
         "Classic Beta PvE 2",
         "Alliance",
         "Orgrimmar",
     )
-    assert (snap.build, snap.interface, snap.addon_version) == ("70450", 16001, "0.2.0")
+    assert (snap.build, snap.interface, snap.addon_version, snap.scanner_addon_version) == (
+        "70450",
+        16001,
+        "0.1.0",
+        "0.3.0",
+    )
     assert (snap.house_key, snap.plan_hash) == ("beta-normal-alliance", "a" * 64)
-    assert (snap.native_phase, snap.native_ordinal) == ("normal", 0)
     assert not snap.ah_open and snap.target_present and snap.auctioneer_name == "Auctioneer Jaxon"
     assert snap.range_available and snap.in_range and snap.binding_available
     assert (snap.binding_action, snap.interaction_mode, snap.blocking_ui) == ("", "any", "")
@@ -167,7 +181,7 @@ def test_blocking_reason(blocking: dict[str, bool], expected: str) -> None:
 
 def test_observe_decodes_a_frame_and_tracks_progress() -> None:
     obs, _p, _w, canvas, clock = make()
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     first = obs.observe(LoopState())
     assert first.process_alive and first.window_ok and first.window_focused
     assert first.snapshot is not None and first.snapshot.received_at == 1000.0
@@ -180,7 +194,7 @@ def test_observe_decodes_a_frame_and_tracks_progress() -> None:
     again = obs.observe(LoopState())
     assert again.snapshot is not None and again.snapshot.received_at == 1000.0
     assert again.frames_seen_this_process == 1 and again.last_frame_at == 1000.0
-    canvas.frames = [render(snapshot(2))]
+    canvas.frames = [render_screen(snapshot(2), automation_snapshot(2))]
     clock.now = 1006.0
     third = obs.observe(LoopState())
     assert third.snapshot is not None and third.snapshot.received_at == 1006.0
@@ -189,7 +203,7 @@ def test_observe_decodes_a_frame_and_tracks_progress() -> None:
 
 def test_no_process_means_no_capture() -> None:
     obs, process, _w, canvas, _c = make(process=FakeProcess([]))
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     result = obs.observe(LoopState())
     assert not result.process_alive and not result.window_ok and result.snapshot is None
     assert canvas.sizes == []
@@ -203,62 +217,65 @@ def test_capture_and_decode_errors_leave_no_fresh_snapshot() -> None:
     canvas.error = None
     from PIL import Image
 
-    canvas.frames = [Image.new("RGB", (256, 256), (7, 7, 7))]
+    canvas.frames = [Image.new("RGB", DISPLAY, (7, 7, 7))]
     result = obs.observe(LoopState())
-    assert result.snapshot is None and obs.decode_error.startswith("ProtocolError")
+    assert result.snapshot is None and obs.decode_error.startswith("scanner ProtocolError")
 
 
 def test_window_not_ok_skips_capture() -> None:
     obs, _p, _w, canvas, _c = make(window=FakeWindow(ok=False))
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     result = obs.observe(LoopState())
     assert not result.window_ok and result.snapshot is None and canvas.sizes == []
 
 
 def test_boot_change_is_rejected_until_armed() -> None:
     obs, _p, _w, canvas, _c = make()
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     obs.observe(LoopState())
     other = snapshot(2)
-    other["boot"] = "boot-2"
-    canvas.frames = [render(other)]
+    other["boot"] = "scanner-boot-2"
+    game = automation_snapshot(2)
+    canvas.frames = [render_screen(other, game)]
     rejected = obs.observe(LoopState())
     assert "unexpected status boot change" in obs.decode_error
     assert rejected.frames_seen_this_process == 1
     obs.arm_boot_change()
     accepted = obs.observe(LoopState())
     assert obs.decode_error == "" and accepted.frames_seen_this_process == 2
-    assert accepted.snapshot is not None and accepted.snapshot.boot == "boot-2"
+    assert accepted.snapshot is not None and accepted.snapshot.scanner_addon_version == "0.3.0"
 
 
 def test_decoder_epoch_resets_on_process_and_window_change() -> None:
     obs, process, window, canvas, _c = make()
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     obs.observe(LoopState())
     # A new process starts with another boot and sequence: no arming needed.
     process.current, process.started = [11], 500.0
     other = snapshot(1)
-    other["boot"] = "boot-9"
-    canvas.frames = [render(other)]
+    other["boot"] = "scanner-boot-9"
+    game = automation_snapshot(1)
+    game["boot"] = "automation-boot-9"
+    canvas.frames = [render_screen(other, game)]
     fresh = obs.observe(LoopState())
     assert obs.decode_error == ""
     assert fresh.frames_seen_this_process == 1 and fresh.process_started_at == 500.0
-    assert fresh.snapshot is not None and fresh.snapshot.boot == "boot-9"
+    assert fresh.snapshot is not None and fresh.snapshot.boot == "automation-boot-9"
     # A new window id also gets a new decoder (the old one is bound to the old identity).
     window.state = observe.WindowState(78, 1, True, True, DISPLAY)
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     obs.observe(LoopState())
     assert obs.decode_error == ""
 
 
 def test_probe_frame_is_tristate_with_a_throwaway_decoder() -> None:
     obs, _p, window, canvas, _c = make()
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     assert obs.probe_frame() is True
     assert obs.probe_frame() is True  # no sequence/boot memory between probes
     from PIL import Image
 
-    canvas.frames = [Image.new("RGB", (256, 256), (7, 7, 7))]
+    canvas.frames = [Image.new("RGB", DISPLAY, (7, 7, 7))]
     assert obs.probe_frame() is False  # window valid, capture worked, nothing decodes
     canvas.error = CaptureError("x")
     with pytest.raises(CaptureError):
@@ -274,14 +291,14 @@ def test_probe_frame_is_tristate_with_a_throwaway_decoder() -> None:
 
 def test_observer_passes_the_owned_pids_to_the_window_source() -> None:
     obs, _p, window, canvas, _c = make(process=FakeProcess([10, 12]))
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     obs.observe(LoopState())
     assert window.pids == [10, 12]
 
 
 def test_presence_is_passed_through() -> None:
     obs, _p, _w, canvas, _c = make(presence=FakePresence(active=True))
-    canvas.frames = [render(snapshot(1))]
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     result = obs.observe(LoopState())
     assert result.human_active and result.human_reason == "fake"
 
@@ -404,9 +421,6 @@ def companion_bytes() -> bytes:
         STATE_VERSION,
         {"uid-1": 10},
         (),
-        (),
-        (),
-        {},
         {key.storage_key(): record, other.key.storage_key(): other},
     )
     return dump_bytes(state)

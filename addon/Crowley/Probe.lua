@@ -1,99 +1,18 @@
 local _, ns = ...
 
--- Records the client's AH and encoding API surface so the assumptions the scanner makes
--- about the Forever client can be checked from SavedVariables.
+-- Record only the client APIs and identity facts used by scan collection.
 local NAMESPACES = {
   "C_AuctionHouse",
   "C_EncodingUtil",
   "C_GameRules",
   "C_Item",
   "C_RealmInfo",
-  "C_Container",
-  "C_TradeSkillUI",
-  "C_Spell",
-  "C_Mail",
-  "C_MerchantFrame",
-  "C_Bank",
-  "C_PlayerInfo",
-  "C_CurrencyInfo",
-  "C_Timer",
-  "C_SpellBook",
-  "C_Professions",
 }
 
-local TRADE_GLOBALS = {
-  "GetMoney",
-  "GetCoinTextureString",
-  "GetContainerNumSlots",
-  "GetContainerItemInfo",
-  "GetContainerItemLink",
-  "UseContainerItem",
-  "PickupContainerItem",
-  "GetInboxNumItems",
-  "GetInboxHeaderInfo",
-  "GetInboxItem",
-  "GetInboxItemLink",
-  "TakeInboxItem",
-  "TakeInboxMoney",
-  "AutoLootMailItem",
-  "CheckInbox",
-  "GetNumSkillLines",
-  "GetSkillLineInfo",
-  "GetProfessions",
-  "GetProfessionInfo",
-  "GetTradeSkillLine",
-  "GetNumTradeSkills",
-  "GetTradeSkillInfo",
-  "GetTradeSkillNumReagents",
-  "GetTradeSkillReagentInfo",
-  "GetTradeSkillCooldown",
-  "DoTradeSkill",
-  "CloseTradeSkill",
-  "GetSpellCooldown",
-  "GetMerchantNumItems",
-  "GetMerchantItemInfo",
-  "GetMerchantItemID",
-  "BuyMerchantItem",
-  "CanMerchantRepair",
-  "GetNumTrainerServices",
-  "GetTrainerServiceInfo",
-  "GetTrainerServiceSkillReq",
-  "GetTrainerServiceCost",
-  "BuyTrainerService",
-  "IsUsableSpell",
-  "InCombatLockdown",
-}
-
-local TRADE_FRAMES = {
-  "AuctionHouseFrame",
-  "MerchantFrame",
-  "MailFrame",
-  "TradeSkillFrame",
-  "ClassTrainerFrame",
-  "ProfessionsFrame",
-}
-
-local MOTION_APIS = {
-  "UnitPosition",
-  "GetPlayerFacing",
-  "GetUnitSpeed",
-  "UnitAffectingCombat",
-  "UnitIsDeadOrGhost",
-  "GetBindingKey",
-}
-
-local MOTION_BINDINGS = {
-  "MOVEFORWARD",
-  "MOVEBACKWARD",
-  "STRAFELEFT",
-  "STRAFERIGHT",
-  "TURNLEFT",
-}
-
-local function functionNames(t)
+local function functionNames(value)
   local keys = {}
-  for k, v in pairs(t) do
-    if type(v) == "function" then keys[#keys + 1] = k end
+  for key, child in pairs(value) do
+    if type(child) == "function" then keys[#keys + 1] = key end
   end
   table.sort(keys)
   return keys
@@ -108,23 +27,13 @@ function ns.Probe()
   local result = {
     at = time(),
     context = snapshotOK and contextOrError or false,
-    -- These are raw native values. Keep them separate from Context.Snapshot(),
-    -- whose shape is part of the strict scan envelope.
     region = region,
     regionName = regionName,
     realmName = realmName,
     namespaces = {},
-    tradeGlobals = {},
-    tradeFrames = {},
-    -- Presence is diagnostic only.  The Agent samples and validates the
-    -- actual native values; Probe must not invent values or alter the scan
-    -- Context.Snapshot envelope.
-    motion = { apiPresence = {}, bindingActions = {} },
   }
   if not snapshotOK then result.contextError = tostring(contextOrError) end
 
-  -- House detection is diagnostic here: an unrecognized client value must not
-  -- prevent the raw client facts and API surface from being saved.
   local houseOK, houseOrError = pcall(ns.Context.House)
   if houseOK then
     result.house = houseOrError
@@ -135,18 +44,6 @@ function ns.Probe()
 
   for _, name in ipairs(NAMESPACES) do
     result.namespaces[name] = _G[name] and functionNames(_G[name]) or false
-  end
-  for _, name in ipairs(TRADE_GLOBALS) do
-    result.tradeGlobals[name] = type(_G[name]) == "function"
-  end
-  for _, name in ipairs(TRADE_FRAMES) do
-    result.tradeFrames[name] = _G[name] ~= nil
-  end
-  for _, name in ipairs(MOTION_APIS) do
-    result.motion.apiPresence[name] = type(_G[name]) == "function"
-  end
-  for _, action in ipairs(MOTION_BINDINGS) do
-    result.motion.bindingActions[#result.motion.bindingActions + 1] = action
   end
   ns.db.probe = result
   local houseText = result.house and result.house.key or ("attribution error: " .. (result.attributionError or "unknown"))

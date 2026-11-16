@@ -55,5 +55,3 @@ function Encoder.Decode(source, deserialize)
   if type(source) ~= "string" or type(deserialize) ~= "function" then error("scan decoder capabilities are unavailable") end
   return pcall(deserialize, source)
 end
-
-ns.RegisterModule("ScanEncoder", { requires = { "Core", "GeneratedWireSchemas" }, onLoad = function() end })

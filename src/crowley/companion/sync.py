@@ -22,15 +22,14 @@ from crowley.core import companion_state, savedvars
 from crowley.core.companion_state import (
     CompanionState,
     CompanionStateError,
-    LegacyCompanionStateError,
+    PreviousCompanionStateError,
     RejectionKey,
     RejectionRecord,
     dump_bytes,
     parse_bytes,
-    upgrade_legacy_state_bytes,
+    upgrade_previous_state_bytes,
 )
 from crowley.core.luawriter import render_assignment
-from crowley.core.queue import render_queue_lua
 
 from .config import CompanionSettings
 
@@ -90,9 +89,6 @@ class State:
 
     uploaded: dict[str, int] = field(default_factory=dict)
     probes: list[int] = field(default_factory=list)
-    references: list[str] = field(default_factory=list)
-    accounts: list[str] = field(default_factory=list)
-    executions: dict[str, str] = field(default_factory=dict)
     rejections: dict[str, RejectionRecord] = field(default_factory=dict)
 
     @classmethod
@@ -106,15 +102,12 @@ class State:
         upgraded = False
         try:
             parsed = parse_bytes(raw)
-        except LegacyCompanionStateError:
-            parsed = upgrade_legacy_state_bytes(raw)
+        except PreviousCompanionStateError:
+            parsed = upgrade_previous_state_bytes(raw)
             upgraded = True
         state = cls(
             uploaded=dict(parsed.uploaded),
             probes=list(parsed.probes),
-            references=list(parsed.references),
-            accounts=list(parsed.accounts),
-            executions=dict(parsed.executions),
             rejections=dict(parsed.rejections),
         )
         if upgraded:
@@ -128,15 +121,10 @@ class State:
             record_id: seen_at for record_id, seen_at in self.uploaded.items() if seen_at >= cutoff
         }
         self.probes = self.probes[-MAX_HISTORY_ENTRIES:]
-        self.references = self.references[-MAX_HISTORY_ENTRIES:]
-        self.accounts = self.accounts[-MAX_HISTORY_ENTRIES:]
         snapshot = CompanionState(
             version=STATE_VERSION,
             uploaded=self.uploaded,
             probes=tuple(self.probes),
-            references=tuple(self.references),
-            accounts=tuple(self.accounts),
-            executions=self.executions,
             rejections=self.rejections,
         )
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,7 +317,6 @@ class Companion:
         self._pending: dict[Path, tuple[float, int]] = {}
         self._present_ids: dict[Path, list[str]] = {}
         self._last_data_write = 0.0
-        self._queue_warning_logged = False
 
     @property
     def configuration_digest(self) -> str:
@@ -337,8 +324,6 @@ class Companion:
             "wow_dir": str(self.settings.wow_path),
             "server_url": self.settings.server_url.rstrip("/"),
             "wtf_account": self.settings.wtf_account,
-            "house_key": self.settings.house_key,
-            "character": self.settings.character,
             "api_token_sha256": hashlib.sha256(
                 self.settings.api_token.get_secret_value().encode("utf-8")
             ).hexdigest(),
@@ -351,9 +336,8 @@ class Companion:
         endpoint: str,
         *,
         json_body: object,
-        params: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        response = self.client.request(method, endpoint, json=json_body, params=params)
+        response = self.client.request(method, endpoint, json=json_body)
         classification = classify_http_status(response.status_code)
         if classification is FailureClass.SUCCESS:
             return response
@@ -461,32 +445,6 @@ class Companion:
         for scan_id, scan in db["scans"].items():
             if scan_id not in self.state.uploaded and self._upload_scan(path, scan_id, scan):
                 uploaded += 1
-
-        reference = db.get("reference")
-        if reference and reference["id"] not in self.state.references:
-            if self._upload_reference(path, reference):
-                uploaded += 1
-
-        account = db.get("account")
-        if account and account["id"] not in self.state.accounts:
-            if self._upload_account(path, account):
-                uploaded += 1
-
-        executions = db.get("executions", {})
-        if executions == []:
-            executions = {}
-        if not isinstance(executions, dict):
-            raise RuntimeError("CrowleyDB.executions must be an object")
-        for queue_id, execution in executions.items():
-            if not isinstance(execution, dict):
-                raise RuntimeError(f"CrowleyDB.executions[{queue_id!r}] must be an object")
-            digest = _json_digest(execution)
-            if self.state.executions.get(queue_id) != digest and self._upload_execution(
-                path, queue_id, execution
-            ):
-                self.state.executions[queue_id] = digest
-                uploaded += 1
-
         probe = db.get("probe")
         if probe and probe["at"] not in self.state.probes:
             probe_id = str(probe["at"])
@@ -534,73 +492,7 @@ class Companion:
     def upload_scan(self, scan_id: str, scan: dict[str, object]) -> bool:
         return self._upload_scan(self.settings.saved_variables, scan_id, scan)
 
-    def _upload_reference(self, path: Path, reference: dict[str, object]) -> bool:
-        capture_id = _required_string(reference, "id", "item reference")
-
-        def accepted(response: httpx.Response) -> None:
-            result = _response_object(response, "item reference response")
-            status = _required_string(result, "status", "item reference response")
-            items = _required_value(result, "items", "item reference response")
-            log.info("item reference %s -> %s (%s)", capture_id, status, items)
-            self.state.references.append(capture_id)
-
-        return self._submit_record(
-            path,
-            "item-reference",
-            capture_id,
-            reference,
-            lambda: self._request("POST", "/v1/item-reference", json_body=reference),
-            accepted,
-        )
-
-    def upload_reference(self, reference: dict[str, object]) -> bool:
-        return self._upload_reference(self.settings.saved_variables, reference)
-
-    def _upload_account(self, path: Path, account: dict[str, object]) -> bool:
-        capture_id = _required_string(account, "id", "account state")
-
-        def accepted(response: httpx.Response) -> None:
-            result = _response_object(response, "account state response")
-            status = _required_string(result, "status", "account state response")
-            items = _required_value(result, "items", "account state response")
-            log.info("account state %s -> %s (%s items)", capture_id, status, items)
-            self.state.accounts.append(capture_id)
-
-        return self._submit_record(
-            path,
-            "account-state",
-            capture_id,
-            account,
-            lambda: self._request("POST", "/v1/account-state", json_body=account),
-            accepted,
-        )
-
-    def upload_account(self, account: dict[str, object]) -> bool:
-        return self._upload_account(self.settings.saved_variables, account)
-
-    def _upload_execution(self, path: Path, queue_id: str, execution: dict[str, object]) -> bool:
-        def accepted(_: httpx.Response) -> None:
-            results = execution.get("results")
-            if not isinstance(results, (list, dict)):
-                raise RuntimeError("execution record results must be an array or object")
-            log.info("uploaded execution %s (%s results)", queue_id, len(results))
-
-        return self._submit_record(
-            path,
-            "execution",
-            queue_id,
-            execution,
-            lambda: self._request("POST", "/v1/executions", json_body=execution),
-            accepted,
-        )
-
-    def upload_execution(self, queue_id: str, execution: dict[str, object]) -> bool:
-        return self._upload_execution(self.settings.saved_variables, queue_id, execution)
-
     def _write_addon_data(self) -> None:
-        configured = bool(self.settings.house_key and self.settings.character)
-        if not configured:
-            self.write_queue()
         scan_ids = sorted({sid for ids in self._present_ids.values() for sid in ids})
         path = self.settings.saved_variables
         payload = {"scan_ids": scan_ids}
@@ -631,34 +523,6 @@ class Companion:
             target,
             len(data["ackedScans"]),
         )
-        if configured:
-            self.write_queue()
-
-    def write_queue(self) -> None:
-        queue_id = "none"
-        queue: dict[str, object] | None = None
-        house_key = self.settings.house_key
-        character = self.settings.character
-        if house_key and character:
-            response = self._request(
-                "GET",
-                f"/v1/houses/{house_key}/queue/active",
-                json_body=None,
-                params={"character": character},
-            )
-            value: object = response.json()
-            if value is not None:
-                queue = _mapping_for_runtime(value, "active queue response")
-                queue_id = _required_string(queue, "queueId", "active queue response")
-        elif not self._queue_warning_logged:
-            log.warning("queue settings unset; writing Queue.lua with no queue")
-            self._queue_warning_logged = True
-        text = render_queue_lua(queue)
-        target = self.settings.queue_lua
-        current = target.read_text(encoding="utf-8") if target.exists() else None
-        if current != text:
-            atomic_write(target, text)
-            log.info("wrote Queue.lua (%s)", queue_id)
 
     def write_addon_data(self) -> None:
         with state_file_lock(self.state_file):

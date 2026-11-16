@@ -78,12 +78,9 @@ class CompanionSettings(BaseModel):
     poll_seconds: float = 3.0
     refresh_minutes: float = 5.0
     wtf_account: str
-    house_key: str | None = None
-    character: str | None = None
     state_file: Path | None = None
     saved_variables: Path
     data_lua: Path
-    queue_lua: Path
     addons_dir: Path
 
     def __init__(self, **values: object) -> None:
@@ -101,12 +98,9 @@ class CompanionSettings(BaseModel):
                 "poll_seconds": resolved.tunables.poll_seconds,
                 "refresh_minutes": resolved.tunables.refresh_minutes,
                 "wtf_account": resolved.host.wtf_account,
-                "house_key": resolved.target.house,
-                "character": resolved.host.character,
                 "state_file": resolved.state_file,
                 "saved_variables": resolved.saved_variables,
                 "data_lua": resolved.data_lua,
-                "queue_lua": resolved.queue_lua,
                 "addons_dir": resolved.addons_dir,
             }
         super().__init__(**values)
@@ -115,8 +109,6 @@ class CompanionSettings(BaseModel):
     def validate_target_facts(self) -> CompanionSettings:
         if self.wow_path.name != self.target.product_dir:
             raise ValueError("wow_dir must end in the selected target productDir")
-        if self.house_key is not None and self.house_key != self.target.house:
-            raise ValueError("house_key must match the selected target house when configured")
         return self
 
     @field_validator("wtf_account")

@@ -56,13 +56,6 @@ def decode_strict_json(source: str | bytes | bytearray) -> dict[str, Any]:
     return value
 
 
-# Public aliases let the server worker choose a descriptive import without
-# creating a second decoder or a second wire representation.
-decode_outer_json = decode_strict_json
-decode_json_object = decode_strict_json
-decode_json_envelope = decode_strict_json
-
-
 def decode_json_payload(encoded: str) -> dict[str, Any]:
     """Decode the one format-2 raw-deflate/base64 JSON representation."""
     if not isinstance(encoded, str):
@@ -905,8 +898,3 @@ def normalize_observation(format: int, kind: str, observation: dict[str, Any]) -
                 raise ScanFormatError("item row price copper is invalid")
             row["unitPrice"] = {"numerator": price["copper"], "denominator": 1}
     return normalized
-
-
-# Compatibility names remain aliases for historical callers and archives.
-validate_v2_envelope = validate_envelope
-parse_v2_envelope = validate_envelope

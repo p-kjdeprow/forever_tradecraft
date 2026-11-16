@@ -7,7 +7,6 @@ to `$XDG_CONFIG_HOME/crowley/` after validating the untracked host contract at
 | File | Contents |
 |---|---|
 | `companion.toml` | companion polling and refresh intervals |
-| `paper.env` | paper-trading tunables |
 
 The host contract is documented in `deploy/templates/host.example.toml`.
 It owns the absolute Wine/game roots, selected account and character, server

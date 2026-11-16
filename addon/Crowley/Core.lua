@@ -1,6 +1,6 @@
 local ADDON_NAME, ns = ...
 
-ns.VERSION = "0.2.0"
+ns.VERSION = "0.3.0"
 ns.MAX_STORED_SCANS = 6
 
 local defaults = {
@@ -14,77 +14,6 @@ local defaults = {
   lastSweepAttempted = 0,
   lastSweepFailures = 0,
 }
-
--- Native construction is decided once, by Core's first ADDON_LOADED handler.
--- Agent and Scanner consume this immutable per-load decision; malformed
--- SavedVariables are never repaired by a later handler.
-local NATIVE_STATES = {
-  armed = true, deferred = true, constructing = true, constructed = true,
-  failed = true, restore_pending = true,
-}
-
-local function validToken(token, allowRecovery)
-  if not ns.Util.IsString(token, 1, 64) then return false end
-  if token:find("[%c]") then return false end
-  if allowRecovery then return token:match("^recovery:[0-9a-f]+$") ~= nil and #token == 33 end
-  return token:find("%s") == nil
-end
-
-local function validateNativeMarker(marker)
-  if type(marker) ~= "table" or not ns.Util.ExactKeys(marker, { schema = true, state = true, token = true, attempts = true }) then
-    return nil, "malformed"
-  end
-  if marker.schema ~= 1 or not ns.Util.IsInteger(marker.attempts, 0, 1) then
-    return nil, "malformed"
-  end
-  local state = marker.state
-  if not NATIVE_STATES[state] then return nil, "malformed" end
-  if state == "restore_pending" then
-    if marker.attempts ~= 0 or not validToken(marker.token, true) then return nil, "malformed" end
-  elseif (state == "armed" or state == "deferred") and marker.attempts ~= 0 then
-    return nil, "malformed"
-  elseif (state == "constructing" or state == "constructed" or state == "failed") and marker.attempts ~= 1 then
-    return nil, "malformed"
-  elseif not validToken(marker.token, false) then
-    return nil, "malformed"
-  end
-  return ns.Util.Copy(marker), nil
-end
-
-local function decideNativeConstruction()
-  local marker = ns.db.nativeConstruction
-  if marker == nil then
-    ns.nativeDecision = { kind = "ordinary", state = "ordinary", marker = nil, reason = "" }
-    return
-  end
-  local valid, reason = validateNativeMarker(marker)
-  if not valid then
-    ns.nativeDecision = { kind = "restore_only", state = "unknown", marker = ns.Util.Copy(marker), reason = reason }
-    return
-  end
-  -- armed is the only pre-reload spelling. The next load owns the
-  -- canonical deferred spelling while retaining the exact boot token.
-  if valid.state == "armed" then
-    valid.state = "deferred"
-    ns.db.nativeConstruction = ns.Util.Copy(valid)
-  end
-  ns.nativeDecision = { kind = valid.state, state = valid.state, marker = valid, reason = "" }
-end
-
-function ns.NativeDecision()
-  return ns.Util.Copy(ns.nativeDecision or { kind = "unknown", state = "unknown", marker = nil, reason = "not_loaded" })
-end
-
-function ns.NativeMarkerValid(marker)
-  return validateNativeMarker(marker)
-end
-
-function ns.SetNativeMarker(marker)
-  local valid, reason = validateNativeMarker(marker)
-  if not valid then return false, reason end
-  ns.db.nativeConstruction = ns.Util.Copy(valid)
-  return true
-end
 
 function ns.Print(...)
   local parts = { ... }
@@ -130,44 +59,6 @@ end
 function ns.PruneStorage()
   if not ns.db then return end
   pruneScans(ns.db)
-end
-
-local modules = {}
-local moduleOrder = {}
-local lifecycleStarted = false
-
-function ns.RegisterModule(name, specification)
-  if type(name) ~= "string" or name == "" then error("module name must be a non-empty string") end
-  if type(specification) ~= "table" then error("module " .. name .. " registration must be a table") end
-  if type(specification.requires) ~= "table" then error("module " .. name .. " requires must be an array") end
-  if type(specification.onLoad) ~= "function" then error("module " .. name .. " onLoad must be a function") end
-  if modules[name] then error("duplicate module registration: " .. name) end
-  if lifecycleStarted then error("module registered after addon lifecycle started: " .. name) end
-  modules[name] = { requires = specification.requires, onLoad = specification.onLoad }
-  moduleOrder[#moduleOrder + 1] = name
-end
-
-local function loadModules()
-  local states, ordered = {}, {}
-  local function visit(name, path)
-    local module = modules[name]
-    if not module then error("unknown module dependency: " .. table.concat(path, " -> ") .. " -> " .. name) end
-    if states[name] == 1 then error("module dependency cycle: " .. table.concat(path, " -> ") .. " -> " .. name) end
-    if states[name] == 2 then return end
-    states[name] = 1
-    local nextPath = ns.Util.Copy(path)
-    nextPath[#nextPath + 1] = name
-    for _, requirement in ipairs(module.requires) do
-      if type(requirement) ~= "string" or requirement == "" then
-        error("module " .. name .. " has an invalid dependency")
-      end
-      visit(requirement, nextPath)
-    end
-    states[name] = 2
-    ordered[#ordered + 1] = name
-  end
-  for _, name in ipairs(moduleOrder) do visit(name, {}) end
-  for _, name in ipairs(ordered) do modules[name].onLoad() end
 end
 
 local function rejectLegacyStorage()
@@ -225,24 +116,6 @@ ns.frame:SetScript("OnEvent", function(_, event, ...)
   for _, fn in ipairs(snapshot) do fn(event, ...) end
 end)
 
-ns.RegisterModule("Core", {
-  requires = {},
-  onLoad = function()
-    ns.db = CrowleyDB
-    decideNativeConstruction()
-    ns.db.cursorItemID = ns.db.cursorItemID
-    ns.db.cursorPlanHash = ns.db.cursorPlanHash
-    ns.db.failureCount = ns.db.failureCount or 0
-    ns.PruneStorage()
-    local plan = CROWLEY_DATA.scanPlan
-    if plan and plan.planHash then
-      ns.Print(("plan loaded: %s (%d item(s))"):format(plan.planHash:sub(1, 12), #(plan.itemIDs or {})))
-    else
-      ns.Print("plan not loaded; collection is paused until the companion writes Data.lua")
-    end
-  end,
-})
-
 ns.On("ADDON_LOADED", function(_, name)
   if name ~= ADDON_NAME then return end
   if CrowleyDB == nil then CrowleyDB = {} end
@@ -250,8 +123,19 @@ ns.On("ADDON_LOADED", function(_, name)
   for k, v in pairs(defaults) do
     if CrowleyDB[k] == nil then CrowleyDB[k] = v end
   end
-  lifecycleStarted = true
-  loadModules()
+  ns.db = CrowleyDB
+  ns.db.cursorItemID = ns.db.cursorItemID
+  ns.db.cursorPlanHash = ns.db.cursorPlanHash
+  ns.db.failureCount = ns.db.failureCount or 0
+  ns.PruneStorage()
+  local plan = CROWLEY_DATA.scanPlan
+  if plan and plan.planHash then
+    ns.Print(("plan loaded: %s (%d item(s))"):format(plan.planHash:sub(1, 12), #(plan.itemIDs or {})))
+  else
+    ns.Print("plan not loaded; collection is paused until the companion writes Data.lua")
+  end
+  ns.Scanner.Initialize()
+  ns.ScanStatus.Initialize()
 end)
 
 ns.On("AUCTION_HOUSE_SHOW", function()

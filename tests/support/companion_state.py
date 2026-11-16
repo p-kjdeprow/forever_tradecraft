@@ -18,9 +18,6 @@ def write_companion_state(
         version=STATE_VERSION,
         uploaded={} if uploaded is None else uploaded,
         probes=probes,
-        references=(),
-        accounts=(),
-        executions={},
         rejections={},
     )
     path.write_bytes(dump_bytes(state))

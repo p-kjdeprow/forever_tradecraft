@@ -152,8 +152,10 @@ def test_generated_wire_schema_artifact_is_current() -> None:
     assert result.returncode == 0, result.stderr
     schemas = (ROOT / "addon" / "Crowley" / "GeneratedSchemas.lua").read_text(encoding="utf-8")
     assert '["ackedScans"] = true' in schemas
-    assert '["actions"] = true' in schemas
-    assert "buy_commodity" in schemas
+    assert 'crowleyData = {["ackedScans"] = true, ["generatedAt"] = true, ["scanPlan"] = true}' in schemas
+    assert all(
+        name not in schemas for name in ("crowleyQueue", "execution =", "actionFields", "buy_commodity")
+    )
 
 
 def test_generator_writes_target_catalog_lua_and_tocs_without_toml_staging(tmp_path: Path) -> None:

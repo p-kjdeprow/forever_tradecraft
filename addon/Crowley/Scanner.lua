@@ -36,58 +36,15 @@ local CANONICAL_CATALOG_HASH = TARGET.catalogHash
 -- One compact, source-catalog-derived representation: each entry is the positive
 -- delta from the prior item ID and its canonical pool (0=core, 1=discovery, 2=cold).
 local CANONICAL_PLAN_ENTRIES = TARGET.planEntries
-local PRE_LOGOUT_FENCE_COMMAND = "/crowley session fence"
 local SCHEDULE_TRACE_VERSION = 1
 local SCHEDULE_TRACE_CAP = 64
 local SCHEDULE_TRACE_STRING_LIMIT = 32
 local state
 local generation = 0
 local scheduleToken = 0
-local scheduleBlocked = false
-local nativeConstructionFence = false
-local scheduleFence = { state = "inactive", reason = "", command = PRE_LOGOUT_FENCE_COMMAND }
+local suspendOwner = nil
 local internalSendDepth = 0
 local keyFields
-
-local function nativeDecision()
-  if type(ns.NativeDecision) ~= "function" then return { kind = "unknown", state = "unknown", reason = "not_loaded" } end
-  return ns.NativeDecision()
-end
-
-local function nativeBlocked()
-  if ns.Agent and type(ns.Agent.Lifecycle) == "function" then
-    local lifecycle = ns.Agent.Lifecycle()
-    if lifecycle == "ordinary" or lifecycle == "finalized" then return false end
-  end
-  local decision = nativeDecision()
-  return decision.kind ~= "ordinary" and decision.kind ~= "finalized"
-end
-
-local function effectiveFence()
-  if scheduleBlocked then return { state = scheduleFence.state, reason = scheduleFence.reason, command = scheduleFence.command } end
-  if nativeConstructionFence then
-    -- Native construction is an internal admission fence.  Keep the public
-    -- wire projection on the existing armed/empty-reason contract; the
-    -- scanner entry points below still refuse while this private bit is set.
-    return { state = "armed", reason = "", command = PRE_LOGOUT_FENCE_COMMAND }
-  end
-  return { state = scheduleFence.state, reason = scheduleFence.reason, command = scheduleFence.command }
-end
-
-function Scanner.SetNativeConstructionFence(armed)
-  nativeConstructionFence = armed == true
-  if not nativeConstructionFence and not scheduleBlocked and ns.ahOpen and not state then
-    Scanner.Schedule("native_construction_release")
-  end
-end
-
-function Scanner.NativeConstructionFence()
-  return nativeConstructionFence
-end
-
-function Scanner.LogoutFenceActive()
-  return scheduleBlocked
-end
 
 local function scheduleFinite(value)
   if not ns.Util.IsFiniteNumber(value, nil, nil) then return 0 end
@@ -250,17 +207,13 @@ Native.On("PLAYER_LOGOUT", function()
   ns.ahOpen = false
   if state then Scanner.Abort("logout") end
 end)
-ns.RegisterModule("Scanner", {
-  requires = { "Core", "ScannerState", "ScanEncoder", "ScannerNative", "GeneratedWireSchemas" },
-  onLoad = function()
-    beginScheduleLoad()
-    local decision = nativeDecision()
-    nativeConstructionFence = decision.kind ~= "ordinary" and decision.kind ~= "finalized"
-    ns.db.agentLastSaved = ns.db.agentLastSaved or {
-      memoryUid = "", finishedAt = 0, planned = 0, attempted = 0, failures = 0, rows = 0,
-    }
-  end,
-})
+function Scanner.Initialize()
+  beginScheduleLoad()
+  ns.db.scannerLastSaved = ns.db.scannerLastSaved or ns.db.agentLastSaved or {
+    memoryUid = "", finishedAt = 0, planned = 0, attempted = 0, failures = 0, rows = 0,
+  }
+  ns.db.agentLastSaved = nil
+end
 
 local function safeProduct(a, b)
   if type(a) ~= "number" or type(b) ~= "number" or a < 0 or b < 0 or a > MAX_SAFE or b > MAX_SAFE then return nil end
@@ -990,14 +943,50 @@ end
 function Scanner.InProgress() return state ~= nil end
 function Scanner.CooldownRemaining() if not ns.db.lastSweepStart then return 0 end return math.max(0, CADENCE - (time() - ns.db.lastSweepStart)) end
 function Scanner.Due() return Scanner.CooldownRemaining() == 0 end
+
+local function validOwner(owner)
+  return type(owner) == "string" and #owner >= 1 and #owner <= 64 and
+    owner:match("^[A-Za-z0-9][A-Za-z0-9_.:-]*$") ~= nil
+end
+
+function Scanner.Suspend(owner)
+  if not validOwner(owner) then return false, "invalid_owner" end
+  if suspendOwner and suspendOwner ~= owner then return false, "owned_by_other" end
+  if not suspendOwner then
+    suspendOwner = owner
+    local previousToken = scheduleToken
+    scheduleToken = scheduleToken + 1
+    scheduleEvent("cancel", {
+      reason = "ah_suspended", source = "ownership", token = previousToken, currentToken = scheduleToken,
+    })
+  end
+  if state then return false, "scan_active" end
+  return true, nil
+end
+
+function Scanner.Quiescent(owner)
+  return validOwner(owner) and suspendOwner == owner and state == nil
+end
+
+function Scanner.Resume(owner)
+  if not validOwner(owner) or suspendOwner ~= owner then return false, "not_owner" end
+  if state then return false, "scan_active" end
+  suspendOwner = nil
+  if ns.ahOpen then Scanner.Schedule("ownership_resume") end
+  return true, nil
+end
+
+_G.CrowleyScanner = {
+  protocol = 1,
+  suspend = Scanner.Suspend,
+  quiescent = Scanner.Quiescent,
+  resume = Scanner.Resume,
+}
+
 function Scanner.Schedule(source)
   source = source or "unknown"
   scheduleEvent("request", { source = source })
-  if scheduleBlocked then scheduleEvent("refusal", { reason = "logout_fence", source = source }) return end
-  if nativeBlocked() or nativeConstructionFence then
-    scheduleEvent("refusal", { reason = "native_construction_fence", source = source })
-    return
-  end
+  if suspendOwner then scheduleEvent("refusal", { reason = "ah_suspended", source = source }) return end
   if not ns.ahOpen then scheduleEvent("refusal", { reason = "ah_closed", source = source }) return end
   if state then scheduleEvent("refusal", { reason = "sweep_active", source = source }) return end
   if ns.db.storageBlocked then scheduleEvent("refusal", { reason = "storage_blocked", source = source }) return end
@@ -1014,7 +1003,7 @@ function Scanner.Schedule(source)
     if not ns.ahOpen then
       scheduleEvent("ah_closed_discard", { reason = "ah_closed", source = "timer", token = token, currentToken = scheduleToken })
     end
-    if token ~= scheduleToken or not ns.ahOpen then
+    if token ~= scheduleToken or not ns.ahOpen or suspendOwner then
       return
     end
     Scanner.Start(false, "timer_callback")
@@ -1051,8 +1040,7 @@ end
 function Scanner.Start(force, source)
   source = source or "manual"
   if state then return ns.Print("a sweep is already running") end
-  if scheduleBlocked then return ns.Print("scan refused: logout fence active") end
-  if nativeBlocked() or nativeConstructionFence then return ns.Print("scan refused: native construction fence active") end
+  if suspendOwner then return ns.Print("scan refused: auction house is suspended") end
   if not ns.ahOpen then return ns.Print("open the auction house first") end
   if ns.PruneStorage then ns.PruneStorage() end
   local plan, errorText = loadPlan()
@@ -1064,7 +1052,7 @@ function Scanner.Start(force, source)
       scheduleEvent("due_refusal", {
         reason = "cooldown_active", source = source, due = time() + remaining, delay = remaining,
       })
-      if ns.ahOpen and not scheduleBlocked and not state then Scanner.Schedule("timer_rearm") end
+      if ns.ahOpen and not suspendOwner and not state then Scanner.Schedule("timer_rearm") end
       return
     end
     return ns.Print(("scan due in %ds"):format(remaining))
@@ -1123,37 +1111,6 @@ function Scanner.Start(force, source)
   Scanner.Next()
 end
 
-function Scanner.PreLogoutFence()
-  -- Lua event/timer callbacks are serialized.  Check the private active state
-  -- and revoke the timer token in this one handler, so a due callback cannot
-  -- slip between an idle check and token cancellation.  A live item/owned
-  -- query is refused and remains untouched; ordinary PLAYER_LOGOUT below
-  -- still preserves its partial-save behavior.
-  if nativeBlocked() or nativeConstructionFence then
-    scheduleEvent("fence_refusal", { reason = "native_construction_fence", source = "pre_logout_fence" })
-    return false, "native_construction_fence"
-  end
-  if state then
-    scheduleEvent("fence_refusal", { reason = "scan_active", source = "pre_logout_fence" })
-    scheduleFence = { state = "refused", reason = "scan_active", command = PRE_LOGOUT_FENCE_COMMAND }
-    traceEvent("pre_logout_fence_refused", state, { command = PRE_LOGOUT_FENCE_COMMAND, reason = "scan_active" })
-    return false, "scan_active"
-  end
-  local previousToken = scheduleToken
-  scheduleToken = scheduleToken + 1
-  scheduleBlocked = true
-  scheduleEvent("cancel", {
-    reason = "pre_logout_fence", source = "pre_logout_fence", token = previousToken, currentToken = scheduleToken,
-  })
-  scheduleFence = { state = "armed", reason = "", command = PRE_LOGOUT_FENCE_COMMAND }
-  traceEvent("pre_logout_fence_armed", nil, { command = PRE_LOGOUT_FENCE_COMMAND })
-  return true, nil
-end
-
-function Scanner.PreLogoutFenceStatus()
-  return effectiveFence()
-end
-
 function Scanner.Abort(reason)
   if not state then return end
   if state.item then failCurrent(reason) end
@@ -1192,7 +1149,7 @@ function Scanner.Finish()
   end
   ns.db.lastSweepPlanned, ns.db.lastSweepAttempted, ns.db.lastSweepFailures = #s.order, attempted, failures
   local savedRows = ns.db.scans[id].numRows
-  ns.db.agentLastSaved = {
+  ns.db.scannerLastSaved = {
     memoryUid = id, finishedAt = ns.db.scans[id].finishedAt, planned = #s.order,
     attempted = attempted, failures = failures, rows = savedRows,
   }
@@ -1206,9 +1163,7 @@ function Scanner.Finish()
   Scanner.Schedule("finish")
 end
 
--- A copied, read-only projection for Agent.lua. The projection intentionally keeps
--- the empty active UID while a scan is running: this native scanner allocates its
--- stable UID only when Finish writes CrowleyDB.scans.
+-- Public scanner status. The active UID remains empty until Finish writes CrowleyDB.scans.
 function Scanner.Status()
   local db = ns.db or {}
   local plan, planError
@@ -1246,7 +1201,7 @@ function Scanner.Status()
     sweepCapSeconds = plan.sweepCapSeconds or SWEEP_TIMEOUT,
     initialPriceLevels = plan.initialPriceLevels or 0,
   } or nil
-  local last = db.agentLastSaved or {}
+  local last = db.scannerLastSaved or {}
   local pending = {}
   local pendingSeen = {}
   for id in pairs(db.scans or {}) do pendingSeen[id] = true end
@@ -1265,7 +1220,7 @@ function Scanner.Status()
     phase = status.phase, activeSweepId = status.activeSweepId, startedAt = status.startedAt,
     dueAt = status.dueAt, ordinal = status.ordinal, planned = status.planned,
     cursorItemID = status.cursorItemID, reason = status.reason, plan = planProjection,
-    scheduleFence = Scanner.PreLogoutFenceStatus(), lastSaved = {
+    lastSaved = {
       memoryUid = last.memoryUid or "", finishedAt = last.finishedAt or 0,
       planned = last.planned or 0, attempted = last.attempted or 0, failures = last.failures or 0,
       rows = last.rows or 0, persistence = "unknown",

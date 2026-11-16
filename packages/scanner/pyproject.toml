@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "crowley-scanner"
+version = "0.2.0"
+description = "Crowley scanner addon transport and SavedVariables companion"
+requires-python = ">=3.12"
+dependencies = [
+  "crowley-common>=0.2,<0.3",
+  "httpx>=0.28.1,<1",
+  "pydantic>=2.14.1,<3",
+]
+
+[project.scripts]
+crowley-companion = "crowley_scanner.companion.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/crowley_scanner"]
+artifacts = ["src/crowley_scanner/addon/**/*", "src/crowley_scanner/py.typed"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["pyproject.toml", "src/crowley_scanner"]

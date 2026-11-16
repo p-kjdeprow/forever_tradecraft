@@ -74,10 +74,29 @@ Incomplete or uncertain receipts stop that operation. GUI ownership and client-s
 are separately required for market actions. Session/identity, human presence, focus and freshness
 are rechecked before dispatch. The existing hard click interval and curved pointer path are retained.
 
+Combined operation has one GUI owner: the host loop executes submitted automation through the
+public runner instead of allowing an independent trading process to race its scan-maintenance
+actions. Standalone automation refuses a conflicting GUI owner. During an active or uncertain
+effect the host cannot type scan commands, reload, or relaunch behind the runner. Use a small
+explicit ownership handoff/status interface; do not add a second supervisor or message broker.
+Mail collection and walking use bounded primitive steps with a persisted progress cursor. Every
+protected mail call gets its own dispatch marker and causal receipt. Posting and cancellation
+remain one protected-call step each.
+
 CLI behavior should be explicit and JSON-readable: prepare/inspect, dry-run, run with exact batch
 confirmation and session arm, status, stop, and reconcile. Do not ship a CLI that claims to execute
 but only mutates ledger state. The first foundation batch may expose prepare/status/inspection while
 native backend integration is pending; label that implementation stage accurately.
+
+## Native posting evidence
+
+The installed Auctionator modern-AH source uses PostCommodity(location, duration, quantity,
+unitPrice) and PostItem(location, duration, quantity, minBid, buyout), with item/commodity deposit
+calls distinguished by native commodity status. This establishes another addon's call signatures,
+not observed protected-call behavior on this client. The stored Crowley probe records these APIs
+on client build 70862, not the currently selected 70938. Recheck actual current-client availability,
+event order, price units, and protected callback behavior during the native implementation gate.
+Do not copy Auctionator fallback/default behavior, and do not claim a dry run proves a real post.
 
 ## Parallel wave two write scopes
 

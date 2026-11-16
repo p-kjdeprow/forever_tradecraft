@@ -100,6 +100,10 @@ Live qualification requiring specific real-gold operations remains separate from
   its published port with docker rather than using the production database, and remove it afterward.
 - Root package metadata, old-to-new import switch, source removal, docs refresh, baseline ratchets,
   final artifact tests, native automation adapters, movement, and live dry-run qualification remain.
+- Host-config inventory found legacy model_crop, canvas_origin, outer geometry and client-offset
+  fields have no consumers beyond their own validation. Remove them when switching to the new
+  host application and adapt fixtures together; validate actual screenshot/window bounds in the
+  adapters rather than retaining stale calibration configuration.
 
 Scanner standalone configuration will be its own strict scanner.toml [scanner] with game_root,
 wtf_account, character, server_url, poll_seconds, and refresh_minutes. Character preserves the

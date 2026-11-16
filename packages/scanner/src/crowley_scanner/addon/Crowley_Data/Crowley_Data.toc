@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: Crowley Data
+## Notes: Strategy data written by the Crowley companion. Do not edit by hand.
+## Version: 0.1.0
+
+Data.lua

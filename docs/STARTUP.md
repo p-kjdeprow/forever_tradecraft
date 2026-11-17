@@ -2,7 +2,7 @@
 
 The reviewed startup implementation is installed in the coordinated component packages.
 End-to-end collection qualification remains open; see [HANDOFF](HANDOFF.md) for the current
-blocked client and remaining live gates. A source edit alone does not update running services.
+restart and remaining live gates. A source edit alone does not update running services.
 See [STARTUP_PLAN](STARTUP_PLAN.md) for the frozen API, ownership and qualification gates.
 
 The shared startup path reconciles the current desktop rather than assuming the launcher just

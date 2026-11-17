@@ -54,3 +54,13 @@ AH collection, a new original saved payload accepted by the server, retained pri
 and ACK publication. Report loaded ACK separately. Stop on a contradictory native
 contract instead of loosening pins. Land source and final handoff on main/origin/main;
 remove only task-owned disposable artifacts.
+
+## Current rollout deviation
+
+The original legacy dump/raw snapshot completed and passed byte validation. The
+disposable restore failed at `create_database` and verified cleanup of its own
+resources. The user then explicitly prioritized immediate scanner recovery, so
+the remaining restore investigation was deferred. The reviewed server-only cutover
+preserved the original database container, DB/raw mounts and twelve migration
+checksums; health and the authenticated new plan passed. The snapshot remains
+unqualified for restore. See HANDOFF for current collection evidence.

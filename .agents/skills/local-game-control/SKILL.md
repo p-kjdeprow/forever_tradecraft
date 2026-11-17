@@ -56,6 +56,9 @@ trading, account changes or unrelated display changes.
   the update.
 - After a coordinated addon cutover, verify the companion's actual client-data field set before the next game
   load. Server response metadata and client Lua have separate contracts; a parseable Data.lua can still abort addon startup.
+- Run a preserved legacy tool with its own venv interpreter; a copied CLI can retain the original installation's
+  shebang. Wheel-based server images install modules in `/app/.venv`; inspect package resources with that image's
+  `/app/.venv/bin/python`, not its system interpreter or a guessed source-tree path.
 - For a reviewed plan cutover, verify the old sweep was saved, uploaded and ACKed, then stop the loop. Hold the GUI
   lease across fresh frame, disk and server checks, post-capture process/window/focus/presence checks, one normal
   window-manager close and exact process exit. Release the lease before installing. A reviewed helper can carry a

@@ -1,45 +1,63 @@
 # Current handoff
 
 Updated 2026-11-17. The user authorized the repository refactor, parallel Luna implementation
-and independent Sol review loops, commits on main, and cleanup of task worktrees/temp files.
+and independent Sol review loops, commits on main/origin/main, and task artifact cleanup.
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
-Cold-start source fixes are independently reviewed and installed as the five component
-packages at version 0.2.0, code commit `8ff9912`. `crowley-host` replaces the retired legacy
-`crowley-scan`; companion remains enabled and active. All pre-existing disabled timers remain
-disabled. See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
+The coordinated desktop packages 0.2.0 are installed from reviewed code commit `5164928`.
+`crowley-host` replaces the retired legacy `crowley-scan`; both host and companion are active.
+All pre-existing disabled timers remain disabled. Both game addons are 0.3.0; scanner frame
+schema is 1 and automation schema is 3. See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
 
-Live qualification reached a normal cold Play, automatic recovery of a real initial window-restore
-timeout, fullscreen repair, verified `Dandune Hillmont` entry, and independent fresh scanner/native
-publications on build 70938. Both game addons are 0.3.0; scanner frame schema is 1 and automation
-schema is 3. The selected display label is independent of native Dandune and the pinned native realm;
-no realm is displayed on character selection. Battle.net identity uses exact executable argv0,
-UID, prefix and start ticks because its mutable comm is CrBrowserMain.
+The user explicitly authorized termination of the stranded headless client. One exact-process
+SIGTERM ended it; no SIGKILL was needed. The original Battle.net instance remains intact.
+A separate native Linux crash-notification dialog ignored the one guarded XTEST Cancel click.
+After verifying its exact identity and installed response behavior, one ordinary SIGTERM
+ended only that notification without opening or sending a report. Its crash files remain.
 
-End-to-end collection is NOT yet qualified. Long binding input exposed a native observation refusal;
-the measured stale case now gets one fresh capture within the unchanged observation deadline, and
-AH postcondition clocks begin at admitted Return. A later aggregate observation refusal remains
-unclassified: thirty read-only samples passed, so do not label it process drift or elapsed-time
-exhaustion, or change a limit without evidence. No new sweep or trade occurred on this boot.
+Battle.net had independently updated wowf to 1.60.1.70959 while the old client was headless.
+The selected target, operational catalog build and generated addon target are now promoted
+together, preserving revision 9, all 807 item IDs/pools, cadence/caps and historical item/export
+facts. [Build promotion plan](BUILD_70959_PLAN.md). New plan hash:
+`814c25b46d4f5fc2d24355ca2e712bf07cdd2bcf2dd39852b006ba1f220285ee`.
+Historical 70938 item/export facts and the separately qualified seller build are unchanged;
+this promotion does not qualify selling, movement or a new client-data export.
 
-Current recovery is blocked by one headless WoW process. The old recovery implementation used
-xdotool's XDestroyWindow command, removing its main window without ending its process. The corrected
-source uses an exact-XID normal `wmctrl -i -c` request and rejects destructive close/kill forms.
-A separately verified Win32 WM_CLOSE-only request flushed SavedVariables but did not end the
-remaining process. Host is deliberately stopped; companion and the original Battle.net remain
-running. Explicit user authorization for termination of only the verified remaining process is
-pending. Do not send signals, start a duplicate client, reset policy history, or reuse old GUI proof.
-Private exact identities, pidfd termination proposal, backups and receipts are under
-~/.local/state/crowley/startup-rollout-20261117/qualification.
+The market server now runs reviewed image
+`sha256:5d336ea2487bf8821a1b91f167d8806846e4fc145cf5a05afa8de7db90798e1b`.
+Its health and authenticated canonical-plan response pass. The original database container,
+DB/raw mounts and all twelve migration checksums are unchanged. No schema change, manual
+production database write or trade was performed. Companion wrote the exact canonical
+three-field Data.lua and the matching 70959 plan before normal host restart.
 
-Source verification passed 1497 tests / 31 skipped, Ruff check and format, and Pyright with zero
-errors. All five installed namespaces match their reviewed wheels byte for byte; package tests
-also exercise isolated distributions. All twelve applied migrations retain their original bytes.
-No server image, schema, manual database write or live trading was performed. Remaining live gates
-are safe client recovery, the actual AH sweep, original saved payload acceptance and retained prices,
-ACK write versus loaded ACK on a real boot, and a quiet host restart preserving the game process.
-Private release/rollback artifacts remain at ~/.local/state/crowley/startup-rollout-20261117.
+Normal host cold-start successfully dispatched Play, adopted exactly one new client, entered
+`Dandune Hillmont`, repaired/verified fullscreen and reached matching native world readiness
+with an independent scanner ready publication. Strict expected build 70959/interface 16001
+passed native readiness. AH opening and the first new sweep are still being observed; do not
+claim restored collection, saved payload acceptance or loaded ACK from world readiness alone.
+The user was invited to manually open the AH to avoid slow guarded targeting/binding input;
+honor the standard human-presence hold and do not race their input.
+
+The 70959 promotion passed the full suite: 1497 tests / 31 skipped. The subsequent one-line
+backup verifier fix passed 129 affected tests / 1 skipped, with independent Sol READY reviews,
+Ruff check/format and zero Pyright errors. All five installed namespaces byte-match reviewed
+wheels. The backup verifier now inspects migrations with the packaged server interpreter;
+see [the bounded fix](BACKUP_IMAGE_RUNTIME_FIX.md).
+
+A completed legacy snapshot has validated original dump/raw bytes. Its disposable restore
+is NOT qualified: after correcting migration inspection, a fresh isolated attempt failed at
+create_database and verified cleanup removed only its own disposable resources. The user
+then explicitly prioritized immediate scanner recovery, so the remaining restore investigation
+was deferred before the reviewed server-only cutover. Do not weaken restore checks, label the
+backup restore-verified, or reset scan policy history. The original server image, secret/config
+rollback copy, saved-data backups and exact receipts are retained privately under
+~/.local/state/crowley/startup-rollout-20261117; the snapshot is under market-backups.
+
+Remaining collection evidence is the actual AH sweep, original saved payload acceptance,
+retained positive prices, ACK publication versus later loaded ACK, and a quiet warm host
+restart preserving the game. A previous aggregate native-observation refusal during long
+binding input remains unclassified; do not widen freshness/deadlines without actual evidence.
 
 Retain the main dashboard and recipe watch, existing AH collection, scan/probe transport,
 health/diagnosis and backup/restore. Delete every inactive workflow, then build fresh automation

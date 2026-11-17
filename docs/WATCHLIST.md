@@ -1,6 +1,19 @@
 # First run scan catalog
 
-## Revision 9 deployed plan (two-sweep cadence qualification passed)
+## Revision 9 build promotion (70959; collection qualification in progress)
+
+On 2026-11-17, Battle.net updated the selected client to **1.60.1.70959**. The
+coordinated desktop/addon/server deployment promotes only operational build metadata;
+all 974 catalog rows, 807 active memberships, historical item reasons, pools and
+collection limits are unchanged. Catalog hash:
+`8980d5974a7ca3b1092b026720f3942445f0679d56c262976529437801f9cbd8`; plan hash:
+`814c25b46d4f5fc2d24355ca2e712bf07cdd2bcf2dd39852b006ba1f220285ee`.
+The normal host reached matching native world and scanner readiness. The first new
+AH sweep is still being observed; previous cadence evidence below does not qualify
+this client build. No new item/export, seller or route qualification is claimed.
+See [HANDOFF](HANDOFF.md) and the [promotion plan](BUILD_70959_PLAN.md).
+
+## Historical revision 9 plan (70938; two-sweep cadence qualification passed)
 
 Revision 9 adds recipe 288206, **Recipe: Draught of Water Walking**, as one known-tradeable core ID. It preserves all
 973 existing catalog rows and all 806 existing active memberships, statuses and evidence. The deployed catalog has

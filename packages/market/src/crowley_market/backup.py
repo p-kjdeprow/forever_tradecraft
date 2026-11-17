@@ -2201,7 +2201,7 @@ def _target_image_migrations(image_id: str, *, package_namespace: str) -> list[d
         )
     )
     result = _docker(
-        ["run", "--rm", "--network", "none", "--entrypoint", "/usr/local/bin/python", image_id, "-c", script]
+        ["run", "--rm", "--network", "none", "--entrypoint", "/app/.venv/bin/python", image_id, "-c", script]
     ).stdout.strip()
     try:
         return json.loads(result)

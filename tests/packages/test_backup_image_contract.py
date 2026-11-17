@@ -68,6 +68,7 @@ def test_image_and_reference_migration_scripts_use_the_selected_namespace(
 
     monkeypatch.setattr(backup, "_docker", fake_docker)
     assert backup._target_image_migrations("image-id", package_namespace=namespace) == []
+    assert calls[0][calls[0].index("--entrypoint") + 1] == "/app/.venv/bin/python"
     script = calls[0][calls[0].index("-c") + 1]
     ast.parse(script)
     assert f"resources.files('{expected_namespace}.server.migrations')" in script

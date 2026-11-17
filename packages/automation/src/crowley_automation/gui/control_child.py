@@ -487,6 +487,8 @@ def _classify(
         if expected_window is None or expected_window <= 0:
             raise ControlChildError("window state update requires an exact observed window")
         xid = str(expected_window)
+        if args == ("-i", "-c", xid):
+            return "window_close"
         if args == ("-i", "-r", xid, "-b", "remove,maximized_vert,maximized_horz"):
             return "wm_maximize_remove"
         if args == ("-i", "-r", xid, "-b", "add,fullscreen"):
@@ -503,8 +505,6 @@ def _classify(
         and int(args[2]) > 0
     ):
         return "activate"
-    if len(args) == 2 and args[0] == "windowclose" and args[1].isdecimal() and int(args[1]) > 0:
-        return "window_close"
     if args and len(args) % 2 == 0:
         releases_only = True
         for index in range(0, len(args), 2):

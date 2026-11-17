@@ -70,6 +70,9 @@ Input subprocesses carry parent-death protection and the inherited lease descrip
 Battle.net applications are deliberately outside that control-child lifetime. Graceful cancellation
 can release only keys/buttons this run may have left down; SIGKILL cannot retract queued X events.
 No helper waits for stdin or an internal review checkpoint while retaining desktop ownership.
+Owned restart uses one pinned `wmctrl -i -c` request to the exact observed window, followed by
+process-exit verification. X window destruction is not application exit; destructive xdotool
+close/kill forms are excluded from the control-child command surface.
 
 ## Rollout
 

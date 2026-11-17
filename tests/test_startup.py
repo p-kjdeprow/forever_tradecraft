@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import crowley_automation.desktop_observe as desktop_observe
 import crowley_automation.startup as startup_module
@@ -161,6 +162,144 @@ def test_restart_reason_outside_frozen_allowlist_never_inspects_process(
     assert status.outcome == "blocked"
     assert status.reason == "restart_reason_not_authorized"
     assert not recovery.active
+
+
+def test_restart_uses_exact_pinned_wmctrl_close_and_waits_for_process_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    identity = ProcessIdentity(17, 100, 1000, "C:\\wow.exe", str(tmp_path / "wine"))
+    window = WindowState(42, 1, True, True, (1920, 1080), fullscreen=True)
+    native = NativeWorldObservation(identity, window, {"boot": "boot-1"}, clock.wall(), "same")
+    recovery._last_native = native
+    monkeypatch.setattr(startup_module, "observe_native_world", lambda *_args, **_kwargs: native)
+    monkeypatch.setattr(recovery, "_game_identities", lambda: (identity,))
+    monkeypatch.setattr(recovery, "_require_disk_build", lambda: None)
+    guards: list[tuple[ProcessIdentity, int]] = []
+    monkeypatch.setattr(
+        recovery,
+        "_guard_identity",
+        lambda _session, current, xid, **_kwargs: guards.append((current, xid)),
+    )
+
+    wmctrl = SimpleNamespace(proc_path="/proc/self/fd/73", fd=73, close=lambda: None)
+    loaded_tools: list[str] = []
+    monkeypatch.setattr(
+        recovery,
+        "_control_tool_factory",
+        lambda name: (loaded_tools.append(name), wmctrl)[1],
+    )
+    control_calls: list[tuple[list[str], dict[str, object]]] = []
+    close_guards: list[Any] = []
+
+    class FakeControl:
+        child_pid = None
+        cleanup_failed = False
+
+        def run(self, argv, **kwargs):
+            control_calls.append((argv, kwargs))
+            close_guards[-1]()
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        def close(self) -> None:
+            pass
+
+    control = FakeControl()
+
+    def new_control(_session, current, xid, **kwargs):
+        assert current == identity and xid == 42
+        assert kwargs["game"] is True
+        assert kwargs["require_focus"] is False
+        assert kwargs["extra_tools"] == {"wmctrl": wmctrl}
+        close_guards.append(kwargs["guard"])
+        return control
+
+    monkeypatch.setattr(recovery, "_new_control", new_control)
+    launches: list[str] = []
+    monkeypatch.setattr(recovery, "_launch_battle_net", lambda _session: launches.append("launch"))
+    recovery._popen = lambda *_args, **_kwargs: pytest.fail("restart close must not spawn an app")
+
+    dispatched = recovery.request_restart(identity, "ah_open_failed")
+    assert dispatched.outcome == "waiting"
+    assert dispatched.action == "wm_close_dispatched"
+    assert dispatched.reason == "normal_window_close_dispatched"
+    assert loaded_tools == ["wmctrl"]
+    assert len(control_calls) == 1
+    argv, kwargs = control_calls[0]
+    assert argv == ["/proc/self/fd/73", "-i", "-c", "42"]
+    assert kwargs["timeout"] == 5.0
+    assert kwargs["pass_fds"] == (73,)
+    assert guards == [(identity, 42), (identity, 42)]
+
+    clock.value = 1.1
+    waiting = recovery.step()
+    assert waiting.outcome == "waiting"
+    assert waiting.reason == "waiting_for_exact_game_exit"
+    assert waiting.action == "wm_close_dispatched"
+    assert len(control_calls) == 1
+
+    clock.value = 30.0
+    timed_out = recovery.step()
+    assert timed_out.outcome == "failed"
+    assert timed_out.reason == "normal_window_close_timed_out"
+    assert len(control_calls) == 1
+    assert launches == []
+
+
+def test_restart_stop_at_final_close_guard_prevents_wmctrl_emission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, _clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    identity = ProcessIdentity(17, 100, 1000, "C:\\wow.exe", str(tmp_path / "wine"))
+    window = WindowState(42, 1, True, True, (1920, 1080), fullscreen=True)
+    native = NativeWorldObservation(identity, window, {"boot": "boot-1"}, 10_000.0, "same")
+    recovery._last_native = native
+    monkeypatch.setattr(startup_module, "observe_native_world", lambda *_args, **_kwargs: native)
+    monkeypatch.setattr(recovery, "_game_identities", lambda: (identity,))
+    monkeypatch.setattr(recovery, "_require_disk_build", lambda: None)
+    guard_count = 0
+
+    def guard_identity(_session, _current, _window, **_kwargs) -> None:
+        nonlocal guard_count
+        guard_count += 1
+        if guard_count == 2:
+            raise _HoldEpisode("stop_requested")
+
+    monkeypatch.setattr(recovery, "_guard_identity", guard_identity)
+    wmctrl = SimpleNamespace(proc_path="/proc/self/fd/74", fd=74, close=lambda: None)
+    monkeypatch.setattr(recovery, "_control_tool_factory", lambda _name: wmctrl)
+    emitted: list[list[str]] = []
+    close_guards: list[Any] = []
+
+    class FakeControl:
+        child_pid = None
+        cleanup_failed = False
+
+        def run(self, argv, **kwargs):
+            close_guards[-1]()
+            emitted.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        def close(self) -> None:
+            pass
+
+    control = FakeControl()
+
+    def new_control(*_args, **kwargs):
+        close_guards.append(kwargs["guard"])
+        return control
+
+    monkeypatch.setattr(
+        recovery,
+        "_new_control",
+        new_control,
+    )
+    status = recovery.request_restart(identity, "ah_open_failed")
+    assert status.outcome == "held"
+    assert status.reason == "stop_requested"
+    assert emitted == []
 
 
 def test_hidden_owned_window_is_locatable_but_never_valid_geometry() -> None:

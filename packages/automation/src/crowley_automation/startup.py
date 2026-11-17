@@ -986,15 +986,22 @@ class StartupRecovery:
             self._guard_identity(session, identity, window, game=True, require_focus=False)
             self._require_disk_build()
 
+        wmctrl = self._pinned_control_tool("wmctrl")
         control = self._new_control(
-            session, identity, window, game=True, require_focus=False, guard=close_guard
+            session,
+            identity,
+            window,
+            game=True,
+            require_focus=False,
+            extra_tools={"wmctrl": wmctrl},
+            guard=close_guard,
         )
         try:
             result = control.run(
-                [self._input_tool().proc_path, "windowclose", str(window)],
+                [wmctrl.proc_path, "-i", "-c", str(window)],
                 timeout=5.0,
                 env=dict(session.environment),
-                pass_fds=(self._input_tool().image.fd,),
+                pass_fds=(wmctrl.fd,),
             )
         finally:
             self._close_control(control)

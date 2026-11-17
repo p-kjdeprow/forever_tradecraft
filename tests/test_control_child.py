@@ -46,6 +46,21 @@ def test_window_manager_grammar_is_exact_and_binds_one_window() -> None:
         _classify("wmctrl", ("-c", "Battle.net"), expected_window=42)
 
 
+def test_window_close_requires_the_exact_observed_window_manager_target() -> None:
+    assert _classify("wmctrl", ("-i", "-c", "42"), expected_window=42) == "window_close"
+
+    for name, args, expected_window in (
+        ("wmctrl", ("-i", "-c", "43"), 42),
+        ("wmctrl", ("-c", "World of Warcraft"), 42),
+        ("wmctrl", ("-k", "on"), 42),
+        ("wmctrl", ("-i", "-c", "42"), None),
+        ("xdotool", ("windowclose", "42"), 42),
+        ("xdotool", ("windowkill", "42"), 42),
+    ):
+        with pytest.raises(ControlChildError):
+            _classify(name, args, expected_window=expected_window)
+
+
 def test_wine_is_not_a_control_tool_or_serialized_child_record(tmp_path: Path) -> None:
     with pytest.raises(ControlChildError, match="outside the allowlist"):
         PinnedControlTool.load("wine")

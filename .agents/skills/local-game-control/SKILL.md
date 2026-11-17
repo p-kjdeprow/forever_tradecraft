@@ -44,6 +44,8 @@ trading, account changes or unrelated display changes.
 - Wine identity channels differ: `/proc/<pid>/exe` is the Linux loader and argv0 may use Windows path semantics.
   Chromium can rename Battle.net's `comm`; bind it to exact executable argv0, UID, prefix, start ticks and window
   PID instead of a fixed process name. Reuse the producer matcher rather than duplicating it in an operator script.
+  Exact title/PID can also match Wine's unmapped override-redirect helper; inspect map state and override-redirect
+  before treating hidden candidates as duplicate application windows. Preserve visible and managed minimized candidates.
 
 ## Plan and build cutovers
 

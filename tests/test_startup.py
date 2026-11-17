@@ -177,7 +177,7 @@ def test_hidden_owned_window_is_locatable_but_never_valid_geometry() -> None:
         if command[:2] == ("xwininfo", "-id") and "-children" in command:
             return 0, '  0x2b "client" 1920x1080+0+0\n'
         if command[:2] == ("xwininfo", "-id"):
-            return 0, "  Map State: IsUnMapped\n"
+            return 0, "  Map State: IsUnMapped\n  Override Redirect State: no\n"
         if command[:2] == ("xdotool", "getwindowgeometry"):
             return 0, "X=0\nY=0\nWIDTH=1920\nHEIGHT=1080\n"
         if command[:2] == ("xprop", "-id"):
@@ -194,6 +194,66 @@ def test_hidden_owned_window_is_locatable_but_never_valid_geometry() -> None:
     assert state.ok is False
     assert "window_not_viewable" in state.detail
     assert ("xdotool", "search", "--class", "^wow\\.exe$") in commands
+
+
+def test_unmapped_override_redirect_duplicate_title_is_not_the_main_window() -> None:
+    helper_id = int("1400016", 16)
+    main_id = int("1400017", 16)
+
+    def run(argv: list[str]) -> tuple[int, str]:
+        command = tuple(argv)
+        if command[:2] == ("xdotool", "search"):
+            return 0, f"{helper_id}\n{main_id}\n"
+        if command[:2] == ("xdotool", "getwindowname"):
+            return 0, "Battle.net\n"
+        if command[:2] == ("xdotool", "getwindowpid"):
+            return 0, "33913\n"
+        if command == ("xdotool", "getdisplaygeometry"):
+            return 0, "1920 1080\n"
+        if command[:2] == ("xwininfo", "-id") and "-children" in command:
+            return 0, '  0x2b "client" 1920x1080+0+0\n'
+        if command[:2] == ("xwininfo", "-id"):
+            if command[2] == hex(helper_id):
+                return 0, "  Map State: IsUnMapped\n  Override Redirect State: yes\n"
+            return 0, "  Map State: IsViewable\n  Override Redirect State: no\n"
+        if command[:2] == ("xdotool", "getwindowgeometry"):
+            return 0, "X=0\nY=0\nWIDTH=1920\nHEIGHT=1080\n"
+        if command[:2] == ("xprop", "-id"):
+            return 0, "_NET_WM_STATE(ATOM) = _NET_WM_STATE_FULLSCREEN\n"
+        if command == ("xdotool", "getwindowfocus"):
+            return 0, f"{main_id}\n"
+        raise AssertionError(command)
+
+    state = X11Window("battle.net.exe", "Battle.net", run).observe([33913], include_hidden=True)
+    assert state.xid == main_id
+    assert state.count == 1
+    assert state.visible
+    assert state.ok
+
+
+def test_visible_override_redirect_duplicate_title_still_blocks() -> None:
+    helper_id = int("1400016", 16)
+    main_id = int("1400017", 16)
+
+    def run(argv: list[str]) -> tuple[int, str]:
+        command = tuple(argv)
+        if command[:2] == ("xdotool", "search"):
+            return 0, f"{helper_id}\n{main_id}\n"
+        if command[:2] == ("xdotool", "getwindowname"):
+            return 0, "Battle.net\n"
+        if command[:2] == ("xdotool", "getwindowpid"):
+            return 0, "33913\n"
+        if command[:2] == ("xwininfo", "-id"):
+            return 0, "  Map State: IsViewable\n  Override Redirect State: yes\n"
+        if command == ("xdotool", "getdisplaygeometry"):
+            return 0, "1920 1080\n"
+        raise AssertionError(command)
+
+    state = X11Window("battle.net.exe", "Battle.net", run).observe([33913], include_hidden=True)
+    assert state.xid is None
+    assert state.count == 2
+    assert state.foreign_count == 0
+    assert "window_count=2" in state.detail
 
 
 def test_same_title_foreign_process_window_blocks_an_owned_candidate() -> None:

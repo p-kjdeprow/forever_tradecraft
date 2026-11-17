@@ -131,6 +131,7 @@ Client assumptions are explicit and bounded by their evidence:
 | Arrow bindings identify forward/left/right | Native binding readback required before holds; no default W/A/D assumptions |
 | Battle.net must reuse the logged-in instance and Play needs a real curved click | Existing launcher qualification; direct game launch cannot issue its login ticket |
 | Battle.net can rename its process to CrBrowserMain | Measured live process; bind exact executable argv0, UID, prefix, start ticks and window PID rather than comm |
+| Wine can retain an unmapped override-redirect window with the same Battle.net title and PID | Exclude only owned candidates explicitly reporting both properties; visible duplicates, foreign candidates and managed minimized windows remain counted |
 | Selected character text can differ from native character, with no realm displayed | Recorded selection and same-process native identity; pin character_select_name before entry and native character/realm afterward |
 | Expected product text must be the selected Game Version label above Play | Recorded dropdown geometry and adversarial banner cases; unrelated article text cannot authorize Play |
 | The measured Battle.net Updates information window is a separate 900x600 window | Same-process capture with heading, PATCH/date and close control; dismiss that exact child once, and hold on unknown dialogs |

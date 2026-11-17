@@ -321,6 +321,8 @@ class X11Window:
             title_matches, owned = self._candidate_identity(candidate, pids)
             if title_matches:
                 if owned:
+                    if include_hidden and self._is_unmapped_override_redirect(candidate):
+                        continue
                     ids.append(candidate)
                 else:
                     foreign += 1
@@ -379,6 +381,12 @@ class X11Window:
         tree = self._must(["xwininfo", "-id", hex(xid)])
         match = re.search(r"^\s*Map State:\s*(\S+)\s*$", tree, re.MULTILINE)
         return match is not None and match.group(1) == "IsViewable"
+
+    def _is_unmapped_override_redirect(self, xid: int) -> bool:
+        tree = self._must(["xwininfo", "-id", hex(xid)])
+        map_states = re.findall(r"^\s*Map State:\s*(\S+)\s*$", tree, re.MULTILINE)
+        override_states = re.findall(r"^\s*Override Redirect State:\s*(\S+)\s*$", tree, re.MULTILINE)
+        return map_states == ["IsUnMapped"] and override_states == ["yes"]
 
     def _fullscreen(self, xid: int) -> bool:
         code, output = self._run(["xprop", "-id", str(xid), "_NET_WM_STATE"])

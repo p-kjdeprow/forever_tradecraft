@@ -422,6 +422,10 @@ class StartupRecovery:
             BattleNetPlayError,
         ) as error:
             reason = _safe_failure_reason(error)
+            if isinstance(error, BattleNetPlayError):
+                message = f"{type(error).__name__}: {' '.join(str(error).split())}"
+                prefix = "startup control failed: "
+                _LOG.warning("%s%s", prefix, message[: 200 - len(prefix)])
             return self._finish("failed", self._phase(), reason)
         except (OSError, subprocess.SubprocessError, ValueError, ActError) as error:
             return self._finish("failed", self._phase(), _safe_failure_reason(error))

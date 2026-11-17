@@ -1480,6 +1480,33 @@ def test_capture_failure_with_unreaped_control_retains_gui_ownership(
     assert recovery._control is control
 
 
+def test_battle_net_control_failure_logs_bounded_detail_without_changing_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    recovery, _clock, provider, lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    detail = "runner could not verify control\n" + "diagnostic " * 50
+    monkeypatch.setattr(
+        recovery,
+        "_step_locked",
+        lambda _session: (_ for _ in ()).throw(startup_module.BattleNetPlayError(detail)),
+    )
+
+    with caplog.at_level("WARNING", logger=startup_module.__name__):
+        status = recovery.step()
+
+    assert status.outcome == "failed"
+    assert status.reason == "startup_control_failed"
+    assert detail not in status.reason
+    assert not recovery.active
+    assert not lease.held
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    assert "BattleNetPlayError: runner could not verify control diagnostic" in message
+    assert "\n" not in message
+    assert len(message) <= 200
+
+
 @pytest.mark.parametrize(
     ("failure", "expected"),
     [

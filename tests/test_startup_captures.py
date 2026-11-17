@@ -86,12 +86,16 @@ def test_recorded_character_controls_require_the_full_selected_display_name(
 
 @pytest.mark.process
 @pytest.mark.skipif(shutil.which("tesseract") is None, reason="Tesseract 5/eng required")
+@pytest.mark.parametrize(
+    "filename", ["battlenet-updates.png", "battlenet-updates-active.png", "battlenet-updates-hover.png"]
+)
 def test_recorded_release_information_panel_binds_heading_release_and_close(
+    filename: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OMP_THREAD_LIMIT", "1")
     manifest = json.loads((_FIXTURES / "provenance.json").read_text())
-    case = next(case for case in manifest["cases"] if case["file"] == "battlenet-updates.png")
+    case = next(case for case in manifest["cases"] if case["file"] == filename)
     path = _FIXTURES / case["file"]
     assert hashlib.sha256(path.read_bytes()).hexdigest() == case["file_sha256"]
     image = Image.open(path).convert("RGB")
@@ -99,8 +103,13 @@ def test_recorded_release_information_panel_binds_heading_release_and_close(
     evidence = classify_battle_net_updates_capture(reader, reader.read(image), image)
     assert evidence.kind == UIKind.NEWS_MODAL
     assert evidence.reason == "verified_battle_net_updates_panel"
-    assert evidence.control == (875, 7, 10, 10)
+    assert evidence.control == (875, 7, 11, 11)
     assert evidence.context_fingerprint is not None
+    if filename != "battlenet-updates.png":
+        before = Image.open(_FIXTURES / "battlenet-updates.png").convert("RGB")
+        before_evidence = classify_battle_net_updates_capture(reader, reader.read(before), before)
+        assert evidence.control == before_evidence.control
+        assert evidence.context_fingerprint == before_evidence.context_fingerprint
 
     without_heading = image.copy()
     without_heading.paste("black", (20, 24, 420, 89))

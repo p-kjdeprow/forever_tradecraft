@@ -79,6 +79,8 @@ trading, account changes or unrelated display changes.
   GNOME Screenshot can block during toolkit portal settings initialization before its Shell screenshot RPC.
   Trace the screenshot sender's portal calls too; the qualified runner disables that theme-only portal in its child.
 - Do not replay an action because its first frame lags.
+- Qualify normal and hovered controls before a production click. Pointer motion can change OCR segmentation
+  without moving the target; keep confidence, semantic identity and post-motion geometry checks intact.
 - A GNOME system modal can dim the HUD and ignore Xwayland input. A disconnected login screen keeps the same Wine
   identity; read the screen, not just the process.
 - Recheck the current PID and screen after a user returns or restores the game. An earlier login or ruleset screen

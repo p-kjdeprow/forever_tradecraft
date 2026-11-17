@@ -111,6 +111,62 @@
       "window_title": "Battle.net Updates",
       "same_process_as_main": true,
       "app_patch": "2.53.4"
+    },
+    {
+      "file": "battlenet-updates-hover.png",
+      "source_sha256": "48b0ccbb3f252f05e3d181c80dfd871c4a331f0e10a0bccdfe37677564e7e3b0",
+      "captured_utc": "2026-11-17T10:50:49.872338+00:00",
+      "capture_method": "Leased read-only GNOME capture through installed ScreenCanvas after verified pointer motion; no press",
+      "source_size": [
+        1920,
+        1080
+      ],
+      "source_window_xywh": [
+        527,
+        234,
+        900,
+        600
+      ],
+      "crop_xyxy": [
+        527,
+        234,
+        1427,
+        834
+      ],
+      "file_sha256": "d7b68dc78cce76d2e6ec45a0fd80e2f36db1f89cf3b8dc41679b99891acee83b",
+      "purpose": "Actual same owned release-information panel with red hover background and white close X. Exact unaltered crop excludes local account header; publisher example artwork remains. Full-page OCR merged window controls on hover, motivating dedicated glyph recognition.",
+      "expected_kind": "news_modal",
+      "window_title": "Battle.net Updates",
+      "same_process_as_main": true,
+      "app_patch": "2.53.4"
+    },
+    {
+      "file": "battlenet-updates-active.png",
+      "source_sha256": "3be856b152f8a7bff0ee084f334c6cc940f1884771b707ef262d731eea55574d",
+      "captured_utc": "2026-11-17T10:44:24.182867+00:00",
+      "capture_method": "Unmodified installed ScreenCanvas under canonical lease in matching transient user-systemd service",
+      "source_size": [
+        1920,
+        1080
+      ],
+      "source_window_xywh": [
+        527,
+        234,
+        900,
+        600
+      ],
+      "crop_xyxy": [
+        527,
+        234,
+        1427,
+        834
+      ],
+      "file_sha256": "6130ea06168adf6da0416a4ad419266b5e9fffe040e6dda624612dade2b0c651",
+      "purpose": "Actual active titlebar with unhovered close X. Exact unaltered crop excludes local account header; publisher example artwork remains. Same measured owned Updates window as hover case.",
+      "expected_kind": "news_modal",
+      "window_title": "Battle.net Updates",
+      "same_process_as_main": true,
+      "app_patch": "2.53.4"
     }
   ]
 }

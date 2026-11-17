@@ -17,8 +17,9 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
-from PIL import Image
+from PIL import Image, ImageOps
 
 MAX_OCR_BYTES = 4 * 1024 * 1024
 MAX_OCR_ROWS = 20_000
@@ -27,6 +28,8 @@ MAX_CAPTURE_AGE_SECONDS = 5.0
 MIN_CONTROL_CONFIDENCE = 85.0
 _PRODUCT_PLAY_MAX_LEFT_DELTA = 12
 _PRODUCT_PLAY_MAX_GAP = 24
+_UPDATES_CLOSE_GLYPH_ROI = (870, 2, 890, 22)
+_UPDATES_CLOSE_GLYPH_SCALE = 3
 _TSV_HEADER = (
     "level",
     "page_num",
@@ -120,6 +123,22 @@ class TesseractReader:
         self._environment = environment
 
     def read(self, image: Image.Image, *, captured_monotonic: float | None = None) -> OCRDocument:
+        return self._read(image, captured_monotonic=captured_monotonic, psm=11)
+
+    def read_single_character(
+        self, image: Image.Image, *, captured_monotonic: float | None = None
+    ) -> OCRDocument:
+        """Read one measured glyph with Tesseract's single-character segmentation."""
+
+        return self._read(image, captured_monotonic=captured_monotonic, psm=10)
+
+    def _read(
+        self,
+        image: Image.Image,
+        *,
+        captured_monotonic: float | None,
+        psm: Literal[10, 11],
+    ) -> OCRDocument:
         captured = self._clock() if captured_monotonic is None else captured_monotonic
         if not math.isfinite(captured) or self._clock() - captured > MAX_CAPTURE_AGE_SECONDS:
             raise StartupUIError("screen_capture_stale")
@@ -152,7 +171,7 @@ class TesseractReader:
                 raise StartupUIError("screen_capture_oversized")
             digest = hashlib.sha256(payload).hexdigest()
             completed = self._run(
-                [executable, str(path), "stdout", "-l", "eng", "--psm", "11", "tsv"],
+                [executable, str(path), "stdout", "-l", "eng", "--psm", str(psm), "tsv"],
                 timeout=10.0,
                 environment=environment,
             )
@@ -372,18 +391,30 @@ def classify_battle_net_updates_capture(
     ):
         return UIEvidence(UIKind.UNKNOWN, "battle_net_updates_release_layout_unverified")
 
-    close_words = [
-        word
-        for word in document.words
-        if _normalize(word.text) in {"x", "×"}
-        and word.confidence >= MIN_CONTROL_CONFIDENCE
-        and word.center[0] >= image.width * 0.93
-        and word.center[1] <= image.height * 0.05
-        and word.width <= 20
-        and word.height <= 20
-    ]
+    close_image = _updates_close_glyph_image(image)
+    try:
+        close_document = reader.read_single_character(
+            close_image, captured_monotonic=document.captured_monotonic
+        )
+    except StartupUIError:
+        return UIEvidence(UIKind.UNKNOWN, "battle_net_updates_close_unverified")
+    close_words = _map_region_words(
+        close_document.words,
+        offset=(_UPDATES_CLOSE_GLYPH_ROI[0], _UPDATES_CLOSE_GLYPH_ROI[1]),
+        scale=_UPDATES_CLOSE_GLYPH_SCALE,
+        page=3,
+    )
     close_box = _word_box(close_words)
-    if len(close_words) != 1 or close_box is None:
+    if (
+        len(close_words) != 1
+        or close_box is None
+        or _normalize(close_words[0].text) not in {"x", "×"}
+        or close_words[0].confidence < MIN_CONTROL_CONFIDENCE
+        or not 8 <= close_box[2] <= 13
+        or not 8 <= close_box[3] <= 13
+        or not 875 <= close_words[0].center[0] <= 886
+        or not 7 <= close_words[0].center[1] <= 18
+    ):
         return UIEvidence(UIKind.UNKNOWN, "battle_net_updates_close_unverified")
     fingerprint = hashlib.sha256(
         "\0".join(
@@ -405,6 +436,18 @@ def classify_battle_net_updates_capture(
         "Close",
         fingerprint,
     )
+
+
+def _updates_close_glyph_image(image: Image.Image) -> Image.Image:
+    left, top, right, bottom = _UPDATES_CLOSE_GLYPH_ROI
+    green = image.crop((left, top, right, bottom)).convert("RGB").getchannel("G")
+    midpoint = [0 if pixel >= 128 else 255 for pixel in range(256)]
+    normalized = ImageOps.autocontrast(green, cutoff=0).point(midpoint)
+    size = (
+        (right - left) * _UPDATES_CLOSE_GLYPH_SCALE,
+        (bottom - top) * _UPDATES_CLOSE_GLYPH_SCALE,
+    )
+    return normalized.resize(size, Image.Resampling.LANCZOS).convert("RGB")
 
 
 def classify_character_select(

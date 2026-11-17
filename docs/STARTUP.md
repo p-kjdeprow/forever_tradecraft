@@ -44,6 +44,9 @@ Tesseract with English data is the single supported OCR engine. Its exact text a
 are corroborated by current layout/control geometry, ownership, focus and fresh capture evidence.
 A blue button or four bright glyphs alone do not establish Play. Only the measured 900x600
 Battle.net Updates release-information window is dismissible; unknown dialogs remain visible holds.
+Its close glyph uses the same measured region and single-character OCR treatment before and
+after hover. The whole panel heading and release evidence still establish its identity; moving
+the pointer cannot substitute a lower-confidence control or change the release fingerprint.
 On the qualified GNOME Screenshot 41 / libhandy 1.8.3 platform, the screenshot child sets
 `HDY_DISABLE_PORTAL=1`. This removes a measured blocking theme-settings lookup before capture;
 the authenticated GNOME Shell screenshot path is unchanged. The switch is scoped to a copied

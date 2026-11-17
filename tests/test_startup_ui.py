@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import pytest
 from crowley_automation.startup_ui import (
+    OCRDocument,
+    StartupUIError,
     TextWord,
     UIKind,
     classify_battle_net_ui,
+    classify_battle_net_updates_capture,
     classify_character_select,
 )
 from PIL import Image, ImageDraw
@@ -12,6 +15,102 @@ from PIL import Image, ImageDraw
 
 def _word(text: str, left: int, top: int, *, line: int, width: int = 50, height: int = 20) -> TextWord:
     return TextWord(text, 96, left, top, width, height, (1, 1, 1, line))
+
+
+class _UpdatesReader:
+    def __init__(self, close_words: tuple[TextWord, ...] = (), *, stale_close: bool = False) -> None:
+        self.close_words = close_words
+        self.stale_close = stale_close
+        self.captured: float | None = None
+
+    def read(self, image: Image.Image, *, captured_monotonic: float | None = None) -> OCRDocument:
+        assert image.size == (800, 130)
+        self.captured = captured_monotonic
+        return OCRDocument(
+            (
+                TextWord("Battle.net", 96, 12, 18, 120, 30, (1, 1, 1, 1)),
+                TextWord("Updates", 96, 138, 18, 90, 30, (1, 1, 1, 1)),
+            ),
+            "header",
+            captured_monotonic or 0.0,
+            captured_monotonic or 0.0,
+            image.size,
+        )
+
+    def read_single_character(
+        self, image: Image.Image, *, captured_monotonic: float | None = None
+    ) -> OCRDocument:
+        assert image.size == (60, 60)
+        assert image.mode == "RGB"
+        assert captured_monotonic == self.captured
+        assert image.getpixel((0, 0)) == (255, 255, 255)
+        assert image.getpixel((30, 30)) == (0, 0, 0)
+        if self.stale_close:
+            raise StartupUIError("screen_capture_stale")
+        return OCRDocument(self.close_words, "close", 1.0, 1.1, image.size)
+
+
+def _updates_image() -> Image.Image:
+    image = Image.new("RGB", (900, 600), (30, 30, 30))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((837, 0, 899, 24), fill=(150, 30, 30))
+    draw.line((875, 7, 885, 17), fill=(245, 245, 245), width=2)
+    draw.line((885, 7, 875, 17), fill=(245, 245, 245), width=2)
+    return image
+
+
+def _updates_document() -> OCRDocument:
+    return OCRDocument(
+        (
+            _word("PATCH", 42, 122, line=1, width=58, height=25),
+            _word("2.53.4", 101, 122, line=1, width=100, height=25),
+            _word("10/01/2026", 43, 151, line=2, width=90, height=10),
+        ),
+        "body",
+        1.0,
+        1.1,
+        (900, 600),
+    )
+
+
+def test_updates_close_uses_one_measured_single_character_glyph() -> None:
+    reader = _UpdatesReader((_word("x", 14, 14, line=1, width=32, height=32),))
+    evidence = classify_battle_net_updates_capture(reader, _updates_document(), _updates_image())  # type: ignore[arg-type]
+    assert evidence.kind == UIKind.NEWS_MODAL
+    assert evidence.control == (875, 7, 11, 11)
+    assert evidence.control_text == "Close"
+
+
+@pytest.mark.parametrize(
+    "words",
+    [
+        (_word("+", 14, 14, line=1, width=32, height=32),),
+        (_word("Oo", 14, 14, line=1, width=32, height=32),),
+        (_word("Xx", 6, 6, line=1, width=54, height=51),),
+        (_word("x", 14, 14, line=1, width=32, height=32), _word("x", 35, 14, line=2, width=32, height=32)),
+        (TextWord("x", 84.9, 14, 14, 32, 32, (1, 1, 1, 1)),),
+    ],
+)
+def test_updates_close_rejects_other_duplicate_or_low_confidence_glyphs(
+    words: tuple[TextWord, ...],
+) -> None:
+    evidence = classify_battle_net_updates_capture(
+        _UpdatesReader(words),
+        _updates_document(),
+        _updates_image(),  # type: ignore[arg-type]
+    )
+    assert evidence.kind == UIKind.UNKNOWN
+    assert evidence.reason == "battle_net_updates_close_unverified"
+
+
+def test_updates_close_rejects_stale_single_glyph_ocr() -> None:
+    evidence = classify_battle_net_updates_capture(
+        _UpdatesReader(stale_close=True),
+        _updates_document(),
+        _updates_image(),  # type: ignore[arg-type]
+    )
+    assert evidence.kind == UIKind.UNKNOWN
+    assert evidence.reason == "battle_net_updates_close_unverified"
 
 
 def test_marketing_and_desktop_toast_do_not_mask_selected_play() -> None:

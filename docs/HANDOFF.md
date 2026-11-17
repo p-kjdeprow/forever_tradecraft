@@ -34,10 +34,12 @@ three-field Data.lua and the matching 70959 plan before normal host restart.
 Normal host cold-start successfully dispatched Play, adopted exactly one new client, entered
 `Dandune Hillmont`, repaired/verified fullscreen and reached matching native world readiness
 with an independent scanner ready publication. Strict expected build 70959/interface 16001
-passed native readiness. AH opening and the first new sweep are still being observed; do not
-claim restored collection, saved payload acceptance or loaded ACK from world readiness alone.
-The user was invited to manually open the AH to avoid slow guarded targeting/binding input;
-honor the standard human-presence hold and do not race their input.
+passed native readiness. Normal guarded targeting and binding completed, and interaction
+opened the AH. The first 70959 sweep began at approximately 17:25:36 UTC; fresh status at
+17:25:38 reported AH open, scanner phase item and sweep_running. Collection is active and no
+user intervention was needed. First saved-payload acceptance, retained prices and loaded ACK
+are still unverified; the existing read-only observer is following the normal save/upload
+boundary. Leave collection running and honor the standard human-presence hold.
 
 The 70959 promotion passed the full suite: 1497 tests / 31 skipped. The subsequent one-line
 backup verifier fix passed 129 affected tests / 1 skipped, with independent Sol READY reviews,
@@ -54,7 +56,7 @@ backup restore-verified, or reset scan policy history. The original server image
 rollback copy, saved-data backups and exact receipts are retained privately under
 ~/.local/state/crowley/startup-rollout-20261117; the snapshot is under market-backups.
 
-Remaining collection evidence is the actual AH sweep, original saved payload acceptance,
+Remaining collection evidence is completion of the first AH sweep, original saved payload acceptance,
 retained positive prices, ACK publication versus later loaded ACK, and a quiet warm host
 restart preserving the game. A previous aggregate native-observation refusal during long
 binding input remains unclassified; do not widen freshness/deadlines without actual evidence.

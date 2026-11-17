@@ -8,8 +8,9 @@ all 974 catalog rows, 807 active memberships, historical item reasons, pools and
 collection limits are unchanged. Catalog hash:
 `8980d5974a7ca3b1092b026720f3942445f0679d56c262976529437801f9cbd8`; plan hash:
 `814c25b46d4f5fc2d24355ca2e712bf07cdd2bcf2dd39852b006ba1f220285ee`.
-The normal host reached matching native world and scanner readiness. The first new
-AH sweep is still being observed; previous cadence evidence below does not qualify
+The normal host reached matching native world and scanner readiness, opened the AH,
+and began its first sweep at approximately 17:25:36 UTC. Completion/upload is still
+being observed; previous cadence evidence below does not qualify
 this client build. No new item/export, seller or route qualification is claimed.
 See [HANDOFF](HANDOFF.md) and the [promotion plan](BUILD_70959_PLAN.md).
 

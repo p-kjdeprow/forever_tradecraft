@@ -841,8 +841,8 @@ def test_corrupt_profile_mismatched_and_blocked_storage_do_not_block_live_render
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938.alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
-const malformedStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps({**wrong_profile, "summary": malformed, "profile_key": "alchemy225-tailoring150-cap300-budget100000-owned-profit-only"})}) : null, setItem: () => {{}} }};
+const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938.alchemy225-tailoring150-cap300-budget100000-owned-profit-only-rank-flow";
+const malformedStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps({**wrong_profile, "summary": malformed, "profile_key": "alchemy225-tailoring150-cap300-budget100000-owned-profit-only-rank-flow"})}) : null, setItem: () => {{}} }};
 const mismatchStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps(wrong_profile)}) : null, setItem: () => {{}} }};
 const blockedStorage = new Proxy({{}}, {{ get: () => {{ throw new Error("storage blocked"); }} }});
 function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
@@ -910,7 +910,7 @@ def test_house_build_and_profile_cache_isolation_and_old_house_response_race():
     actual = _node(
         f"""
 const values = new Map();
-const profileKey = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
+const profileKey = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only-rank-flow";
 const cacheKey = (house, build) => `crowley.trading-summary.v1.${{encodeURIComponent(house)}}.${{encodeURIComponent(build)}}.${{profileKey}}`;
 const cacheEntry = (summary, override = {{}}) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profileKey, summary, ...override }});
 values.set(cacheKey("us-normal-alliance", "1.60.1.70938"), cacheEntry({json.dumps(default_summary)}));
@@ -1276,7 +1276,7 @@ def test_old_top_ten_cache_stays_limited_until_full_pool_refresh_then_upgrades()
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
+const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only-rank-flow";
 const legacyKey = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
 const currentKey = "crowley.trading-summary.v2.us-normal-alliance.1.60.1.70938." + profile;
 const values = new Map([[legacyKey, JSON.stringify({{ version: 1, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: profile, summary: {json.dumps(legacy_summary)} }})]]);
@@ -1339,7 +1339,7 @@ def test_v1_bridge_cache_with_full_candidates_is_restored_and_malformed_pool_is_
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
+const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only-rank-flow";
 const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
 const entry = (summary) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profile, summary }});
 const validValues = new Map([[key, entry({json.dumps(bridge_summary)})]]);
@@ -1394,7 +1394,7 @@ def test_unknown_zero_and_slow_activity_render_in_fresh_and_saved_profit_pool():
     summary.update(candidates=candidates, opportunities=candidates[:10])
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
+const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only-rank-flow";
 const key = "crowley.trading-summary.v2.us-normal-alliance.1.60.1.70938." + profile;
 const values = new Map([[key, JSON.stringify({{ version: 2, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: profile, summary: {json.dumps(summary)} }})]]);
 const storage = {{ getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) }};

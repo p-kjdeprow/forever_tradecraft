@@ -4,6 +4,8 @@ The dashboard has one saved maximum-profession-skill selector: 150, 225, or 300.
 It applies to both retained professions, Alchemy and Tailoring, and defaults to 225.
 The selector limits recipe eligibility; it does not change the assumed character's
 current training or erase the existing leveling/training notes.
+The subsequent [ranking correction](STRATEGY_RANKING_FIX.md) removes the old
+unconditional training penalty, so admitted higher-skill recipes can reach the top ten.
 
 The market server now calculates the complete profitable candidate pool through
 skill 300. Each row includes `eligibility_skill`, which is the exact learning rank

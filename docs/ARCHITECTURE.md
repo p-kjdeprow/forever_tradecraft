@@ -66,6 +66,9 @@ Each row carries `eligibility_skill`: its exact learning rank, or the verified y
 upper bound when the rank is unknown. `required_skill` stays null in that latter case;
 missing learning evidence never becomes skill zero. The wider pool uses a distinct
 cache profile so an old 225-limited pool cannot suppress recipes at skill 300.
+Ranking uses estimated profit rate, then batch profit and a stable spell-ID tie
+break. Current-training labels are informational and cannot demote recipes admitted
+by the selected skill limit. Ranking changes also invalidate browser/server caches.
 
 All twelve applied SQL migrations retain their original bytes. Retiring an API removes
 its runtime consumers, not historical tables or raw evidence. New schema changes require

@@ -40,6 +40,20 @@ Only the server was redeployed; scanner/companion PIDs and DB/raw mounts are unc
 See [the filter record](PROFESSION_SKILL_FILTER.md). Private deployment and browser
 receipts are in `~/.local/state/crowley/profession-skill-20261117/`.
 
+A subsequent user report exposed a real ranking defect: all recipes marked as
+leveling targets were placed below all ready recipes, regardless of their economics.
+At sweep 914, selecting 300 added 22 candidates at the 50c profit threshold but
+left the displayed ten identical. That unconditional training tier is now removed.
+Ranking uses estimated profit rate, then batch profit and spell ID; training labels
+remain visible without changing order. At 300 the live ten now include Greater
+Arcane Elixir (285), Distilled Firewater (250) and Elixir of the Grizzly (300).
+All 146 candidate records matched exactly before/after for the same sweep; only
+ordering changed. Client-export teaching evidence independently confirms the
+285 requirement for Greater Arcane Elixir. The correction passed 56 focused tests,
+Ruff, scoped Pyright and a live browser/cache check. Scanner and companion processes
+were left running. See [the correction record](STRATEGY_RANKING_FIX.md); private
+receipts are in `~/.local/state/crowley/strategy-ranking-20261117/`.
+
 The cold-start refactor introduced two full captures and a Python child per typed
 character. Commands now use one explicit key transition chain through one monitored
 child, with cheap stop/presence/maintenance/session/process/focus checks during typing.
@@ -61,7 +75,7 @@ disabled. Both addons remain 0.3.0, scanner schema 1 and automation schema 3.
 See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
 
 The server now runs image
-`sha256:cf2caeac7bc3d0d4284c35ff1b5a78cfec5d2dd5c0bfb1ad26ed7eae8b1cefc1`.
+`sha256:9ff7338ea59d7ca52a57a672bb4c09df76bd6f6b98c74b96a1b1b28d6dbea0e1`.
 The original database container and DB/raw mounts are unchanged. All twelve applied
 migrations retain their original bytes. The supported client-data exporter and loader
 imported genuine build 1.60.1.70959 data (export 5: 2,282 recipes, 4,556 items).

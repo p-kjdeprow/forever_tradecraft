@@ -43,6 +43,7 @@ PROFILE_KEY = (
     PROFESSION_SKILL_CAP,
     BUDGET_COPPER,
     "profit-only",
+    "rank-flow",
 )
 
 TRADING_SUMMARY_CACHE: MarketCache[dict[str, Any]] = MarketCache(max_entries=8, ttl_seconds=900)
@@ -387,7 +388,7 @@ def _opportunity(
     output_quote: _Quote,
     activity: _Activity,
     list_price: int,
-) -> tuple[dict[str, Any], int, Fraction] | None:
+) -> tuple[dict[str, Any], Fraction] | None:
     if len(recipe.outputs) != 1:
         return None
     item_id, output_per_craft = recipe.outputs[0]
@@ -488,15 +489,14 @@ def _opportunity(
         if recipe.cooldown_seconds > 0:
             craft_rate = min(craft_rate, Fraction(3600, recipe.cooldown_seconds))
         flow = (profit / crafts) * craft_rate
-    tier = 2 if eligibility.needs_leveling else (0 if activity.rate is not None and activity.rate > 0 else 1)
-    return row, tier, flow
+    return row, flow
 
 
 def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
     """Calculate ranked positive-margin candidates and retain the legacy top-ten field."""
 
     House.parse(inputs.house)
-    candidates: list[tuple[int, Fraction, Fraction, int, dict[str, Any]]] = []
+    candidates: list[tuple[Fraction, Fraction, int, dict[str, Any]]] = []
     for recipe in inputs.recipes:
         eligibility = _eligibility(recipe)
         if eligibility is None:
@@ -519,11 +519,11 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
         result = _opportunity(inputs, recipe, eligibility, output_quote, activity, list_price)
         if result is None:
             continue
-        row, tier, flow = result
+        row, flow = result
         profit = Fraction(row["profit"])
-        candidates.append((tier, -flow, -profit, recipe.spell_id, row))
-    candidates.sort(key=lambda entry: entry[:4])
-    candidate_rows = [entry[4] for entry in candidates]
+        candidates.append((-flow, -profit, recipe.spell_id, row))
+    candidates.sort(key=lambda entry: entry[:3])
+    candidate_rows = [entry[3] for entry in candidates]
     return {
         "house": inputs.house,
         "client_build": inputs.client_build,
@@ -557,6 +557,8 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
             "All skill planning stays within 300; the dashboard applies the selected skill limit.",
             "Batch sizing and ranking assume a 10% share of observed market activity; "
             "this is not a personal sales forecast.",
+            "Ranking uses estimated profit rate, then batch profit. Current-training labels do not "
+            "affect ranking; the dashboard's selected skill limit controls eligibility.",
             "Recipes with the same cooldown group share one timer; rows are alternatives, not a "
             "combined portfolio forecast.",
         ],

@@ -323,6 +323,32 @@ def test_cooldown_caps_ranking_flow_and_rows_expose_shared_group():
     assert not any("unmeasured trials" in note for note in result["notes"])
 
 
+@pytest.mark.parametrize("profession", ["alchemy", "tailoring"])
+@pytest.mark.parametrize("units_removed", [0, 10])
+def test_higher_skill_recipe_can_outrank_ready_recipe_without_training_penalty(profession, units_removed):
+    ready = _recipe(spell_id=10, profession=profession, output_id=1000, learning_rank=140)
+    higher = _recipe(spell_id=11, profession=profession, output_id=1001, learning_rank=300)
+    facts = _facts(output_sell=0, reagent_vendor_size=1, reagent_vendor_price=1)
+    facts[1001] = ItemFacts(1001, 0, None, None, 20, 2)
+    result = summary.build_trading_summary(
+        _inputs(
+            [ready, higher],
+            books={
+                1000: _commodity_history(1000, units_removed=units_removed, unit_price=100),
+                1001: _commodity_history(1001, units_removed=units_removed, unit_price=200),
+            },
+            facts=facts,
+        )
+    )
+    rows = result["candidates"]
+    assert [row["spell_id"] for row in rows] == [11, 10]
+    assert rows[0]["needs_leveling"] is True
+    assert rows[1]["needs_leveling"] is False
+    assert Fraction(rows[0]["profit_per_item"]) > Fraction(rows[1]["profit_per_item"])
+    assert [row["spell_id"] for row in rows if row["eligibility_skill"] <= 225] == [10]
+    assert [row["spell_id"] for row in rows if row["eligibility_skill"] <= 300] == [11, 10]
+
+
 def test_tailoring_caps_distinguish_exact_rank_from_yellow_threshold():
     exact_leveling = _recipe(
         spell_id=10,

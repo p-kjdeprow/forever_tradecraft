@@ -299,6 +299,40 @@ def test_doctor_accepts_companion_rendered_data(tmp_path: Path, monkeypatch: pyt
     assert report.ok, report.problems
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        render_assignment(
+            "CROWLEY_DATA",
+            {
+                "generatedAt": 1,
+                "ackedScans": [],
+                "scanPlan": False,
+                "referenceItemIDs": [],
+            },
+            header="stale companion fields",
+        ),
+        render_assignment("CROWLEY_DATA", {"generatedAt": 1, "scanPlan": False}, header="missing field"),
+        "CROWLEY_DATA = false\n",
+        "Other_Data = {}\n",
+    ],
+)
+def test_doctor_requests_companion_refresh_for_invalid_runtime_data_schema(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    source: str,
+) -> None:
+    environment, game_root = _setup(tmp_path, monkeypatch)
+    data_lua = game_root / "_classic_beta_" / "Interface" / "AddOns" / "Crowley_Data" / "Data.lua"
+    data_lua.write_text(source, encoding="utf-8")
+
+    report = doctor.doctor(environment, database_status=_current)
+
+    data_problems = [problem for problem in report.problems if "CROWLEY_DATA" in problem]
+    assert len(data_problems) == 1
+    assert "refresh companion" in data_problems[0]
+
+
 def test_doctor_accepts_uv_tool_symlinked_entrypoints(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

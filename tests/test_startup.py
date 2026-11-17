@@ -940,6 +940,164 @@ def test_existing_hidden_decorated_game_window_is_restored_and_repaired_in_place
     assert actions == [("restore", 44), ("repair", 44)]
 
 
+def test_timed_out_restore_reobserves_same_window_and_continues_when_it_settles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    identity = ProcessIdentity(17, 100, 1000, "C:\\wow.exe", str(tmp_path / "wine"))
+    hidden = WindowState(44, 1, False, False, (1920, 1080), visible=False)
+    healthy = WindowState(44, 1, True, True, (1920, 1080), fullscreen=True)
+    state = [hidden]
+    restores: list[int] = []
+    launches: list[str] = []
+    monkeypatch.setattr(recovery, "_game_identities", lambda: (identity,))
+    monkeypatch.setattr(recovery, "_game_window", lambda *_args: state[0])
+
+    def timeout_restore(_session, _identity, window: int, *, game: bool) -> None:
+        assert game
+        restores.append(window)
+        raise subprocess.TimeoutExpired("private-window-command", 5.0)
+
+    monkeypatch.setattr(recovery, "_activate", timeout_restore)
+    monkeypatch.setattr(recovery, "_launch_battle_net", lambda _session: launches.append("launch"))
+    monkeypatch.setattr(
+        startup_module,
+        "observe_native_world",
+        lambda _config, **_kwargs: NativeWorldObservation(
+            identity, healthy, {"boot": "boot-1"}, clock.wall(), "same"
+        ),
+    )
+
+    timed_out = recovery.step()
+    assert timed_out.outcome == "waiting"
+    assert timed_out.reason == "game_window_restore_timeout_reobserve"
+    assert timed_out.window_xid == 44
+    assert timed_out.deadline_at == pytest.approx(10_030.0)
+    assert recovery.active
+    assert restores == [44]
+
+    state[0] = healthy
+    clock.value += 1.1
+    ready = recovery.step()
+    assert ready.outcome == "ready"
+    assert ready.process_identity == identity
+    assert restores == [44]
+    assert launches == []
+
+
+def test_timed_out_partial_fullscreen_repair_is_reobserved_before_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    identity = ProcessIdentity(17, 100, 1000, "C:\\wow.exe", str(tmp_path / "wine"))
+    dirty = WindowState(
+        44,
+        1,
+        False,
+        True,
+        (1920, 1080),
+        "window_not_fullscreen",
+        outer_rect=(66, 32, 1854, 1048),
+        visible=True,
+    )
+    healthy = WindowState(44, 1, True, True, (1920, 1080), fullscreen=True)
+    state = [dirty]
+    repairs: list[int] = []
+    monkeypatch.setattr(recovery, "_game_identities", lambda: (identity,))
+    monkeypatch.setattr(recovery, "_game_window", lambda *_args: state[0])
+
+    def partial_repair(_session, _identity, window: int) -> None:
+        repairs.append(window)
+        state[0] = healthy
+        raise subprocess.TimeoutExpired("private-window-command", 5.0)
+
+    monkeypatch.setattr(recovery, "_repair_fullscreen", partial_repair)
+    monkeypatch.setattr(
+        startup_module,
+        "observe_native_world",
+        lambda _config, **_kwargs: NativeWorldObservation(
+            identity, healthy, {"boot": "boot-1"}, clock.wall(), "same"
+        ),
+    )
+
+    timed_out = recovery.step()
+    assert timed_out.outcome == "waiting"
+    assert timed_out.reason == "fullscreen_repair_timeout_reobserve"
+    assert timed_out.window_xid == 44
+    assert timed_out.deadline_at == pytest.approx(10_030.0)
+
+    clock.value += 1.1
+    ready = recovery.step()
+    assert ready.outcome == "ready"
+    assert ready.process_identity == identity
+    assert repairs == [44]
+
+
+@pytest.mark.parametrize("operation", ["restore", "repair"])
+def test_persistent_window_command_timeouts_expire_original_30_second_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    recovery, clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    identity = ProcessIdentity(17, 100, 1000, "C:\\wow.exe", str(tmp_path / "wine"))
+    state = (
+        WindowState(44, 1, False, False, (1920, 1080), visible=False)
+        if operation == "restore"
+        else WindowState(
+            44,
+            1,
+            False,
+            True,
+            (1920, 1080),
+            "window_not_fullscreen",
+            outer_rect=(66, 32, 1854, 1048),
+        )
+    )
+    attempts: list[int] = []
+    launches: list[str] = []
+    monkeypatch.setattr(recovery, "_game_identities", lambda: (identity,))
+    monkeypatch.setattr(recovery, "_game_window", lambda *_args: state)
+
+    def timeout(*_args, **_kwargs) -> None:
+        attempts.append(44)
+        clock.value += 5.0
+        raise subprocess.TimeoutExpired("private-window-command", 5.0)
+
+    monkeypatch.setattr(recovery, "_activate" if operation == "restore" else "_repair_fullscreen", timeout)
+    monkeypatch.setattr(recovery, "_launch_battle_net", lambda _session: launches.append("launch"))
+
+    status = recovery.step()
+    assert status.outcome == "waiting"
+    original_deadline = status.deadline_at
+    assert original_deadline == pytest.approx(10_030.0)
+
+    for _ in range(8):
+        assert status.outcome == "waiting"
+        assert status.deadline_at == original_deadline
+        assert status.retry_at is not None
+        clock.value = status.retry_at - 10_000.0
+        status = recovery.step()
+        if status.outcome == "failed":
+            break
+
+    expected_reason = (
+        "game_window_restore_timed_out" if operation == "restore" else "fullscreen_repair_timed_out"
+    )
+    assert status.outcome == "failed"
+    assert status.reason == expected_reason
+    assert clock.value == pytest.approx(30.0)
+    assert recovery._game_window_deadline == pytest.approx(30.0)
+    if operation == "repair":
+        assert recovery._repair_deadline == pytest.approx(30.0)
+    assert recovery._episode_deadline == pytest.approx(600.0)
+    assert len(attempts) == 5
+    assert launches == []
+
+
 @pytest.mark.parametrize(
     ("evidence", "outcome", "reason"),
     [

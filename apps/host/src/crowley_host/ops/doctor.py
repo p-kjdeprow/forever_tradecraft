@@ -160,6 +160,11 @@ def _check_runtime_lua(path: Path, global_name: str, problems: list[str]) -> Non
     except (OSError, UnicodeError, savedvars.SavedVariablesError) as exc:
         problems.append(f"runtime-owned Lua is not parseable: {path} ({exc})")
         return
+    if global_name == "CROWLEY_DATA":
+        data = value.get(global_name)
+        if not isinstance(data, dict) or set(data) != {"generatedAt", "ackedScans", "scanPlan"}:
+            problems.append(f"runtime-owned CROWLEY_DATA is missing or stale; refresh companion data: {path}")
+        return
     if global_name not in value:
         problems.append(f"runtime-owned Lua is missing {global_name}: {path}")
 

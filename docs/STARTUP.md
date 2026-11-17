@@ -24,6 +24,7 @@ cannot authorize a replacement instance; an already dispatched Play keeps its or
 | Graphical-session environment absent/stale | Refresh from the user manager and wait visibly |
 | Screenshot capture fails | Retire stale proof, release controls safely, log a bounded cause and reobserve within the original startup deadlines |
 | Existing decorated/maximized game | Repair and verify the same owned window |
+| Restore/fullscreen request times out during initial window creation | Reobserve the same process/window within the original 30-second window deadline |
 | Measured Battle.net Updates information window | Verify owned child, panel/heading/release/close control; dismiss once and observe disappearance |
 | Login required or account conflict | Block for the user; never type credentials or reconnect |
 | Updating/downloading/busy | Report and wait, without clicking an unrelated button |
@@ -74,6 +75,9 @@ At a quiet saved/uploaded/ACKed scan boundary, retire the old owner and its cont
 install and verify the new desktop set, and enable only the new host. Preserve SavedVariables,
 mutable Data.lua ACKs, original scan-plan identity and companion cadence. This startup work does
 not require a market-server image or database change.
+On a package cutover, start the companion first and verify that it has published the exact
+three-field client document before doctor and the next game load. Preserving an old mutable
+file does not establish that its field set matches the newly installed client.
 
 Final source verification, live UI qualification and installed cutover receipts will be recorded
 in [HANDOFF](HANDOFF.md) when complete. Follow [local-game-control](../.agents/skills/local-game-control/SKILL.md)

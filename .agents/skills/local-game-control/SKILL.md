@@ -54,6 +54,8 @@ trading, account changes or unrelated display changes.
 - Before staging a client update, compare the active `.build.info` product version, the running HUD build and the
   packaged target. A warm client can stay on its old build after the files on disk change; a clean relaunch activates
   the update.
+- After a coordinated addon cutover, verify the companion's actual client-data field set before the next game
+  load. Server response metadata and client Lua have separate contracts; a parseable Data.lua can still abort addon startup.
 - For a reviewed plan cutover, verify the old sweep was saved, uploaded and ACKed, then stop the loop. Hold the GUI
   lease across fresh frame, disk and server checks, post-capture process/window/focus/presence checks, one normal
   window-manager close and exact process exit. Release the lease before installing. A reviewed helper can carry a

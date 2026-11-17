@@ -35,6 +35,11 @@ without automation installed. Starts are scheduled 900 seconds apart; each query
 has its target-defined budget, and cold items rotate through six recorded slices. Query
 freshness barriers retain distinctions between attempted, incomplete, empty and priced.
 
+The companion projects the HTTP addon-data response onto exactly `generatedAt`, `ackedScans`
+and `scanPlan` before publishing client Lua. Server metadata such as retired reference-item
+IDs cannot enter that strict client document. Missing or malformed required fields preserve
+the previous file. Doctor checks the client document's exact top-level field set before launch.
+
 The scanner saves compressed observations in CrowleyDB.scans. The game writes SavedVariables
 at reload/logout/exit. The companion parses original bytes, uploads idempotently and writes
 Data.lua acknowledgements. Loading acknowledgements at the next reload prunes in-memory

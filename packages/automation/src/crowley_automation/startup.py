@@ -581,7 +581,25 @@ class StartupRecovery:
         if state.detail == "window_process_mismatch":
             raise _BlockEpisode("game_window_process_mismatch")
         if not state.visible:
-            self._activate(session, identity, state.xid, game=True)
+            if self._clock() >= self._game_window_deadline:
+                return self._finish(
+                    "failed", "game_window", "game_window_restore_timed_out", identity, state.xid
+                )
+            try:
+                self._activate(session, identity, state.xid, game=True)
+            except subprocess.TimeoutExpired:
+                _LOG.warning("startup game-window restore timed out; reobserving same window")
+                if self._clock() >= self._game_window_deadline:
+                    return self._finish(
+                        "failed", "game_window", "game_window_restore_timed_out", identity, state.xid
+                    )
+                return self._wait(
+                    "game_window",
+                    "game_window_restore_timeout_reobserve",
+                    identity=identity,
+                    window=state.xid,
+                    deadline=self._game_window_deadline,
+                )
             return self._wait(
                 "game_window",
                 "game_window_restore_dispatched",
@@ -605,7 +623,22 @@ class StartupRecovery:
                     window=state.xid,
                     deadline=self._repair_deadline,
                 )
-            self._repair_fullscreen(session, identity, state.xid)
+            try:
+                self._repair_fullscreen(session, identity, state.xid)
+            except subprocess.TimeoutExpired:
+                _LOG.warning("startup fullscreen repair timed out; reobserving same window")
+                self._repair_retry_at = self._clock() + _REPAIR_RETRY_SECONDS
+                if self._clock() >= self._repair_deadline:
+                    return self._finish(
+                        "failed", "game_window", "fullscreen_repair_timed_out", identity, state.xid
+                    )
+                return self._wait(
+                    "game_window",
+                    "fullscreen_repair_timeout_reobserve",
+                    identity=identity,
+                    window=state.xid,
+                    deadline=self._repair_deadline,
+                )
             self._repair_retry_at = self._clock() + _REPAIR_RETRY_SECONDS
             return self._wait(
                 "game_window",

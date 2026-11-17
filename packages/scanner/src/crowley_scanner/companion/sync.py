@@ -505,9 +505,21 @@ class Companion:
                 raise
             self._record_permanent_rejection(key, exc)
             return
+        response_data = _response_object(response, "addon-data response")
+        data = {
+            "generatedAt": _required_value(response_data, "generatedAt", "addon-data response"),
+            "ackedScans": _required_value(response_data, "ackedScans", "addon-data response"),
+            "scanPlan": _required_value(response_data, "scanPlan", "addon-data response"),
+        }
+        if isinstance(data["generatedAt"], bool) or not isinstance(data["generatedAt"], int):
+            raise RuntimeError("addon-data response.generatedAt must be an integer")
+        acked_scans = data["ackedScans"]
+        if not isinstance(acked_scans, list) or any(not isinstance(item, str) for item in acked_scans):
+            raise RuntimeError("addon-data response.ackedScans must be an array of strings")
+        if not isinstance(data["scanPlan"], dict):
+            raise RuntimeError("addon-data response.scanPlan must be an object")
+        data["ackedScans"] = sorted(cast(list[str], acked_scans), key=lambda item: item.encode())
         self.state.clear_record_rejections(key)
-        data = response.json()
-        data["ackedScans"] = sorted(data["ackedScans"], key=lambda item: item.encode())
         text = render_assignment(
             "CROWLEY_DATA",
             data,

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import httpx
 import pytest
-from crowley_common.game_target import load_game_target
+from crowley_common.game_target import load_game_target, target_scan_plan
 from crowley_common.luawriter import render_assignment
-from crowley_common.watchlist import load_catalog
+from crowley_common.watchlist import Catalog
 from crowley_scanner import savedvars
 from crowley_scanner.companion.config import CompanionSettings
 from crowley_scanner.companion.sync import (
@@ -34,9 +34,30 @@ from crowley_scanner.state import (
 from pydantic import SecretStr, ValidationError
 
 from .test_core import raw_scan
+from .wow_harness import WowClient
 
 FIXTURE = Path(__file__).parent / "fixtures/native-construction-unknown-savedvars.lua"
 TARGET_FIXTURE = Path(__file__).parent / "fixtures/targets/verified-beta.json"
+CATALOG_FIXTURE = Path(__file__).parent / "fixtures/catalogs/verified-beta.json"
+
+
+def _scan_plan() -> dict[str, object]:
+    target = load_game_target(TARGET_FIXTURE)
+    catalog = Catalog.model_validate_json(CATALOG_FIXTURE.read_text(encoding="utf-8"))
+    return target_scan_plan(catalog, target)
+
+
+def _addon_data_response(
+    *, acked_scans: list[str] | None = None, extra: dict[str, object] | None = None
+) -> httpx.Response:
+    payload: dict[str, object] = {
+        "generatedAt": 1,
+        "ackedScans": [] if acked_scans is None else acked_scans,
+        "scanPlan": _scan_plan(),
+    }
+    if extra:
+        payload.update(extra)
+    return httpx.Response(200, json=payload)
 
 
 def _settings_for(
@@ -109,7 +130,7 @@ def test_retries_failed_file_without_reuploading_successful_scans(companion, fai
     uploaded = []
     probes = []
     failed = False
-    plan = load_catalog().scan_plan()
+    plan = _scan_plan()
 
     def respond(request):
         nonlocal failed
@@ -119,10 +140,7 @@ def test_retries_failed_file_without_reuploading_successful_scans(companion, fai
         elif request.url.path == "/v1/probes":
             target = "probe"
         else:
-            return httpx.Response(
-                200,
-                json={"generatedAt": 1, "ackedScans": uploaded.copy(), "scanPlan": plan},
-            )
+            return _addon_data_response(acked_scans=uploaded.copy())
         attempts.append(target)
         if target == failure and not failed:
             failed = True
@@ -157,6 +175,77 @@ def test_retries_failed_file_without_reuploading_successful_scans(companion, fai
     assert len(attempts) == 4  # Completed files stay processed.
 
 
+def test_addon_data_publication_drops_server_metadata_and_loads_in_scanner(companion):
+    instance, _saved = companion
+    plan = _scan_plan()
+    acked = ["scan-z", "scan-a"]
+    generated_at = 1760000123
+    response = {
+        "generatedAt": generated_at,
+        "ackedScans": acked,
+        "scanPlan": plan,
+        "referenceItemIDs": [2589, 2592],
+    }
+    instance.client = httpx.Client(
+        base_url="http://test",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=response)),
+    )
+    try:
+        instance.write_addon_data()
+    finally:
+        instance.client.close()
+
+    data = savedvars.load_file(instance.settings.data_lua)["CROWLEY_DATA"]
+    assert set(data) == {"generatedAt", "ackedScans", "scanPlan"}
+    assert data["generatedAt"] == generated_at
+    assert data["ackedScans"] == ["scan-a", "scan-z"]
+    assert data["scanPlan"] == {**plan, "pools": {**plan["pools"], "cold": {}}}
+
+    client = WowClient(load_automation=False)
+    client.lua.globals().CROWLEY_DATA = client._to_lua(data)
+    client.login()
+    assert client.lua.globals().CrowleyDB is not None
+    assert any("plan loaded:" in message for message in client.chat)
+
+
+@pytest.mark.parametrize(
+    ("body", "message"),
+    [
+        ([], "addon-data response must be an object"),
+        (
+            {"generatedAt": 1, "ackedScans": [], "referenceItemIDs": [2589]},
+            "addon-data response is missing key 'scanPlan'",
+        ),
+        (
+            {"generatedAt": True, "ackedScans": [], "scanPlan": {}},
+            "addon-data response.generatedAt must be an integer",
+        ),
+        (
+            {"generatedAt": 1, "ackedScans": "scan-1", "scanPlan": {}},
+            "addon-data response.ackedScans must be an array of strings",
+        ),
+        (
+            {"generatedAt": 1, "ackedScans": [], "scanPlan": []},
+            "addon-data response.scanPlan must be an object",
+        ),
+    ],
+)
+def test_invalid_addon_data_response_preserves_previous_data_lua(companion, body, message):
+    instance, _saved = companion
+    previous = b"-- existing Data.lua bytes\nCROWLEY_DATA = {}\n"
+    instance.settings.data_lua.write_bytes(previous)
+    instance.client = httpx.Client(
+        base_url="http://test",
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, json=body)),
+    )
+    try:
+        with pytest.raises(RuntimeError, match=message):
+            instance.write_addon_data()
+    finally:
+        instance.client.close()
+    assert instance.settings.data_lua.read_bytes() == previous
+
+
 def test_changed_file_waits_for_stability_after_failed_upload(companion):
     instance, saved = companion
     write_savedvars(saved, [raw_scan(id="s1")])
@@ -170,7 +259,7 @@ def test_changed_file_waits_for_stability_after_failed_upload(companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 2, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.tick()
@@ -202,7 +291,7 @@ def test_unknown_native_marker_fixture_preserves_scan_wire_and_is_not_uploaded(c
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -359,7 +448,7 @@ def test_transient_http_rejection_is_retried(status, companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     with pytest.raises(UploadResponseError) as failure:
@@ -383,7 +472,7 @@ def test_rejection_is_retried_when_configuration_changes(companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -412,7 +501,7 @@ def test_rejection_is_retried_when_contract_version_changes(companion, monkeypat
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -437,7 +526,7 @@ def test_permanent_rejection_skips_same_digest_retries_changed_digest_and_operat
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -461,7 +550,7 @@ def test_permanent_rejection_skips_same_digest_retries_changed_digest_and_operat
             lambda request: (
                 httpx.Response(422, json={"code": "bad_scan", "detail": "invalid contract"})
                 if request.url.path == "/v1/scans"
-                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+                else _addon_data_response()
             )
         ),
     )
@@ -474,7 +563,7 @@ def test_permanent_rejection_skips_same_digest_retries_changed_digest_and_operat
             lambda request: (
                 httpx.Response(200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"})
                 if request.url.path == "/v1/scans"
-                else httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+                else _addon_data_response()
             )
         ),
     )
@@ -497,7 +586,7 @@ def test_permanent_rejection_does_not_block_other_records(companion):
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     instance.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(respond))
     instance.once()
@@ -562,7 +651,7 @@ def test_companion_ledger_full_persists_first_rejection_and_leaves_signature_pen
 
     def fill_ledger(request):
         if request.url.path == "/v1/addon-data":
-            return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+            return _addon_data_response()
         if request.url.path != "/v1/scans":
             raise AssertionError(f"unexpected request {request.url}")
         scan_id = json.loads(request.content)["id"]
@@ -590,7 +679,7 @@ def test_companion_ledger_full_persists_first_rejection_and_leaves_signature_pen
             return httpx.Response(
                 200, json={"house": "us-normal-alliance", "listings": 1, "status": "created"}
             )
-        return httpx.Response(200, json={"generatedAt": 1, "ackedScans": []})
+        return _addon_data_response()
 
     replacement = Companion(instance.settings)
     replacement.client = httpx.Client(base_url="http://test", transport=httpx.MockTransport(retry_second))

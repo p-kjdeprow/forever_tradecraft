@@ -1,18 +1,21 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import crowley_automation.desktop_observe as desktop_observe
 import crowley_automation.startup as startup_module
 import pytest
 from crowley_automation.config import AutomationConfig
 from crowley_automation.desktop_input import GuiLease
-from crowley_automation.desktop_observe import NativeWorldObservation, WindowState, X11Window
+from crowley_automation.desktop_observe import NativeWorldObservation, ScreenCanvas, WindowState, X11Window
 from crowley_automation.desktop_session import DesktopSession, DesktopSessionUnavailable
+from crowley_automation.gui.capture import CaptureError
 from crowley_automation.gui.process import ProcessIdentity
 from crowley_automation.startup import (
     StartupRecovery,
@@ -1383,3 +1386,130 @@ def test_capture_that_takes_too_long_is_waited_and_reobserved_as_stale(
     assert status.reason == "screen_capture_stale_reobserve"
     assert recovery._episode_deadline == pytest.approx(600.0)
     assert recovery.active
+
+
+def test_capture_failure_releases_lease_and_reobserves_with_original_deadlines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    recovery, clock, provider, lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    recovery._bnet_launched = True
+    recovery._login_deadline = 180.0
+    recovery._play_deadline = 20.0
+    recovery._news_close_pending = True
+    recovery._news_deadline = 15.0
+    recovery._play_attempts = 2
+    attempts = 0
+
+    def observe(_session) -> StartupStatus:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise CaptureError("diagnostic details that must not enter status")
+        return recovery._finish("ready", "native_ready", "matching_native_world_ready", native=True)
+
+    monkeypatch.setattr(recovery, "_step_locked", observe)
+    with caplog.at_level("WARNING", logger=startup_module.__name__):
+        unavailable = recovery.step()
+    original_deadline = recovery._episode_deadline
+    assert unavailable.outcome == "waiting"
+    assert unavailable.reason == "screen_capture_failed_reobserve"
+    assert unavailable.deadline_at == pytest.approx(10_015.0)
+    assert "diagnostic details" not in unavailable.reason
+    assert not recovery.active
+    assert not lease.held
+    assert recovery._play_attempts == 2
+    assert recovery._episode_deadline == original_deadline == pytest.approx(600.0)
+    assert len(caplog.records) == 1
+    assert len(caplog.records[0].getMessage()) <= 200
+
+    clock.value += 1.1
+    ready = recovery.step()
+    assert ready.outcome == "ready"
+    assert recovery._episode_deadline == original_deadline
+    assert recovery._play_attempts == 2
+
+
+def test_repeated_capture_failures_expire_original_episode_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    monkeypatch.setattr(
+        recovery,
+        "_step_locked",
+        lambda _session: (_ for _ in ()).throw(CaptureError("capture unavailable")),
+    )
+
+    first = recovery.step()
+    assert first.outcome == "waiting"
+    original_deadline = recovery._episode_deadline
+    clock.value = 600.0
+    expired = recovery.step()
+    assert expired.outcome == "failed"
+    assert expired.reason == "episode_deadline_expired"
+    assert recovery._episode_deadline == original_deadline == pytest.approx(600.0)
+
+
+def test_capture_failure_with_unreaped_control_retains_gui_ownership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, _clock, provider, lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+
+    class UnreapedControl:
+        child_pid = 404
+        cleanup_failed = True
+
+        def close(self) -> None:
+            raise startup_module.ControlChildError("still alive")
+
+    control = UnreapedControl()
+    recovery._control = control  # type: ignore[assignment]
+    monkeypatch.setattr(
+        recovery,
+        "_step_locked",
+        lambda _session: (_ for _ in ()).throw(CaptureError("capture unavailable")),
+    )
+
+    status = recovery.step()
+    assert status.outcome == "failed"
+    assert status.reason == "control_cleanup_failed"
+    assert recovery.active
+    assert lease.held
+    assert recovery._control is control
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        (OSError("no command"), "gnome-screenshot failed (OSError)"),
+        (subprocess.TimeoutExpired("gnome-screenshot", timeout=1.0), "gnome-screenshot timed out"),
+    ],
+)
+def test_screen_capture_runner_preserves_bounded_failure_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: BaseException,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(
+        desktop_observe.subprocess, "run", lambda *_args, **_kwargs: (_ for _ in ()).throw(failure)
+    )
+    with pytest.raises(CaptureError) as error:
+        ScreenCanvas(tmp_path)._capture_run(["gnome-screenshot", "-f", "capture.png"], 1.0)
+    assert str(error.value) == expected
+
+
+def test_screen_capture_runner_includes_bounded_stderr_on_exit_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        desktop_observe.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(returncode=9, stderr="diagnostic " + "x" * 400),
+    )
+    with pytest.raises(CaptureError) as error:
+        ScreenCanvas(tmp_path)._capture_run(["gnome-screenshot", "-f", "capture.png"], 1.0)
+    assert "gnome-screenshot exited 9: diagnostic" in str(error.value)
+    assert len(str(error.value)) <= 200

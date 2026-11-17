@@ -73,6 +73,8 @@ trading, account changes or unrelated display changes.
 - Exit code zero from an input tool proves dispatch, not effect. Read the result from a fresh HUD frame
   (`crowley-desktop probe-frame`, `crowley-host status`) before the next dependent step; XTEST keys can land up to about
   1 s late and go to the compositor-focused window, which is not always the X "active window".
+- A capture error does not establish a missing window. Preserve its original bounded command/cause diagnostic;
+  reproduce once with the installed session provider before changing environment or capture behavior.
 - Do not replay an action because its first frame lags.
 - A GNOME system modal can dim the HUD and ignore Xwayland input. A disconnected login screen keeps the same Wine
   identity; read the screen, not just the process.

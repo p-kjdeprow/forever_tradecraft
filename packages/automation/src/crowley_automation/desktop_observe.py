@@ -429,10 +429,14 @@ class ScreenCanvas:
                 if self._environment is None
                 else dict(self._environment() if callable(self._environment) else self._environment),
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise gui_capture.CaptureError(f"{argv[0]} failed") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise gui_capture.CaptureError(f"{argv[0]} timed out") from exc
+        except OSError as exc:
+            raise gui_capture.CaptureError(f"{argv[0]} failed ({type(exc).__name__})") from exc
         if done.returncode != 0:
-            raise gui_capture.CaptureError(f"{argv[0]} exited {done.returncode}")
+            detail = " ".join(done.stderr.split())[:160]
+            suffix = f": {detail}" if detail else ""
+            raise gui_capture.CaptureError(f"{argv[0]} exited {done.returncode}{suffix}")
 
     def capture(self, display: tuple[int, int]) -> Any:
         from PIL import Image

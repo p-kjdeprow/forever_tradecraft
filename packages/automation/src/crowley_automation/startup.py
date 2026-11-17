@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import pwd
 import re
@@ -39,6 +40,7 @@ from crowley_automation.desktop_session import (
     DesktopSessionProvider,
     DesktopSessionUnavailable,
 )
+from crowley_automation.gui.capture import CaptureError
 from crowley_automation.gui.control_child import (
     ControlChildCancelled,
     ControlChildError,
@@ -88,6 +90,7 @@ _BATTLE_NET_UPDATES_TITLE = "Battle.net Updates"
 _PRODUCT_UI_TITLES = {"wowf": "WoW: Forever"}
 _BATTLE_NET_CONFIG_LIMIT = 2 * 1024 * 1024
 _BUILD_INFO_LIMIT = 1024 * 1024
+_LOG = logging.getLogger(__name__)
 
 
 def _nonblocking_gui_lease(path: Path) -> GuiLease:
@@ -356,6 +359,42 @@ class StartupRecovery:
                 retry=self._clock() + 5.0,
                 identity=None,
                 window=None,
+            )
+        except CaptureError as error:
+            message = f"{type(error).__name__}: {' '.join(str(error).split())}"
+            prefix = "startup screen capture failed: "
+            _LOG.warning("%s%s", prefix, message[: 200 - len(prefix)])
+            self._last_native = None
+            phase = self._phase()
+            deadlines: list[float] = [self._episode_deadline]
+            if phase == "battle_net_login":
+                deadlines.extend(
+                    item for item in (self._login_deadline, self._play_deadline) if item is not None
+                )
+                if self._news_close_pending:
+                    if self._news_deadline is not None:
+                        deadlines.append(self._news_deadline)
+            elif phase == "world_loading":
+                if self._world_deadline is not None:
+                    deadlines.append(self._world_deadline)
+            elif phase == "game_close":
+                if self._close_deadline is not None:
+                    deadlines.append(self._close_deadline)
+            deadline = min(deadlines)
+            if not self._release_episode():
+                return self._publish(
+                    "failed",
+                    phase,
+                    "control_cleanup_failed",
+                    identity=self._last_identity,
+                    window=self._last_window,
+                )
+            return self._wait(
+                phase,
+                "screen_capture_failed_reobserve",
+                identity=self._last_identity,
+                window=self._last_window,
+                deadline=deadline,
             )
         except StartupUIError as error:
             if error.args and error.args[0] == "screen_capture_stale":

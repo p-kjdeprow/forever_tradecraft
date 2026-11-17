@@ -18,6 +18,7 @@ resumes. A healthy existing sweep requires no startup action or state reset.
 | Physical input within five minutes | Release startup ownership and wait; no attempts consumed |
 | GUI lease or automation effect owned elsewhere | Hold without input or a relaunch penalty |
 | Graphical-session environment absent/stale | Refresh from the user manager and wait visibly |
+| Screenshot capture fails | Retire stale proof, release controls safely, log a bounded cause and reobserve within the original startup deadlines |
 | Existing decorated/maximized game | Repair and verify the same owned window |
 | Measured Battle.net Updates information window | Verify owned child, panel/heading/release/close control; dismiss once and observe disappearance |
 | Login required or account conflict | Block for the user; never type credentials or reconnect |

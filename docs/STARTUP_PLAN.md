@@ -222,6 +222,13 @@ press, pointer motion, activation or retry. Do not claim SIGKILL releases keys o
 queued events: supported guarantee is no later command in a delayed control helper after parent
 death, plus bounded release-only cleanup on graceful stop.
 
+Admit a host action initially, then run one full fresh admission at each control helper's final
+boundary, after environment resolution and immediately before its final stop check and spawn.
+The keyboard adapter and runner must not repeat that same capture-heavy admission earlier.
+Record new possibly-down controls only after this final admission. Release cleanup may start
+only after a prior helper is confirmed reaped; it cannot overwrite an unreaped child's identity.
+This keeps final checks mandatory while avoiding three identical native/scanner reads per key.
+
 ### Host consumer integration
 
 Remove LauncherRun and the host's blind launcher polling branch. Host calls recovery for no game,

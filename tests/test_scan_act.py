@@ -341,7 +341,11 @@ def ready_observation(
 
 
 def actor(
-    tmp_path: Path, *, active: bool = False, stopping: Any = lambda: False
+    tmp_path: Path,
+    *,
+    active: bool = False,
+    stopping: Any = lambda: False,
+    control_runner: Any = None,
 ) -> tuple[act.Actor, RecordingKeys, list[str], Matcher, Window, Recovery, Session]:
     order: list[str] = []
     lease = desktop_input.GuiLease(tmp_path / "gui.lock", timeout=0.2)
@@ -362,6 +366,7 @@ def actor(
         native_observe=lambda: _current_native(result, window),
         recovery=recovery,
         stopping=stopping,
+        control_runner=control_runner,
         clock=lambda: 1000.0,
     )
     scan_source.actor = result
@@ -438,6 +443,7 @@ def test_input_actions_send_keys_under_the_lease(tmp_path: Path, action: Action,
         chat_submit_decision() if action is Action.PRESS_RETURN else decision(action), obs
     ) == str(action)
     assert recording.events == [event] and recording.held_during == [True]
+    assert not runner._lease.held
 
 
 def test_type_command_is_allowlisted(tmp_path: Path) -> None:
@@ -829,6 +835,137 @@ def test_control_child_stop_is_a_skipped_action_and_helper_failure_is_visible(tm
     with pytest.raises(desktop_input.ActError, match="pinned control helper failed"):
         runner.execute(chat_submit_decision(), chat_submit_observation())
     assert recording.events == []
+
+
+@pytest.mark.parametrize(
+    "sender_error",
+    [
+        desktop_input.ActError("ordinary sender failure"),
+        subprocess.TimeoutExpired(["xdotool"], 30),
+        None,
+    ],
+    ids=["act-error", "timeout", "nominal-return"],
+)
+def test_pending_cleanup_is_fatal_for_every_action_exit(
+    tmp_path: Path, sender_error: BaseException | None
+) -> None:
+    class PendingControl:
+        child_pid: int | None = None
+        possible_down: frozenset[str] = frozenset()
+        cleanup_failed = False
+
+        def close(self) -> None:
+            self.child_pid = None
+            self.possible_down = frozenset()
+            self.cleanup_failed = False
+
+    control = PendingControl()
+    runner, _recording, _order, _matcher, _window, _recovery, _session = actor(
+        tmp_path, control_runner=control
+    )
+
+    class PendingKeys:
+        def press(self, _key: str) -> None:
+            control.child_pid = 404
+            control.possible_down = frozenset({"key:009"})
+            control.cleanup_failed = True
+            if sender_error is not None:
+                raise sender_error
+
+        def chord(self, _steps: tuple[KeyStep, ...]) -> None:
+            raise AssertionError("unexpected chord")
+
+        def type_text(self, _text: str) -> None:
+            raise AssertionError("unexpected typing")
+
+    runner._keys = PendingKeys()  # type: ignore[assignment]
+    with pytest.raises(ControlChildError, match="cleanup did not complete") as captured:
+        runner.execute(decision(Action.PRESS_ESCAPE), ready_observation())
+    if sender_error is not None:
+        assert captured.value.__context__ is sender_error
+    from crowley_host.scan.loop import OPERATIONAL_ERRORS
+
+    assert not isinstance(captured.value, OPERATIONAL_ERRORS)
+    assert runner._lease.held
+    assert control.child_pid == 404 and control.cleanup_failed
+
+    runner.close()
+    assert not runner._lease.held
+    assert control.child_pid is None and not control.cleanup_failed
+
+
+def test_unreaped_control_child_retains_canonical_lease_until_cleanup_succeeds(
+    tmp_path: Path,
+) -> None:
+    class UnreapableControl:
+        child_pid: int | None = None
+        cleanup_failed = False
+        possible_down: frozenset[str] = frozenset()
+        can_reap = False
+        close_calls = 0
+
+        def close(self) -> None:
+            self.close_calls += 1
+            if not self.can_reap:
+                self.child_pid = 404
+                self.cleanup_failed = True
+                self.possible_down = frozenset({"key:036"})
+                raise ControlChildError("exact control child could not be reaped")
+            self.child_pid = None
+            self.cleanup_failed = False
+            self.possible_down = frozenset()
+
+        def release_only(self) -> None:
+            if self.child_pid is not None:
+                self.cleanup_failed = True
+                return
+            self.cleanup_failed = False
+            self.possible_down = frozenset()
+
+    control = UnreapableControl()
+    runner, _recording, _order, _matcher, _window, _recovery, _session = actor(
+        tmp_path, control_runner=control
+    )
+
+    class UnreapableKeys:
+        def press(self, _key: str) -> None:
+            control.child_pid = 404
+            control.cleanup_failed = True
+            control.possible_down = frozenset({"key:036"})
+            raise ControlChildError("exact control child could not be reaped")
+
+        def chord(self, _steps: tuple[KeyStep, ...]) -> None:
+            raise AssertionError("unexpected chord")
+
+        def type_text(self, _text: str) -> None:
+            raise AssertionError("unexpected typing")
+
+    runner._keys = UnreapableKeys()  # type: ignore[assignment]
+    with pytest.raises(ControlChildError, match="cleanup did not complete"):
+        runner.execute(chat_submit_decision(), chat_submit_observation())
+    assert runner._lease.held
+    assert control.child_pid == 404 and control.cleanup_failed
+
+    contender = desktop_input.GuiLease(tmp_path / "gui.lock", timeout=0.05)
+    with pytest.raises(desktop_input.ActError, match="held elsewhere"), contender.hold():
+        pass
+    with pytest.raises(act.ActionNotAdmitted, match="control_cleanup_failed"):
+        runner.execute(chat_submit_decision(), chat_submit_observation())
+
+    with pytest.raises(ControlChildError, match="could not be reaped"):
+        runner.close()
+    assert runner._lease.held
+    assert control.child_pid == 404 and control.cleanup_failed
+
+    control.can_reap = True
+    runner.close()
+    assert control.close_calls == 2
+    assert not runner._lease.held
+    assert control.child_pid is None and not control.cleanup_failed
+    with contender.hold():
+        assert contender.held
+    with pytest.raises(act.ActionNotAdmitted, match="actor_closed"):
+        runner.execute(chat_submit_decision(), chat_submit_observation())
 
 
 def test_fresh_native_busy_or_popup_race_skips_input(tmp_path: Path) -> None:

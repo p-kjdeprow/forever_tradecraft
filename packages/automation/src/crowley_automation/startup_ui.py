@@ -25,6 +25,8 @@ MAX_OCR_ROWS = 20_000
 MAX_IMAGE_PIXELS = 33_554_432
 MAX_CAPTURE_AGE_SECONDS = 5.0
 MIN_CONTROL_CONFIDENCE = 85.0
+_PRODUCT_PLAY_MAX_LEFT_DELTA = 12
+_PRODUCT_PLAY_MAX_GAP = 24
 _TSV_HEADER = (
     "level",
     "page_num",
@@ -278,7 +280,27 @@ def classify_battle_net_ui(
         # surface. Keep this read-only until a real captured panel layout can
         # prove both the panel boundary and its unique close control.
         return UIEvidence(UIKind.UNKNOWN, "news_modal_panel_unverified")
-    product_visible = _normalize(expected_product) in {_normalize(line) for line in lines}
+    product_visible = False
+    if play_button is not None:
+        play_left, play_top, _play_width, _play_height = play_button
+        expected_line = _normalize(expected_product)
+        qualified_product_boxes = []
+        for line_id, line_text in line_texts(words, minimum_confidence=MIN_CONTROL_CONFIDENCE).items():
+            if _normalize(line_text) != expected_line:
+                continue
+            product_box = _word_box(
+                [word for word in words if word.line == line_id and word.confidence >= MIN_CONTROL_CONFIDENCE]
+            )
+            if product_box is None:
+                continue
+            product_left, product_top, _product_width, product_height = product_box
+            gap = play_top - (product_top + product_height)
+            if (
+                abs(product_left - play_left) <= _PRODUCT_PLAY_MAX_LEFT_DELTA
+                and 0 <= gap <= _PRODUCT_PLAY_MAX_GAP
+            ):
+                qualified_product_boxes.append(product_box)
+        product_visible = len(qualified_product_boxes) == 1
     if play_button is not None and product_visible:
         return UIEvidence(UIKind.PLAY_READY, "exact_play_label_and_blue_control", play_button, "Play")
     if play_button is not None:

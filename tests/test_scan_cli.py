@@ -4,13 +4,17 @@ import io
 import json
 import re
 import stat
+import subprocess
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from crowley_common.frames import PLAN_COUNT
 from crowley_common.game_target import load_game_target
 from crowley_host.scan import cli, config, loop
+from crowley_host.scan.policy import Action, Decision
 
 from tests.ops.test_install import _write_host
 from tests.support.config import fixture_automation
@@ -91,6 +95,161 @@ def test_run_wires_the_loop_and_restores_state(env: Path, monkeypatch: pytest.Mo
     assert created["recovery"].session_provider is created["actor"]._session_provider
     assert created["observer"]._session_provider is created["actor"]._session_provider
     assert created["observer"]._session_environment is created["actor"]._session_environment
+
+
+def test_run_keeps_one_final_actor_guard_per_pinned_key_emission(
+    env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from crowley_automation import startup as automation_startup
+    from crowley_automation.desktop_observe import WindowState
+    from crowley_automation.gui.process import ProcessIdentity
+
+    from tests.test_scan_act import XMODMAP, ready_automation, ready_observation
+
+    events: list[str] = []
+    observation = ready_observation(chat_active=True, chat_focused=True)
+    identity = observation.process_identity
+    assert identity is not None
+    native_value = ready_automation(chat_active=True, chat_focused=True)
+    window = WindowState(77, 1, True, True, (1920, 1080), fullscreen=True)
+
+    class Session:
+        fingerprint = "session-1"
+        environment = {"DISPLAY": ":0", "XAUTHORITY": str(env / "xauth")}
+
+    class SessionProvider:
+        def current(self) -> Session:
+            return Session()
+
+    session_provider = SessionProvider()
+
+    class Presence:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def human_active(self) -> tuple[bool, str]:
+            return False, "idle"
+
+    class Matcher:
+        def identities(self) -> tuple[ProcessIdentity, ...]:
+            return (identity,)
+
+    class WindowSource:
+        def observe(self, _pids: list[int]) -> WindowState:
+            return window
+
+    class Observer:
+        window_source = WindowSource()
+        window_xid = 77
+        decode_error = ""
+
+        def observe(self, state: Any) -> Any:
+            events.append("paired_capture")
+            return replace(observation, state=state)
+
+    observer = Observer()
+
+    class Tool:
+        proc_path = "/proc/self/fd/9"
+        image = SimpleNamespace(fd=9)
+
+        def close(self) -> None:
+            pass
+
+    class Recovery:
+        def __init__(self, _config: Any, *, session_provider: Any, **_kwargs: Any) -> None:
+            self.session_provider = session_provider
+
+        def close(self) -> None:
+            pass
+
+    class Control:
+        possible_down = False
+        child_pid = None
+        cleanup_failed = False
+
+        def __init__(self, _lease: Any, _tool: Any, *, environment: Any, guard: Any, **_kwargs: Any) -> None:
+            self.environment, self.guard = environment, guard
+
+        def run(self, argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+            assert self.environment()["DISPLAY"] == ":0"
+            events.append("runner_environment_resolved")
+            self.guard()
+            key_chars = {
+                "061": "/",
+                "027": "r",
+                "026": "e",
+                "046": "l",
+                "032": "o",
+                "038": "a",
+                "040": "d",
+            }
+            if len(argv) > 2 and argv[1] == "keydown" and argv[2] in key_chars:
+                native_value["chatEdit"]["text"] += key_chars[argv[2]]
+            events.append("emission")
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        def close(self) -> None:
+            pass
+
+    actor_type = cli.Actor
+
+    class CountingActor(actor_type):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(clock=lambda: observation.wall, **kwargs)
+
+        def before_emit(self) -> None:
+            events.append("actor_guard")
+            super().before_emit()
+
+    class MatcherConfig:
+        def __new__(cls) -> Any:
+            return Matcher()
+
+    class FakeLoop:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        def run(self, *, stop: Any) -> None:
+            del stop
+            actor = self.kwargs["actor"]
+            actor._keys._query_run = lambda argv, **_kwargs: subprocess.CompletedProcess(argv, 0, XMODMAP, "")
+            actor.execute(Decision(Action.TYPE_COMMAND, observation.state, command="/reload"), observation)
+
+    def native_observe(*_args: Any, **_kwargs: Any) -> Any:
+        events.append("native_capture")
+        return SimpleNamespace(
+            identity=identity,
+            window=window,
+            snapshot=native_value,
+            session_fingerprint="session-1",
+        )
+
+    loaded = replace(loaded_config(env), matcher=MatcherConfig())
+    monkeypatch.setattr(cli, "load_scan_config", lambda: loaded)
+    monkeypatch.setattr(cli, "DesktopSessionProvider", lambda _display: session_provider)
+    monkeypatch.setattr(cli, "Presence", Presence)
+    monkeypatch.setattr(cli, "build_observer", lambda *_args, **_kwargs: observer)
+    monkeypatch.setattr(cli, "PinnedInputTool", type("ToolLoader", (), {"load": staticmethod(Tool)}))
+    monkeypatch.setattr(cli, "ControlChildRunner", Control)
+    monkeypatch.setattr(cli, "Actor", CountingActor)
+    monkeypatch.setattr(cli, "ScanLoop", FakeLoop)
+    monkeypatch.setattr(cli, "maintenance_blocker", lambda: None)
+    monkeypatch.setattr(cli.desktop_observe, "observe_native_world", native_observe)
+    monkeypatch.setattr(automation_startup, "StartupRecovery", Recovery)
+
+    assert cli.main(["run"]) == 0
+
+    command_length = len("/reload")
+    guard_positions = [index for index, event in enumerate(events) if event == "actor_guard"]
+    assert len(guard_positions) == command_length
+    for guard_at in guard_positions:
+        assert events[guard_at - 1] == "runner_environment_resolved"
+        assert events[guard_at + 1 : guard_at + 3] == ["native_capture", "paired_capture"]
+    assert events.count("native_capture") == command_length + 1  # initial plus each final guard
+    assert events.count("paired_capture") == command_length + 1
+    assert native_value["chatEdit"]["text"] == "/reload"
+    assert events[-1] == "emission"
 
 
 def loaded_config(root: Path) -> config.ScanConfig:

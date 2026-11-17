@@ -13,7 +13,7 @@ pinned native realm; no realm is displayed on character selection. Required char
 records that literal independently of native pins. Battle.net's mutable comm is CrBrowserMain;
 identity uses exact executable argv0, UID, prefix and process start ticks. A real same-process
 Battle.net Updates release-information window is retained for cold-start qualification.
-Both host and automation source reviews are READY. Final source verification passed 1430 tests
+Both host and automation source reviews are READY. Final source verification passed 1442 tests
 with 31 skipped, Ruff check/format, zero Pyright errors, and all five reviewed wheels installed
 outside the checkout against locked runtime dependencies with ten CLI help checks. All twelve
 applied migrations retain their original bytes. Installed-runtime qualification remains in progress.

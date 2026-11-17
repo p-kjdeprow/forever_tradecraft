@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Mapping
+from contextlib import contextmanager
 from typing import Any, Protocol
 
 from crowley_automation import desktop_input
@@ -99,6 +100,52 @@ class Actor:
         self._clock = clock
         self._observation: Observation | None = None
         self._decision: Decision | None = None
+        self._lease_context: Any | None = None
+        self._cleanup_latched = False
+        self._closing = False
+        self._closed = False
+
+    def _control_cleanup_pending(self) -> bool:
+        runner = self._control_runner
+        return runner is not None and (
+            runner.child_pid is not None or bool(runner.possible_down) or runner.cleanup_failed
+        )
+
+    def _enter_lease_context(self) -> None:
+        if self._lease_context is not None:
+            raise ActionNotAdmitted("control_cleanup_failed")
+        context = self._lease.hold()
+        context.__enter__()
+        self._lease_context = context
+
+    def _release_lease_context(self) -> None:
+        context = self._lease_context
+        if context is None:
+            return
+        try:
+            context.__exit__(None, None, None)
+        except Exception:
+            self._cleanup_latched = True
+            raise
+        else:
+            self._lease_context = None
+
+    @contextmanager
+    def _action_lease(self):
+        if self._closed or self._closing:
+            raise ActionNotAdmitted("actor_closed")
+        if self._cleanup_latched or self._control_cleanup_pending():
+            self._cleanup_latched = True
+            raise ActionNotAdmitted("control_cleanup_failed")
+        self._enter_lease_context()
+        try:
+            yield
+        finally:
+            if self._control_cleanup_pending():
+                self._cleanup_latched = True
+                raise ControlChildError("control helper cleanup did not complete")
+            else:
+                self._release_lease_context()
 
     def _check_stopping(self) -> None:
         if self._stopping():
@@ -412,6 +459,11 @@ class Actor:
         action = decision.action
         if action in (Action.WAIT, Action.HOLD_HUMAN, Action.FAULT):
             return "none"
+        if self._closed or self._closing:
+            raise ActionNotAdmitted("actor_closed")
+        if self._cleanup_latched or self._control_cleanup_pending():
+            self._cleanup_latched = True
+            raise ActionNotAdmitted("control_cleanup_failed")
         if action is Action.RELAUNCH:
             identity = observation.process_identity
             if identity is None or decision.detail not in RESTART_REASONS:
@@ -424,7 +476,7 @@ class Actor:
         if action is Action.ACTIVATE_WINDOW or action in INPUT_ACTIONS:
             self._observation, self._decision = observation, decision
             try:
-                with self._lease.hold():
+                with self._action_lease():
                     self._check_stopping()
                     self._check_native(observation, decision)
                     self._check_dynamic(observation, decision)
@@ -449,9 +501,15 @@ class Actor:
                 if "held elsewhere" in str(exc) or "launcher busy" in str(exc):
                     raise ActionNotAdmitted("gui_busy") from None
                 raise
-            except ControlChildCancelled:
+            except ControlChildCancelled as exc:
+                if self._control_cleanup_pending():
+                    self._cleanup_latched = True
+                    raise ControlChildError("control child cleanup did not complete") from exc
                 raise ActionNotAdmitted("stopping") from None
             except ControlChildError as exc:
+                if self._control_cleanup_pending():
+                    self._cleanup_latched = True
+                    raise
                 raise desktop_input.ActError("pinned control helper failed") from exc
             finally:
                 self._observation, self._decision = None, None
@@ -461,10 +519,24 @@ class Actor:
     def close(self) -> None:
         """Reap and close the action control runner, releasing only known-down keys."""
 
-        if self._control_runner is None:
+        if self._closed:
             return
-        if self._control_runner.possible_down:
-            with self._lease.hold():
-                self._control_runner.close()
+        self._closing = True
+        runner = self._control_runner
+        if runner is None:
+            self._release_lease_context()
+            self._closed = True
+            return
+        try:
+            if self._lease_context is None and self._control_cleanup_pending():
+                self._enter_lease_context()
+            runner.close()
+            if self._control_cleanup_pending():
+                raise ControlChildError("control helper cleanup did not complete")
+            self._release_lease_context()
+        except Exception:
+            self._cleanup_latched = True
+            raise
         else:
-            self._control_runner.close()
+            self._cleanup_latched = False
+            self._closed = True

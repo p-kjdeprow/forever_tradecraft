@@ -239,9 +239,8 @@ class ControlChildRunner:
         operation = _classify(pinned.name, args, expected_window=self._window_xid)
         if operation != "release":
             if self._stopping():
+                self.release_only()
                 raise ControlChildCancelled("control cancelled by stop")
-            self._guard()
-        self._mark_possible_down(args)
         try:
             result = self._execute(
                 pinned,
@@ -254,6 +253,10 @@ class ControlChildRunner:
         except ControlChildCancelled:
             self.release_only()
             raise
+        except Exception:
+            if operation != "release":
+                self.release_only()
+            raise
         if result.returncode == 0:
             self._clear_released(args)
         return subprocess.CompletedProcess(list(argv), result.returncode, result.stdout, result.stderr)
@@ -261,16 +264,16 @@ class ControlChildRunner:
     def release_only(self) -> None:
         """Emit only recorded mouse/key releases under the still-held GUI lease."""
 
+        if self._child is not None:
+            self.cleanup_failed = True
+            return
         if not self._possible_down:
+            self.cleanup_failed = False
             return
         if not self._lease.held:
             self.cleanup_failed = True
             return
         controls = tuple(sorted(self._possible_down))
-        if not controls:
-            if self._child is None:
-                self.cleanup_failed = False
-            return
         args: list[str] = []
         for control in controls:
             if control == "button:1":
@@ -337,6 +340,8 @@ class ControlChildRunner:
         cleanup: bool,
         environment_overrides: Mapping[str, str] | None = None,
     ):
+        if self._child is not None:
+            raise ControlChildError("previous control child is still tracked")
         lease_fd = self._lease.fd
         if lease_fd is None:
             raise ControlChildError("canonical GUI lease descriptor is unavailable")
@@ -367,6 +372,7 @@ class ControlChildRunner:
             self._guard()
             if self._stopping():
                 raise ControlChildCancelled("control cancelled by stop")
+            self._mark_possible_down(args)
         try:
             child = self._popen(
                 command,

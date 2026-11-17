@@ -24,18 +24,52 @@ def test_marketing_and_desktop_toast_do_not_mask_selected_play() -> None:
         _word("available", 830, 82, line=2),
         _word("Upgrade", 940, 310, line=3),
         _word("Available", 1010, 310, line=3),
-        _word("WoW:", 190, 910, line=4, width=45),
-        _word("Forever", 240, 910, line=4, width=70),
-        _word("Play", 275, 960, line=5),
+        _word("WoW:", 192, 911, line=4, width=40, height=10),
+        _word("Forever", 232, 911, line=4, width=51, height=10),
+        _word("WoW:", 1050, 200, line=6, width=45),
+        _word("Forever", 1095, 200, line=6, width=70),
+        _word("Play", 260, 958, line=5, width=65, height=20),
     )
     evidence = classify_battle_net_ui(
         words,
         image,
         expected_product="WoW: Forever",
-        play_button=(184, 940, 232, 55),
+        play_button=(186, 942, 229, 52),
     )
     assert evidence.kind == UIKind.PLAY_READY
     assert evidence.control_text == "Play"
+
+
+def test_wrong_selected_product_and_distant_expected_banner_do_not_authorize_play() -> None:
+    words = (
+        _word("WoW:", 192, 911, line=1, width=40, height=10),
+        _word("Classic", 232, 911, line=1, width=51, height=10),
+        _word("WoW:", 1050, 200, line=2, width=45),
+        _word("Forever", 1095, 200, line=2, width=70),
+    )
+    evidence = classify_battle_net_ui(
+        words,
+        Image.new("RGB", (1920, 1080), "black"),
+        expected_product="WoW: Forever",
+        play_button=(186, 942, 229, 52),
+    )
+    assert evidence.kind == UIKind.UNKNOWN
+    assert evidence.reason == "expected_product_not_visibly_selected"
+
+
+def test_expected_product_as_distant_menu_or_body_text_does_not_authorize_play() -> None:
+    words = (
+        _word("WoW:", 1100, 500, line=1, width=45),
+        _word("Forever", 1145, 500, line=1, width=70),
+    )
+    evidence = classify_battle_net_ui(
+        words,
+        Image.new("RGB", (1920, 1080), "black"),
+        expected_product="WoW: Forever",
+        play_button=(186, 942, 229, 52),
+    )
+    assert evidence.kind == UIKind.UNKNOWN
+    assert evidence.reason == "expected_product_not_visibly_selected"
 
 
 def test_news_heading_and_close_glyph_without_verified_panel_is_not_dismissed() -> None:

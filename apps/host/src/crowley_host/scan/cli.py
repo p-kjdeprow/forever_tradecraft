@@ -127,7 +127,6 @@ def _run(_args: argparse.Namespace) -> int:
             environment,
             run=control.run,
             query_run=subprocess.run,
-            before_emit=guard,
         )
 
         def activate(xid: int) -> None:

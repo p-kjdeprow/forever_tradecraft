@@ -21,6 +21,9 @@ trading, account changes or unrelated display changes.
 - Your own synthetic input (XTEST) does not register as a human, so it will not hold the loop. Stop the unit
   before sending any, and obey the click rules in `CLAUDE.md` (at most one automated click per second, curved
   human pointer motion through `crowley_automation.gui`, never warp the pointer).
+- Validate helper imports, CLI argument formats and restoration paths before stopping the owner. Bounded
+  focus-only inspections need automatic restoration in `finally`, with fresh ownership checks and stop honored;
+  do not depend on a later model turn to restore focus or resume collection.
 - Check processes and map windows to PIDs before launching anything. Match the owned game by uid, Windows argv0
   `Wow.exe` and `WINEPREFIX` (`crowley_automation.gui.process`), not by broad command text. Battle.net visible does not mean
   the game stopped. Never start a second client or a second Battle.net (it deletes the saved login token).

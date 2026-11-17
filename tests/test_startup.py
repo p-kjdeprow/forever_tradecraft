@@ -66,9 +66,9 @@ class _FakeClock:
 
 
 class _SessionProvider:
-    def __init__(self) -> None:
+    def __init__(self, authority: Path) -> None:
         self.available = False
-        self.session = DesktopSession({"DISPLAY": ":0", "XAUTHORITY": "/tmp/auth"}, "same")
+        self.session = DesktopSession({"DISPLAY": ":0", "XAUTHORITY": str(authority)}, "same")
 
     def current(self) -> DesktopSession:
         if not self.available:
@@ -92,7 +92,7 @@ class _Lease:
 
 def _fake_recovery(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     clock = _FakeClock()
-    provider = _SessionProvider()
+    provider = _SessionProvider(tmp_path / "Xauthority")
     lease = _Lease()
     presence = [False]
     monkeypatch.setattr(startup_module, "maintenance_blocker", lambda: None)
@@ -376,7 +376,7 @@ def test_startup_lease_contention_returns_promptly_as_held(
     lock_path = private_dir / "gui.lock"
     monkeypatch.setattr(startup_module, "gui_lock_path", lambda: lock_path)
     monkeypatch.setattr(startup_module, "maintenance_blocker", lambda: None)
-    provider = _SessionProvider()
+    provider = _SessionProvider(tmp_path / "Xauthority")
     provider.available = True
     recovery = StartupRecovery(
         _config(tmp_path),
@@ -462,7 +462,7 @@ def test_adopted_battle_net_with_single_instance_disabled_never_runs_wine_ipc(
         "/prefix/drive_c/Program Files (x86)/Battle.net/Battle.net.exe",
         str(tmp_path / "wine"),
     )
-    session = DesktopSession({"DISPLAY": ":0", "XAUTHORITY": "/tmp/auth"}, "same")
+    session = DesktopSession({"DISPLAY": ":0", "XAUTHORITY": str(tmp_path / "Xauthority")}, "same")
     monkeypatch.setattr(recovery, "_guard_identity", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
         startup_module, "_battle_net_config", lambda _prefix: '{"Client":{"SingleInstance":"false"}}'

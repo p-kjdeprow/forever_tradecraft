@@ -15,7 +15,7 @@ def _provider(tmp_path: Path, *, extra: tuple[str, ...] = (), x_status: int = 0)
     entries = (
         "DISPLAY=:0",
         f"XAUTHORITY={authority}",
-        "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+        f"DBUS_SESSION_BUS_ADDRESS=unix:path={tmp_path / 'bus'}",
         *extra,
     )
 

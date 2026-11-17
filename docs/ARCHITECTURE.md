@@ -130,6 +130,10 @@ Client assumptions are explicit and bounded by their evidence:
 | UnitPosition heading follows atan2(dy,dx), forward=(cos facing,sin facing) | Historical measured route evidence only; each route profile pins current build/instance and calibrated signed rates |
 | Arrow bindings identify forward/left/right | Native binding readback required before holds; no default W/A/D assumptions |
 | Battle.net must reuse the logged-in instance and Play needs a real curved click | Existing launcher qualification; direct game launch cannot issue its login ticket |
+| Battle.net can rename its process to CrBrowserMain | Measured live process; bind exact executable argv0, UID, prefix, start ticks and window PID rather than comm |
+| Selected character text can differ from native character, with no realm displayed | Recorded selection and same-process native identity; pin character_select_name before entry and native character/realm afterward |
+| Expected product text must be the selected Game Version label above Play | Recorded dropdown geometry and adversarial banner cases; unrelated article text cannot authorize Play |
+| The measured Battle.net Updates information window is a separate 900x600 window | Same-process capture with heading, PATCH/date and close control; dismiss that exact child once, and hold on unknown dialogs |
 | GNOME animations and idle blanking are disabled | Host doctor checks; corrupt or absent captures reject input |
 | Client exports do not establish recipe availability on Forever | Analysis gates on observed market evidence; recipe ownership/budget assumptions remain visible |
 

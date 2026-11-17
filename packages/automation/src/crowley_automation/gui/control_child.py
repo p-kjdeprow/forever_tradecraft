@@ -6,7 +6,6 @@ import ctypes
 import fcntl
 import hashlib
 import os
-import re
 import signal
 import stat
 import subprocess
@@ -78,7 +77,7 @@ class PinnedControlTool:
 
     @classmethod
     def load(cls, name: str, path: str | os.PathLike[str] | None = None) -> PinnedControlTool:
-        if name not in {"xprop", "wmctrl", "wine"}:
+        if name not in {"xprop", "wmctrl"}:
             raise ControlChildError("system control binary is outside the allowlist")
         candidate = Path(path) if path is not None else Path("/usr/bin") / name
         source_fd = -1
@@ -101,14 +100,10 @@ class PinnedControlTool:
             chunks: list[bytes] = []
             while block := os.read(source_fd, 1024 * 1024):
                 digest.update(block)
-                if name != "wine":
-                    chunks.append(block)
+                chunks.append(block)
             final_info = os.fstat(source_fd)
             if _file_identity(info) != _file_identity(final_info):
                 raise ControlChildError("system control binary changed while pinning")
-            if name == "wine":
-                image, source_fd = source_fd, -1
-                return cls(name, str(resolved), image, digest.hexdigest())
             image = _memfd_create(f"crowley-{name}")
             for block in chunks:
                 _write_all(image, block)
@@ -359,7 +354,6 @@ class ControlChildRunner:
             str(os.getpid()),
             str(parent_start),
             image.digest,
-            image.proc_path,
             image.name,
             operation,
             str(self._window_xid or 0),
@@ -498,17 +492,6 @@ def _classify(
         if args == ("-i", "-r", xid, "-b", "add,fullscreen"):
             return "wm_fullscreen_add"
         raise ControlChildError("wmctrl request is outside the fullscreen repair allowlist")
-    if name == "wine":
-        if expected_window is None or expected_window <= 0:
-            raise ControlChildError("Battle.net product selection requires its exact observed window")
-        if (
-            len(args) == 2
-            and Path(args[0]).is_absolute()
-            and Path(args[0]).name == "Battle.net.exe"
-            and re.fullmatch(r"--exec=launch_uid (?:wowf|wowc|wowt)", args[1])
-        ):
-            return "battle_net_product_exec"
-        raise ControlChildError("Battle.net product selection is outside the allowlist")
     if name != "xdotool":
         raise ControlChildError("control executable is outside the pinned allowlist")
     if args == ("getmouselocation", "--shell"):
@@ -581,7 +564,7 @@ def _delay(value: str) -> float:
 
 
 def _main(argv: Sequence[str]) -> int:
-    if len(argv) < 10:
+    if len(argv) < 9:
         return 125
     (
         path_text,
@@ -590,7 +573,6 @@ def _main(argv: Sequence[str]) -> int:
         parent_text,
         parent_ticks_text,
         digest,
-        image_path_text,
         name,
         operation,
         window_text,
@@ -605,7 +587,7 @@ def _main(argv: Sequence[str]) -> int:
             return 125
         if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
             return 125
-        if name not in {"xdotool", "xprop", "wmctrl", "wine"}:
+        if name not in {"xdotool", "xprop", "wmctrl"}:
             return 125
         expected_window = int(window_text)
         if expected_window < 0:
@@ -617,18 +599,13 @@ def _main(argv: Sequence[str]) -> int:
             args[index] == "mousedown" or args[index] == "keydown" for index in range(0, len(args), 2)
         ):
             return 125
-        if not _verify_lease(lease_path, lease_fd) or not _verify_image(
-            image_fd, digest, name, image_path_text
-        ):
+        if not _verify_lease(lease_path, lease_fd) or not _verify_image(image_fd, digest, name):
             return 125
         if not _set_parent_death_signal():
             return 125
         if os.getppid() != parent_pid or process_start_ticks(parent_pid) != parent_ticks:
             return 125
         os.set_inheritable(lease_fd, True)
-        if name == "wine":
-            os.set_inheritable(image_fd, False)
-            os.execv(image_path_text, [image_path_text, *args])
         executable = f"/proc/self/fd/{image_fd}"
         os.set_inheritable(image_fd, True)
         os.execv(executable, [executable, *args])
@@ -659,36 +636,20 @@ def _verify_lease(path: Path, fd: int) -> bool:
     )
 
 
-def _verify_image(fd: int, digest: str, name: str, image_path: str) -> bool:
+def _verify_image(fd: int, digest: str, name: str) -> bool:
     import fcntl
 
     try:
         info = os.fstat(fd)
         link = os.readlink(f"/proc/self/fd/{fd}")
         data = os.pread(fd, _MAX_IMAGE_BYTES + 1, 0)
-        if name == "wine":
-            path_info = os.stat(image_path, follow_symlinks=False)
-            seals = 0
-        else:
-            path_info = None
-            seals = fcntl.fcntl(fd, _F_GET_SEALS)
+        seals = fcntl.fcntl(fd, _F_GET_SEALS)
     except OSError:
         return False
     if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_IMAGE_BYTES:
         return False
     if hashlib.sha256(data).hexdigest() != digest:
         return False
-    if name == "wine":
-        return (
-            os.path.isabs(image_path)
-            and info.st_uid in {0, os.getuid()}
-            and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
-            and bool(info.st_mode & stat.S_IXUSR)
-            and data[:4] == b"\x7fELF"
-            and path_info is not None
-            and (info.st_dev, info.st_ino) == (path_info.st_dev, path_info.st_ino)
-            and not stat.S_ISLNK(path_info.st_mode)
-        )
     required = _SEAL_WRITE | _SEAL_GROW | _SEAL_SHRINK | _SEAL_SEAL
     return link.startswith(f"/memfd:crowley-{name}") and seals & required == required
 

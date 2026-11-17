@@ -29,6 +29,8 @@ trading, account changes or unrelated display changes.
   the game stopped. Never start a second client or a second Battle.net (it deletes the saved login token).
   Match control helpers by exact executable/argv tokens and process start identity; inline shell/Python source can
   mention launcher names without being a launcher. Persist dispatch results before another action or handoff.
+  A positively verified selected product needs only the guarded Play action; do not add a Wine product-selection
+  launch first. Cold application launch and bounded desktop-control children have different lifetimes.
 
 ## Environment
 

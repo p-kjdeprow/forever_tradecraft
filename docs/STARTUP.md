@@ -10,6 +10,10 @@ created the game. It reuses an exact existing game/Battle.net process, repairs s
 geometry in place, and enters the configured character only from positively identified selection
 UI. It validates native world readiness independently of scanner decoding before host scan policy
 resumes. A healthy existing sweep requires no startup action or state reset.
+Once the main page positively identifies the configured selected product and enabled Play,
+the controller uses the guarded Play click directly. It does not launch a redundant Wine
+product-selection command. An observed Battle.net process disappearing during that episode
+cannot authorize a replacement instance; an already dispatched Play keeps its original wait limit.
 
 ## Holds and failures
 

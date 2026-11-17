@@ -16,6 +16,7 @@ from crowley_automation.gui.control_child import (
     ControlChildCancelled,
     ControlChildError,
     ControlChildRunner,
+    PinnedControlTool,
     _classify,
 )
 
@@ -43,6 +44,28 @@ def test_window_manager_grammar_is_exact_and_binds_one_window() -> None:
         )
     with pytest.raises(ControlChildError):
         _classify("wmctrl", ("-c", "Battle.net"), expected_window=42)
+
+
+def test_wine_is_not_a_control_tool_or_serialized_child_record(tmp_path: Path) -> None:
+    with pytest.raises(ControlChildError, match="outside the allowlist"):
+        PinnedControlTool.load("wine")
+
+    assert (
+        control_child._main(
+            [
+                str(tmp_path / "gui.lock"),
+                "77",
+                "78",
+                "99",
+                "0",
+                "0" * 64,
+                "wine",
+                "battle_net_product_exec",
+                "42",
+            ]
+        )
+        == 125
+    )
 
 
 def test_stop_cancels_exact_input_child_releases_key_and_keeps_lease_until_reap(tmp_path: Path) -> None:

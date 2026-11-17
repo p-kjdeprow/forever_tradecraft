@@ -186,7 +186,6 @@ class StartupRecovery:
         self._known_bnet_identity: ProcessIdentity | None = None
         self._bnet_launch_deadline: float | None = None
         self._login_deadline: float | None = None
-        self._product_selection_dispatched = False
         self._play_attempts = 0
         self._play_deadline: float | None = None
         self._news_close_pending = False
@@ -481,7 +480,6 @@ class StartupRecovery:
         self._known_bnet_identity = None
         self._bnet_launch_deadline = None
         self._login_deadline = None
-        self._product_selection_dispatched = False
         self._play_attempts = 0
         self._play_deadline = None
         self._news_close_pending = False
@@ -710,7 +708,7 @@ class StartupRecovery:
         if len(identities) > 1:
             raise _BlockEpisode("multiple_battle_net_instances")
         if not identities:
-            if self._product_selection_dispatched:
+            if self._known_bnet_identity is not None:
                 if self._play_deadline is not None and self._clock() < self._play_deadline:
                     return self._wait(
                         "game_start",
@@ -719,7 +717,7 @@ class StartupRecovery:
                         deadline=self._play_deadline,
                         action="play_click_dispatched",
                     )
-                raise _BlockEpisode("battle_net_disappeared_after_product_selection")
+                raise _BlockEpisode("battle_net_disappeared_after_observation")
             if self._bnet_launched:
                 deadline = self._bnet_launch_deadline or self._clock() + _LOGIN_SECONDS
                 if self._clock() >= deadline:
@@ -869,18 +867,6 @@ class StartupRecovery:
                 deadline=self._login_deadline,
             )
         if evidence.kind == UIKind.PLAY_READY:
-            if not self._product_selection_dispatched:
-                self._guard_identity(session, identity, state.xid, game=False, require_focus=False)
-                self._battle_net_exec(session, identity, state.xid)
-                self._product_selection_dispatched = True
-                return self._wait(
-                    "battle_net_ready",
-                    "product_selection_dispatched",
-                    identity=None,
-                    window=state.xid,
-                    deadline=self._login_deadline,
-                    action="product_selection_dispatched",
-                )
             if self._play_deadline is not None:
                 if self._clock() < self._play_deadline:
                     return self._wait(
@@ -1661,44 +1647,6 @@ class StartupRecovery:
             start_new_session=True,
             env=environment,
         )
-
-    def _battle_net_exec(self, session: DesktopSession, identity: ProcessIdentity, window: int) -> None:
-        self._guard_identity(session, identity, window, game=False, require_focus=False)
-        if not _single_instance_enabled(_battle_net_config(self.config.wine_prefix)):
-            raise _BlockEpisode("battle_net_single_instance_not_enabled")
-        wine_path = _reviewed_wine_path()
-        wine = self._pinned_control_tool("wine", wine_path)
-        bnet = _battle_net_executable(self.config.wine_prefix)
-        self._require_disk_build()
-
-        def action_guard() -> None:
-            self._guard_identity(session, identity, window, game=False, require_focus=False)
-            if not _single_instance_enabled(_battle_net_config(self.config.wine_prefix)):
-                raise _BlockEpisode("battle_net_single_instance_not_enabled")
-            self._require_disk_build()
-
-        runtime = self._new_control(
-            session,
-            identity,
-            window,
-            game=False,
-            require_focus=False,
-            extra_tools={"wine": wine},
-            guard=action_guard,
-        )
-        try:
-            result = runtime.run(
-                [wine.proc_path, str(bnet), f"--exec=launch_uid {self.config.product}"],
-                timeout=15.0,
-                env=_wine_environment(session.environment, self.config.wine_prefix),
-                pass_fds=(wine.fd,),
-            )
-        except (OSError, subprocess.SubprocessError, ControlChildError) as error:
-            raise _BlockEpisode("battle_net_product_selection_failed") from error
-        finally:
-            self._close_control(runtime)
-        if result.returncode != 0:
-            raise _BlockEpisode("battle_net_product_selection_failed")
 
     def _publish(
         self,

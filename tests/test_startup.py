@@ -380,7 +380,6 @@ def test_safe_login_refusal_reobserves_after_backoff_but_not_before(
     recovery._step_locked = observe  # type: ignore[method-assign]
     recovery._play_attempts = 2
     recovery._play_deadline = 42.0
-    recovery._product_selection_dispatched = True
     episode_deadline = 600.0
     blocked = recovery.step()
     assert blocked.outcome == "blocked"
@@ -394,7 +393,6 @@ def test_safe_login_refusal_reobserves_after_backoff_but_not_before(
     assert observations == 2
     assert recovery._play_attempts == 2
     assert recovery._play_deadline == 42.0
-    assert recovery._product_selection_dispatched
     assert recovery._episode_deadline == episode_deadline
 
 
@@ -415,14 +413,12 @@ def test_unknown_ui_reobservation_preserves_prior_attempts_and_original_episode_
     recovery._step_locked = observe  # type: ignore[method-assign]
     recovery._play_attempts = 2
     recovery._play_deadline = 38.0
-    recovery._product_selection_dispatched = True
     assert recovery.step().reason == "battle_net_ui_unrecognized"
     assert recovery._episode_deadline == 600.0
     clock.value = 5.0
     assert recovery.step().reason == "still_unrecognized"
     assert recovery._play_attempts == 2
     assert recovery._play_deadline == 38.0
-    assert recovery._product_selection_dispatched
     assert recovery._episode_deadline == 600.0
     clock.value = 601.0
     expired = recovery.step()
@@ -512,36 +508,6 @@ def test_only_exact_client_single_instance_string_true_is_accepted(raw: str) -> 
 
 def test_exact_client_single_instance_string_true_is_accepted() -> None:
     assert _single_instance_enabled('{"Client":{"SingleInstance":"true"}}')
-
-
-def test_adopted_battle_net_with_single_instance_disabled_never_runs_wine_ipc(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    recovery = _recovery(tmp_path)
-    identity = ProcessIdentity(
-        21,
-        200,
-        1000,
-        "/prefix/drive_c/Program Files (x86)/Battle.net/Battle.net.exe",
-        str(tmp_path / "wine"),
-    )
-    session = DesktopSession({"DISPLAY": ":0", "XAUTHORITY": str(tmp_path / "Xauthority")}, "same")
-    monkeypatch.setattr(recovery, "_guard_identity", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(
-        startup_module, "_battle_net_config", lambda _prefix: '{"Client":{"SingleInstance":"false"}}'
-    )
-    monkeypatch.setattr(
-        startup_module,
-        "_reviewed_wine_path",
-        lambda: pytest.fail("Wine must not be resolved for an unqualified adopted client"),
-    )
-    monkeypatch.setattr(
-        recovery,
-        "_pinned_control_tool",
-        lambda *_args: pytest.fail("Wine IPC must not be pinned or launched"),
-    )
-    with pytest.raises(_BlockEpisode, match="battle_net_single_instance_not_enabled"):
-        recovery._battle_net_exec(session, identity, 42)
 
 
 def _add_fake_battle_net_proc(
@@ -644,25 +610,25 @@ def test_stop_rechecked_at_detached_battle_net_launch_boundary_prevents_spawn(
 
 
 @pytest.mark.parametrize(
-    ("already_selected", "game_appears_at_check", "expected_outcome", "expected_action"),
+    ("game_appears_at_check", "play_attempts", "expected_outcome", "expected_action"),
     [
-        (False, 2, "held", None),
-        (False, 3, "held", None),
-        (False, None, "waiting", "product_ipc"),
-        (True, 2, "held", None),
-        (True, None, "waiting", "play"),
+        (2, 0, "held", None),
+        (3, 0, "held", None),
+        (None, 0, "waiting", "play"),
+        (None, 3, "failed", None),
     ],
 )
-def test_battle_net_main_action_rechecks_for_a_new_owned_game_process(
+def test_battle_net_play_rechecks_for_a_new_owned_game_process(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    already_selected: bool,
     game_appears_at_check: int | None,
+    play_attempts: int,
     expected_outcome: str,
     expected_action: str | None,
 ) -> None:
     recovery, _clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
     provider.available = True
+    recovery._play_attempts = play_attempts
     identity = ProcessIdentity(21, 200, 1000, "Battle.net.exe", str(tmp_path / "wine"))
     game = ProcessIdentity(31, 300, 1000, "Wow.exe", str(tmp_path / "wine"))
     main = WindowState(42, 1, True, True, (1920, 1080), outer_rect=(0, 0, 1920, 1080))
@@ -700,24 +666,70 @@ def test_battle_net_main_action_rechecks_for_a_new_owned_game_process(
         "_classify_battle_net",
         lambda _screen: UIEvidence(UIKind.PLAY_READY, "play_ready", (100, 100, 200, 50), "Play"),
     )
-    recovery._product_selection_dispatched = already_selected
     actions: list[str] = []
-
-    def product_ipc(session, current, window) -> None:
-        recovery._guard_identity(session, current, window, game=False, require_focus=False)
-        actions.append("product_ipc")
 
     def play_click(session, current, _screen, _evidence, *, action: str) -> None:
         recovery._guard_identity(session, current, 42, game=False, require_focus=True)
+        recovery._guard_identity(session, current, 42, game=False, require_focus=True)
         actions.append(action)
 
-    monkeypatch.setattr(recovery, "_battle_net_exec", product_ipc)
     monkeypatch.setattr(recovery, "_click_battle_net_control", play_click)
     status = recovery.step()
-    assert status.outcome == expected_outcome
+    assert status.outcome == expected_outcome, status
     assert actions == ([] if expected_action is None else [expected_action])
-    if expected_action is None:
+    if expected_outcome == "held":
         assert status.reason == "owned_game_process_appeared_before_battle_net_action"
+    elif expected_outcome == "failed":
+        assert status.reason == "play_attempt_limit_reached"
+
+
+def test_observed_battle_net_disappearance_never_spawns_a_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, _clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    identity = ProcessIdentity(21, 200, 1000, "Battle.net.exe", str(tmp_path / "wine"))
+    recovery._known_bnet_identity = identity
+    launches: list[str] = []
+    monkeypatch.setattr(startup_module, "_battle_net_identities", lambda _prefix: ())
+    monkeypatch.setattr(recovery, "_game_identities", lambda: ())
+    monkeypatch.setattr(recovery, "_launch_battle_net", lambda _session: launches.append("launch"))
+
+    status = recovery.step()
+
+    assert status.outcome == "blocked"
+    assert status.reason == "battle_net_disappeared_after_observation"
+    assert launches == []
+
+
+def test_disappeared_battle_net_waits_only_for_original_play_deadline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    identity = ProcessIdentity(21, 200, 1000, "Battle.net.exe", str(tmp_path / "wine"))
+    recovery._known_bnet_identity = identity
+    recovery._play_deadline = 20.0
+    recovery._play_attempts = 1
+    launches: list[str] = []
+    monkeypatch.setattr(startup_module, "_battle_net_identities", lambda _prefix: ())
+    monkeypatch.setattr(recovery, "_game_identities", lambda: ())
+    monkeypatch.setattr(recovery, "_launch_battle_net", lambda _session: launches.append("launch"))
+
+    waiting = recovery.step()
+    assert waiting.outcome == "waiting"
+    assert waiting.reason == "waiting_for_game_after_battle_net_exit"
+    assert waiting.deadline_at == pytest.approx(10_020.0)
+    assert recovery._play_deadline == 20.0
+    assert recovery._play_attempts == 1
+    assert launches == []
+
+    clock.value = 20.0
+    blocked = recovery.step()
+    assert blocked.outcome == "blocked"
+    assert blocked.reason == "battle_net_disappeared_after_observation"
+    assert recovery._play_attempts == 1
+    assert launches == []
 
 
 @pytest.mark.parametrize("appears", ["game", "battle_net", "none"])
@@ -821,7 +833,6 @@ def test_cold_start_adopts_battle_net_then_selects_product_play_and_world_withou
     )
     monkeypatch.setattr(recovery, "_game_window", lambda *_args: game_window)
     monkeypatch.setattr(recovery, "_guard_identity", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(recovery, "_battle_net_exec", lambda *_args: app_actions.append("select_product"))
     monkeypatch.setattr(
         recovery,
         "_screen_observation",
@@ -874,8 +885,6 @@ def test_cold_start_adopts_battle_net_then_selects_product_play_and_world_withou
     assert recovery.step().action == "battle_net_launch_dispatched"
     bnet_identities.append(bnet_identity)
     clock.value += 1.1
-    assert recovery.step().action == "product_selection_dispatched"
-    clock.value += 1.1
     assert recovery.step().action == "play_click_dispatched"
     game_identities.append(game_identity)
     clock.value += 1.1
@@ -885,7 +894,7 @@ def test_cold_start_adopts_battle_net_then_selects_product_play_and_world_withou
     ready = recovery.step()
     assert ready.outcome == "ready"
     assert ready.native_ready
-    assert app_actions == ["launch_bnet", "select_product", "play", "enter_world"]
+    assert app_actions == ["launch_bnet", "play", "enter_world"]
 
 
 def test_existing_hidden_decorated_game_window_is_restored_and_repaired_in_place(
@@ -948,7 +957,7 @@ def test_existing_hidden_decorated_game_window_is_restored_and_repaired_in_place
         (UIEvidence(UIKind.UNKNOWN, "launcher_ui_unrecognized"), "blocked", "battle_net_ui_unrecognized"),
     ],
 )
-def test_unqualified_battle_net_states_never_click_or_select_product(
+def test_unqualified_battle_net_states_never_click_play(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     evidence: UIEvidence,
@@ -986,7 +995,6 @@ def test_unqualified_battle_net_states_never_click_or_select_product(
     )
     monkeypatch.setattr(recovery, "_classify_battle_net", lambda _screen: evidence)
     actions: list[str] = []
-    monkeypatch.setattr(recovery, "_battle_net_exec", lambda *_args: actions.append("select_product"))
     monkeypatch.setattr(
         recovery,
         "_click_battle_net_control",
@@ -1069,7 +1077,6 @@ def test_measured_updates_child_is_activated_closed_once_and_must_disappear_befo
         "_classify_battle_net",
         lambda _screen: UIEvidence(UIKind.PLAY_READY, "play_ready", (100, 100, 200, 50), "Play"),
     )
-    monkeypatch.setattr(recovery, "_battle_net_exec", lambda *_args: actions.append("select_product"))
     monkeypatch.setattr(
         recovery,
         "_click_battle_net_control",
@@ -1086,10 +1093,8 @@ def test_measured_updates_child_is_activated_closed_once_and_must_disappear_befo
     clock.value += 1.1
     assert recovery.step().reason == "battle_net_updates_disappeared_reobserving_main"
     clock.value += 1.1
-    assert recovery.step().action == "product_selection_dispatched"
-    clock.value += 1.1
     assert recovery.step().action == "play_click_dispatched"
-    assert actions == ["activate_updates", "close_updates", "select_product", "play"]
+    assert actions == ["activate_updates", "close_updates", "play"]
 
 
 @pytest.mark.parametrize(
@@ -1185,7 +1190,6 @@ def test_unknown_battlenet_window_title_blocks_main_play(
     )
     monkeypatch.setattr(recovery, "_battle_net_unknown_window_candidates", lambda *_args: 1)
     actions: list[str] = []
-    monkeypatch.setattr(recovery, "_battle_net_exec", lambda *_args: actions.append("select_product"))
     status = recovery.step()
     assert status.outcome == "blocked"
     assert status.reason == "unrecognized_battle_net_window_candidate"
@@ -1250,7 +1254,7 @@ def test_replaced_updates_child_after_close_is_a_changed_postcondition_not_a_sec
         (WindowState(None, 2, False, False, (1920, 1080), visible=False), "held"),
     ],
 )
-def test_main_product_selection_guard_rechecks_for_new_updates_children(
+def test_main_play_guard_rechecks_for_new_updates_children(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     guard_state: WindowState,
@@ -1288,16 +1292,25 @@ def test_main_product_selection_guard_rechecks_for_new_updates_children(
         lambda _screen: UIEvidence(UIKind.PLAY_READY, "play_ready", (100, 100, 200, 50), "Play"),
     )
     actions: list[str] = []
-    monkeypatch.setattr(recovery, "_battle_net_exec", lambda *_args: actions.append("select_product"))
+
+    def guarded_play(session, current, _screen, _evidence, *, action: str) -> None:
+        recovery._guard_identity(session, current, 42, game=False, require_focus=True)
+        actions.append(action)
+
+    monkeypatch.setattr(
+        recovery,
+        "_click_battle_net_control",
+        guarded_play,
+    )
 
     status = recovery.step()
-    assert status.outcome == expected_outcome
+    assert status.outcome == expected_outcome, status
     if expected_outcome == "held":
         assert status.reason == "battle_net_updates_window_appeared_before_main_action"
         assert actions == []
     else:
-        assert status.reason == "product_selection_dispatched"
-        assert actions == ["select_product"]
+        assert status.reason == "play_click_dispatched"
+        assert actions == ["play"]
 
 
 def test_one_stale_read_reobserves_without_resetting_actions_or_episode_deadline(

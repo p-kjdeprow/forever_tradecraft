@@ -1513,3 +1513,58 @@ def test_screen_capture_runner_includes_bounded_stderr_on_exit_failure(
         ScreenCanvas(tmp_path)._capture_run(["gnome-screenshot", "-f", "capture.png"], 1.0)
     assert "gnome-screenshot exited 9: diagnostic" in str(error.value)
     assert len(str(error.value)) <= 200
+
+
+@pytest.mark.parametrize("source_kind", ["mapping", "callable", "inherited"])
+def test_capture_child_gets_portal_switch_without_mutating_source_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_kind: str
+) -> None:
+    monkeypatch.setenv("HDY_DISABLE_PORTAL", "0")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.setenv("XAUTHORITY", str(tmp_path / "inherited-authority"))
+    monkeypatch.setenv("CAPTURE_SENTINEL", "inherited-value")
+    source_environment = {
+        "DISPLAY": ":7",
+        "XAUTHORITY": str(tmp_path / "provided-authority"),
+        "HDY_DISABLE_PORTAL": "0",
+        "CAPTURE_SENTINEL": "provided-value",
+    }
+    source_before = dict(source_environment)
+    process_environment_before = dict(os.environ)
+    calls: list[tuple[list[str], dict[str, object]]] = []
+
+    if source_kind == "mapping":
+        canvas = ScreenCanvas(tmp_path, source_environment)
+    elif source_kind == "callable":
+        canvas = ScreenCanvas(tmp_path, lambda: source_environment)
+    else:
+        canvas = ScreenCanvas(tmp_path)
+
+    def run(argv: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((argv, kwargs))
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(desktop_observe.subprocess, "run", run)
+    canvas._capture_run(["gnome-screenshot", "-f", "capture.png"], 4.25)
+
+    assert len(calls) == 1
+    argv, kwargs = calls[0]
+    assert argv == ["gnome-screenshot", "-f", "capture.png"]
+    assert kwargs["capture_output"] is True
+    assert kwargs["text"] is True
+    assert kwargs["check"] is False
+    assert kwargs["timeout"] == 4.25
+    child_environment = kwargs["env"]
+    assert isinstance(child_environment, dict)
+    assert child_environment["HDY_DISABLE_PORTAL"] == "1"
+    if source_kind == "inherited":
+        assert child_environment["DISPLAY"] == ":0"
+        assert child_environment["XAUTHORITY"] == str(tmp_path / "inherited-authority")
+        assert child_environment["CAPTURE_SENTINEL"] == "inherited-value"
+    else:
+        assert child_environment["DISPLAY"] == ":7"
+        assert child_environment["XAUTHORITY"] == str(tmp_path / "provided-authority")
+        assert child_environment["CAPTURE_SENTINEL"] == "provided-value"
+    assert source_environment == source_before
+    assert os.environ["HDY_DISABLE_PORTAL"] == "0"
+    assert dict(os.environ) == process_environment_before

@@ -74,7 +74,10 @@ trading, account changes or unrelated display changes.
   (`crowley-desktop probe-frame`, `crowley-host status`) before the next dependent step; XTEST keys can land up to about
   1 s late and go to the compositor-focused window, which is not always the X "active window".
 - A capture error does not establish a missing window. Preserve its original bounded command/cause diagnostic;
-  reproduce once with the installed session provider before changing environment or capture behavior.
+  reproduce once with the unmodified installed runner and session provider before changing capture behavior.
+  Time outside the call first; a replacement runner can change environment or subprocess arguments and hide the bug.
+  GNOME Screenshot can block during toolkit portal settings initialization before its Shell screenshot RPC.
+  Trace the screenshot sender's portal calls too; the qualified runner disables that theme-only portal in its child.
 - Do not replay an action because its first frame lags.
 - A GNOME system modal can dim the HUD and ignore Xwayland input. A disconnected login screen keeps the same Wine
   identity; read the screen, not just the process.

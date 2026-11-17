@@ -418,6 +418,15 @@ class ScreenCanvas:
         self._environment = environment
 
     def _capture_run(self, argv: list[str], timeout: float) -> None:
+        if self._environment is None:
+            source_environment = os.environ
+        elif callable(self._environment):
+            source_environment = self._environment()
+        else:
+            source_environment = self._environment
+        capture_environment = dict(source_environment)
+        # Keep libhandy's theme-settings lookup out of the screenshot child.
+        capture_environment["HDY_DISABLE_PORTAL"] = "1"
         try:
             done = subprocess.run(
                 argv,
@@ -425,9 +434,7 @@ class ScreenCanvas:
                 text=True,
                 check=False,
                 timeout=timeout,
-                env=None
-                if self._environment is None
-                else dict(self._environment() if callable(self._environment) else self._environment),
+                env=capture_environment,
             )
         except subprocess.TimeoutExpired as exc:
             raise gui_capture.CaptureError(f"{argv[0]} timed out") from exc

@@ -520,7 +520,7 @@ console.log(JSON.stringify({{ scanWasFast, rendered2, requestSignals, callsAfter
         "No profitable strategies currently meet the turnover requirements"
         not in actual["emptyTurnover"]["cards"]
     )
-    assert "at least 6 observed market units/hour" in actual["emptyTurnover"]["cards"]
+    assert "at current prices" in actual["emptyTurnover"]["cards"]
     assert actual["emptyTurnover"]["cardClass"] == "panel empty"
     assert "No strategies meet this minimum net profit per item" in actual["emptyTurnover"]["status"]
     assert "other-house" in actual["emptyTurnover"]["watchState"]
@@ -839,8 +839,8 @@ def test_corrupt_profile_mismatched_and_blocked_storage_do_not_block_live_render
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938.alchemy225-tailoring150-cap225-budget100000-owned";
-const malformedStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps({**wrong_profile, "summary": malformed, "profile_key": "alchemy225-tailoring150-cap225-budget100000-owned"})}) : null, setItem: () => {{}} }};
+const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938.alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
+const malformedStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps({**wrong_profile, "summary": malformed, "profile_key": "alchemy225-tailoring150-cap225-budget100000-owned-profit-only"})}) : null, setItem: () => {{}} }};
 const mismatchStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps(wrong_profile)}) : null, setItem: () => {{}} }};
 const blockedStorage = new Proxy({{}}, {{ get: () => {{ throw new Error("storage blocked"); }} }});
 function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
@@ -908,7 +908,7 @@ def test_house_build_and_profile_cache_isolation_and_old_house_response_race():
     actual = _node(
         f"""
 const values = new Map();
-const profileKey = "alchemy225-tailoring150-cap225-budget100000-owned";
+const profileKey = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
 const cacheKey = (house, build) => `crowley.trading-summary.v1.${{encodeURIComponent(house)}}.${{encodeURIComponent(build)}}.${{profileKey}}`;
 const cacheEntry = (summary, override = {{}}) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profileKey, summary, ...override }});
 values.set(cacheKey("us-normal-alliance", "1.60.1.70938"), cacheEntry({json.dumps(default_summary)}));
@@ -1270,7 +1270,7 @@ def test_old_top_ten_cache_stays_limited_until_full_pool_refresh_then_upgrades()
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap225-budget100000-owned";
+const profile = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
 const legacyKey = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
 const currentKey = "crowley.trading-summary.v2.us-normal-alliance.1.60.1.70938." + profile;
 const values = new Map([[legacyKey, JSON.stringify({{ version: 1, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: profile, summary: {json.dumps(legacy_summary)} }})]]);
@@ -1333,7 +1333,7 @@ def test_v1_bridge_cache_with_full_candidates_is_restored_and_malformed_pool_is_
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap225-budget100000-owned";
+const profile = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
 const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
 const entry = (summary) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profile, summary }});
 const validValues = new Map([[key, entry({json.dumps(bridge_summary)})]]);
@@ -1368,7 +1368,7 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
     assert actual["recovered"]["summaryCalls"] == 1
 
 
-def test_turnover_floor_filters_fresh_and_saved_full_pool_before_top_ten():
+def test_unknown_zero_and_slow_activity_render_in_fresh_and_saved_profit_pool():
     latest = {
         "house": "us-normal-alliance",
         "sweep_id": 41,
@@ -1380,11 +1380,15 @@ def test_turnover_floor_filters_fresh_and_saved_full_pool_before_top_ten():
     candidates[1]["market_units_per_hour"] = 2.5
     candidates[2]["market_units_per_hour"] = 6
     candidates[3]["market_units_per_hour"] = 6.01
+    candidates[4].update(
+        market_units_per_hour=None, volume_status="unknown", usable_hours=None, usable_intervals=0
+    )
+    candidates[5].update(market_units_per_hour=0, volume_status="observed_no_depletion")
     summary = _summary(41, latest["finished_epoch"], count=0)
     summary.update(candidates=candidates, opportunities=candidates[:10])
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap225-budget100000-owned";
+const profile = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
 const key = "crowley.trading-summary.v2.us-normal-alliance.1.60.1.70938." + profile;
 const values = new Map([[key, JSON.stringify({{ version: 2, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: profile, summary: {json.dumps(summary)} }})]]);
 const storage = {{ getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) }};
@@ -1396,17 +1400,27 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
   const cached = mountDashboard(storage);
   await settle();
   const savedCards = cached.nodes.get("opportunities").children.map((n) => n.textContent);
+  const obsoleteProfile = profile.replace("-profit-only", "");
+  const obsoleteKey = key.replace("-profit-only", "");
+  const obsoleteEntry = JSON.stringify({{ version: 2, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: obsoleteProfile, summary: {{ ...{json.dumps(summary)}, candidates: [], opportunities: [] }} }});
+  const obsolete = mountDashboard({{ getItem: (k) => k === obsoleteKey ? obsoleteEntry : null, setItem: () => {{}} }});
+  const restoredObsoletePool = obsolete.dashboard.state.summary !== null;
+  await settle();
+  const recoveredCards = obsolete.nodes.get("opportunities").children.map((n) => n.textContent);
   const fresh = mountDashboard({{ getItem: () => null, setItem: () => {{}} }});
   await settle();
   const freshCards = fresh.nodes.get("opportunities").children.map((n) => n.textContent);
-  console.log(JSON.stringify({{ savedCards, freshCards }}));
+  console.log(JSON.stringify({{ savedCards, freshCards, recoveredCards, restoredObsoletePool }}));
 }})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
 """
     )
-    for key in ("savedCards", "freshCards"):
+    assert actual["restoredObsoletePool"] is False
+    for key in ("savedCards", "freshCards", "recoveredCards"):
         cards = actual[key]
         assert len(cards) == 10
-        assert "Rank 03" in cards[0]  # Exactly six qualifies.
-        assert "Rank 04" in cards[1]  # Above six qualifies.
-        assert "Rank 12" in cards[-1]  # Backfilled from beyond the original top ten.
-        assert not any("Rank 01" in card or "Rank 02" in card for card in cards)
+        assert "Rank 01" in cards[0]
+        assert "Rank 02" in cards[1]
+        assert "Rank 10" in cards[-1]
+        assert "Activity unknown" in cards[4]
+        assert "unknown usable h" in cards[4]
+        assert "0 units/h" in cards[5]

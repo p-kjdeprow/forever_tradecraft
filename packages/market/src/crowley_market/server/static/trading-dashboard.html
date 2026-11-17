@@ -155,7 +155,7 @@
     <div class="main-heading">
       <div>
         <h2>Top 10 crafting strategies</h2>
-        <p class="muted">At least 6 observed market units/hour over usable intervals in the last 24 hours. Batches use the assumed 10 g budget.</p>
+        <p class="muted">Positive estimated profit at current prices. Activity history is informational. Batches use the assumed 10 g budget.</p>
       </div>
       <div id="profile" class="profile">Alchemy 225 · Tailoring 150 (planning through 225) · 10 g assumed</div>
     </div>
@@ -200,10 +200,9 @@
     const SUMMARY_CACHE_PREFIX = "crowley.trading-summary";
     const SUMMARY_TIMEOUT_MS = 60_000;
     const LATEST_TIMEOUT_MS = 30_000;
-    const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap225-budget100000-owned";
+    const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
     const MIN_PROFIT_THRESHOLDS = [50, 100, 300, 500, 1000];
     const DEFAULT_MIN_PROFIT_COPPER = 50;
-    const MIN_MARKET_UNITS_PER_HOUR = 6;
     const MIN_PROFIT_PREFERENCE_KEY = "crowley.dashboard.minimum-profit-per-item.v1";
     const POLL_MS = 60_000;
     const STALE_SECONDS = 45 * 60;
@@ -266,12 +265,6 @@
       const count = BigInt(integerValue(divisor, "output quantity", 1));
       return `${amount.numerator}/${amount.denominator * count}`;
     }
-    function positiveKnownActivity(item) {
-      return item.volume_status === "observed_activity" &&
-        typeof item.market_units_per_hour === "number" && Number.isFinite(item.market_units_per_hour) && item.market_units_per_hour > 0 &&
-        typeof item.usable_hours === "number" && Number.isFinite(item.usable_hours) && item.usable_hours > 0 &&
-        Number.isSafeInteger(item.usable_intervals) && item.usable_intervals > 0;
-    }
     function stableJson(value) {
       if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
       if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
@@ -299,6 +292,7 @@
         if ((proceeds.numerator * cost.denominator - cost.numerator * proceeds.denominator) * profit.denominator !== profit.numerator * proceeds.denominator * cost.denominator) throw new Error(`${itemLabel}.profit does not equal proceeds minus cost`);
         if (profit.numerator * profitPerItem.denominator !== profitPerItem.numerator * profit.denominator * BigInt(quantity)) throw new Error(`${itemLabel}.profit_per_item does not equal batch profit divided by output quantity`);
         if (typeof item.volume_status !== "string" || typeof item.evidence_label !== "string") throw new Error(`${itemLabel} has invalid evidence`);
+        if (item.market_units_per_hour != null && (typeof item.market_units_per_hour !== "number" || !Number.isFinite(item.market_units_per_hour) || item.market_units_per_hour < 0)) throw new Error(`${itemLabel}.market_units_per_hour is invalid`);
         if (item.usable_hours != null && (typeof item.usable_hours !== "number" || !Number.isFinite(item.usable_hours) || item.usable_hours < 0)) throw new Error(`${itemLabel}.usable_hours is invalid`);
         if (item.usable_intervals != null) integerValue(item.usable_intervals, `${itemLabel}.usable_intervals`);
         if (!Array.isArray(item.reagents)) throw new Error(`${itemLabel}.reagents must be an array`);
@@ -329,7 +323,6 @@
       if (Object.keys(DASHBOARD_PROFILE).some((key) => profile[key] !== DASHBOARD_PROFILE[key])) throw new Error("trading summary profile does not match the dashboard profile");
       if (!Array.isArray(value.notes) || value.notes.some((note) => typeof note !== "string")) throw new Error("trading summary notes must be strings");
       const candidates = validateOpportunityRows(value.candidates, "candidates");
-      if (candidates.some((item) => !positiveKnownActivity(item))) throw new Error("candidates must contain only positive known-activity rows");
       const opportunities = validateOpportunityRows(value.opportunities, "opportunities");
       const top = candidates.slice(0, 10);
       if (opportunities.length !== top.length || opportunities.some((item, index) => stableJson(item) !== stableJson(top[index]))) throw new Error("opportunities must match the first ten ranked candidates");
@@ -355,7 +348,7 @@
         return validateSummary(summary, snapshot);
       }
       const rows = validateOpportunityRows(summary.opportunities, "legacy opportunities", { derivePerItem: true });
-      if (rows.length > 10 || rows.some((item) => !positiveKnownActivity(item))) throw new Error("legacy cached summary is not a qualified top-ten view");
+      if (rows.length > 10) throw new Error("legacy cached summary exceeds ten rows");
       return { ...validateSummary({ ...summary, candidates: rows, opportunities: rows }, snapshot), candidatePoolComplete: false, legacyTopTen: true };
     }
     function scanAge(latest, nowEpoch = Date.now() / 1000) {
@@ -661,11 +654,11 @@
           metric("List price each", safeMoney(item.unit_list_price)));
 
         const evidence = el("p", "", "evidence");
-        const usableHours = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, useGrouping: false }).format(item.usable_hours);
-        const activity = new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3, useGrouping: false }).format(item.market_units_per_hour);
+        const usableHours = item.usable_hours == null ? "unknown" : new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, useGrouping: false }).format(item.usable_hours);
+        const activity = item.market_units_per_hour == null ? "Activity unknown" : `${new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3, useGrouping: false }).format(item.market_units_per_hour)} units/h`;
         append(evidence,
           document.createTextNode(`${activityWindowHours}h observed activity: `),
-          el("strong", `${activity} units/h`),
+          el("strong", activity),
           document.createTextNode(` · ${usableHours} usable h across ${item.usable_intervals} intervals · ${item.evidence_label}. Sales are unconfirmed.`));
         const priceAge = el("span", "", "price-age");
         priceAgeEntries.push({ node: priceAge, ageAtScan: item.price_age_seconds, finishedEpoch: summaryFinishedEpoch });
@@ -700,8 +693,8 @@
       }
       function renderSummary(summary, { fromCache = false, preserveStatus = false, filterChange = false } = {}) {
         const nextPriceAgeEntries = [];
-        const filtered = summary.candidates.filter((item) => positiveKnownActivity(item) && item.market_units_per_hour >= MIN_MARKET_UNITS_PER_HOUR && profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
-        let emptyMessage = "No strategies meet this minimum net profit per item and at least 6 observed market units/hour in the 24-hour window. Unknown or slower activity remains hidden.";
+        const filtered = summary.candidates.filter((item) => profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
+        let emptyMessage = "No strategies meet this minimum net profit per item at current prices.";
         if (!summary.candidatePoolComplete && filtered.length === 0) {
           emptyMessage = "No saved top-ten strategies meet this minimum. Lower-ranked results are unavailable until the complete candidate pool refreshes.";
         }

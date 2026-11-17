@@ -357,7 +357,7 @@ def test_tailoring_caps_distinguish_exact_rank_from_yellow_threshold():
     assert 12 not in rows and 13 not in rows
 
 
-def test_long_gaps_and_grouped_item_books_are_excluded():
+def test_long_gaps_and_grouped_item_books_keep_profitable_rows_with_unknown_activity():
     recipe = _recipe(output_id=1000, reagent_id=2000)
     long_gap_inputs = _inputs(
         [recipe],
@@ -366,7 +366,9 @@ def test_long_gaps_and_grouped_item_books_are_excluded():
         },
         facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
     )
-    assert summary.build_trading_summary(long_gap_inputs)["opportunities"] == []
+    row = summary.build_trading_summary(long_gap_inputs)["opportunities"][0]
+    assert row["volume_status"] == "unknown"
+    assert row["market_units_per_hour"] is None
 
     item_books = [_item_book(index, ASOF - 6 * 3600 + index * 900, grouped=True) for index in range(25)]
     grouped_inputs = _inputs(
@@ -374,10 +376,12 @@ def test_long_gaps_and_grouped_item_books_are_excluded():
         item_books={1000: item_books},
         facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
     )
-    assert summary.build_trading_summary(grouped_inputs)["opportunities"] == []
+    row = summary.build_trading_summary(grouped_inputs)["opportunities"][0]
+    assert row["volume_status"] == "unknown"
+    assert row["market_units_per_hour"] is None
 
 
-def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
+def test_unknown_activity_remains_in_candidate_pool_and_preserves_existing_ranking():
     qualified_ids = range(1000, 1013)
     unknown_ids = range(1013, 1025)
     recipes = [
@@ -405,17 +409,16 @@ def test_unknown_high_ask_cannot_crowd_positive_turnover_rows_before_top_ten():
     result = summary.build_trading_summary(_inputs(recipes, books=books, facts=facts))
 
     assert len(result["opportunities"]) == 10
-    assert len(result["candidates"]) == len(qualified_ids)
-    assert [row["item_id"] for row in result["candidates"]] == list(qualified_ids)
+    assert len(result["candidates"]) == len(qualified_ids) + len(unknown_ids)
+    assert [row["item_id"] for row in result["candidates"]] == [*qualified_ids, *unknown_ids]
     assert result["opportunities"] == result["candidates"][:10]
     assert {row["item_id"] for row in result["opportunities"]} == set(range(1000, 1010))
     assert all(row["volume_status"] == "observed_activity" for row in result["opportunities"])
     assert all(row["market_units_per_hour"] >= 6 for row in result["opportunities"])
 
 
-@pytest.mark.parametrize("interval_seconds, accepted", [(3601, False), (3600, True), (3599, True)])
-def test_six_units_per_hour_floor_uses_exact_rate_before_rounding(interval_seconds, accepted):
-    # 6 units / 3601 seconds rounds to 6.00, but is still below the hard floor.
+@pytest.mark.parametrize("interval_seconds", [3601, 3600, 3599])
+def test_activity_near_six_units_per_hour_does_not_filter_profitable_rows(interval_seconds):
     books = _commodity_points(1000, [(-interval_seconds, 100), (0, 94)])
     plans = {int(book.sweep_id): summary.SweepSamplingPlan(900, 4, frozenset({1000})) for book in books}
     result = summary.build_trading_summary(
@@ -426,11 +429,11 @@ def test_six_units_per_hour_floor_uses_exact_rate_before_rounding(interval_secon
             facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
         )
     )
-    assert bool(result["candidates"]) is accepted
-    assert bool(result["opportunities"]) is accepted
+    assert result["candidates"]
+    assert result["opportunities"][0]["market_units_per_hour"] == round(6 * 3600 / interval_seconds, 2)
 
 
-def test_usable_24h_history_with_zero_depletion_is_excluded():
+def test_usable_24h_history_with_zero_depletion_keeps_profitable_rows():
     recipe = _recipe()
     result = summary.build_trading_summary(
         _inputs(
@@ -442,8 +445,10 @@ def test_usable_24h_history_with_zero_depletion_is_excluded():
         )
     )
 
-    assert result["opportunities"] == []
-    assert result["candidates"] == []
+    assert len(result["candidates"]) == 1
+    row = result["opportunities"][0]
+    assert row["market_units_per_hour"] == 0
+    assert row["volume_status"] == "observed_no_depletion"
 
 
 def test_short_positive_history_after_six_hours_qualifies_without_filling_missing_time():

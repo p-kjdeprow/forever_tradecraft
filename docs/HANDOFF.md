@@ -18,6 +18,15 @@ No screenshots or game input were used during the preceding offline repair.
 See [the recovery record](URGENT_RECOVERY_PLAN.md) for causes, checks and limitations.
 User-managed alerts are paused; their unfinished changes are preserved privately.
 
+The user subsequently removed the market-activity eligibility filter: profitable
+current-price strategies must remain visible even with unknown, zero or slow activity.
+The audit found 100 positive if-sold recipes in sweep 906, all hidden solely because
+the new build had no usable activity intervals. Do not interpret an empty filtered
+list as proof that no profitable recipes exist. The server and dashboard now admit
+these candidates, retain activity as informational evidence, and keep the user's
+minimum-profit preference. Old filtered browser caches are isolated by the changed
+policy key. See [the change record](PROFIT_FILTER_REMOVAL.md).
+
 The cold-start refactor introduced two full captures and a Python child per typed
 character. Commands now use one explicit key transition chain through one monitored
 child, with cheap stop/presence/maintenance/session/process/focus checks during typing.
@@ -39,7 +48,7 @@ disabled. Both addons remain 0.3.0, scanner schema 1 and automation schema 3.
 See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
 
 The server now runs image
-`sha256:e6230b4abd20bd383ff51e2e03abc07eb1548ef4a1375f1c5562253d7f8b5994`.
+`sha256:4d544dea56b8a4adcf8fc2d9066eb9a4688aa62e10c9a3cce9a393c185cc96d0`.
 The original database container and DB/raw mounts are unchanged. All twelve applied
 migrations retain their original bytes. The supported client-data exporter and loader
 imported genuine build 1.60.1.70959 data (export 5: 2,282 recipes, 4,556 items).
@@ -47,10 +56,14 @@ Trading-summary now returns HTTP 200 for sweep 906: 470 queried and 470 successf
 A headless browser verified automatic refresh from 905 to 906, matching summary and
 watch identities, a fresh scan indicator, no JavaScript errors, and HTTP 200 on all
 API calls. Profit preferences persist across reload and invalid house input is
-rejected. No browser screenshots were taken. Current filters produce zero qualifying
-opportunities; this is a visible empty result, not a loading failure. Served dashboard
-bytes match source; refresh a tab loaded before deployment to obtain the repaired
-recipe-watch validator. Resume evidence is in `~/.local/state/crowley/resume-20261117/`.
+rejected. No browser screenshots were taken. Following the activity-filter removal,
+sweep 906 returns 100 profitable candidates and a populated top ten. Unknown activity
+is explicitly labeled. Served dashboard bytes match source; refresh a tab loaded
+before deployment to obtain the updated profit-only view. Resume evidence is in
+`~/.local/state/crowley/resume-20261117/`; filter audit, deployment and browser proofs
+are in `~/.local/state/crowley/profit-audit-20261117/`. The filter removal was deployed
+to the market server only; installed desktop packages and both running services were
+left intact. Its 49 focused tests, Ruff checks and scoped Pyright pass.
 The health command's only remaining issue is the previously deferred stale backup
 record; neither scanner nor website health is currently flagged.
 Historical 70938 item/export facts are preserved; no schema change or trade occurred.

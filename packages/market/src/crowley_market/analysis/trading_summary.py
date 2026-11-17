@@ -35,8 +35,15 @@ ACTIVITY_WINDOW_HOURS = 24
 ACTIVITY_WINDOW_SECONDS = ACTIVITY_WINDOW_HOURS * 3600
 LISTING_HOURS = 12
 MAX_CRAFTS = 5
-MIN_MARKET_UNITS_PER_HOUR = Fraction(6)
-PROFILE_KEY = ("alchemy", ALCHEMY_SKILL, "tailoring", TAILORING_SKILL, TAILORING_PLANNING_CAP, BUDGET_COPPER)
+PROFILE_KEY = (
+    "alchemy",
+    ALCHEMY_SKILL,
+    "tailoring",
+    TAILORING_SKILL,
+    TAILORING_PLANNING_CAP,
+    BUDGET_COPPER,
+    "profit-only",
+)
 
 TRADING_SUMMARY_CACHE: MarketCache[dict[str, Any]] = MarketCache(max_entries=8, ttl_seconds=900)
 
@@ -502,12 +509,6 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
         if output_fact is None or output_fact.bonding not in (0, 2, 3):
             continue
         activity = _activity(inputs, item_id, output_quote, list_price)
-        if (
-            activity.status != "observed_activity"
-            or activity.rate is None
-            or activity.rate < MIN_MARKET_UNITS_PER_HOUR
-        ):
-            continue
         result = _opportunity(inputs, recipe, eligibility, output_quote, activity, list_price)
         if result is None:
             continue
@@ -543,8 +544,8 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
             "grouped, stale, and historically unsupported intervals are excluded.",
             "Current listing targets undercut the lowest observed price by one copper. "
             "Tools, categories, and focus requirements are shown per recipe.",
-            "Only positive-margin opportunities with at least 6 observed market units per hour "
-            "and usable 24-hour evidence are shown; unknown or slower activity is excluded. "
+            "Positive-margin opportunities are shown regardless of observed market activity. "
+            "Unknown activity does not establish demand or a sale probability. "
             "All skill planning stays within 225.",
             "Batch sizing and ranking assume a 10% share of observed market activity; "
             "this is not a personal sales forecast.",

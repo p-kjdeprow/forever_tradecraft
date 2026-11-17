@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+from crowley_automation.config import AutomationConfig
+from crowley_automation.config import load_config as load_automation_config
 from crowley_automation.gui.process import OwnedGameMatcher
 from crowley_common.frames import ProtocolContract
 from crowley_common.game_target import CatalogLike, selected_target, target_scan_plan
@@ -30,6 +32,7 @@ class ScanConfigError(ValueError):
 @dataclass(frozen=True)
 class ScanConfig:
     target: Target
+    automation: AutomationConfig
     matcher: OwnedGameMatcher
     window_class: str
     window_title: str
@@ -59,18 +62,43 @@ def load_scan_config(
     *,
     host_path: str | Path | None = None,
     scanner_path: str | Path | None = None,
+    automation_path: str | Path | None = None,
 ) -> ScanConfig:
     """Join host display settings and standalone scanner settings at the host boundary."""
 
     game = selected_target()
     host = load_host_config(host_config_path() if host_path is None else host_path)
     scanner: ScannerConfig = load_scanner_config(scanner_path)
+    automation = load_automation_config(automation_path)
     catalog = load_catalog()
     game.validate_catalog(cast(CatalogLike, catalog))
     plan = target_scan_plan(cast(CatalogLike, catalog), game)
     plan_hash = plan.get("planHash")
     if not isinstance(plan_hash, str) or not plan_hash:
         raise ScanConfigError("selected target canonical plan has no planHash")
+
+    expected_automation = {
+        "wine_prefix": host.wine_prefix,
+        "game_root": host.game_root,
+        "display": host.display,
+        "window_title": host.window_title,
+        "game_executable": game.executable,
+        "game_argv0": game.windows_argv0,
+        "window_class": game.window_class,
+        "product": game.product,
+        "product_dir": game.product_dir,
+        "character": host.character,
+        "realm": game.realm,
+        "character_select_name": host.character_select_name,
+        "faction": game.faction,
+        "house": game.house,
+        "build": game.full_build,
+        "interface": game.interface,
+        "native_region": game.native_region_id,
+        "canvas_crop": host.automation_canvas_crop,
+    }
+    if any(getattr(automation, key) != value for key, value in expected_automation.items()):
+        raise ScanConfigError("automation.toml is stale relative to host.toml and selected target")
 
     flavor = Path(scanner.game_root) / game.product_dir
     addons_dir = flavor / "Interface" / "AddOns"
@@ -87,6 +115,7 @@ def load_scan_config(
         addon_version=automation_version,
         scanner_addon_version=scanner_version,
         auctioneer=AUCTIONEER_NAME,
+        native_region=game.native_region_id,
     )
     matcher = OwnedGameMatcher.for_game(
         game_executable=game.executable,
@@ -103,6 +132,7 @@ def load_scan_config(
     )
     return ScanConfig(
         target=target,
+        automation=automation,
         matcher=matcher,
         window_class=game.window_class,
         window_title=host.window_title,

@@ -4,9 +4,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from crowley_automation import desktop_cli
+from crowley_automation import desktop_cli, desktop_observe
 from crowley_automation.config import AutomationConfig
 from crowley_automation.desktop_observe import WindowState
+from crowley_automation.gui.process import ProcessIdentity
 from crowley_automation.ledger import Ledger
 from crowley_automation.model import Batch, CollectMail
 from crowley_common.frames import pack_cells
@@ -42,8 +43,11 @@ def _config(tmp_path: Path) -> AutomationConfig:
         game_executable="Wow.exe",
         game_argv0="C:\\wow.exe",
         window_class="wow.exe",
+        product="wowf",
+        product_dir="_forever_",
         character="Tester",
         realm="Normal",
+        character_select_name="Tester",
         faction="Alliance",
         house="us-normal-alliance",
         build="1.60.1.70938",
@@ -58,17 +62,20 @@ def _pin_probe(
 ) -> None:
     selected = _config(tmp_path) if config is None else config
 
-    class Process:
-        def __init__(self, _matcher: object) -> None: ...
+    class Matcher:
+        def identities(self) -> tuple[ProcessIdentity, ...]:
+            return (ProcessIdentity(17, 99, 1000, selected.game_argv0, selected.wine_prefix),)
 
-        def pids(self) -> list[int]:
-            return [17]
+    class MatcherFactory:
+        @staticmethod
+        def for_game(**_kwargs: str) -> Matcher:
+            return Matcher()
 
     class Window:
         def __init__(self, *_args: object) -> None: ...
 
         def observe(self, _pids: list[int]) -> WindowState:
-            return WindowState(42, 1, True, True, DISPLAY)
+            return WindowState(42, 1, True, True, DISPLAY, fullscreen=True)
 
     class Canvas:
         def __init__(self, *_args: object) -> None: ...
@@ -77,10 +84,10 @@ def _pin_probe(
             return screen
 
     monkeypatch.setattr(desktop_cli, "load_config", lambda: selected)
-    monkeypatch.setattr(desktop_cli, "x11_environment", lambda _display: {})
-    monkeypatch.setattr(desktop_cli, "ProcProcessSource", Process)
-    monkeypatch.setattr(desktop_cli, "X11Window", Window)
-    monkeypatch.setattr(desktop_cli, "ScreenCanvas", Canvas)
+    monkeypatch.setattr(desktop_observe, "x11_environment", lambda _display: {})
+    monkeypatch.setattr(desktop_observe, "OwnedGameMatcher", MatcherFactory)
+    monkeypatch.setattr(desktop_observe, "X11Window", Window)
+    monkeypatch.setattr(desktop_observe, "ScreenCanvas", Canvas)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
 
 
@@ -104,8 +111,12 @@ def test_probe_rejects_a_frame_that_ages_during_capture(
     client.state.now = capture_start
     client.fire("PLAYER_ENTERING_WORLD")
     _pin_probe(tmp_path, monkeypatch, _screen(client.frame_bytes))
-    capture_times = iter((float(capture_start + 10),))
-    monkeypatch.setattr(desktop_cli.time, "time", lambda: next(capture_times))
+    observe = desktop_cli.observe_native_world
+    monkeypatch.setattr(
+        desktop_cli,
+        "observe_native_world",
+        lambda config, **kwargs: observe(config, wall_clock=lambda: float(capture_start + 10), **kwargs),
+    )
 
     assert desktop_cli.main(["probe-frame"]) == desktop_cli.PROBE_ERROR
     assert "stale or future-dated" in capsys.readouterr().err
@@ -119,6 +130,52 @@ def test_probe_treats_a_canvas_without_the_frame_signature_as_absent(
     assert desktop_cli.main(["probe-frame"]) == desktop_cli.PROBE_NO_FRAME
 
 
+def test_native_observation_timestamp_is_capture_start_not_capture_completion(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    selected = _config(tmp_path)
+    identity = ProcessIdentity(17, 99, 1000, selected.game_argv0, selected.wine_prefix)
+    clocks = {"monotonic": 0.0, "wall": 100.0}
+
+    class Matcher:
+        def identities(self) -> tuple[ProcessIdentity, ...]:
+            return (identity,)
+
+    class MatcherFactory:
+        @staticmethod
+        def for_game(**_kwargs: str) -> Matcher:
+            return Matcher()
+
+    class Window:
+        def __init__(self, *_args: object) -> None: ...
+
+        def observe(self, _pids: list[int], *, include_hidden: bool = False) -> WindowState:
+            assert not include_hidden
+            return WindowState(42, 1, True, True, DISPLAY, fullscreen=True)
+
+    class Canvas:
+        def __init__(self, *_args: object) -> None: ...
+
+        def capture(self, _display: tuple[int, int]) -> Image.Image:
+            clocks["monotonic"] += 1.0
+            clocks["wall"] += 1.0
+            return Image.new("RGB", DISPLAY, (17, 17, 17))
+
+    monkeypatch.setattr(desktop_observe, "x11_environment", lambda _display: {})
+    monkeypatch.setattr(desktop_observe, "OwnedGameMatcher", MatcherFactory)
+    monkeypatch.setattr(desktop_observe, "X11Window", Window)
+    monkeypatch.setattr(desktop_observe, "ScreenCanvas", Canvas)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+    observation = desktop_observe.observe_native_world(
+        selected,
+        clock=lambda: clocks["monotonic"],
+        wall_clock=lambda: clocks["wall"],
+    )
+    assert observation.observed_wall == 100.0
+    assert clocks["wall"] == 101.0
+
+
 def test_probe_rejects_a_corrupt_frame_with_a_valid_signature(
     tmp_path: Path, monkeypatch: Any, capsys: Any
 ) -> None:
@@ -129,7 +186,7 @@ def test_probe_rejects_a_corrupt_frame_with_a_valid_signature(
     _pin_probe(tmp_path, monkeypatch, _screen(bytes(corrupted)))
 
     assert desktop_cli.main(["probe-frame"]) == desktop_cli.PROBE_ERROR
-    assert "CRC mismatch" in capsys.readouterr().err
+    assert "automation canvas frame is corrupt" in capsys.readouterr().err
 
 
 def test_presence_input_gate_blocks_uncertain_ledger_but_missing_ledger_stays_clear(

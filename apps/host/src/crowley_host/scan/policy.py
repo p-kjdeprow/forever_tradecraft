@@ -28,6 +28,8 @@ from dataclasses import dataclass, field, fields, replace
 from enum import StrEnum
 from typing import Any
 
+from crowley_automation.gui.process import ProcessIdentity
+
 STORMWIND = "Stormwind City"
 SWEEP_PHASES = frozenset({"item", "owned"})
 # Copied from session/driver.py CONDITIONAL_INTERACTION_BINDING_COMMAND.
@@ -46,7 +48,7 @@ RELOAD_MIN_GAP_S = 60.0  # between reloads for different sweeps
 FLUSH_PERSIST_S = 120.0  # after the reloaded boot is seen, the uid must be on disk
 FLUSH_RETRY_S = 1800.0  # one flush attempt per uid per 30 min
 NO_PROGRESS_S = 1800.0  # row 12, per stage
-STUCK_RELAUNCH_S = 1800.0  # window_invalid / blocking_ui / activation failure this long
+STUCK_RELAUNCH_S = 1800.0  # persistent blocking UI fault horizon
 AH_ATTEMPTS = 3
 AH_ATTEMPT_WINDOW_S = 600.0
 AH_POST_S = 10.0  # ahOpen must follow Ctrl-F12 within this
@@ -62,6 +64,7 @@ FRESH_BEFORE_RETURN_S = 3.0
 RELAUNCH_FAST_COUNT = 3
 RELAUNCH_FAST_GAP_S = 900.0
 RELAUNCH_SLOW_GAP_S = 3600.0
+RESTART_REASONS = frozenset({"no_frame_after_running", "ah_open_failed", "no_progress"})
 
 
 class Action(StrEnum):
@@ -109,6 +112,7 @@ class Snapshot:
     zone: str
     build: str
     interface: int
+    native_region: int
     addon_version: str
     scanner_addon_version: str
     house_key: str
@@ -151,6 +155,7 @@ class Target:
     addon_version: str
     scanner_addon_version: str
     auctioneer: str
+    native_region: int
 
 
 @dataclass(frozen=True)
@@ -185,6 +190,8 @@ class LoopState:
     blocking_since: float | None = None
     window_activations: tuple[float, ...] = ()
     window_activation_failed_at: float | None = None
+    observed_process_pid: int | None = None
+    observed_process_start_ticks: int | None = None
     # Not durable (process-local or monotonic-clock based):
     ah_stage: str = ""  # "", begun, targeting, binding, interact_sent
     ah_stage_at: float = 0.0
@@ -211,7 +218,13 @@ DURABLE_FIELDS = (
     "blocking_since",
     "window_activations",
     "window_activation_failed_at",
+    "observed_process_pid",
+    "observed_process_start_ticks",
 )
+_LEGACY_DURABLE_FIELDS = frozenset(DURABLE_FIELDS) - {
+    "observed_process_pid",
+    "observed_process_start_ticks",
+}
 _TUPLE_FIELDS = frozenset({"ah_attempts", "window_activations"})
 
 
@@ -226,6 +239,8 @@ def durable_fields(state: LoopState) -> dict[str, Any]:
 
 def restore(data: dict[str, Any]) -> LoopState:
     """Inverse of `durable_fields`; any missing or unknown key is an error."""
+    if set(data) == _LEGACY_DURABLE_FIELDS:
+        data = {**data, "observed_process_pid": None, "observed_process_start_ticks": None}
     if set(data) != set(DURABLE_FIELDS):
         raise ValueError(f"scan-loop state keys mismatch: {sorted(set(data) ^ set(DURABLE_FIELDS))}")
     known = {f.name for f in fields(LoopState)}
@@ -250,10 +265,40 @@ def _check_durable_value(key: str, value: object) -> None:
         ok = isinstance(value, int) and not isinstance(value, bool) and value >= 0
     elif key == "no_progress_at":
         ok = _is_number(value)
+    elif key in {"observed_process_pid", "observed_process_start_ticks"}:
+        ok = value is None or (isinstance(value, int) and not isinstance(value, bool) and value >= 0)
     else:  # optional wall-clock times
         ok = value is None or _is_number(value)
     if not ok:
         raise ValueError(f"scan-loop state field {key} has an invalid value: {value!r}")
+
+
+def bind_process_identity(st: LoopState, identity: ProcessIdentity) -> LoopState:
+    """Bind failure clocks to one verified client while preserving scan receipts/history."""
+
+    if (st.observed_process_pid, st.observed_process_start_ticks) == (
+        identity.pid,
+        identity.start_ticks,
+    ):
+        return st
+    return replace(
+        st,
+        ah_attempts=(),
+        ah_failed_at=None,
+        no_progress_stage=0,
+        no_progress_at=0.0,
+        window_bad_since=None,
+        blocking_since=None,
+        window_activations=(),
+        window_activation_failed_at=None,
+        observed_process_pid=identity.pid,
+        observed_process_start_ticks=identity.start_ticks,
+        ah_stage="",
+        ah_stage_at=0.0,
+        ah_open_since=None,
+        tx=None,
+        tx_cooldown_until=0.0,
+    )
 
 
 @dataclass(frozen=True)
@@ -276,6 +321,12 @@ class Observation:
     human_reason: str
     target: Target
     native_automation_busy: bool = False
+    process_identity: ProcessIdentity | None = None
+    window_xid: int | None = None
+    window_fullscreen: bool = False
+    session_fingerprint: str = ""
+    native_ready: bool = False
+    native_boot: str = ""
     maintenance_blocker: str = ""
     state: LoopState = field(default_factory=LoopState)
 
@@ -308,13 +359,16 @@ def relaunch_gap(attempts: int) -> float:
 
 
 def _relaunch(obs: Observation, st: LoopState, why: str, code: str = "") -> Decision:
+    if why not in RESTART_REASONS:
+        raise ValueError(f"restart reason is not an established scan failure: {why}")
     last = st.last_relaunch_at
     if last is not None and obs.wall - last < relaunch_gap(st.relaunch_attempts):
         return _wait(st, f"relaunch_backoff:{why}", code)
-    fresh = LoopState(
+    fresh = replace(
+        st,
         last_relaunch_at=obs.wall,
         relaunch_attempts=st.relaunch_attempts + 1,
-        last_new_sweep_at=obs.wall,
+        tx=None,
     )
     return Decision(Action.RELAUNCH, fresh, fault_code=code, detail=why)
 
@@ -343,6 +397,7 @@ def _pins_detail(snap: Snapshot, pins: Target) -> str:
         ("plan_hash", snap.plan_hash, pins.plan_hash),
         ("build", snap.build, pins.build),
         ("interface", snap.interface, pins.interface),
+        ("native_region", snap.native_region, pins.native_region),
         ("automation_addon_version", snap.addon_version, pins.addon_version),
         ("scanner_addon_version", snap.scanner_addon_version, pins.scanner_addon_version),
     )
@@ -392,8 +447,6 @@ def decide(obs: Observation) -> Decision:
     if len(recent) >= ACTIVATIONS:
         failed = st.window_activation_failed_at if st.window_activation_failed_at is not None else now
         st = replace(st, window_activations=recent, window_activation_failed_at=failed)
-        if now - failed >= STUCK_RELAUNCH_S:
-            return _relaunch(obs, st, "window_activation_failed", "window_activation_failed")
         return _fault(st, "window_activation_failed")
     st = replace(st, window_activations=(*recent, now))
     return Decision(Action.ACTIVATE_WINDOW, st, detail=f"before:{d.action}")
@@ -407,16 +460,14 @@ def _decide(obs: Observation) -> Decision:
         return _wait(st, obs.maintenance_blocker)
     if obs.native_automation_busy or (snap is not None and snap.automation_busy):
         return _wait(st, "automation_native_busy")
-    if not obs.process_alive:  # 1
-        return _relaunch(obs, st, "no_process")
-    # Window validity precedes the frame-age rows: a window that is not one fullscreen
-    # game window cannot be decoded, and its own 30 min clock must run instead of rows 2/3.
+    if not obs.process_alive:  # startup recovery owns no-process handling
+        return _wait(st, "startup_recovery")
+    # StartupRecovery repairs a verified game's window in place and never turns bad
+    # geometry into permission to close the client.
     if not obs.window_ok:
-        since = now if st.window_bad_since is None else st.window_bad_since
-        st = replace(st, window_bad_since=since)
-        if now - since >= STUCK_RELAUNCH_S:
-            return _relaunch(obs, st, "window_invalid", "window_invalid")
-        return _fault(st, "window_invalid")
+        return _wait(replace(st, window_bad_since=None), "startup_recovery", "window_invalid")
+    if not obs.native_ready:
+        return _wait(st, "startup_recovery")
     if st.window_bad_since is not None:
         st = replace(st, window_bad_since=None)
     age = None if obs.last_frame_at is None else now - obs.last_frame_at
@@ -424,7 +475,7 @@ def _decide(obs: Observation) -> Decision:
         if age is None or age >= NO_FRAME_S:  # 2
             return _relaunch(obs, st, "no_frame_after_running")
     elif now - obs.process_started_at >= NO_FRAME_S:  # 3
-        return _relaunch(obs, st, "no_frames_after_launch", "no_frames_after_launch")
+        return _fault(st, "scanner_frame_missing", "native_ready_without_scanner_frame")
     if snap is None or now - snap.received_at > STALE_FRAME_S:
         return _stale(obs, st, snap)
     st = _track(obs, snap)
@@ -440,7 +491,7 @@ def _decide(obs: Observation) -> Decision:
         since = now if st.blocking_since is None else st.blocking_since
         st = replace(st, blocking_since=since)
         if now - since >= STUCK_RELAUNCH_S:
-            return _relaunch(obs, st, "blocking_ui", "blocking_ui")
+            return _fault(st, "blocking_ui", snap.blocking_ui)
         # The Game Menu is a known UI that Escape closes (and a stray Escape opens).  With
         # the chat box closed, one Escape per 30 s dismisses it; anything else holds.
         if snap.blocking_ui == "game_menu_shown" and not snap.chat_active:

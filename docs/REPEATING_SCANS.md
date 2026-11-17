@@ -44,8 +44,15 @@ blocking UI, foreign/unfocused chat, missing binding/range, persistence/upload b
 scanner progress. Diagnose the actual code/detail. Do not bypass guards or replay a command just
 because its first publication lags. A disconnected client still has a valid Wine process identity.
 
-The host can normally relaunch after prolonged failure with bounded backoff. It must never reload,
-relaunch or send scan-maintenance keys during an active or unresolved market effect. Client-side
+Startup uses automation's shared in-process recovery controller. It refreshes the authenticated
+desktop session, adopts exact existing clients and repairs supported window geometry. Positive
+selected-name/control evidence authorizes entry; a fresh independent automation publication
+establishes world readiness. A missing scanner canvas is a scanner fault. See [STARTUP](STARTUP.md).
+
+After an established prolonged scan failure, the host can request a guarded normal close of the
+same verified client with bounded backoff. Unknown UI, missing pre-world frames and failed focus
+do not authorize closing a client. It must never reload, relaunch or send scan-maintenance keys
+during an active or unresolved market effect. Client-side
 AH ownership is separate from the desktop lease: Crowley_Host suspends the scanner through its
 public contract and waits for active queries to finish before granting automation. Missing expected
 coordination is an error; uncertain effects retain the grant.
@@ -55,14 +62,17 @@ systemctl --user stop crowley-host   # game remains running
 systemctl --user start crowley-host
 ```
 
-Stopping the unit does not prove a previously launched child has ended. Read the local-game-control
-skill before manual input and verify exact child/process/window ownership under the shared lease.
-Honor a human stop immediately; do not send cleanup input after a stop unless authorized.
+The new host cancels and reaps its recorded input/control helpers before releasing the GUI lease;
+real game and Battle.net processes survive. Older installed crowley-scan launchers lack that
+guarantee: an inactive legacy unit does not prove its launcher child ended. Read local-game-control
+before manual contact and verify ownership under the shared lease. Stop forbids new presses,
+motion and window changes; only bounded releases of possibly held controls may precede unlock.
 
 A plan or package-contract cutover needs a quiet old-client boundary. Prebuild the full reviewed
 wheel/image set and rollback artifacts. Verify old sweep persistence, server acceptance and ACK
-write; require fresh old-plan frames, correct native identity, focused window, no human/blocking
-UI/chat/command transaction, and at least 90 seconds of slack. Stop host, prove its launcher child
+write; the latest written ACK may load on the next boot. Require fresh old-plan frames, correct
+native identity, focused window, no human/blocking UI/chat/command transaction, and at least
+90 seconds of slack. A completed non-sweeping AH-closed state is also quiet. Stop host, prove its launcher child
 ended, then hold the GUI lease across fresh post-capture ownership/presence checks and one guarded
 normal window-manager close. Verify exact process exit before installing; a failed close aborts.
 Never kill as a cutover fallback or modify SavedVariables to make a check pass.

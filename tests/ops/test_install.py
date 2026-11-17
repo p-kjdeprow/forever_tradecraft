@@ -3,9 +3,9 @@ from __future__ import annotations
 import configparser
 import json
 import os
-import pwd
 import shutil
 import subprocess
+import sys
 import tomllib
 import zipfile
 from pathlib import Path
@@ -34,6 +34,7 @@ def _write_host(config_home: Path, game_root: Path, wine_prefix: Path) -> None:
                 f"game_root = {json.dumps(str(game_root))}",
                 'wtf_account = "850981908#1"',
                 'character = "Arthur"',
+                'character_select_name = "Dandune Hillmont"',
                 'display = ":crowley-test"',
                 'server_url = "http://server.invalid:8080"',
                 'window_title = "World of Warcraft"',
@@ -163,171 +164,59 @@ def test_refuses_symlinked_xdg_config_root(tmp_path: Path) -> None:
         install.install(install.InstallRequest(game_root=game_root, dry_run=True), environment)
 
 
-def test_hostile_paths_are_escaped_in_launcher_and_component_configs(tmp_path: Path) -> None:
+def test_hostile_paths_are_confined_to_component_config(tmp_path: Path) -> None:
     environment, _game_root, _runtime = _environment(tmp_path)
     marker = tmp_path / "executed"
     hostile_root = tmp_path / ("game;$(touch " + str(marker) + ')"\\é')
     (hostile_root / "_classic_beta_" / "Interface" / "AddOns").mkdir(parents=True)
     _write_host(environment["XDG_CONFIG_HOME"], hostile_root, tmp_path / "wine")
     plan = install.build_plan(install.InstallRequest(game_root=hostile_root), environment)
-    configs = {
-        item.relative_name: item.content
-        for item in plan.files
-        if item.relative_name in {"config/scanner.toml"}
-    }
-    assert all(content is not None for content in configs.values())
-    scanner = tomllib.loads(configs["config/scanner.toml"].decode("utf-8"))
-    assert set(scanner) == {"scanner"}
-    assert scanner["scanner"]["game_root"] == str(hostile_root)
-    launcher = next(
-        item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
-    )
+    by_name = {item.relative_name: item.content for item in plan.files}
+    scanner = tomllib.loads(by_name["config/scanner.toml"].decode("utf-8"))["scanner"]
+    automation = tomllib.loads(by_name["config/automation.toml"].decode("utf-8"))["automation"]
+    launcher = by_name["launcher/crowley-world-of-warcraft"]
     assert launcher is not None
-    assert "$(touch" in launcher.decode("utf-8")
+
+    assert scanner["game_root"] == str(hostile_root)
+    assert automation["game_root"] == str(hostile_root)
+    assert automation["product"] == "wow_classic_beta"
+    assert automation["product_dir"] == "_classic_beta_"
+    assert automation["character_select_name"] == "Dandune Hillmont"
+    assert launcher == install.render_launcher()
+    assert str(hostile_root).encode() not in launcher
     assert not marker.exists()
 
 
-def test_launcher_uses_host_display_and_requires_xauthority(tmp_path: Path) -> None:
+def test_launcher_executes_startup_with_the_rendered_xdg_config(tmp_path: Path) -> None:
     environment, game_root, _runtime = _environment(tmp_path)
     plan = install.build_plan(install.InstallRequest(game_root=game_root), environment)
-    launcher = next(
-        item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
+    by_name = {item.relative_name: item.content for item in plan.files}
+    launcher = by_name["launcher/crowley-world-of-warcraft"]
+    automation = by_name["config/automation.toml"]
+    assert launcher is not None and automation is not None
+
+    config_path = tmp_path / "config" / "crowley" / "automation.toml"
+    config_path.write_bytes(automation)
+    command_dir = tmp_path / "bin"
+    command_dir.mkdir()
+    command = command_dir / "crowley-desktop"
+    command.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys, tomllib\n"
+        "from pathlib import Path\n"
+        "config = Path(os.environ['XDG_CONFIG_HOME']) / 'crowley' / 'automation.toml'\n"
+        "with config.open('rb') as stream: values = tomllib.load(stream)['automation']\n"
+        "print(json.dumps({'args': sys.argv[1:], 'product': values['product'], "
+        "'product_dir': values['product_dir'], 'character_select_name': values['character_select_name']}))\n",
+        encoding="utf-8",
     )
-    assert launcher is not None
-    rendered = launcher.decode("utf-8")
-    assert "DISPLAY_VALUE=:crowley-test" in rendered
-    assert "${DISPLAY" not in rendered
-    assert "${XAUTHORITY:-" not in rendered
-    assert ":-" not in rendered
-
-    launcher_path = tmp_path / "launcher"
-    launcher_path.write_bytes(launcher)
-    launcher_path.chmod(0o700)
-    child_environment = dict(environment)
-    child_environment["CROWLEY_WINE"] = "/bin/true"
-    child_environment.pop("XAUTHORITY", None)
-    completed = subprocess.run(
-        [str(launcher_path)],
-        env=child_environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode != 0
-    assert "set XAUTHORITY" in completed.stderr
-
-
-def test_launcher_selects_the_target_product_without_repeated_exec(tmp_path: Path) -> None:
-    environment, game_root, _runtime = _environment(tmp_path)
-    target = load_game_target(TARGET_FIXTURE)
-    plan = install.build_plan(install.InstallRequest(game_root=game_root), environment)
-    launcher = next(
-        item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
-    )
-    assert launcher is not None
-    rendered = launcher.decode("utf-8")
-
-    assert f"PRODUCT={target.product}" in rendered
-    assert 'battle_net_exec "launch_uid $PRODUCT"' in rendered
-    assert f"EXECUTABLE={target.executable}" in rendered
-    exec_invocations = [
-        line
-        for line in rendered.splitlines()
-        if line.startswith('    game_env "$WINE" "$BATTLE_NET" --exec=')
-    ]
-    assert len(exec_invocations) == 1
-    assert exec_invocations[0].count("--exec") == 1
-    assert "--class '^battle\\.net\\.exe$'" in rendered
-    assert "--name" not in rendered  # xdotool shares one pattern across --class/--name
-    assert "getwindowname" in rendered
-    assert "-b remove,maximized_vert,maximized_horz" in rendered
-    assert "-remove WM_NORMAL_HINTS" in rendered
-    assert "_MOTIF_WM_HINTS '0x2, 0x0, 0x0, 0x0, 0x0'" in rendered
-    assert "_NET_WM_STATE_FULLSCREEN" in rendered
-    assert "xwininfo -id" in rendered
-    # The only keyboard Return is the Enter World press sent to the game window.
-    assert rendered.count("xdotool key") == 1
-    assert "x11 xdotool key --clearmodifiers Return" in rendered
-    assert rendered.index('"$CROWLEY_DESKTOP" play') < rendered.index("xdotool key --clearmodifiers Return")
-    # Enter World repeats until a canvas frame decodes (no blind fixed settle).
-    assert "CHARACTER_SELECT_SETTLE_SECONDS" not in rendered
-    assert "ENTER_WORLD_SETTLE_SECONDS=15" in rendered
-    assert "ENTER_WORLD_TIMEOUT_SECONDS=600" in rendered
-    assert "ENTER_WORLD_ATTEMPTS" not in rendered
-    assert 'x11 "$CROWLEY_DESKTOP" probe-frame || probe=$?' in rendered
-    # Return only on exit 1; 0 breaks; anything else fails.
-    assert "0) break ;;" in rendered and "1) gui_step enter_world ;;" in rendered
-    assert "*) fail " in rendered
-    assert rendered.index("probe-frame") < rendered.index("1) gui_step enter_world")
-    # Every input step holds the shared GUI lease and passes the presence gate.
-    assert '"$CROWLEY_DESKTOP" presence-ok --for-input' in rendered
-    assert '9>"$GUI_LOCK"' in rendered and 'flock -w "$GUI_LEASE_WAIT_SECONDS" 9' in rendered
-    assert 'GUI_LOCK="$GUI_LOCK_DIR/gui.lock"' in rendered
-    assert rendered.count("gui_step x11 xdotool windowactivate --sync") == 2
-    play_call = 'gui_step x11 "$CROWLEY_DESKTOP" play --window "$window"'
-    assert play_call in rendered
-    assert "crowley-ops" not in rendered
-    assert "gui_step enter_world" in rendered
-    assert rendered.index("xdotool key --clearmodifiers Return") > rendered.index(
-        'xdotool windowactivate --sync "$game_window"'
-    )
-    assert "xdotool key --clearmodifiers Escape" not in rendered
-    assert rendered.count("battle_net_exec 'focus play'") == 1
-    assert '"$CROWLEY_DESKTOP" play --window "$window"' in rendered
-    assert "PLAY_ATTEMPTS=3" in rendered
-    assert "GAME_START_ATTEMPT_SECONDS=20" in rendered
-    assert "xdotool click" not in rendered
-    assert "mousemove" not in rendered
-
-
-def test_launcher_rejects_missing_single_instance_before_wine(
-    tmp_path: Path,
-) -> None:
-    environment, game_root, _runtime = _environment(tmp_path)
-    target = load_game_target(TARGET_FIXTURE)
-    executable = game_root / target.product_dir / target.executable
-    executable.parent.mkdir(parents=True, exist_ok=True)
-    executable.write_bytes(b"game executable")
-
-    user_name = pwd.getpwuid(os.getuid()).pw_name
-    config = (
-        tmp_path
-        / "wine"
-        / "drive_c"
-        / "users"
-        / user_name
-        / "AppData"
-        / "Roaming"
-        / "Battle.net"
-        / "Battle.net.config"
-    )
-    config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("{}", encoding="utf-8")
-
-    wine = tmp_path / "wine-recorder"
-    record = tmp_path / "wine-invocations"
-    wine.write_text('#!/bin/sh\nprintf \'%s\\n\' "$*" >> "$CROWLEY_WINE_RECORD"\n', encoding="utf-8")
-    wine.chmod(0o700)
-    xauthority = tmp_path / "Xauthority"
-    xauthority.write_bytes(b"xauthority")
-
-    plan = install.build_plan(install.InstallRequest(game_root=game_root), environment)
-    launcher = next(
-        item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"
-    )
-    assert launcher is not None
+    command.chmod(0o700)
     launcher_path = tmp_path / "launcher"
     launcher_path.write_bytes(launcher)
     launcher_path.chmod(0o700)
 
     child_environment = dict(environment)
-    child_environment.update(
-        {
-            "CROWLEY_WINE": str(wine),
-            "CROWLEY_WINE_RECORD": str(record),
-            "XAUTHORITY": str(xauthority),
-        }
-    )
+    child_environment["PATH"] = f"{command_dir}:{os.environ.get('PATH', '')}"
     completed = subprocess.run(
         [str(launcher_path)],
         env=child_environment,
@@ -336,9 +225,13 @@ def test_launcher_rejects_missing_single_instance_before_wine(
         check=False,
     )
 
-    assert completed.returncode != 0
-    assert 'Client.SingleInstance must be "true"' in completed.stderr
-    assert not record.exists()
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {
+        "args": ["startup"],
+        "product": "wow_classic_beta",
+        "product_dir": "_classic_beta_",
+        "character_select_name": "Dandune Hillmont",
+    }
 
 
 def test_install_copies_addon_units_and_manifest_and_is_idempotent(

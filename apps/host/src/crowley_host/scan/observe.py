@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
 from crowley_automation.desktop_observe import (
     ABSENT_WINDOW,
+    FUTURE_FRAME_TOLERANCE_SECONDS,
+    MAX_FRAME_AGE_SECONDS,
     CanvasSource,
     ObserveError,
-    ProcessSource,
     WindowSource,
     WindowState,
     crop_canvas,
 )
+from crowley_automation.desktop_session import (
+    DesktopSession,
+    DesktopSessionProvider,
+    DesktopSessionUnavailable,
+)
 from crowley_automation.gui import capture as gui_capture
+from crowley_automation.gui.process import ProcessIdentity
 from crowley_common.frames import FrameKind, PixelDecoder, ProtocolContract, ProtocolError
 from crowley_scanner import savedvars
 from crowley_scanner import state as companion_state
@@ -80,6 +87,7 @@ def to_snapshot(
         zone=context["zone"],
         build=context["clientBuild"],
         interface=context["interface"],
+        native_region=context["nativeRegion"],
         addon_version=context["addonVersion"],
         scanner_addon_version=scanner_value["addonVersion"],
         house_key=scanner_value["house"]["key"],
@@ -210,6 +218,18 @@ class PresenceSource(Protocol):
     def human_active(self) -> tuple[bool, str]: ...
 
 
+class OwnedProcesses(Protocol):
+    def identities(self) -> tuple[ProcessIdentity, ...]: ...
+
+    def started_at(self, pids: list[int]) -> float: ...
+
+
+class SessionEnvironment(Protocol):
+    def refresh(self, session: DesktopSession) -> None: ...
+
+    def __call__(self) -> Mapping[str, str]: ...
+
+
 # --- observer -----------------------------------------------------------------------------
 
 
@@ -217,7 +237,7 @@ class Observer:
     def __init__(
         self,
         *,
-        process: ProcessSource,
+        process: OwnedProcesses,
         window: WindowSource,
         canvas: CanvasSource,
         disk: DiskSource,
@@ -226,10 +246,14 @@ class Observer:
         contract: ProtocolContract,
         canvas_crop: tuple[int, int, int, int],
         automation_canvas_crop: tuple[int, int, int, int],
+        session_provider: DesktopSessionProvider | None = None,
+        session_environment: SessionEnvironment | None = None,
         clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self._process, self._window, self._canvas = process, window, canvas
+        self._session_provider = session_provider
+        self._session_environment = session_environment
         self._disk, self._presence = disk, presence
         self._target, self._contract = target, contract
         self._scanner_crop, self._automation_crop = canvas_crop, automation_canvas_crop
@@ -237,7 +261,8 @@ class Observer:
         self._scanner_decoder: PixelDecoder | None = None
         self._automation_decoder: PixelDecoder | None = None
         self._identity = ""
-        self._process_key: tuple[tuple[int, ...], float] | None = None
+        self._process_key: tuple[tuple[ProcessIdentity, ...], float] | None = None
+        self._session_fingerprint = ""
         self._frames_seen = 0
         self._last_frame_at: float | None = None
         self._latest_scanner: tuple[dict[str, Any], float] | None = None
@@ -248,8 +273,14 @@ class Observer:
         self.window: WindowState = ABSENT_WINDOW
 
     @property
+    def window_source(self) -> WindowSource:
+        """Window query adapter shared with the guarded action path."""
+
+        return self._window
+
+    @property
     def window_xid(self) -> int | None:
-        return self.window.xid
+        return None if self.window.foreign_count else self.window.xid
 
     def human_active(self) -> tuple[bool, str]:
         return self._presence.human_active()
@@ -268,6 +299,39 @@ class Observer:
             crop=crop,
             contract=self._contract if kind == "scanner" else None,
         )
+
+    def _retire_evidence(self) -> None:
+        self._scanner_decoder = None
+        self._automation_decoder = None
+        self._identity = ""
+        self._latest_scanner = None
+        self._latest_automation = None
+        self._latest = None
+        self._latest_pair = None
+        self._last_frame_at = None
+        self._frames_seen = 0
+        self.decode_error = ""
+
+    def _native_ready(self, value: dict[str, Any] | None, received_at: float | None, now: float) -> bool:
+        age = None if received_at is None else now - received_at
+        if (
+            value is None
+            or age is None
+            or age > MAX_FRAME_AGE_SECONDS
+            or age < -FUTURE_FRAME_TOLERANCE_SECONDS
+        ):
+            return False
+        context = value["context"]
+        expected = {
+            "character": self._target.character,
+            "realm": self._target.realm,
+            "playerFaction": self._target.faction,
+            "clientBuild": self._target.build,
+            "interface": self._target.interface,
+            "addonVersion": self._target.addon_version,
+            "nativeRegion": self._target.native_region,
+        }
+        return all(context[key] == expected_value for key, expected_value in expected.items())
 
     def _sample(self, window: WindowState, identity: str) -> tuple[Snapshot, float] | None:
         """Capture and decode once; update the frame counters.  None when no frame decoded."""
@@ -327,36 +391,76 @@ class Observer:
 
     def observe(self, state: LoopState) -> Observation:
         wall, mono = self._clock(), self._monotonic()
-        pids = self._process.pids()
-        alive = bool(pids)
-        started = self._process.started_at(pids) if alive else 0.0
-        key = (tuple(pids), started) if alive else None
+        session_fingerprint = ""
+        session_unavailable = False
+        if self._session_provider is not None:
+            try:
+                session = self._session_provider.current()
+            except DesktopSessionUnavailable:
+                self._retire_evidence()
+                session_unavailable = True
+            else:
+                session_fingerprint = session.fingerprint
+                if self._session_environment is not None:
+                    self._session_environment.refresh(session)
+                if session_fingerprint != self._session_fingerprint:
+                    self._retire_evidence()
+                self._session_fingerprint = session_fingerprint
+        identities = self._process.identities()
+        pids = [identity.pid for identity in identities]
+        alive = bool(identities)
+        started = self._process.started_at(pids) if len(identities) == 1 else 0.0
+        identity = identities[0] if len(identities) == 1 else None
+        key = (identities, started) if identity is not None else None
         if key != self._process_key:
             self._process_key = key
-            self._frames_seen = 0
-            self._last_frame_at = None
-            self._latest = None
-            self._latest_scanner = None
-            self._latest_automation = None
-            self._latest_pair = None
-        window = self._window.observe(pids) if alive else ABSENT_WINDOW
+            self._retire_evidence()
+        window = (
+            self._window.observe(pids) if identity is not None and not session_unavailable else ABSENT_WINDOW
+        )
         self.window = window
-        if key is not None and window.ok and window.xid is not None:
-            self._sample(window, f"{key[0][0]}:{started}:{window.xid}")
+        owned_window_ok = window.ok and window.foreign_count == 0
+        if key is not None and identity is not None and owned_window_ok and window.xid is not None:
+            self._sample(window, f"{identity.pid}:{identity.start_ticks}:{window.xid}")
         elif not alive:
             self.decode_error = ""
         # A failed or skipped decode leaves the last frame in place; it ages into "stale".
         latest = self._latest if alive else None
-        latest_automation = self._latest_automation if alive else None
+        latest_automation = self._latest_automation if alive and not session_unavailable else None
         human, reason = self._presence.human_active()
         disk = self._disk.read()
         snapshot = latest[0] if latest is not None else None
+        automation_value = latest_automation[0] if latest_automation is not None else None
+        automation_at = latest_automation[1] if latest_automation is not None else None
+        if self._session_provider is not None and session_fingerprint:
+            try:
+                current_session = self._session_provider.current()
+                if current_session.fingerprint != session_fingerprint:
+                    if self._session_environment is not None:
+                        self._session_environment.refresh(current_session)
+                    self._retire_evidence()
+                    self.window = ABSENT_WINDOW
+                    window = ABSENT_WINDOW
+                    snapshot = None
+                    automation_value = None
+                    automation_at = None
+                    latest_automation = None
+                    session_fingerprint = ""
+            except DesktopSessionUnavailable:
+                self._retire_evidence()
+                self.window = ABSENT_WINDOW
+                window = ABSENT_WINDOW
+                snapshot = None
+                automation_value = None
+                automation_at = None
+                latest_automation = None
+                session_fingerprint = ""
         return Observation(
             wall=wall,
             mono=mono,
             process_alive=alive,
             process_started_at=started,
-            window_ok=window.ok,
+            window_ok=owned_window_ok and window.fullscreen,
             window_focused=window.focused,
             snapshot=snapshot,
             last_frame_at=self._last_frame_at,
@@ -372,5 +476,14 @@ class Observer:
             native_automation_busy=(
                 automation_busy(latest_automation[0]) if latest_automation is not None else False
             ),
+            process_identity=identity,
+            window_xid=window.xid if owned_window_ok else None,
+            window_fullscreen=window.fullscreen,
+            session_fingerprint=session_fingerprint,
+            native_ready=self._native_ready(automation_value, automation_at, wall)
+            and identity is not None
+            and owned_window_ok
+            and window.fullscreen,
+            native_boot=automation_value["boot"] if automation_value is not None else "",
             state=state,
         )

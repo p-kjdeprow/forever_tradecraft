@@ -1,9 +1,24 @@
 # Current handoff
 
-Updated 2026-11-16. The user authorized the repository refactor, parallel Luna implementation
+Updated 2026-11-17. The user authorized the repository refactor, parallel Luna implementation
 and independent Sol review loops, commits on main, and cleanup of task worktrees/temp files.
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
+
+Cold-start recovery is currently being implemented and qualified; see [STARTUP_PLAN](STARTUP_PLAN.md)
+and [STARTUP](STARTUP.md). The installed desktop still runs legacy crowley 0.1.0 / crowley-scan;
+source packages have not been installed during this task. Collection was restored after controlled
+UI capture. The actual selected UI label is `Dandune Hillmont`, paired to native Dandune and the
+pinned native realm; no realm is displayed on character selection. Required character_select_name
+records that literal independently of native pins. Battle.net's mutable comm is CrBrowserMain;
+identity uses exact executable argv0, UID, prefix and process start ticks. A real same-process
+Battle.net Updates release-information window is retained for cold-start qualification.
+Both host and automation source reviews are READY. Final source verification passed 1430 tests
+with 31 skipped, Ruff check/format, zero Pyright errors, and all five reviewed wheels installed
+outside the checkout against locked runtime dependencies with ten CLI help checks. All twelve
+applied migrations retain their original bytes. Installed-runtime qualification remains in progress.
+Private rollback/proposal artifacts are under
+~/.local/state/crowley/startup-rollout-20261117. No market image/database or trade changed.
 
 Retain the main dashboard and recipe watch, existing AH collection, scan/probe transport,
 health/diagnosis and backup/restore. Delete every inactive workflow, then build fresh automation

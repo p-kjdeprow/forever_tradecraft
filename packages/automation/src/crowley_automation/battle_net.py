@@ -1,4 +1,4 @@
-"""Start a game from Battle.net by clicking its Play button like a human.
+"""Battle.net UI recognition and guarded startup-control helpers.
 
 After a fresh Battle.net start the embedded Chromium view has no keyboard
 focus, ``focus play`` does not move it, and Return does nothing; Tab reaches the
@@ -14,18 +14,15 @@ import json
 import os
 import re
 import subprocess
-import tempfile
 import time
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 from crowley_common.platform.paths import XdgDirs
 from PIL import Image
 
-from crowley_automation.desktop_input import ActError, GuiLease, gui_lock_path
-from crowley_automation.gui import capture
 from crowley_automation.gui.click_gate import acquire_click_rate_permit
 from crowley_automation.gui.input_tool import PinnedInputTool
 from crowley_automation.gui.pointer import (
@@ -37,11 +34,14 @@ from crowley_automation.gui.pointer import (
     build_pointer_motion_chain,
     plan_human_pointer,
 )
-from crowley_automation.presence import Presence
-from crowley_automation.runtime import maintenance_blocker
+from crowley_automation.startup_ui import (
+    MIN_CONTROL_CONFIDENCE,
+    StartupUIError,
+    TesseractReader,
+    TextWord,
+    line_texts,
+)
 
-WINDOW_CLASS_PATTERN = r"^battle\.net\.exe$"
-WINDOW_NAME = "Battle.net"
 # Play button fill spans roughly RGB (20,140,255) to (0,116,224); the range is
 # widened to also cover the lighter hover blue left by a pointer resting on it.
 _BLUE_MAX_RED = 70
@@ -55,10 +55,7 @@ _MIN_WIDTH, _MAX_WIDTH = 150, 350
 _MIN_HEIGHT, _MAX_HEIGHT = 35, 80
 _MIN_FILL_RATIO = 0.6
 _INNER_FRACTION = 0.6
-# The label must read "Play": four glyphs (P, l, a, y), roughly centred.
-_GLYPH_MIN_CHANNEL = 170
-_GLYPH_MIN_AREA = 6
-_PLAY_GLYPH_COUNT = 4
+# The label must be a single exact Tesseract word on one line, roughly centred.
 _LABEL_MIN_WIDTH_FRACTION, _LABEL_MAX_WIDTH_FRACTION = 0.10, 0.50
 _LABEL_MAX_CENTER_OFFSET_FRACTION = 0.15
 _COMMAND_TIMEOUT_SECONDS = 20.0
@@ -125,38 +122,25 @@ def _components(mask: bytearray, width: int, height: int, *, diagonal: bool = Fa
     return found
 
 
-def _verify_play_label(image: Image.Image, box: Box) -> None:
-    """Require the button text to be the four-glyph, centred word "Play"."""
-
-    crop = image.crop((box.left, box.top, box.left + box.width, box.top + box.height)).convert("RGB")
-    data = crop.tobytes()
-    mask = bytearray(box.width * box.height)
-    for index in range(len(mask)):
-        if min(data[index * 3 : index * 3 + 3]) >= _GLYPH_MIN_CHANNEL:
-            mask[index] = 1
-    glyphs = [
-        glyph
-        for area, glyph in _components(mask, box.width, box.height, diagonal=True)
-        if area >= _GLYPH_MIN_AREA
-    ]
-    if len(glyphs) != _PLAY_GLYPH_COUNT:
-        raise BattleNetPlayError(f"the blue button label has {len(glyphs)} glyphs, expected the 4 of 'Play'")
-    run_left = min(glyph.left for glyph in glyphs)
-    run_right = max(glyph.left + glyph.width for glyph in glyphs)
-    run_width = run_right - run_left
-    if not _LABEL_MIN_WIDTH_FRACTION * box.width <= run_width <= _LABEL_MAX_WIDTH_FRACTION * box.width:
-        raise BattleNetPlayError(f"the blue button label width {run_width} is implausible for 'Play'")
-    if abs((run_left + run_right) / 2 - box.width / 2) > _LABEL_MAX_CENTER_OFFSET_FRACTION * box.width:
-        raise BattleNetPlayError("the blue button label is not centred, so it is not 'Play'")
-
-
-def locate_play_button(image: Image.Image, window: Box) -> Box:
+def locate_play_button(
+    image: Image.Image,
+    window: Box,
+    *,
+    words: Sequence[TextWord] | None = None,
+    captured_monotonic: float | None = None,
+) -> Box:
     """Return the Play button box in image coordinates, or fail loudly.
 
-    The search covers the bottom-left quarter of the window.  Exactly one blue
-    region of plausible size must exist (the gear button beside Play is a
-    separate, much narrower region).
+    The search covers the bottom-left quarter of the window. Exactly one blue
+    region of plausible size must contain the exact OCR line ``Play``. Four
+    connected glyphs alone are not accepted as evidence.
     """
+
+    if words is None:
+        try:
+            words = TesseractReader().read(image, captured_monotonic=captured_monotonic).words
+        except StartupUIError as error:
+            raise BattleNetPlayError("Tesseract could not verify the Battle.net button label") from error
 
     left, top = max(window.left, 0), max(window.top + window.height // 2, 0)
     right = min(window.left + window.width // 2, image.width)
@@ -185,20 +169,53 @@ def locate_play_button(image: Image.Image, window: Box) -> Box:
     # quarter; only a region whose label reads "Play" counts.  Live 2026-11-09: two
     # plausible regions made a relaunch fail and cost a 15 min backoff.
     labelled: list[Box] = []
-    rejections: list[str] = []
+    lines = line_texts(words, minimum_confidence=MIN_CONTROL_CONFIDENCE)
     for box in plausible:
         located = Box(left + box.left, top + box.top, box.width, box.height)
-        try:
-            _verify_play_label(image, located)
-        except BattleNetPlayError as exc:
-            rejections.append(f"{box.width}x{box.height}: {exc}")
+        label_words = [
+            word
+            for word in words
+            if word.confidence >= MIN_CONTROL_CONFIDENCE
+            and word.line in lines
+            and lines[word.line].casefold() == "play"
+            and located.left <= word.left
+            and word.right <= located.left + located.width
+            and located.top <= word.top
+            and word.bottom <= located.top + located.height
+        ]
+        if len(label_words) == 1 and _centered_play_label(label_words[0], located.width, located.left):
+            labelled.append(located)
             continue
-        labelled.append(located)
+        button_crop = image.crop(
+            (located.left, located.top, located.left + located.width, located.top + located.height)
+        ).resize((located.width * 3, located.height * 3), Image.Resampling.LANCZOS)
+        try:
+            local_words = TesseractReader().read(button_crop, captured_monotonic=captured_monotonic).words
+        except StartupUIError:
+            continue
+        local_lines = line_texts(local_words, minimum_confidence=MIN_CONTROL_CONFIDENCE)
+        exact = [
+            word
+            for word in local_words
+            if word.confidence >= MIN_CONTROL_CONFIDENCE
+            and word.line in local_lines
+            and local_lines[word.line].casefold() == "play"
+        ]
+        if len(exact) == 1 and _centered_play_label(exact[0], button_crop.width, 0):
+            labelled.append(located)
     if not labelled:
-        raise BattleNetPlayError("no blue region is labelled Play: " + "; ".join(rejections))
+        raise BattleNetPlayError("no blue region contains the exact centered Play label")
     if len(labelled) > 1:
         raise BattleNetPlayError(f"ambiguous Play button: {len(labelled)} blue regions labelled Play")
     return labelled[0]
+
+
+def _centered_play_label(word: TextWord, width: int, offset: int) -> bool:
+    if word.text.casefold() != "play":
+        return False
+    if not _LABEL_MIN_WIDTH_FRACTION * width <= word.width <= _LABEL_MAX_WIDTH_FRACTION * width:
+        return False
+    return abs(word.center[0] - (width / 2 + offset)) <= _LABEL_MAX_CENTER_OFFSET_FRACTION * width
 
 
 def inner_target(box: Box) -> Box:
@@ -209,10 +226,15 @@ def inner_target(box: Box) -> Box:
     return Box(box.left + (box.width - width) // 2, box.top + (box.height - height) // 2, width, height)
 
 
-def _run(args: Sequence[str]) -> str:
+def _run(args: Sequence[str], *, env: Mapping[str, str] | None = None) -> str:
     try:
         completed = subprocess.run(
-            list(args), capture_output=True, text=True, check=False, timeout=_COMMAND_TIMEOUT_SECONDS
+            list(args),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=_COMMAND_TIMEOUT_SECONDS,
+            env=None if env is None else dict(env),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise BattleNetPlayError(f"{args[0]} failed: {exc}") from exc
@@ -223,33 +245,6 @@ def _run(args: Sequence[str]) -> str:
     return completed.stdout
 
 
-def _run_discarding_output(args: list[str], _timeout: float) -> None:
-    _run(args)
-
-
-def find_battle_net_window() -> int:
-    """Find the one visible battle.net.exe-class window named exactly Battle.net."""
-
-    try:
-        found = subprocess.run(
-            ["xdotool", "search", "--onlyvisible", "--class", WINDOW_CLASS_PATTERN],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=_COMMAND_TIMEOUT_SECONDS,
-        ).stdout
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise BattleNetPlayError(f"xdotool search failed: {exc}") from exc
-    matches = [
-        int(candidate)
-        for candidate in found.split()
-        if _run(["xdotool", "getwindowname", candidate]).rstrip("\n") == WINDOW_NAME
-    ]
-    if len(matches) != 1:
-        raise BattleNetPlayError(f"expected exactly one visible Battle.net window, found {len(matches)}")
-    return matches[0]
-
-
 def _shell_ints(text: str, names: Sequence[str]) -> dict[str, int]:
     values = dict(re.findall(r"^([A-Z]+)=(-?\d+)$", text, flags=re.MULTILINE))
     missing = [name for name in names if name not in values]
@@ -258,61 +253,22 @@ def _shell_ints(text: str, names: Sequence[str]) -> dict[str, int]:
     return {name: int(values[name]) for name in names}
 
 
-def window_geometry(window: int) -> Box:
+def window_geometry(window: int, *, env: Mapping[str, str] | None = None) -> Box:
     values = _shell_ints(
-        _run(["xdotool", "getwindowgeometry", "--shell", str(window)]), ("X", "Y", "WIDTH", "HEIGHT")
+        _run(["xdotool", "getwindowgeometry", "--shell", str(window)], env=env),
+        ("X", "Y", "WIDTH", "HEIGHT"),
     )
     return Box(values["X"], values["Y"], values["WIDTH"], values["HEIGHT"])
 
 
-def _display_size() -> tuple[int, int]:
-    parts = _run(["xdotool", "getdisplaygeometry"]).split()
-    if len(parts) != 2 or not all(part.isdecimal() for part in parts):
-        raise BattleNetPlayError("xdotool getdisplaygeometry output is malformed")
-    return int(parts[0]), int(parts[1])
-
-
-def _tool_run(tool: PinnedInputTool, args: Sequence[str], timeout: float) -> str:
-    """Run the pinned XTEST emitter (the driver's input path) with one argv."""
-
-    completed = subprocess.run(
-        [tool.proc_path, *args],
-        capture_output=True,
-        text=True,
-        check=False,
-        pass_fds=(tool.image.fd,),
-        timeout=timeout,
-    )
-    if completed.returncode != 0:
-        raise BattleNetPlayError(f"pointer emitter exited {completed.returncode}: {completed.stderr.strip()}")
-    return completed.stdout
-
-
-def _pointer_position(tool: PinnedInputTool) -> tuple[int, int, int]:
-    """Return (x, y, window) from the pinned tool's getmouselocation, like the driver."""
-
-    values: dict[str, int] = {}
-    for line in _tool_run(tool, ["getmouselocation", "--shell"], _COMMAND_TIMEOUT_SECONDS).splitlines():
-        key, separator, value = line.strip().partition("=")
-        if key not in {"X", "Y", "SCREEN", "WINDOW"} or not separator or key in values:
-            raise BattleNetPlayError("pointer position output is malformed")
-        try:
-            values[key] = int(value, 0) if key == "WINDOW" else int(value)
-        except ValueError as exc:
-            raise BattleNetPlayError("pointer position output is malformed") from exc
-    if set(values) != {"X", "Y", "SCREEN", "WINDOW"} or values["SCREEN"] != 0 or values["WINDOW"] <= 0:
-        raise BattleNetPlayError("pointer position output is incomplete")
-    return values["X"], values["Y"], values["WINDOW"]
-
-
-def _is_window_or_descendant(xid: int, ancestor: int) -> bool:
+def _is_window_or_descendant(xid: int, ancestor: int, *, env: Mapping[str, str] | None = None) -> bool:
     """Walk X parents upward from xid; true when ancestor is reached before the root."""
 
     current = xid
     for _ in range(16):
         if current == ancestor:
             return True
-        tree = _run(["xwininfo", "-id", hex(current), "-tree"])
+        tree = _run(["xwininfo", "-id", hex(current), "-tree"], env=env)
         parent = re.search(r"Parent window id: (0x[0-9a-fA-F]+)", tree)
         root = re.search(r"Root window id: (0x[0-9a-fA-F]+)", tree)
         if parent is None or root is None or int(parent.group(1), 16) == int(root.group(1), 16):
@@ -321,151 +277,189 @@ def _is_window_or_descendant(xid: int, ancestor: int) -> bool:
     return False
 
 
-def _capture(directory: Path, display: tuple[int, int]) -> Image.Image:
-    """Capture under the cross-process screenshot lock; wait for a complete PNG."""
-
-    path = directory / "battle-net.png"
-    deadline = time.monotonic() + _COMMAND_TIMEOUT_SECONDS
-    capture.capture_screen(path, display, deadline_monotonic=deadline, run=_run_discarding_output)
-    with Image.open(path) as opened:
-        image = opened.convert("RGB")
-    if image.size != display:
-        raise BattleNetPlayError(f"screenshot is {image.size}, expected the display size {display}")
-    path.unlink()
-    return image
-
-
 def _write_evidence(path: Path, evidence: dict[str, object]) -> None:
     descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(evidence, sort_keys=True))
 
 
-def _gui_lease() -> GuiLease:
-    inherited = os.environ.get("CROWLEY_GUI_LEASE_FD")
-    if inherited is None:
-        return GuiLease(gui_lock_path())
-    if not inherited.isdecimal():
-        raise BattleNetPlayError("inherited GUI lease descriptor is invalid")
-    return GuiLease.from_inherited_fd(gui_lock_path(), int(inherited))
+def click_control(
+    window: int,
+    control: Box,
+    display: tuple[int, int],
+    *,
+    tool: PinnedInputTool,
+    control_run: Callable[..., subprocess.CompletedProcess[str]],
+    environment: Callable[[], Mapping[str, str]],
+    guard: Callable[[], None],
+    revalidate: Callable[[], Box | None],
+    action: str,
+) -> Path:
+    """Human-click one freshly classified control through the parent-death runner."""
 
+    if action not in {"play", "news_close", "enter_world"}:
+        raise BattleNetPlayError("startup click action is not allowlisted")
+    current_env = dict(environment())
+    geometry = window_geometry(window, env=current_env)
+    if geometry.width <= 0 or geometry.height <= 0 or display[0] <= 0 or display[1] <= 0:
+        raise BattleNetPlayError("startup window geometry is invalid")
+    if control.width <= 0 or control.height <= 0:
+        raise BattleNetPlayError("startup control geometry is invalid")
 
-def _presence_guard() -> None:
-    blocker = maintenance_blocker()
-    if blocker is not None:
-        raise BattleNetPlayError(f"local automation state blocks Play click: {blocker}")
-    active, reason = Presence().human_active()
-    if active:
-        raise BattleNetPlayError(f"physical input detected; Play click aborted: {reason}")
-
-
-def click_play(window: int | None = None) -> Path:
-    """Acquire the shared GUI lease and presence-check before a Play click."""
-
-    lease = _gui_lease()
-    try:
-        with lease.hold():
-            _presence_guard()
-            return _click_play_held(window, _presence_guard)
-    except ActError as exc:
-        raise BattleNetPlayError(f"GUI lease unavailable; Play click aborted: {exc}") from exc
-
-
-def _click_play_held(window: int | None, guard: Callable[[], None]) -> Path:
-    """Locate Play on a fresh capture and click it; return the evidence file.
-
-    Mirrors the session driver's pointer protocol: plan from the pointer read
-    inside the held click permit, emit the motion chain alone, verify the
-    pointer endpoint and target window, precommit, then press and release as a
-    separate emission, then record the press.
-    """
-
-    if window is None:
-        window = find_battle_net_window()
-    for name in ("DISPLAY", "XAUTHORITY"):
-        if not os.environ.get(name):
-            raise BattleNetPlayError(f"{name} must be set for the graphical session")
+    center = inner_target(control)
+    screen = Rect(0, 0, display[0], display[1])
+    capture_id = f"startup-{action}-{time.monotonic_ns()}"
+    binding = BindingMetadata(f"startup-{action}", capture_id, 1, 1, window, (window,))
+    target = PointerTarget(
+        f"startup-{action}",
+        Rect(center.left, center.top, center.width, center.height),
+        binding,
+        padding=1,
+    )
     dirs = XdgDirs.from_environ(os.environ)
     dirs.crowley_runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
     evidence_dir = dirs.crowley_state / "executor-evidence"
     evidence_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-
-    geometry = window_geometry(window)
-    display = _display_size()
-    with tempfile.TemporaryDirectory(prefix="battle-net-play-", dir=dirs.crowley_runtime) as scratch:
-        image = _capture(Path(scratch), display)
-    button = locate_play_button(image, geometry)
-    inner = inner_target(button)
-
-    # Plan in screen coordinates so a pointer outside the window still starts
-    # on the planned path instead of being warped onto it.
-    screen = Rect(0, 0, display[0], display[1])
-    capture_id = f"battle-net-play-{time.monotonic_ns()}"
-    binding = BindingMetadata("battle-net-play", capture_id, 1, 1, window, (window,))
-    target = PointerTarget(
-        "battle-net-play", Rect(inner.left, inner.top, inner.width, inner.height), binding, padding=1
-    )
     evidence: dict[str, object] = {
-        "schema": "crowley.battle-net-play.v1",
+        "schema": "crowley.startup-click.v1",
+        "action": action,
         "window": window,
         "windowGeometry": [geometry.left, geometry.top, geometry.width, geometry.height],
-        "button": [button.left, button.top, button.width, button.height],
-        "clickTarget": [inner.left, inner.top, inner.width, inner.height],
+        "control": [control.left, control.top, control.width, control.height],
+        "clickTarget": [center.left, center.top, center.width, center.height],
         "phase": "located",
     }
     evidence_path = evidence_dir / f"{capture_id}.json"
     _write_evidence(evidence_path, evidence)
 
-    tool = PinnedInputTool.load()
-    try:
-        with acquire_click_rate_permit() as permit:
-            start_x, start_y, _start_window = _pointer_position(tool)
-            plan = plan_human_pointer(Point(start_x, start_y), target, screen, button=PointerButton.LEFT)
-            if plan.click is None:
-                raise BattleNetPlayError("the pointer plan carries no click")
-            chain = build_pointer_motion_chain(plan.trajectory, (0, 0, display[0], display[1]))
-            first = plan.trajectory.samples[0].point
-            endpoint = (int(plan.endpoint.x), int(plan.endpoint.y))
-            evidence.update(
-                {
-                    "phase": "planned",
-                    "seed": plan.seed,
-                    "start": [start_x, start_y],
-                    "endpoint": list(endpoint),
-                    "waypoints": [[point.x, point.y] for point in plan.waypoints],
-                    "movementDuration": plan.movement_duration,
-                    "dwell": plan.click.dwell,
-                    "samples": [[s.at, s.point.x, s.point.y] for s in plan.trajectory.samples],
-                    "motionArgv": chain[1:],
-                }
-            )
-            _write_evidence(evidence_path, evidence)
-            # The motion chain never warps to the first sample, so the pointer
-            # must still be exactly there.
-            if _pointer_position(tool)[:2] != (int(first.x), int(first.y)):
-                raise BattleNetPlayError("pointer start changed before the planned motion")
+    def emit(args: Sequence[str], timeout: float) -> str:
+        done = control_run(
+            [tool.proc_path, *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+            env=current_env,
+            pass_fds=(tool.image.fd,),
+        )
+        if done.returncode != 0:
+            raise BattleNetPlayError("pinned XTEST control command failed")
+        return done.stdout
+
+    with acquire_click_rate_permit(cancellation_check=guard) as permit:
+        location = _shell_ints(
+            emit(["getmouselocation", "--shell"], _COMMAND_TIMEOUT_SECONDS), ("X", "Y", "SCREEN", "WINDOW")
+        )
+        if location["SCREEN"] != 0 or location["WINDOW"] <= 0:
+            raise BattleNetPlayError("pointer position is not attached to the active X screen")
+        plan = plan_human_pointer(
+            Point(location["X"], location["Y"]), target, screen, button=PointerButton.LEFT
+        )
+        if plan.click is None:
+            raise BattleNetPlayError("startup pointer plan has no click")
+        chain = build_pointer_motion_chain(plan.trajectory, (0, 0, display[0], display[1]))
+        first = plan.trajectory.samples[0].point
+        endpoint = (int(plan.endpoint.x), int(plan.endpoint.y))
+        evidence.update(
+            {
+                "phase": "planned",
+                "seed": plan.seed,
+                "start": [location["X"], location["Y"]],
+                "endpoint": list(endpoint),
+                "waypoints": [[point.x, point.y] for point in plan.waypoints],
+                "movementDuration": plan.movement_duration,
+                "dwell": plan.click.dwell,
+                "samples": [
+                    [sample.at, sample.point.x, sample.point.y] for sample in plan.trajectory.samples
+                ],
+                "motionArgv": chain[1:],
+            }
+        )
+        _write_evidence(evidence_path, evidence)
+        if _pointer_position_with_runner(tool, control_run, current_env)[:2] != (int(first.x), int(first.y)):
+            raise BattleNetPlayError("pointer start changed before startup motion")
+        guard()
+        emit(chain[1:], plan.movement_duration + _COMMAND_TIMEOUT_SECONDS)
+        end_x, end_y, end_window = _pointer_position_with_runner(tool, control_run, current_env)
+        if (end_x, end_y) != endpoint or not _is_window_or_descendant(end_window, window, env=current_env):
+            raise BattleNetPlayError("pointer did not reach the verified startup control")
+        if window_geometry(window, env=current_env) != geometry:
+            raise BattleNetPlayError("startup window changed after pointer motion")
+        fresh_control = revalidate()
+        if fresh_control is None or not _safe_control_revalidation(control, fresh_control, endpoint):
+            raise BattleNetPlayError("startup control changed after pointer motion")
+        guard()
+        evidence["precommitMonotonicNs"] = permit.precommit()
+        evidence["phase"] = "precommitted"
+        try:
             guard()
-            _tool_run(tool, chain[1:], plan.movement_duration + _COMMAND_TIMEOUT_SECONDS)
-            end_x, end_y, end_window = _pointer_position(tool)
-            if (end_x, end_y) != endpoint:
-                raise BattleNetPlayError("pointer is not at the planned endpoint after motion")
-            if not _is_window_or_descendant(end_window, window):
-                raise BattleNetPlayError("pointer is not over the Battle.net window")
-            click_args = ["mousedown", "1", "sleep", f"{plan.click.dwell:.9f}", "mouseup", "1"]
-            evidence["precommitMonotonicNs"] = permit.precommit()
-            evidence["phase"] = "precommitted"
-            try:
-                guard()
-                _tool_run(tool, click_args, plan.click.dwell + _COMMAND_TIMEOUT_SECONDS)
-                evidence["pressMonotonicNs"] = permit.record_press()
-                evidence["phase"] = "pressed"
-            except BaseException:
+            emit(
+                ["mousedown", "1", "sleep", f"{plan.click.dwell:.9f}", "mouseup", "1"],
+                plan.click.dwell + _COMMAND_TIMEOUT_SECONDS,
+            )
+            evidence["pressMonotonicNs"] = permit.record_press()
+            evidence["phase"] = "pressed"
+        except BaseException:
+            cleanup = getattr(getattr(control_run, "__self__", None), "release_only", None)
+            if callable(cleanup):
+                cleanup()
+            else:
                 try:
-                    _tool_run(tool, ["mouseup", "1"], _COMMAND_TIMEOUT_SECONDS)
+                    emit(["mouseup", "1"], _COMMAND_TIMEOUT_SECONDS)
                 except (BattleNetPlayError, OSError, subprocess.TimeoutExpired):
                     pass
-                raise
-    finally:
-        tool.close()
-        _write_evidence(evidence_path, evidence)
+            raise
+    _write_evidence(evidence_path, evidence)
     return evidence_path
+
+
+def _safe_control_revalidation(original: Box, fresh: Box, endpoint: tuple[int, int]) -> bool:
+    """Allow only tiny hover OCR shifts while keeping the planned endpoint safe."""
+
+    if min(original.width, original.height, fresh.width, fresh.height) <= 0:
+        return False
+    original_right = original.left + original.width
+    original_bottom = original.top + original.height
+    fresh_right = fresh.left + fresh.width
+    fresh_bottom = fresh.top + fresh.height
+    if (
+        max(
+            abs(original.left - fresh.left),
+            abs(original.top - fresh.top),
+            abs(original_right - fresh_right),
+            abs(original_bottom - fresh_bottom),
+        )
+        > 8
+    ):
+        return False
+    intersection_width = max(0, min(original_right, fresh_right) - max(original.left, fresh.left))
+    intersection_height = max(0, min(original_bottom, fresh_bottom) - max(original.top, fresh.top))
+    smaller_area = min(original.width * original.height, fresh.width * fresh.height)
+    if intersection_width * intersection_height < smaller_area * 0.8:
+        return False
+    safe = inner_target(fresh)
+    return (
+        safe.left <= endpoint[0] < safe.left + safe.width and safe.top <= endpoint[1] < safe.top + safe.height
+    )
+
+
+def _pointer_position_with_runner(
+    tool: PinnedInputTool,
+    control_run: Callable[..., subprocess.CompletedProcess[str]],
+    environment: Mapping[str, str],
+) -> tuple[int, int, int]:
+    done = control_run(
+        [tool.proc_path, "getmouselocation", "--shell"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_COMMAND_TIMEOUT_SECONDS,
+        env=dict(environment),
+        pass_fds=(tool.image.fd,),
+    )
+    if done.returncode != 0:
+        raise BattleNetPlayError("pinned pointer query failed")
+    values = _shell_ints(done.stdout, ("X", "Y", "SCREEN", "WINDOW"))
+    if values["SCREEN"] != 0 or values["WINDOW"] <= 0:
+        raise BattleNetPlayError("pointer query is not attached to the active X screen")
+    return values["X"], values["Y"], values["WINDOW"]

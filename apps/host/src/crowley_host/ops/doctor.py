@@ -88,7 +88,8 @@ def _check_executable(path: Path, problems: list[str], label: str) -> None:
 
 
 def _check_units(xdg: XdgDirs, environ: Mapping[str, str], problems: list[str]) -> None:
-    expected = {name for name, _ in install.render_units()}
+    expected_units = dict(install.render_units())
+    expected = set(expected_units)
     unit_dir = xdg.config_home / "systemd" / "user"
     home = _home(environ)
     entrypoints = {
@@ -103,10 +104,13 @@ def _check_units(xdg: XdgDirs, environ: Mapping[str, str], problems: list[str]) 
             problems.append(f"unit not installed: {path}")
             continue
         try:
-            text = privfs.read_bounded(path, 128 * 1024).decode("utf-8")
+            content = privfs.read_bounded(path, 128 * 1024)
+            text = content.decode("utf-8")
         except (OSError, UnicodeError, privfs.PrivateFileError):
             problems.append(f"unit is unreadable: {path}")
             continue
+        if content != expected_units[name]:
+            problems.append(f"unit differs from packaged version: {path}")
         if any(fragment in text for fragment in ("/home/", "/run/user/", "repos/", "/checkout/", ".venv")):
             problems.append(f"unit contains a checkout path: {path}")
         if name.endswith(".timer"):
@@ -277,8 +281,42 @@ def _check_launcher(plan: install.InstallPlan, problems: list[str]) -> None:
         return
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         problems.append(f"launcher is not a regular file: {path}")
-    elif stat.S_IMODE(info.st_mode) != 0o700:
+        return
+    if stat.S_IMODE(info.st_mode) != 0o700:
         problems.append(f"launcher must have mode 0700: {path}")
+    expected = next(
+        (item.content for item in plan.files if item.relative_name == "launcher/crowley-world-of-warcraft"),
+        None,
+    )
+    if expected is None:
+        problems.append("packaged launcher bytes are unavailable")
+        return
+    try:
+        actual = privfs.read_bounded(path, install.MAX_RESOURCE_BYTES)
+    except (OSError, privfs.PrivateFileError):
+        problems.append(f"launcher is unreadable: {path}")
+        return
+    if actual != expected:
+        problems.append(f"launcher differs from packaged template: {path}")
+
+
+def _check_tesseract(problems: list[str]) -> None:
+    """The startup UI reader has one required OCR engine and English model."""
+
+    try:
+        result = subprocess.run(
+            ["tesseract", "--list-langs"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        problems.append("Tesseract English language data is unavailable")
+        return
+    languages = {line.strip() for line in result.stdout.splitlines()}
+    if result.returncode != 0 or "eng" not in languages:
+        problems.append("Tesseract English language data is unavailable")
 
 
 def _check_host(xdg: XdgDirs, problems: list[str]) -> HostConfig | None:
@@ -443,6 +481,7 @@ def doctor(
     target = selected_target()
     _check_gnome_animations(problems)
     _check_gnome_idle_delay(problems)
+    _check_tesseract(problems)
     host = _check_host(xdg, problems)
     _check_input_tool(problems)
     scanner_path = xdg.crowley_config / "scanner.toml"
@@ -495,7 +534,7 @@ def doctor(
     values = _check_secrets(xdg, problems)
     _check_database(values, problems, database_status)
     if values and not values.get("CROWLEY_WINE"):
-        problems.append("CROWLEY_WINE is missing from secrets.env (the relaunch launcher needs it)")
+        problems.append("CROWLEY_WINE is missing from secrets.env (startup recovery needs it)")
     _check_account(ops, problems)
     return DoctorReport(tuple(dict.fromkeys(problems)))
 

@@ -37,4 +37,5 @@ unverified until the required specific trials are observed and documented.
 Read per-primitive receipts. Dispatch, callback and native outcome are separate; listed
 is not sold. An uncertain effect prevents new work and is never retried automatically.
 Use stop/status/reconcile as documented. Missing conclusive causal evidence stays uncertain;
-do not edit state or reload to escape it. Honor a user stop without sending cleanup input.
+do not edit state or reload to escape it. A stop forbids further actions; only bounded key/button
+releases for controls this run may have left down are allowed before relinquishing the GUI lease.

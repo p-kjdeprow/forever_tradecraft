@@ -42,6 +42,7 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
                 f'game_root = "{game_root}"',
                 'wtf_account = "850981908#1"',
                 'character = "Arthur"',
+                'character_select_name = "Dandune Hillmont"',
                 'display = ":0"',
                 'server_url = "http://crowley-server:8080"',
                 'window_title = "World of Warcraft"',
@@ -73,11 +74,14 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[dict[str, s
         path = entrypoints / name
         path.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         path.chmod(0o700)
-    monkeypatch.setattr(
-        install.subprocess,
-        "run",
-        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, stdout="", stderr=""),
-    )
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        stdout = (
+            "List of available languages (1):\neng\n" if command[:2] == ["tesseract", "--list-langs"] else ""
+        )
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(install.subprocess, "run", run)
     install.install(install.InstallRequest(game_root=game_root), environment)
     return environment, game_root
 
@@ -150,7 +154,19 @@ def test_rerun_install_repins_configs_and_preserves_scanner_intervals(
         automation["character"],
         automation["display"],
         automation["build"],
-    ) == (str(new_game_root), str(new_wine), "Merlin", ":3", new_target.full_build)
+        automation["product"],
+        automation["product_dir"],
+        automation["character_select_name"],
+    ) == (
+        str(new_game_root),
+        str(new_wine),
+        "Merlin",
+        ":3",
+        new_target.full_build,
+        new_target.product,
+        new_target.product_dir,
+        "Dandune Hillmont",
+    )
     report = doctor.doctor(environment, database_status=_current)
     assert report.ok, report.problems
 
@@ -203,9 +219,20 @@ def test_doctor_aggregates_unit_addon_secret_database_and_account_problems(
     joined = "\n".join(report.problems)
     assert not report.ok
     assert "checkout path" in joined
+    assert "unit differs from packaged version" in joined
     assert "digest mismatch" in joined
     assert "0600" in joined
     assert "migrations are not current" in joined
+
+
+def test_doctor_detects_a_modified_startup_launcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    environment, _game_root = _setup(tmp_path, monkeypatch)
+    launcher = tmp_path / "home" / ".local" / "bin" / "crowley-world-of-warcraft"
+    launcher.write_bytes(launcher.read_bytes() + b"# changed\n")
+
+    report = doctor.doctor(environment, database_status=_current)
+
+    assert f"launcher differs from packaged template: {launcher}" in report.problems
 
 
 def test_doctor_accepts_a_selected_account_with_unrelated_siblings(
@@ -372,3 +399,44 @@ def test_doctor_reports_unavailable_gsettings_for_idle_delay(monkeypatch: pytest
     problems: list[str] = []
     doctor._check_gnome_idle_delay(problems)
     assert "gsettings is unavailable" in "\n".join(problems)
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode", "expected"),
+    (
+        ('List of available languages in "/tessdata/" (1):\neng\n', 0, False),
+        ('List of available languages in "/tessdata/" (1):\nosd\n', 0, True),
+        ("", 1, True),
+    ),
+)
+def test_doctor_requires_tesseract_english(
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+    returncode: int,
+    expected: bool,
+) -> None:
+    seen: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        seen.append(command)
+        return subprocess.CompletedProcess(command, returncode, stdout, "")
+
+    monkeypatch.setattr(doctor.subprocess, "run", run)
+    problems: list[str] = []
+    doctor._check_tesseract(problems)
+
+    assert seen == [["tesseract", "--list-langs"]]
+    if expected:
+        assert problems == ["Tesseract English language data is unavailable"]
+    else:
+        assert problems == []
+
+
+def test_doctor_reports_unavailable_tesseract(monkeypatch: pytest.MonkeyPatch) -> None:
+    def unavailable(_command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("tesseract")
+
+    monkeypatch.setattr(doctor.subprocess, "run", unavailable)
+    problems: list[str] = []
+    doctor._check_tesseract(problems)
+    assert problems == ["Tesseract English language data is unavailable"]

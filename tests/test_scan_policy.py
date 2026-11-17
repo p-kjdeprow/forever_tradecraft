@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+from crowley_automation.gui.process import ProcessIdentity
 from crowley_host.scan.policy import (
     SET_BINDING_COMMAND,
     Action,
@@ -16,6 +17,7 @@ from crowley_host.scan.policy import (
     Step,
     Target,
     allowed_commands,
+    bind_process_identity,
     decide,
     durable_fields,
     relaunch_gap,
@@ -25,7 +27,7 @@ from crowley_host.scan.policy import (
 WALL = 1_000_000.0
 MONO = 500.0
 JAXON = "Auctioneer Jaxon"
-TARGET = Target("Char", "Realm", "Alliance", "house-a", "plan-1", "70862", 11500, "0.2.0", "0.3.0", JAXON)
+TARGET = Target("Char", "Realm", "Alliance", "house-a", "plan-1", "70862", 11500, "0.2.0", "0.3.0", JAXON, 1)
 S1, S2, S3 = "uid-1", "uid-2", "uid-3"
 
 
@@ -40,6 +42,7 @@ def snap(**kw: object) -> Snapshot:
         zone="Stormwind City",
         build="70862",
         interface=11500,
+        native_region=1,
         addon_version="0.2.0",
         scanner_addon_version="0.3.0",
         house_key="house-a",
@@ -88,6 +91,7 @@ def obs(snapshot: Snapshot | None = None, **kw: object) -> Observation:
         human_active=False,
         human_reason="",
         target=TARGET,
+        native_ready=True,
         state=LoopState(last_new_sweep_at=WALL - 60),
     )
     return replace(base, **kw)  # type: ignore[arg-type]
@@ -126,22 +130,31 @@ def test_automation_guards_withhold_scan_maintenance() -> None:
     assert decision.detail == "automation_native_busy"
 
 
-def test_row_1_no_process_relaunches_then_backs_off() -> None:
-    d = decide(obs(process_alive=False, snapshot=None))
-    check(d, Action.RELAUNCH)
-    assert d.state.relaunch_attempts == 1 and d.state.last_relaunch_at == WALL
-    again = replace(obs(process_alive=False, snapshot=None), wall=WALL + 899, state=d.state)
-    check(decide(again), Action.WAIT)
-    check(decide(replace(again, wall=WALL + 900)), Action.RELAUNCH)
+def test_no_process_is_owned_by_startup_recovery_without_consuming_a_scan_attempt() -> None:
+    before = obs(process_alive=False, snapshot=None)
+    d = decide(before)
+    check(d, Action.WAIT)
+    assert d.detail == "startup_recovery"
+    assert d.state == before.state
 
 
 def test_backoff_schedule_15_min_three_times_then_hourly_uncapped() -> None:
     assert [relaunch_gap(n) for n in range(6)] == [900, 900, 900, 3600, 3600, 3600]
     assert relaunch_gap(500) == 3600
-    st = LoopState(last_relaunch_at=WALL - 1000, relaunch_attempts=3)
-    o = obs(process_alive=False, snapshot=None, state=st)
-    check(decide(o), Action.WAIT)  # 1000 s < 3600 s after three attempts
-    check(decide(replace(o, wall=WALL + 2600)), Action.RELAUNCH)
+    st = LoopState(
+        last_relaunch_at=WALL - 1000,
+        relaunch_attempts=3,
+        no_progress_stage=1,
+        no_progress_at=WALL - 2000,
+        last_new_sweep_at=WALL - 2500,
+    )
+    o = obs(state=st)
+    check(decide(o), Action.WAIT, "no_progress")  # 1000 s < 3600 s after three attempts
+    again = decide(replace(o, wall=WALL + 2600))
+    check(again, Action.RELAUNCH)
+    assert again.state.last_new_sweep_at == st.last_new_sweep_at
+    assert again.state.no_progress_at == st.no_progress_at
+    assert again.state.tx is None
     big = replace(o, state=replace(st, relaunch_attempts=40), wall=WALL + 3600)
     check(decide(big), Action.RELAUNCH)
 
@@ -163,15 +176,26 @@ def test_row_3_fresh_launch_without_frames_reports_code() -> None:
     young = obs(snapshot=None, frames_seen_this_process=0, last_frame_at=None, process_started_at=WALL - 599)
     check(decide(young), Action.WAIT)
     old = replace(young, process_started_at=WALL - 600)
-    check(decide(old), Action.RELAUNCH, "no_frames_after_launch")
-    held = replace(old, state=LoopState(last_relaunch_at=WALL - 100, relaunch_attempts=1))
-    check(decide(held), Action.WAIT, "no_frames_after_launch")  # backoff keeps the report
+    check(decide(old), Action.FAULT, "scanner_frame_missing")
+    not_native = replace(old, native_ready=False)
+    check(decide(not_native), Action.WAIT)
+
+
+def test_native_readiness_is_required_before_scan_actions_and_restart() -> None:
+    action = decide(replace(closed(), native_ready=False))
+    check(action, Action.WAIT)
+    assert action.detail == "startup_recovery"
+    stale = replace(
+        obs(snap(received_at=WALL - 600), last_frame_at=WALL - 600),
+        native_ready=False,
+    )
+    check(decide(stale), Action.WAIT)
 
 
 def test_unfocused_window_is_activated_before_any_key() -> None:
     o = obs(snap(ah_open=False), window_focused=False)
     check(decide(o), Action.ACTIVATE_WINDOW)
-    check(decide(replace(o, window_ok=False)), Action.FAULT, "window_invalid")
+    check(decide(replace(o, window_ok=False)), Action.WAIT, "window_invalid")
 
 
 # --- row 4 -----------------------------------------------------------------------------
@@ -580,29 +604,26 @@ def test_wrong_target_is_retargeted_with_targetexact() -> None:
     assert d.command == f"/targetexact {JAXON}"
 
 
-def test_window_invalid_relaunches_after_30_min_with_backoff() -> None:
+def test_invalid_window_is_repaired_by_startup_recovery_without_relaunch() -> None:
     o = replace(obs(), window_ok=False)
     first = decide(o)
-    check(first, Action.FAULT, "window_invalid")
-    assert first.state.window_bad_since == WALL
+    check(first, Action.WAIT, "window_invalid")
+    assert first.detail == "startup_recovery" and first.state.window_bad_since is None
     later = replace(o, wall=WALL + 1800, state=first.state)
-    later = replace(later, snapshot=replace(o.snapshot, received_at=WALL + 1799), last_frame_at=WALL + 1799)
-    check(decide(later), Action.RELAUNCH, "window_invalid")
-    backed = replace(later, state=replace(first.state, last_relaunch_at=WALL + 1000))
-    check(decide(backed), Action.WAIT, "window_invalid")
+    check(decide(later), Action.WAIT, "window_invalid")
 
 
-def test_persistent_blocking_ui_relaunches_after_30_min() -> None:
+def test_persistent_blocking_ui_never_requests_a_client_restart() -> None:
     first = decide(obs(snap(blocking_ui=POPUP)))
     assert first.state.blocking_since == WALL
     o = obs(snap(blocking_ui=POPUP, received_at=WALL + 1799), state=first.state)
     o = replace(o, wall=WALL + 1800, last_frame_at=WALL + 1799)
-    check(decide(o), Action.RELAUNCH, "blocking_ui")
+    check(decide(o), Action.FAULT, "blocking_ui")
     cleared = decide(replace(o, snapshot=snap(received_at=WALL + 1799)))
     assert cleared.state.blocking_since is None
 
 
-def test_activation_cap_then_fault_then_relaunch_after_30_min() -> None:
+def test_activation_cap_eventually_remains_a_fault_without_client_close() -> None:
     o = replace(closed(), window_focused=False)
     for i in range(3):
         d = decide(replace(o, wall=WALL + i))
@@ -614,7 +635,7 @@ def test_activation_cap_then_fault_then_relaunch_after_30_min() -> None:
     far = replace(o, state=fault.state, wall=WALL + 3 + 1800)
     far = replace(far, snapshot=replace(o.snapshot, received_at=WALL + 1802), last_frame_at=WALL + 1802)
     far = with_state(far, window_activations=(WALL + 1800,) * 3)
-    check(decide(far), Action.RELAUNCH, "window_activation_failed")
+    check(decide(far), Action.FAULT, "window_activation_failed")
 
 
 def test_activations_older_than_5_min_do_not_count() -> None:
@@ -662,6 +683,23 @@ def test_durable_fields_round_trip_through_json() -> None:
         restore({k: v for k, v in data.items() if k != "flush_uid"})
 
 
+def test_same_verified_client_keeps_failure_and_window_repair_clocks() -> None:
+    identity = ProcessIdentity(501, 9000, 1000, "C:\\Wow.exe", "/prefix")
+    state = LoopState(
+        ah_attempts=(WALL - 10,),
+        ah_failed_at=WALL - 20,
+        no_progress_stage=1,
+        no_progress_at=WALL - 30,
+        window_bad_since=WALL - 40,
+        blocking_since=WALL - 50,
+        window_activations=(WALL - 60,),
+        window_activation_failed_at=WALL - 70,
+        observed_process_pid=identity.pid,
+        observed_process_start_ticks=identity.start_ticks,
+    )
+    assert bind_process_identity(state, identity) == state
+
+
 def test_hold_human_detail_is_constant() -> None:
     a = decide(obs(human_active=True, human_reason="physical input 1.0s ago"))
     b = decide(obs(human_active=True, human_reason="physical input 9.0s ago"))
@@ -669,14 +707,14 @@ def test_hold_human_detail_is_constant() -> None:
 
 
 def test_non_fullscreen_window_is_invalid_before_the_no_frame_rows() -> None:
-    # No decodable frame for 11 min (rows 2 and 3 would relaunch) but the window is wrong.
+    # No decodable frame for 11 min (rows 2 and 3 would close) but geometry recovery owns it.
     o = replace(obs(), snapshot=None, window_ok=False, last_frame_at=WALL - 660)
     first = decide(o)
-    check(first, Action.FAULT, "window_invalid")
+    check(first, Action.WAIT, "window_invalid")
     later = replace(o, wall=WALL + 1800, state=first.state, last_frame_at=WALL - 660)
-    check(decide(later), Action.RELAUNCH, "window_invalid")
+    check(decide(later), Action.WAIT, "window_invalid")
     never = replace(o, frames_seen_this_process=0, process_started_at=WALL - 660, last_frame_at=None)
-    check(decide(never), Action.FAULT, "window_invalid")
+    check(decide(never), Action.WAIT, "window_invalid")
 
 
 def test_window_bad_clock_clears_when_the_window_is_valid_again() -> None:

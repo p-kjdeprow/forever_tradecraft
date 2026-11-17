@@ -6,19 +6,166 @@ import os
 import re
 import subprocess
 import tempfile
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
 
+from crowley_common.frames import MAGIC, PixelDecoder, ProtocolError
+
+from crowley_automation.config import AutomationConfig
 from crowley_automation.gui import capture as gui_capture
-from crowley_automation.gui.process import OwnedGameMatcher
+from crowley_automation.gui.process import OwnedGameMatcher, ProcessIdentity
+
+from .desktop_session import DesktopSessionProvider
 
 COMMAND_TIMEOUT_S = 5.0
+MAX_FRAME_AGE_SECONDS = 3.0
+FUTURE_FRAME_TOLERANCE_SECONDS = 1.0
 
 
 class ObserveError(RuntimeError):
     """A source could not be read; the tick reports a fault and sends no input."""
+
+
+@dataclass(frozen=True, slots=True)
+class NativeWorldObservation:
+    """One fresh automation publication bound to the exact current process/window."""
+
+    identity: ProcessIdentity
+    window: WindowState
+    snapshot: dict[str, Any] | None
+    observed_wall: float
+    session_fingerprint: str
+
+
+def has_frame_signature(canvas: object) -> bool:
+    """Check the magic in the first 32 physical status cells."""
+
+    try:
+        width, height = canvas.size  # type: ignore[attr-defined]
+        if (width, height) != (256, 256):
+            raise ObserveError("automation canvas crop is not 256x256")
+        for byte_index, value in enumerate(MAGIC):
+            for bit_index in range(8):
+                cell = byte_index * 8 + bit_index
+                left, top = (cell % 128) * 2, (cell // 128) * 2
+                for dy in range(2):
+                    for dx in range(2):
+                        red, green, blue, *_ = canvas.getpixel((left + dx, top + dy))  # type: ignore[attr-defined]
+                        luminance = (299 * red + 587 * green + 114 * blue) // 1000
+                        expected = 255 if (value >> bit_index) & 1 else 0
+                        if luminance != expected:
+                            return False
+        return True
+    except ObserveError:
+        raise
+    except (AttributeError, IndexError, TypeError, ValueError, OSError) as error:
+        raise ObserveError("could not inspect automation canvas header") from error
+
+
+def observe_native_world(
+    config: AutomationConfig,
+    *,
+    session_provider: DesktopSessionProvider | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    wall_clock: Callable[[], float] = time.time,
+) -> NativeWorldObservation:
+    """Take one fresh, independently decoded automation-world observation."""
+
+    if session_provider is None:
+        try:
+            environment = x11_environment(config.display)
+            session_fingerprint = "inherited-session"
+        except ObserveError as error:
+            raise ObserveError("desktop session is unavailable") from error
+
+        def env_provider() -> Mapping[str, str]:
+            return environment
+
+    else:
+        session = session_provider.current()
+        environment = dict(session.environment)
+        session_fingerprint = session.fingerprint
+
+        def env_provider() -> Mapping[str, str]:
+            return dict(session_provider.current().environment)
+
+    matcher = OwnedGameMatcher.for_game(
+        game_executable=config.game_executable,
+        game_argv0=config.game_argv0,
+        wine_prefix=config.wine_prefix,
+    )
+    identities = matcher.identities()
+    if len(identities) != 1:
+        raise ObserveError("owned game process is missing or ambiguous")
+    identity = identities[0]
+    source = X11Window(config.window_class, config.window_title, x11_runner(env_provider))
+    window = source.observe([identity.pid])
+    if not window.ok or not window.fullscreen or window.xid is None:
+        raise ObserveError("game window is not verified fullscreen")
+    began = clock()
+    capture_started_wall = wall_clock()
+    try:
+        from crowley_common.platform.paths import XdgDirs
+
+        dirs = XdgDirs.from_environ(os.environ)
+        image = ScreenCanvas(dirs.crowley_runtime / "automation-capture", env_provider).capture(
+            window.display
+        )
+    except (OSError, ValueError) as error:
+        raise ObserveError("desktop capture failed") from error
+    capture_finished_wall = wall_clock()
+    canvas = crop_canvas(image, window.display, config.canvas_crop, "automation canvas")
+    snapshot: dict[str, Any] | None = None
+    if has_frame_signature(canvas):
+        decoder = PixelDecoder(expected_kind="automation", crop=config.canvas_crop)
+        try:
+            sample = decoder.decode(
+                canvas,
+                monotonic=began,
+                window_identity=f"{identity.pid}:{identity.start_ticks}:{window.xid}",
+            )
+        except ProtocolError as error:
+            raise ObserveError("automation canvas frame is corrupt") from error
+        if sample.frame is not None:
+            candidate = sample.frame.snapshot.value
+            context = candidate["context"]
+            expected = {
+                "character": config.character,
+                "realm": config.realm,
+                "playerFaction": config.faction,
+                "clientBuild": config.build.rsplit(".", 1)[1],
+                "interface": config.interface,
+                "nativeRegion": config.native_region,
+            }
+            if any(context[key] != value for key, value in expected.items()):
+                raise ObserveError("automation publication identity does not match configuration")
+            wall_time = candidate["wallTime"]
+            if (
+                wall_time < capture_finished_wall - MAX_FRAME_AGE_SECONDS
+                or wall_time > capture_finished_wall + FUTURE_FRAME_TOLERANCE_SECONDS
+            ):
+                raise ObserveError("automation publication is stale or future-dated")
+            snapshot = candidate
+
+    current_identities = matcher.identities()
+    current_window = source.observe([identity.pid]) if current_identities == (identity,) else None
+    if (
+        current_identities != (identity,)
+        or current_window is None
+        or not current_window.ok
+        or not current_window.fullscreen
+        or current_window.xid != window.xid
+        or clock() - began > MAX_FRAME_AGE_SECONDS
+    ):
+        raise ObserveError("process, window, or original capture changed during observation")
+    if session_provider is not None and session_provider.current().fingerprint != session_fingerprint:
+        raise ObserveError("desktop session changed during observation")
+    return NativeWorldObservation(
+        identity, current_window, snapshot, capture_started_wall, session_fingerprint
+    )
 
 
 # --- process ------------------------------------------------------------------------------
@@ -26,6 +173,8 @@ class ObserveError(RuntimeError):
 
 class ProcessSource(Protocol):
     def pids(self) -> list[int]: ...
+
+    def identities(self) -> tuple[ProcessIdentity, ...]: ...
 
     def started_at(self, pids: list[int]) -> float:
         """Wall-clock start time of the oldest of *pids*."""
@@ -55,6 +204,9 @@ class ProcProcessSource:
     def pids(self) -> list[int]:
         return sorted(self._matcher.pids())
 
+    def identities(self) -> tuple[ProcessIdentity, ...]:
+        return self._matcher.identities()
+
     def started_at(self, pids: list[int]) -> float:
         return min(process_start_time(pid) for pid in pids)
 
@@ -70,26 +222,38 @@ class WindowState:
     focused: bool
     display: tuple[int, int]
     detail: str = ""
+    outer_rect: tuple[int, int, int, int] | None = None
+    client_rect: tuple[int, int, int, int] | None = None
+    fullscreen: bool = False
+    visible: bool = True
+    foreign_count: int = 0
 
 
-ABSENT_WINDOW = WindowState(None, 0, False, False, (0, 0), "no process")
+ABSENT_WINDOW = WindowState(None, 0, False, False, (0, 0), "no process", visible=False)
 
 
 type X11Run = Callable[[list[str]], tuple[int, str]]
-_CHILD = re.compile(r"^\s+(0x[0-9a-fA-F]+)\s.*?\s(\d+)x(\d+)[+-]\d+[+-]\d+\s", re.MULTILINE)
+type EnvironmentProvider = Mapping[str, str] | Callable[[], Mapping[str, str]]
+_CHILD = re.compile(r"^\s+(0x[0-9a-fA-F]+)\s.*?\s(\d+)x(\d+)([+-]\d+)([+-]\d+)\s", re.MULTILINE)
 
 
 class WindowSource(Protocol):
-    def observe(self, pids: list[int]) -> WindowState:
+    def observe(self, pids: list[int], *, include_hidden: bool = False) -> WindowState:
         """The one visible game window owned by *pids*."""
         ...
 
 
-def x11_runner(env: dict[str, str]) -> X11Run:
+def x11_runner(env: EnvironmentProvider) -> X11Run:
     def run(argv: list[str]) -> tuple[int, str]:
+        current_env = dict(env() if callable(env) else env)
         try:
             done = subprocess.run(
-                argv, capture_output=True, text=True, check=False, timeout=COMMAND_TIMEOUT_S, env=env
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=COMMAND_TIMEOUT_S,
+                env=current_env,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise ObserveError(f"{argv[0]} failed: {exc}") from exc
@@ -122,41 +286,104 @@ class X11Window:
         return out
 
     def _owned(self, xid: int, pids: list[int]) -> bool:
+        title_matches, owned = self._candidate_identity(xid, pids)
+        return title_matches and owned
+
+    def _candidate_identity(self, xid: int, pids: list[int]) -> tuple[bool, bool]:
         code, title = self._run(["xdotool", "getwindowname", str(xid)])
         if code != 0 or title.strip() != self._title:
-            return False
+            return False, False
         code, pid = self._run(["xdotool", "getwindowpid", str(xid)])
-        return code == 0 and pid.strip().isdigit() and int(pid) in pids
+        return True, code == 0 and pid.strip().isdigit() and int(pid) in pids
 
-    def _children(self, xid: int) -> list[tuple[int, tuple[int, int]]]:
+    def _children(self, xid: int) -> list[tuple[int, tuple[int, int, int, int]]]:
         tree = self._must(["xwininfo", "-id", hex(xid), "-children"])
-        return [(int(m[0], 16), (int(m[1]), int(m[2]))) for m in _CHILD.findall(tree)]
+        return [
+            (
+                int(match[0], 16),
+                (int(match[3]), int(match[4]), int(match[1]), int(match[2])),
+            )
+            for match in _CHILD.findall(tree)
+        ]
 
-    def observe(self, pids: list[int]) -> WindowState:
-        code, out = self._run(["xdotool", "search", "--onlyvisible", "--class", self._pattern])
+    def observe(self, pids: list[int], *, include_hidden: bool = False) -> WindowState:
+        search = ["xdotool", "search"]
+        if not include_hidden:
+            search.append("--onlyvisible")
+        search.extend(("--class", self._pattern))
+        code, out = self._run(search)
         if code not in (0, 1):  # 1 = no match
             raise ObserveError(f"xdotool search exited {code}")
         candidates = [int(line) for line in out.split()] if code == 0 else []
-        ids = [xid for xid in candidates if self._owned(xid, pids)]
+        ids: list[int] = []
+        foreign = 0
+        for candidate in candidates:
+            title_matches, owned = self._candidate_identity(candidate, pids)
+            if title_matches:
+                if owned:
+                    ids.append(candidate)
+                else:
+                    foreign += 1
         size = self._must(["xdotool", "getdisplaygeometry"]).split()
         display = (int(size[0]), int(size[1]))
-        if len(ids) != 1:
-            return WindowState(None, len(ids), False, False, display, f"window_count={len(ids)}")
+        total = len(ids) + foreign
+        if total != 1 or foreign:
+            detail = "foreign_window_candidate" if foreign else f"window_count={total}"
+            return WindowState(
+                None,
+                total,
+                False,
+                False,
+                display,
+                detail,
+                visible=False,
+                foreign_count=foreign,
+            )
         xid = ids[0]
+        visible = True if not include_hidden else self._viewable(xid)
         geometry: dict[str, int] = {}
         for line in self._must(["xdotool", "getwindowgeometry", "--shell", str(xid)]).splitlines():
             key, _, value = line.partition("=")
             if key in ("X", "Y", "WIDTH", "HEIGHT"):
                 geometry[key] = int(value)
-        rect = (geometry.get("X"), geometry.get("Y"), geometry.get("WIDTH"), geometry.get("HEIGHT"))
+        rect = (
+            (geometry["X"], geometry["Y"], geometry["WIDTH"], geometry["HEIGHT"])
+            if {"X", "Y", "WIDTH", "HEIGHT"}.issubset(geometry)
+            else None
+        )
         children = self._children(xid)
+        fullscreen = self._fullscreen(xid)
         problems = []
         if rect != (0, 0, display[0], display[1]):
             problems.append(f"geometry={rect} display={display}")
-        if len(children) != 1 or children[0][1] != display:
-            problems.append(f"children={[size for _id, size in children]}")
-        focused = self._focused(xid, [child for child, _size in children])
-        return WindowState(xid, 1, not problems, focused, display, ",".join(problems))
+        if not visible:
+            problems.append("window_not_viewable")
+        expected_client = (0, 0, display[0], display[1])
+        if len(children) != 1 or children[0][1] != expected_client:
+            problems.append(f"children={[rect for _id, rect in children]}")
+        focused = self._focused(xid, [child for child, _rect in children])
+        return WindowState(
+            xid,
+            1,
+            not problems,
+            focused,
+            display,
+            ",".join(problems),
+            rect,
+            children[0][1] if len(children) == 1 else None,
+            fullscreen,
+            visible,
+        )
+
+    def _viewable(self, xid: int) -> bool:
+        tree = self._must(["xwininfo", "-id", hex(xid)])
+        match = re.search(r"^\s*Map State:\s*(\S+)\s*$", tree, re.MULTILINE)
+        return match is not None and match.group(1) == "IsViewable"
+
+    def _fullscreen(self, xid: int) -> bool:
+        code, output = self._run(["xprop", "-id", str(xid), "_NET_WM_STATE"])
+        atoms = {atom for atom in re.split(r"[,\s]+", output) if atom}
+        return code == 0 and "_NET_WM_STATE_FULLSCREEN" in atoms
 
     def _focused(self, xid: int, children: list[int]) -> bool:
         code, out = self._run(["xdotool", "getwindowfocus"])
@@ -178,8 +405,26 @@ class CanvasSource(Protocol):
 
 
 class ScreenCanvas:
-    def __init__(self, scratch_dir: Path) -> None:
+    def __init__(self, scratch_dir: Path, environment: EnvironmentProvider | None = None) -> None:
         self._scratch = scratch_dir
+        self._environment = environment
+
+    def _capture_run(self, argv: list[str], timeout: float) -> None:
+        try:
+            done = subprocess.run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+                env=None
+                if self._environment is None
+                else dict(self._environment() if callable(self._environment) else self._environment),
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise gui_capture.CaptureError(f"{argv[0]} failed") from exc
+        if done.returncode != 0:
+            raise gui_capture.CaptureError(f"{argv[0]} exited {done.returncode}")
 
     def capture(self, display: tuple[int, int]) -> Any:
         from PIL import Image
@@ -187,7 +432,7 @@ class ScreenCanvas:
         self._scratch.mkdir(mode=0o700, parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="scan-", dir=self._scratch) as scratch:
             path = Path(scratch) / "screen.png"
-            gui_capture.capture_screen(path, display)
+            gui_capture.capture_screen(path, display, run=self._capture_run)
             with Image.open(path) as opened:
                 image = opened.convert("RGB")
         if image.size != display:

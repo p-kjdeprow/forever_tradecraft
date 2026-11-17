@@ -5,6 +5,9 @@ wine_prefix = "/absolute/path/to/wine-prefix"
 game_root = "/absolute/path/to/world-of-warcraft"
 wtf_account = "account#1"
 character = "Character"
+# Required: copy this exactly from the character-selection screen after the
+# startup evidence has been measured. The native realm pin is configured by the target.
+character_select_name = ""
 display = ":0"
 server_url = "http://server.example.invalid:8080"
 window_title = "World of Warcraft"

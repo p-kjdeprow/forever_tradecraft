@@ -68,6 +68,7 @@ class HostConfig(BaseModel):
         "game_root",
         "wtf_account",
         "character",
+        "character_select_name",
         "display",
         "server_url",
         "window_title",
@@ -79,6 +80,7 @@ class HostConfig(BaseModel):
     game_root: StrictStr
     wtf_account: StrictStr
     character: StrictStr
+    character_select_name: StrictStr
     display: StrictStr
     server_url: StrictStr
     window_title: StrictStr
@@ -104,10 +106,10 @@ class HostConfig(BaseModel):
             raise ValueError("character must be one literal state-directory component")
         return value
 
-    @field_validator("display", "server_url", "window_title")
+    @field_validator("character_select_name", "display", "server_url", "window_title")
     @classmethod
     def validate_nonempty(cls, value: str) -> str:
-        if not value:
+        if not value.strip():
             raise ValueError("value must be a non-empty string")
         return value
 

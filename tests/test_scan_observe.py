@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 from crowley_automation import desktop_observe
 from crowley_automation.gui.capture import CaptureError
+from crowley_automation.gui.process import ProcessIdentity
 from crowley_common.frames import PLAN_COUNT
 from crowley_host.scan import observe
 from crowley_host.scan.policy import LoopState, Target
@@ -37,6 +38,7 @@ TARGET = Target(
     addon_version="0.2.0",
     scanner_addon_version="0.3.0",
     auctioneer="Auctioneer Jaxon",
+    native_region=1,
 )
 DISPLAY = (1920, 1080)
 
@@ -48,13 +50,19 @@ class FakeProcess:
     def pids(self) -> list[int]:
         return list(self.current)
 
+    def identities(self) -> tuple[ProcessIdentity, ...]:
+        return tuple(
+            ProcessIdentity(pid, int(self.started * 100), 1000, "C:\\Wow.exe", "/prefix")
+            for pid in self.current
+        )
+
     def started_at(self, pids: list[int]) -> float:
         return self.started
 
 
 class FakeWindow:
     def __init__(self, ok: bool = True, focused: bool = True, xid: int = 77) -> None:
-        self.state = desktop_observe.WindowState(xid, 1, ok, focused, DISPLAY)
+        self.state = desktop_observe.WindowState(xid, 1, ok, focused, DISPLAY, fullscreen=True)
 
     def observe(self, pids: list[int]) -> desktop_observe.WindowState:
         self.pids = pids
@@ -149,6 +157,7 @@ def test_snapshot_mapping_covers_every_policy_field() -> None:
         "0.2.0",
         "0.3.0",
     )
+    assert snap.native_region == 1
     assert (snap.house_key, snap.plan_hash) == ("beta-normal-alliance", "a" * 64)
     assert not snap.ah_open and snap.target_present and snap.auctioneer_name == "Auctioneer Jaxon"
     assert snap.range_available and snap.in_range and snap.binding_available
@@ -201,6 +210,8 @@ def test_observe_decodes_a_frame_and_tracks_progress() -> None:
     canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     first = obs.observe(LoopState())
     assert first.process_alive and first.window_ok and first.window_focused
+    assert first.process_identity == ProcessIdentity(10, 10000, 1000, "C:\\Wow.exe", "/prefix")
+    assert first.window_xid == 77 and first.window_fullscreen and first.native_ready
     assert first.snapshot is not None and first.snapshot.received_at == 1000.0
     assert first.frames_seen_this_process == 1 and first.last_frame_at == 1000.0
     assert first.disk_saved_ids == {"s1"} and first.uploaded_ids == {"u1"} and first.data_acked_ids == {"a1"}
@@ -210,6 +221,7 @@ def test_observe_decodes_a_frame_and_tracks_progress() -> None:
     clock.now = 1005.0
     again = obs.observe(LoopState())
     assert again.snapshot is not None and again.snapshot.received_at == 1000.0
+    assert not again.native_ready  # the cached native publication was not retimestamped
     assert again.frames_seen_this_process == 1 and again.last_frame_at == 1000.0
     canvas.frames = [render_screen(snapshot(2), automation_snapshot(2))]
     clock.now = 1006.0
@@ -263,6 +275,7 @@ def test_native_busy_survives_a_bad_scanner_canvas_without_rewriting_frame_time(
     assert stale_pair.snapshot == first.snapshot
     assert stale_pair.snapshot is not None and not stale_pair.snapshot.automation_busy
     assert stale_pair.native_automation_busy
+    assert stale_pair.native_ready
     assert stale_pair.last_frame_at == first.last_frame_at
     assert obs.decode_error.startswith("scanner ProtocolError")
 
@@ -271,6 +284,7 @@ def test_native_busy_survives_a_bad_scanner_canvas_without_rewriting_frame_time(
     no_scanner_history = fresh.observe(LoopState())
     assert no_scanner_history.snapshot is None
     assert no_scanner_history.native_automation_busy
+    assert no_scanner_history.native_ready
 
 
 def test_window_not_ok_skips_capture() -> None:
@@ -278,6 +292,27 @@ def test_window_not_ok_skips_capture() -> None:
     canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     result = obs.observe(LoopState())
     assert not result.window_ok and result.snapshot is None and canvas.sizes == []
+
+
+def test_foreign_window_candidate_blocks_host_capture_even_if_marked_ok() -> None:
+    obs, _p, window, canvas, _c = make()
+    window.state = desktop_observe.WindowState(
+        77,
+        2,
+        True,
+        True,
+        DISPLAY,
+        "foreign_window_candidate",
+        fullscreen=True,
+        foreign_count=1,
+    )
+    canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
+
+    result = obs.observe(LoopState())
+
+    assert not result.window_ok and not result.native_ready
+    assert result.window_xid is None and result.snapshot is None
+    assert canvas.sizes == []
 
 
 def test_boot_change_is_rejected_until_armed() -> None:
@@ -313,17 +348,19 @@ def test_decoder_epoch_resets_on_process_and_window_change() -> None:
     assert fresh.frames_seen_this_process == 1 and fresh.process_started_at == 500.0
     assert fresh.snapshot is not None and fresh.snapshot.boot == "automation-boot-9"
     # A new window id also gets a new decoder (the old one is bound to the old identity).
-    window.state = desktop_observe.WindowState(78, 1, True, True, DISPLAY)
+    window.state = desktop_observe.WindowState(78, 1, True, True, DISPLAY, fullscreen=True)
     canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
     obs.observe(LoopState())
     assert obs.decode_error == ""
 
 
-def test_observer_passes_the_owned_pids_to_the_window_source() -> None:
+def test_observer_does_not_choose_between_multiple_owned_processes() -> None:
     obs, _p, window, canvas, _c = make(process=FakeProcess([10, 12]))
     canvas.frames = [render_screen(snapshot(1), automation_snapshot(1))]
-    obs.observe(LoopState())
-    assert window.pids == [10, 12]
+    result = obs.observe(LoopState())
+    assert result.process_alive and result.process_identity is None
+    assert not result.window_ok and result.snapshot is None
+    assert not hasattr(window, "pids") and canvas.sizes == []
 
 
 def test_presence_is_passed_through() -> None:
@@ -370,6 +407,8 @@ def x11_runner(
         if argv[1] == "getwindowfocus":
             return 0, focus
         if argv[0] == "xprop":
+            if "_NET_WM_STATE" in argv:
+                return 0, "_NET_WM_STATE(ATOM) = _NET_WM_STATE_FULLSCREEN\n"
             return 0, f"_NET_ACTIVE_WINDOW(WINDOW): window id # {active}\n" if active else "no\n"
         if argv[0] == "xwininfo":
             return 0, tree
@@ -386,6 +425,7 @@ def test_window_exactly_one_owned_fullscreen_focused() -> None:
     run, calls = x11_runner()
     state = window(run).observe([10])
     assert (state.xid, state.ok, state.focused, state.display) == (77, True, True, DISPLAY)
+    assert state.fullscreen
     assert calls[0] == ["xdotool", "search", "--onlyvisible", "--class", "^wow\\.exe$"]
 
 
@@ -394,7 +434,13 @@ def test_window_match_requires_title_and_owned_pid() -> None:
     assert window(run).observe([10]).xid == 77  # 78 has the wrong title
     run, _ = x11_runner(pids={"77": "999"})
     state = window(run).observe([10])
-    assert not state.ok and state.xid is None and state.count == 0
+    assert (
+        not state.ok
+        and state.xid is None
+        and state.count == 1
+        and state.foreign_count == 1
+        and state.detail == "foreign_window_candidate"
+    )
     run, _ = x11_runner(ids="77\n78\n", pids={"77": "10", "78": "11"})
     assert window(run).observe([10, 11]).count == 2  # two owned windows is not exactly one
 
@@ -424,6 +470,17 @@ def test_window_not_ok(kwargs: dict[str, Any], detail: str) -> None:
     run, _ = x11_runner(**kwargs)
     state = window(run).observe([10])
     assert not state.ok and detail in state.detail
+
+
+def test_window_requires_fullscreen_atom_for_native_readiness() -> None:
+    def run(argv: list[str]) -> tuple[int, str]:
+        if argv[0] == "xprop" and "_NET_WM_STATE" in argv:
+            return 0, "_NET_WM_STATE(ATOM) = _NET_WM_STATE_MAXIMIZED_VERT\n"
+        base, _calls = x11_runner()
+        return base(argv)
+
+    state = window(run).observe([10])
+    assert state.ok and not state.fullscreen
 
 
 # --- disk ---------------------------------------------------------------------------------

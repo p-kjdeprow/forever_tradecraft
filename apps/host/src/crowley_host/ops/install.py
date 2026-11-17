@@ -7,7 +7,6 @@ import importlib.metadata
 import json
 import os
 import re
-import shlex
 import shutil
 import stat
 import subprocess
@@ -357,39 +356,9 @@ def render_units() -> tuple[tuple[str, bytes], ...]:
     return tuple(rendered)
 
 
-def _resource_template(name: str, replacements: Mapping[bytes, bytes]) -> bytes:
-    rendered = _resource_bytes(name)
-    return _render_template(rendered, replacements, name)
+def render_launcher() -> bytes:
+    """Install the package-owned entrypoint without adding host-side shell behavior."""
 
-
-def _render_template(rendered: bytes, replacements: Mapping[bytes, bytes], name: str) -> bytes:
-    """Apply checked byte substitutions to one packaged template."""
-
-    for placeholder, value in replacements.items():
-        rendered = rendered.replace(placeholder, value)
-    if b"{{" in rendered or b"}}" in rendered:
-        raise InstallError(f"packaged template contains an unresolved placeholder: {name}")
-    return rendered
-
-
-def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path, display: str) -> bytes:
-    """Render the reviewed launcher from target, host display, and game paths."""
-
-    resolved_game_root = _absolute_path(game_root, "launcher game root")
-    expected_argv0 = target.windows_argv0
-    resolved_wine_prefix = _absolute_path(wine_prefix, "launcher Wine prefix")
-    replacements = {
-        b"{{GAME_ROOT}}": shlex.quote(str(resolved_game_root)).encode("utf-8"),
-        b"{{PRODUCT_DIR}}": shlex.quote(target.product_dir).encode("utf-8"),
-        b"{{EXECUTABLE}}": shlex.quote(target.executable).encode("utf-8"),
-        b"{{PRODUCT}}": shlex.quote(target.product).encode("utf-8"),
-        b"{{WINDOW_CLASS}}": shlex.quote(target.window_class).encode("utf-8"),
-        b"{{WINE_PREFIX}}": shlex.quote(str(resolved_wine_prefix)).encode("utf-8"),
-        b"{{EXPECTED_ARGV0}}": shlex.quote(expected_argv0).encode("utf-8"),
-        b"{{DISPLAY}}": shlex.quote(display).encode("utf-8"),
-    }
-    # The standalone automation package owns the launcher because its commands
-    # own game observation and input. The host only supplies the pinned paths.
     try:
         template = (
             resources.files("crowley_automation")
@@ -400,11 +369,7 @@ def render_launcher(target: GameTarget, game_root: Path, wine_prefix: Path, disp
         raise InstallError("packaged desktop launcher is unavailable") from exc
     if len(template) > MAX_RESOURCE_BYTES:
         raise InstallError("packaged desktop launcher is too large")
-    return _render_template(
-        template,
-        replacements,
-        "automation/resources/launcher/crowley-world-of-warcraft.sh.in",
-    )
+    return template
 
 
 def _reject_symlink_ancestors(value: Path, label: str) -> None:
@@ -708,8 +673,11 @@ def _render_config(
             game_executable=target.executable,
             game_argv0=target.windows_argv0,
             window_class=target.window_class,
+            product=target.product,
+            product_dir=target.product_dir,
             character=host.character,
             realm=target.realm,
+            character_select_name=host.character_select_name,
             faction=target.faction,
             house=target.house,
             build=target.full_build,
@@ -871,7 +839,7 @@ def _build_plan(
     launcher = _plan_file(
         launcher_dir / _LAUNCHER_NAME,
         f"launcher/{_LAUNCHER_NAME}",
-        render_launcher(target, game_root, host.wine_prefix_path, host.display),
+        render_launcher(),
         "launcher",
         mode=0o700,
     )

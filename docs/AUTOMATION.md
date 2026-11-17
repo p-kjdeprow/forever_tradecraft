@@ -155,7 +155,8 @@ crowley-automation stop --clear
 ```
 
 Stop is durable and checked at input boundaries and waits. It does not undo a dispatched
-effect or prove failure. No cleanup input is sent after stop/takeover. Host's own lifecycle
+effect or prove failure. After stop/takeover, only bounded releases of possibly held keys/buttons
+are allowed; no new press, motion, activation or operation cleanup is sent. Host's own lifecycle
 is controlled separately; read local-game-control before stopping/operating that service.
 
 A crash after a dispatch marker, lost callback, changed boot or contradictory evidence is

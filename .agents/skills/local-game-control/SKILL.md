@@ -24,6 +24,8 @@ trading, account changes or unrelated display changes.
 - Check processes and map windows to PIDs before launching anything. Match the owned game by uid, Windows argv0
   `Wow.exe` and `WINEPREFIX` (`crowley_automation.gui.process`), not by broad command text. Battle.net visible does not mean
   the game stopped. Never start a second client or a second Battle.net (it deletes the saved login token).
+  Match control helpers by exact executable/argv tokens and process start identity; inline shell/Python source can
+  mention launcher names without being a launcher. Persist dispatch results before another action or handoff.
 
 ## Environment
 
@@ -32,11 +34,13 @@ trading, account changes or unrelated display changes.
 - A worker shell may lack the graphical environment. Take `DISPLAY` and `XAUTHORITY` from the graphical session or
   `host.toml`; do not dump the whole environment. `CROWLEY_WINE` is in `secrets.env`.
 - Use current screenshot dimensions and visible controls; coordinates from another resolution or window position
-  are stale. The display is 1920x1080 and the game window is fullscreen at the origin.
+  are stale. Verify outer and client geometry against the configured display; a manually started client can retain
+  a decorated or maximized window even when its client buffer matches the display size.
 - Verify tool flags with a harmless invocation before relying on them (`xwininfo -stats` prints geometry;
   `-geometry` is unsupported). `wmctrl -lp` rows are XID, desktop (can be -1), PID, machine, title.
-- Wine identity channels differ: `/proc/<pid>/exe` is the Linux loader, `comm` is the Windows program. Windows
-  argv0 uses Windows path semantics.
+- Wine identity channels differ: `/proc/<pid>/exe` is the Linux loader and argv0 may use Windows path semantics.
+  Chromium can rename Battle.net's `comm`; bind it to exact executable argv0, UID, prefix, start ticks and window
+  PID instead of a fixed process name. Reuse the producer matcher rather than duplicating it in an operator script.
 
 ## Plan and build cutovers
 
@@ -72,15 +76,20 @@ trading, account changes or unrelated display changes.
 
 ## Recover without widening the task
 
+- Do not park an already-authorized recovery helper at an interactive review/read checkpoint while holding the
+  GUI lease. Execute the bounded guarded step and report its result; request approval only when the task requires it.
 - Account-conflict dialog: check for duplicate local clients first and close only the accidental duplicate normally.
   Prefer the application's Quit or `wmctrl -ic <XID>` (window-manager close); `xdotool windowclose` does not end the
   client.
 - A disconnect or maintenance needs nothing from you: the loop relaunches (15 min apart, then hourly). Stop it only
   if a human needs the desktop.
-- Honor the latest user instruction. A stop ends input immediately, including cleanup.
-- Stopping the scan unit during a relaunch does not cancel its launcher child. Before manual input, prove that
-  child has ended or quiesce only the exact recorded control-child group under the GUI lease, with the game and
-  Battle.net outside that group. Never infer exclusive GUI ownership from the inactive unit alone.
+- Honor the latest user instruction. Stop forbids new presses, pointer motion, window changes and retries.
+  Only bounded releases of this run's possibly held keys/buttons may precede GUI-lease release; this does not
+  authorize other cleanup actions.
+- Older `crowley-scan` units do not cancel their launcher child on stop. Prove that child ended or quiesce only
+  its exact recorded control group before manual input, with real game/Battle.net outside it. The new host uses
+  in-process recovery and reaps exact control children before unlocking; verify the installed implementation.
+  Never infer exclusive GUI ownership from an inactive legacy unit alone.
 
 ## Report
 

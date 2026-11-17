@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from crowley_automation.config import AutomationConfig
 from crowley_common.game_target import GameTarget, load_game_target
 from crowley_common.platform.paths import XdgDirs
 from crowley_host.config import HostConfig
@@ -18,6 +19,32 @@ def fixture_target() -> GameTarget:
     return load_game_target(FIXTURE_TARGET_PATH)
 
 
+def fixture_automation(root: Path, target: GameTarget | None = None) -> AutomationConfig:
+    """Return a complete automation host pin for consumer unit tests."""
+
+    game = fixture_target() if target is None else target
+    return AutomationConfig(
+        wine_prefix=str(root / "wine"),
+        game_root=str(root / "game"),
+        display=":0",
+        window_title="World of Warcraft",
+        game_executable=game.executable,
+        game_argv0=game.windows_argv0,
+        window_class=game.window_class,
+        product=game.product,
+        product_dir=game.product_dir,
+        character="Arthur",
+        realm=game.realm,
+        character_select_name="Dandune Hillmont",
+        faction=game.faction,
+        house=game.house,
+        build=game.full_build,
+        interface=game.interface,
+        native_region=game.native_region_id,
+        canvas_crop=(352, 48, 256, 256),
+    )
+
+
 def fixture_host(root: Path) -> HostConfig:
     """Return a complete host contract rooted under the test directory."""
 
@@ -27,6 +54,7 @@ def fixture_host(root: Path) -> HostConfig:
             "game_root": str(root / "game"),
             "wtf_account": "account#1",
             "character": "Arthur",
+            "character_select_name": "Dandune Hillmont",
             "display": ":0",
             "server_url": "http://server.example.invalid:8080",
             "window_title": "World of Warcraft",
@@ -62,6 +90,7 @@ def write_host_toml(path: Path, host: HostConfig) -> None:
         f"game_root = {json.dumps(host.game_root)}",
         f"wtf_account = {json.dumps(host.wtf_account)}",
         f"character = {json.dumps(host.character)}",
+        f"character_select_name = {json.dumps(host.character_select_name)}",
         f"display = {json.dumps(host.display)}",
         f"server_url = {json.dumps(host.server_url)}",
         f"window_title = {json.dumps(host.window_title)}",
@@ -74,6 +103,7 @@ def write_host_toml(path: Path, host: HostConfig) -> None:
 __all__ = [
     "FIXTURE_TARGET_PATH",
     "fixture_host",
+    "fixture_automation",
     "fixture_target",
     "fixture_xdg",
     "write_host_toml",

@@ -31,6 +31,14 @@ inspection generations, cache invalidation, attachment reindexing and actual-cha
 Package tests build wheels and
 sdists, check exact owned resources, and reject forbidden component imports.
 
+Startup checks exercise session discovery, process/window identity, bounded recovery transitions
+and control-child lifetime without touching the desktop. Recorded UI crops live under
+tests/fixtures/startup with source digests and crop provenance; account-containing originals
+remain private. Their OCR checks use Tesseract 5 with English data, and skip when the executable
+is absent. Recorded-image tests use a fixed injected clock; separate tests verify capture expiry
+before and during OCR. Production freshness limits remain enforced. Recorded screenshots are
+offline regression evidence, never authority for live input.
+
 The Lua harness models native behavior; it does not prove actual protected-call semantics.
 Live qualification needs the selected client build and exact authorized batch. A dispatched
 input is distinct from a callback, and a callback from a verified native postcondition.

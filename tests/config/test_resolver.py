@@ -33,6 +33,7 @@ def test_host_loader_reports_missing_keys_and_rejects_unknown(tmp_path: Path) ->
     assert "wine_prefix" in message
     assert "game_root" in message
     assert "automation_canvas_crop" in message
+    assert "character_select_name" in message
     assert "model_crop" not in message
 
 
@@ -53,6 +54,16 @@ def test_host_crops_must_be_256_square_and_nonoverlapping(tmp_path: Path) -> Non
     values = fixture_host(tmp_path).model_dump()
     values["automation_canvas_crop"] = values["canvas_crop"]
     with pytest.raises(ValueError, match="automation_canvas_crop must not overlap canvas_crop"):
+        HostConfig.model_validate(values)
+
+
+def test_character_select_name_is_a_required_visual_literal(tmp_path: Path) -> None:
+    values = fixture_host(tmp_path).model_dump()
+    values["character_select_name"] = ""
+    with pytest.raises(ValueError, match="value must be a non-empty string"):
+        HostConfig.model_validate(values)
+    values["character_select_name"] = "   "
+    with pytest.raises(ValueError, match="value must be a non-empty string"):
         HostConfig.model_validate(values)
 
 

@@ -13,6 +13,7 @@ from crowley_common.game_target import load_game_target
 from crowley_host.scan import cli, config, loop
 
 from tests.ops.test_install import _write_host
+from tests.support.config import fixture_automation
 
 TARGET_FIXTURE = Path(__file__).parent / "fixtures" / "targets" / "verified-beta.json"
 
@@ -87,6 +88,9 @@ def test_run_wires_the_loop_and_restores_state(env: Path, monkeypatch: pytest.Mo
     assert created["ran"] and FakeTool.closed
     assert created["state_file"] == loop.state_path() and created["status_file"] == loop.status_path()
     assert created["actor"] is not None and created["observer"] is not None
+    assert created["recovery"].session_provider is created["actor"]._session_provider
+    assert created["observer"]._session_provider is created["actor"]._session_provider
+    assert created["observer"]._session_environment is created["actor"]._session_environment
 
 
 def loaded_config(root: Path) -> config.ScanConfig:
@@ -97,6 +101,7 @@ def loaded_config(root: Path) -> config.ScanConfig:
 
     return config.ScanConfig(
         target=TARGET,
+        automation=fixture_automation(root),
         matcher=OwnedGameMatcher("Wow.exe", "C:\\wow.exe", str(root / "wine"), 1),
         window_class="wow.exe",
         window_title="World of Warcraft",
@@ -123,6 +128,12 @@ def test_load_scan_config_pins_come_from_target_host_and_installed_addon(
     automation_toc.parent.mkdir(parents=True)
     automation_toc.write_text("## Interface: 16001\n## Version: 0.2.0\n", encoding="utf-8")
     _write_host(env / "config", game_root, env / "wine")
+    from crowley_host.config import load_host_config
+    from crowley_host.ops.install import _render_config
+
+    host = load_host_config(env / "config" / "crowley" / "host.toml")
+    automation_path = env / "config" / "crowley" / "automation.toml"
+    automation_path.write_bytes(_render_config("automation.toml", host, game))
     scanner_config = env / "config" / "crowley" / "scanner.toml"
     scanner_config.write_text(
         "[scanner]\n"

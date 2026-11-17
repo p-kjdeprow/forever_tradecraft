@@ -4,30 +4,20 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
+import signal
 import subprocess
 import sys
 import time
 from collections.abc import Sequence
-
-from crowley_common.frames import MAGIC, PixelDecoder, ProtocolError
-from crowley_common.platform.paths import XdgDirs
+from typing import Any, cast
 
 from . import battle_net
 from .config import AutomationConfig, AutomationConfigError, load_config
-from .desktop_observe import (
-    ObserveError,
-    ProcProcessSource,
-    ScreenCanvas,
-    X11Window,
-    crop_canvas,
-    x11_environment,
-    x11_runner,
-)
+from .desktop_observe import NativeWorldObservation, ObserveError, observe_native_world
+from .desktop_session import DesktopSessionProvider, DesktopSessionUnavailable
 from .gui.capture import CaptureError
 from .gui.input_tool import InputToolError
 from .gui.pointer import ExecutorError, PointerExecutionError
-from .gui.process import OwnedGameMatcher
 from .presence import presence_ok
 from .runtime import maintenance_blocker
 
@@ -42,94 +32,20 @@ class DesktopObserveError(RuntimeError):
     """The desktop state could not be safely observed."""
 
 
-def _has_frame_signature(canvas: object) -> bool:
-    """Check the frame magic encoded in the first 32 physical status cells."""
+def observe_native_frame(
+    config: AutomationConfig, *, session_provider: DesktopSessionProvider | None = None
+) -> NativeWorldObservation:
+    """Reusable fresh native-world observation shared with startup recovery."""
 
     try:
-        width, height = canvas.size  # type: ignore[attr-defined]
-        if (width, height) != (256, 256):
-            raise DesktopObserveError("automation canvas crop is not 256x256")
-        for byte_index, value in enumerate(MAGIC):
-            for bit_index in range(8):
-                cell = byte_index * 8 + bit_index
-                left, top = (cell % 128) * 2, (cell // 128) * 2
-                samples: list[int] = []
-                for dy in range(2):
-                    for dx in range(2):
-                        red, green, blue, *_ = canvas.getpixel((left + dx, top + dy))  # type: ignore[attr-defined]
-                        luminance = (299 * red + 587 * green + 114 * blue) // 1000
-                        if luminance not in (0, 255):
-                            return False
-                        samples.append(luminance)
-                expected = 255 if (value >> bit_index) & 1 else 0
-                if any(sample != expected for sample in samples):
-                    return False
-        return True
-    except DesktopObserveError:
-        raise
-    except (AttributeError, IndexError, TypeError, ValueError, OSError) as exc:
-        raise DesktopObserveError(f"could not inspect automation canvas header: {exc}") from exc
-
-
-def _matcher(config: AutomationConfig) -> OwnedGameMatcher:
-    return OwnedGameMatcher.for_game(
-        game_executable=config.game_executable,
-        game_argv0=config.game_argv0,
-        wine_prefix=config.wine_prefix,
-    )
+        return observe_native_world(config, session_provider=session_provider)
+    except (ObserveError, DesktopSessionUnavailable) as error:
+        raise DesktopObserveError(str(error)) from error
 
 
 def _frame(config: AutomationConfig):
-    env = x11_environment(config.display)
-    process = ProcProcessSource(_matcher(config))
-    pids = process.pids()
-    if not pids:
-        raise DesktopObserveError("no owned game process")
-    window = X11Window(config.window_class, config.window_title, x11_runner(env)).observe(pids)
-    if not window.ok or window.xid is None:
-        raise DesktopObserveError(f"game window is not valid: {window.detail}")
-    dirs = XdgDirs.from_environ(os.environ)
-    image = ScreenCanvas(dirs.crowley_runtime / "automation-capture").capture(window.display)
-    capture_finished = time.time()
-    canvas = crop_canvas(image, window.display, config.canvas_crop, "automation canvas")
-    if not _has_frame_signature(canvas):
-        return window, None
-    decoder = PixelDecoder(expected_kind="automation", crop=config.canvas_crop)
-    identity = f"{','.join(map(str, pids))}:{window.xid}"
-    try:
-        sample = decoder.decode(canvas, monotonic=time.monotonic(), window_identity=identity)
-    except ProtocolError as exc:
-        raise DesktopObserveError(f"automation canvas frame is corrupt: {exc}") from exc
-    frame = sample.frame
-    if frame is None:
-        return window, None
-    snapshot = frame.snapshot.value
-    wall_time = snapshot["wallTime"]
-    if (
-        wall_time < capture_finished - MAX_FRAME_AGE_SECONDS
-        or wall_time > capture_finished + FUTURE_FRAME_TOLERANCE_SECONDS
-    ):
-        raise DesktopObserveError("automation publication is stale or future-dated")
-    context = snapshot["context"]
-    expected = {
-        "character": config.character,
-        "realm": config.realm,
-        "playerFaction": config.faction,
-        "clientBuild": config.build.rsplit(".", 1)[1],
-        "interface": config.interface,
-        "nativeRegion": config.native_region,
-    }
-    actual = {
-        "character": context["character"],
-        "realm": context["realm"],
-        "playerFaction": context["playerFaction"],
-        "clientBuild": context["clientBuild"],
-        "interface": context["interface"],
-        "nativeRegion": context["nativeRegion"],
-    }
-    if actual != expected:
-        raise DesktopObserveError("automation publication does not match configured game identity")
-    return window, snapshot
+    observation = observe_native_frame(config)
+    return observation.window, observation.snapshot
 
 
 def _observe(_args: argparse.Namespace) -> int:
@@ -169,10 +85,84 @@ def _presence_ok(args: argparse.Namespace) -> int:
     return presence_ok()
 
 
-def _play(args: argparse.Namespace) -> int:
-    evidence = battle_net.click_play(args.window)
-    print(f"clicked Battle.net Play; evidence {evidence}")
-    return 0
+def _startup(_args: argparse.Namespace) -> int:
+    """Run one bounded startup episode until ready, stop, or a typed refusal."""
+
+    from .startup import StartupRecovery
+
+    config = load_config()
+    stopping = False
+    received_signal = 0
+    previous_handlers: dict[int, object] = {}
+
+    def request_stop(signum: int, _frame: object) -> None:
+        nonlocal stopping, received_signal
+        stopping = True
+        received_signal = signum
+
+    for signum in (signal.SIGINT, signal.SIGTERM):
+        previous_handlers[signum] = signal.signal(signum, request_stop)
+    recovery = StartupRecovery(config, stopping=lambda: stopping)
+    previous_status: tuple[object, ...] | None = None
+    exit_code = 1
+    try:
+        while True:
+            status = recovery.step()
+            signature = (
+                status.outcome,
+                status.phase,
+                status.reason,
+                status.action,
+                status.deadline_at,
+                status.retry_at,
+                status.native_ready,
+                status.process_identity,
+                status.window_xid,
+            )
+            if signature != previous_status:
+                identity = status.process_identity
+                payload: dict[str, object] = {
+                    "outcome": status.outcome,
+                    "phase": status.phase,
+                    "reason": status.reason,
+                    "action": status.action,
+                    "startedAt": status.started_at,
+                    "deadlineAt": status.deadline_at,
+                    "retryAt": status.retry_at,
+                    "nativeReady": status.native_ready,
+                    "processIdentity": None
+                    if identity is None
+                    else {
+                        "pid": identity.pid,
+                        "startTicks": identity.start_ticks,
+                        "uid": identity.uid,
+                        "argv0": identity.argv0,
+                        "winePrefix": identity.wine_prefix,
+                    },
+                    "window": status.window_xid,
+                }
+                print(json.dumps(payload, sort_keys=True, separators=(",", ":")), flush=True)
+                previous_status = signature
+            if status.outcome == "ready":
+                exit_code = 0
+                break
+            if status.outcome == "stopped":
+                exit_code = 128 + received_signal if received_signal else 1
+                break
+            if status.outcome in {"blocked", "failed"}:
+                exit_code = 1
+                break
+            delay = 0.25
+            if status.retry_at is not None:
+                delay = max(0.05, min(1.0, status.retry_at - time.time()))
+            time.sleep(delay)
+    finally:
+        recovery.close()
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, cast(Any, handler))
+    if recovery.active:
+        return 1
+    return exit_code
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -193,9 +183,9 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "probe-frame", help="decode the configured automation canvas once; exit 0, 1, or 3"
     ).set_defaults(func=_probe_frame)
-    play = commands.add_parser("play", help="click Battle.net's Play button like a human")
-    play.add_argument("--window", type=int, help="Battle.net window id; found when omitted")
-    play.set_defaults(func=_play)
+    commands.add_parser("startup", help="recover the desktop until native world readiness").set_defaults(
+        func=_startup
+    )
     return parser
 
 
@@ -214,6 +204,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         OSError,
         PointerExecutionError,
         subprocess.TimeoutExpired,
+        DesktopSessionUnavailable,
         ValueError,
     ) as exc:
         if args.command == "probe-frame":

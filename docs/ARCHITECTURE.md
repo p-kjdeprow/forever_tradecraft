@@ -102,6 +102,19 @@ requires the resulting exclusive grant. Unknown effects retain ownership and pre
 maintenance reload/relaunch; an error cannot silently resume scanning behind an operation.
 Automation never reads scanner private state.
 
+Startup belongs to automation. The host and thin launcher wrapper use the same in-process
+controller; there is no supervisory launcher child or second GUI owner. Each bounded episode
+holds the canonical GUI lease, refreshes desktop-session authority and binds observations to
+process start identity, window, native boot and exact selected target. Healthy warm clients
+resume without resetting scan/ACK history. Missing scanner bytes do not authorize Enter World.
+Host actions refresh their own admission under the lease. Read [STARTUP](STARTUP.md) for the
+phase deadlines, holds, explicit selected-name measurement and UI qualification.
+
+Mutating control helpers inherit the GUI lease and Linux parent-death protection. Stop cancels
+and reaps those exact helpers before ownership is released, with bounded release-only cleanup
+for possibly held controls. Real game/Battle.net processes survive a host stop. This cannot
+retract already queued input; a dispatch remains distinct from its observed postcondition.
+
 Client assumptions are explicit and bounded by their evidence:
 
 | Fact or assumption | Evidence and consequence |

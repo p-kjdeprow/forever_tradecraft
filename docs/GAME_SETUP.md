@@ -14,7 +14,9 @@ For a v0.1 upgrade, review the package-owned
 [host example](../apps/host/src/crowley_host/ops/package_data/config/host.example.toml).
 Remove retired host fields canvas_origin, client_x/client_y, client_width/client_height,
 outer_width/outer_height, model_crop and window_client_offset. Add the independent automation
-canvas crop from the example. Old companion.toml is replaced by strict scanner.toml; a host
+canvas crop from the example and the measured character_select_name shown for the selected
+character. Keep that visual literal separate from the native realm pin; do not infer an alias.
+Old companion.toml is replaced by strict scanner.toml; a host
 install rerender preserves valid scanner poll/refresh values while repinning identity/paths.
 Malformed existing scanner configuration fails before mutation and needs explicit repair.
 
@@ -35,11 +37,17 @@ change it only while Battle.net is stopped because a running process rewrites it
 Do not launch a second instance: it can invalidate the login token. Direct Wow.exe startup
 cannot issue Battle.net's login ticket.
 
-The reviewed launcher invokes one Battle.net command at a time, selects the product page,
-then uses `crowley-desktop battle-net-play` for a real curved pointer click on the verified
-Play button. It verifies process/window identity and fullscreen geometry, waits for character
-select, and uses the independent automation frame probe to observe entry into the world.
-A click dispatch alone does not establish startup. Evidence remains private in XDG state.
+The reviewed launcher is a thin exec wrapper for `crowley-desktop startup`, using the same
+in-process recovery path as the host. It reuses existing clients, repairs supported fullscreen
+geometry, recognizes the exact Play control and benign news modal, and requires the expected
+selected character and selected UI name before Enter World. A missing addon frame never authorizes
+Return. The independent automation publication establishes native world readiness; scanner
+decoding remains separate. A click dispatch alone does not establish startup. Evidence remains
+private in XDG state. Tesseract with English data is the supported OCR dependency; doctor checks it.
+
+See [STARTUP](STARTUP.md) for holds, deadlines, process ownership and UI qualification. These
+source capabilities require the coordinated desktop cutover; older installed launchers retain
+the procedural startup behavior until replaced.
 
 GNOME animations must be disabled and idle blanking off; doctor refuses a host that cannot
 capture a stable canvas. Mutter IdleMonitor supplies physical-presence state. Synthetic

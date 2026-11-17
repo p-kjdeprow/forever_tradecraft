@@ -1,4 +1,4 @@
-"Desktop GUI lease, keyboard and launcher primitives."
+"Desktop GUI lease, keyboard input and guarded window activation."
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ import fcntl
 import math
 import os
 import re
-import shutil
-import signal
 import stat
 import subprocess
 import time
@@ -22,8 +20,6 @@ from crowley_common.platform.paths import XdgDirs
 from crowley_automation.gui import keyboard
 from crowley_automation.gui.input_tool import PinnedInputTool
 
-LAUNCHER = "crowley-world-of-warcraft"
-LAUNCHER_TIMEOUT_S = 600.0
 LEASE_TIMEOUT_S = 30.0
 COMMAND_TIMEOUT_S = 10.0
 INTERACT_CHORD: tuple[keyboard.KeyStep, ...] = (
@@ -60,6 +56,12 @@ class GuiLease:
         """The held descriptor, for a deliberate child-process handoff."""
 
         return self._fd
+
+    @property
+    def path(self) -> Path:
+        """Canonical lock-file path whose descriptor this lease owns."""
+
+        return self._path
 
     @classmethod
     def from_inherited_fd(cls, path: Path, fd: int) -> GuiLease:
@@ -182,20 +184,28 @@ class XtestKeys:
     def __init__(
         self,
         tool: PinnedInputTool,
-        env: Mapping[str, str],
+        env: Mapping[str, str] | Callable[[], Mapping[str, str]],
         *,
         run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        query_run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+        before_emit: Callable[[], None] | None = None,
     ) -> None:
-        self._tool, self._env, self._run = tool, dict(env), run
+        self._tool, self._env, self._run = tool, env, run
+        self._query_run = query_run
+        self._before_emit = before_emit
+
+    def _environment(self) -> dict[str, str]:
+        values = self._env() if callable(self._env) else self._env
+        return dict(values)
 
     def _keymap(self) -> dict[str, int]:
-        done = self._run(
+        done = self._query_run(
             ["xmodmap", "-pke"],
             capture_output=True,
             text=True,
             check=False,
             timeout=COMMAND_TIMEOUT_S,
-            env=self._env,
+            env=self._environment(),
         )
         if done.returncode != 0:
             raise ActError(f"xmodmap exited {done.returncode}")
@@ -204,13 +214,15 @@ class XtestKeys:
     def _send(self, argv: list[str], held: frozenset[str]) -> None:
         command = [self._tool.proc_path, *argv[1:]]
         try:
+            if self._before_emit is not None and argv[1] != "keyup":
+                self._before_emit()
             done = self._run(
                 command,
                 capture_output=True,
                 text=True,
                 check=False,
                 timeout=COMMAND_TIMEOUT_S,
-                env=self._env,
+                env=self._environment(),
                 pass_fds=(self._tool.image.fd,),
             )
             failed = done.returncode != 0
@@ -231,7 +243,7 @@ class XtestKeys:
                     capture_output=True,
                     check=False,
                     timeout=2.0,
-                    env=self._env,
+                    env=self._environment(),
                     pass_fds=(self._tool.image.fd,),
                 )
             except (OSError, subprocess.SubprocessError):
@@ -271,7 +283,7 @@ class XtestKeys:
         )
 
 
-# --- window activation and launcher -------------------------------------------------------
+# --- window activation --------------------------------------------------------------------
 
 
 def activate_window(env: Mapping[str, str], xid: int, *, run: Callable[..., Any] = subprocess.run) -> None:
@@ -288,55 +300,6 @@ def activate_window(env: Mapping[str, str], xid: int, *, run: Callable[..., Any]
         raise ActError(f"window activation failed: {exc}") from exc
     if done.returncode != 0:
         raise ActError(f"window activation exited {done.returncode}")
-
-
-class LauncherRun:
-    """The launcher as a child process the loop polls, so ticks (and presence) continue."""
-
-    def __init__(
-        self,
-        *,
-        which: Callable[[str], str | None] = shutil.which,
-        popen: Callable[..., Any] = subprocess.Popen,
-        clock: Callable[[], float] = time.monotonic,
-        timeout: float = LAUNCHER_TIMEOUT_S,
-    ) -> None:
-        self._which, self._popen, self._clock, self._timeout = which, popen, clock, timeout
-        self._child: Any = None
-        self._started = 0.0
-
-    @property
-    def running(self) -> bool:
-        return self._child is not None
-
-    def start(self) -> None:
-        if self._child is not None:
-            raise ActError("launcher is already running")
-        executable = self._which(LAUNCHER)
-        if executable is None:
-            raise ActError(f"{LAUNCHER} is not on PATH")
-        self._child = self._popen([executable], stdin=subprocess.DEVNULL, start_new_session=True)
-        self._started = self._clock()
-
-    def poll(self) -> tuple[bool, str]:
-        """(finished, detail).  A launcher past its timeout is killed and reported."""
-
-        child = self._child
-        if child is None:
-            return True, "not running"
-        code = child.poll()
-        if code is None and self._clock() - self._started >= self._timeout:
-            try:
-                os.killpg(child.pid, signal.SIGKILL)
-            except OSError:
-                child.kill()
-            child.wait()
-            self._child = None
-            return True, "timeout"
-        if code is None:
-            return False, "running"
-        self._child = None
-        return True, f"exit={code}"
 
 
 # --- actor --------------------------------------------------------------------------------

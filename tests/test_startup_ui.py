@@ -1,0 +1,120 @@
+from __future__ import annotations
+
+import pytest
+from crowley_automation.startup_ui import (
+    TextWord,
+    UIKind,
+    classify_battle_net_ui,
+    classify_character_select,
+)
+from PIL import Image, ImageDraw
+
+
+def _word(text: str, left: int, top: int, *, line: int, width: int = 50, height: int = 20) -> TextWord:
+    return TextWord(text, 96, left, top, width, height, (1, 1, 1, line))
+
+
+def test_marketing_and_desktop_toast_do_not_mask_selected_play() -> None:
+    image = Image.new("RGB", (1920, 1080), (20, 20, 24))
+    words = (
+        _word("Firmware", 750, 50, line=1),
+        _word("Updater", 815, 50, line=1),
+        _word("Firmware", 700, 82, line=2),
+        _word("update", 770, 82, line=2),
+        _word("available", 830, 82, line=2),
+        _word("Upgrade", 940, 310, line=3),
+        _word("Available", 1010, 310, line=3),
+        _word("WoW:", 190, 910, line=4, width=45),
+        _word("Forever", 240, 910, line=4, width=70),
+        _word("Play", 275, 960, line=5),
+    )
+    evidence = classify_battle_net_ui(
+        words,
+        image,
+        expected_product="WoW: Forever",
+        play_button=(184, 940, 232, 55),
+    )
+    assert evidence.kind == UIKind.PLAY_READY
+    assert evidence.control_text == "Play"
+
+
+def test_news_heading_and_close_glyph_without_verified_panel_is_not_dismissed() -> None:
+    image = Image.new("RGB", (1000, 700), "black")
+    evidence = classify_battle_net_ui(
+        (
+            _word("What's", 300, 80, line=1),
+            _word("New", 370, 80, line=1),
+            _word("×", 900, 50, line=2, width=16, height=16),
+        ),
+        image,
+    )
+    assert evidence.kind == UIKind.UNKNOWN
+    assert evidence.reason == "news_modal_panel_unverified"
+
+
+@pytest.mark.parametrize(
+    ("words", "expected"),
+    [
+        ((_word("Log", 300, 200, line=1), _word("In", 350, 200, line=1)), UIKind.LOGIN_REQUIRED),
+        ((_word("Account", 300, 200, line=1), _word("Conflict", 380, 200, line=1)), UIKind.ACCOUNT_CONFLICT),
+        ((_word("Downloading", 300, 200, line=1),), UIKind.UPDATE_BUSY),
+    ],
+)
+def test_launcher_login_conflict_and_update_states_are_classified_without_controls(
+    words: tuple[TextWord, ...], expected: UIKind
+) -> None:
+    evidence = classify_battle_net_ui(words, Image.new("RGB", (1920, 1080), "black"))
+    assert evidence.kind == expected
+    assert evidence.control is None
+
+
+def test_character_select_requires_exact_centered_selected_name_and_enabled_button() -> None:
+    image = Image.new("RGB", (1920, 1080), "black")
+    ImageDraw.Draw(image).rectangle((840, 977, 1080, 1027), fill=(158, 8, 18))
+    evidence = classify_character_select(
+        (
+            _word("Dandune", 830, 941, line=1, width=90),
+            _word("Hillmont", 925, 941, line=1, width=105),
+            _word("Dandune", 1567, 160, line=2, width=90),
+            _word("Hillmont", 1657, 160, line=2, width=105),
+            _word("Enter", 885, 990, line=3, width=65),
+            _word("World", 952, 990, line=3, width=80),
+        ),
+        image,
+        expected_selected_name="Dandune Hillmont",
+    )
+    assert evidence.kind == UIKind.CHARACTER_SELECT
+    assert evidence.control_text == "Enter World"
+
+
+def test_character_list_name_does_not_substitute_for_selected_name() -> None:
+    image = Image.new("RGB", (1920, 1080), "black")
+    ImageDraw.Draw(image).rectangle((840, 977, 1080, 1027), fill=(158, 8, 18))
+    words = (
+        _word("Dandune", 830, 941, line=1, width=90),
+        _word("Dandune", 1567, 160, line=2, width=90),
+        _word("Hillmont", 1657, 160, line=2, width=105),
+        _word("Enter", 885, 990, line=3, width=65),
+        _word("World", 952, 990, line=3, width=80),
+    )
+    evidence = classify_character_select(words, image, expected_selected_name="Dandune Hillmont")
+    assert evidence.kind == UIKind.UNKNOWN
+    assert evidence.reason == "selected_character_name_not_uniquely_identified"
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Queue position 3", UIKind.QUEUE),
+        ("Disconnected", UIKind.DISCONNECTED),
+        ("Loading", UIKind.WORLD_LOADING),
+    ],
+)
+def test_queue_disconnect_and_loading_states_have_no_enter_control(text: str, expected: UIKind) -> None:
+    evidence = classify_character_select(
+        (_word(text, 400, 400, line=1, width=180),),
+        Image.new("RGB", (1920, 1080), "black"),
+        expected_selected_name="Dandune Hillmont",
+    )
+    assert evidence.kind == expected
+    assert evidence.control is None

@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "cases": [
+    {
+      "file": "battlenet-play.png",
+      "source_sha256": "65fa32f4ee7f8e5567b2e88b9986b1b4b7133e1b91d7e8e905d324302a0d9607",
+      "captured_utc": "2026-11-17T06:04:18Z",
+      "source_size": [
+        1920,
+        1080
+      ],
+      "crop_xyxy": [
+        144,
+        800,
+        750,
+        1076
+      ],
+      "file_sha256": "e18c42bda348207b13634f6dd99fe3a101cf453abb934f6ce5fc264e442f70ce",
+      "purpose": "Actual selected WoW: Forever product and enabled Play. Relevant control crop excludes private account header; pixels unchanged. Full original image was separately checked with actual OCR before cropping.",
+      "expected_kind": "play_ready",
+      "window_xywh": [
+        0,
+        0,
+        606,
+        276
+      ],
+      "native_build": "1.60.1.70938"
+    },
+    {
+      "file": "character-select.png",
+      "source_sha256": "7fcd253a3411623b92c1f393146b0f8be93901bd25acfacac663989603312213",
+      "captured_utc": "2026-11-17T06:29:41Z",
+      "source_size": [
+        1920,
+        1080
+      ],
+      "crop_xyxy": [
+        820,
+        930,
+        1100,
+        1027
+      ],
+      "file_sha256": "575ce0d5ad92c8d486f2ec0c0ac306a611c449ec33504ebf3a9a2ec9d1836596",
+      "purpose": "Actual central selected display name and enabled Enter World; unaltered relevant pixels. No realm is displayed. Native identity must be paired to the same process after entry.",
+      "expected_kind": "character_select",
+      "expected_selected_name": "Dandune Hillmont",
+      "native_build": "1.60.1.70938",
+      "paired_native_identity": {
+        "observed_utc": "2026-11-17T06:47:52Z",
+        "same_process_as_capture": true,
+        "character": "Dandune",
+        "realm": "CAMWOW US1 Realm 7 PvE",
+        "client_build": 70938,
+        "zone": "Stormwind City",
+        "note": "Supervised entry paired this full selected display label to native identity. Installed legacy addon at capture; this does not qualify the new source addon installation or native protected actions."
+      }
+    },
+    {
+      "file": "character-select-hover.png",
+      "source_sha256": "7dfa3e7ade33e911c64991f122be219f07820287724d950bb98ca70439d2c912",
+      "captured_utc": "2026-11-17T06:47:19Z",
+      "source_size": [
+        1920,
+        1080
+      ],
+      "crop_xyxy": [
+        820,
+        930,
+        1100,
+        1027
+      ],
+      "file_sha256": "581537b5348c16011229c2d3e7f30e28ce847ad47eda973c231e7f5fe94d8c27",
+      "purpose": "Actual same selected display name and enabled Enter World while hovered: label turns white. Unaltered control pixels; paired same-process native identity after this press.",
+      "expected_kind": "character_select",
+      "expected_selected_name": "Dandune Hillmont",
+      "native_build": "1.60.1.70938",
+      "paired_native_identity": {
+        "observed_utc": "2026-11-17T06:47:52Z",
+        "same_process_as_capture": true,
+        "character": "Dandune",
+        "realm": "CAMWOW US1 Realm 7 PvE",
+        "client_build": 70938,
+        "zone": "Stormwind City",
+        "note": "Supervised entry paired this full selected display label to native identity. Installed legacy addon at capture; this does not qualify the new source addon installation or native protected actions."
+      }
+    },
+    {
+      "file": "battlenet-updates.png",
+      "source_sha256": "26ee86992c2657de26265fdae790e15005ae6ad5900e20ac22708afc9412af80",
+      "captured_utc": "2026-11-17T07:10:58.963412+00:00",
+      "capture_method": "Read-only XWD of exact owned Battle.net Updates window; no focus/owner/input change",
+      "source_size": [
+        900,
+        600
+      ],
+      "source_window_xywh": [
+        528,
+        234,
+        900,
+        600
+      ],
+      "crop_xyxy": [
+        0,
+        0,
+        900,
+        600
+      ],
+      "file_sha256": "09086dbb036595c4c6cbd74b73e424a0a7d5c66993ac6f1965f02b46147ebc74",
+      "purpose": "Actual fully loaded release-information child window: heading, PATCH/date layout and unique close X. Contains no local account header; article contains publisher example artwork. Pixels unchanged.",
+      "expected_kind": "news_modal",
+      "window_title": "Battle.net Updates",
+      "same_process_as_main": true,
+      "app_patch": "2.53.4"
+    }
+  ]
+}

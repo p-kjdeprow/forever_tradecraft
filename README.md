@@ -44,7 +44,7 @@ The public commands are:
 | crowley-server | Market API/dashboard |
 | crowley-companion | Standalone saved-scan/probe upload and ACK transport |
 | crowley-watchlist | Manage the scanner catalog and canonical plan |
-| crowley-desktop | Independent game observation, presence, frame probe and Battle.net Play |
+| crowley-desktop | Independent observation, presence, frame probe and bounded startup recovery |
 | crowley-native | Build/verify the pinned XTEST tool |
 | crowley-automation | Run exact operation batches or bounded commodity selling sessions and read receipts |
 | crowley-host | Scan-aware host loop and status |
@@ -61,6 +61,12 @@ can collect without automation. At six unacknowledged sweeps it pauses without d
 evidence. SavedVariables reaches disk on reload/logout; companion uploads original bytes,
 writes Data.lua ACKs, and a later client reload loads them. The host can automate that cycle.
 See [REPEATING_SCANS](docs/REPEATING_SCANS.md) and [GAME_SETUP](docs/GAME_SETUP.md).
+
+The host and `crowley-desktop startup` share one observation-driven startup controller. It
+refreshes the graphical session, adopts existing owned clients, repairs supported fullscreen
+geometry and verifies launcher/character-selection controls before input. Progress and holds
+are visible in host status. See [STARTUP](docs/STARTUP.md) for the configuration and rollout
+requirements; source changes do not upgrade the installed desktop.
 
 In game, `/crowley probe`, `/crowley status`, `/crowley scan` and `/crowley set` are scanner
 commands. Fresh automation uses its separate `/cauto` staging surface through the supported

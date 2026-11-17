@@ -41,8 +41,11 @@ class AutomationConfig(BaseModel):
     game_executable: StrictStr
     game_argv0: StrictStr
     window_class: StrictStr
+    product: StrictStr
+    product_dir: StrictStr
     character: StrictStr
     realm: StrictStr
+    character_select_name: StrictStr
     faction: StrictStr
     house: StrictStr
     build: StrictStr
@@ -59,7 +62,14 @@ class AutomationConfig(BaseModel):
         return value
 
     @field_validator(
-        "display", "window_title", "game_executable", "game_argv0", "window_class", "realm", "faction"
+        "display",
+        "window_title",
+        "game_executable",
+        "game_argv0",
+        "window_class",
+        "realm",
+        "faction",
+        "character_select_name",
     )
     @classmethod
     def validate_nonempty(cls, value: str) -> str:
@@ -72,6 +82,23 @@ class AutomationConfig(BaseModel):
     def validate_character(cls, value: str) -> str:
         if _COMPONENT.fullmatch(value) is None:
             raise ValueError("character must be one literal state-directory component")
+        return value
+
+    @field_validator("product")
+    @classmethod
+    def validate_product(cls, value: str) -> str:
+        if _COMPONENT.fullmatch(value) is None:
+            raise ValueError("product must be one literal product identifier")
+        return value
+
+    @field_validator("product_dir")
+    @classmethod
+    def validate_product_dir(cls, value: str) -> str:
+        path = Path(value)
+        if not value or path.is_absolute() or len(path.parts) != 1 or value in {".", ".."}:
+            raise ValueError("product_dir must be one relative directory component")
+        if "/" in value or "\\" in value:
+            raise ValueError("product_dir must not contain a path separator")
         return value
 
     @field_validator("house")
@@ -157,8 +184,11 @@ def render_automation_toml(config: AutomationConfig) -> str:
         "game_executable",
         "game_argv0",
         "window_class",
+        "product",
+        "product_dir",
         "character",
         "realm",
+        "character_select_name",
         "faction",
         "house",
         "build",

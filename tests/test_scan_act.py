@@ -553,6 +553,31 @@ def test_identity_or_window_race_skips_input_without_consuming_sender(tmp_path: 
     assert recording.events == []
 
 
+def test_native_read_failure_logs_bounded_details_and_keeps_public_reason(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    runner, recording, _order, _matcher, _window, _recovery, _session = actor(tmp_path)
+
+    def fail_native_read() -> Any:
+        raise act.ObserveError("capture stale\nage 3.025s\n" + "private detail " * 30)
+
+    runner._native_observe = fail_native_read
+    with caplog.at_level("WARNING", logger=act.__name__):
+        with pytest.raises(act.ActionNotAdmitted) as rejected:
+            runner.execute(chat_submit_decision(), chat_submit_observation())
+
+    assert rejected.value.reason == "native_observation_changed"
+    assert recording.events == []
+    assert not runner._lease.held
+    assert len(caplog.records) == 1
+    message = caplog.records[0].getMessage()
+    assert len(message) <= 200
+    assert "\n" not in message
+    assert "ObserveError" in message
+    assert "capture stale age 3.025s" in message
+    assert "private detail" in message
+
+
 def test_foreign_window_candidate_is_treated_as_ambiguous(tmp_path: Path) -> None:
     runner, recording, _order, _matcher, window, _recovery, _session = actor(tmp_path)
     window.current.foreign_count = 1

@@ -106,63 +106,79 @@ def observe_native_world(
     if not window.ok or not window.fullscreen or window.xid is None:
         raise ObserveError("game window is not verified fullscreen")
     began = clock()
-    capture_started_wall = wall_clock()
-    try:
-        from crowley_common.platform.paths import XdgDirs
-
-        dirs = XdgDirs.from_environ(os.environ)
-        image = ScreenCanvas(dirs.crowley_runtime / "automation-capture", env_provider).capture(
-            window.display
-        )
-    except (OSError, ValueError) as error:
-        raise ObserveError("desktop capture failed") from error
-    capture_finished_wall = wall_clock()
-    canvas = crop_canvas(image, window.display, config.canvas_crop, "automation canvas")
     snapshot: dict[str, Any] | None = None
-    if has_frame_signature(canvas):
-        decoder = PixelDecoder(expected_kind="automation", crop=config.canvas_crop)
-        try:
-            sample = decoder.decode(
-                canvas,
-                monotonic=began,
-                window_identity=f"{identity.pid}:{identity.start_ticks}:{window.xid}",
-            )
-        except ProtocolError as error:
-            raise ObserveError("automation canvas frame is corrupt") from error
-        if sample.frame is not None:
-            candidate = sample.frame.snapshot.value
-            context = candidate["context"]
-            expected = {
-                "character": config.character,
-                "realm": config.realm,
-                "playerFaction": config.faction,
-                "clientBuild": config.build.rsplit(".", 1)[1],
-                "interface": config.interface,
-                "nativeRegion": config.native_region,
-            }
-            if any(context[key] != value for key, value in expected.items()):
-                raise ObserveError("automation publication identity does not match configuration")
-            wall_time = candidate["wallTime"]
-            if (
-                wall_time < capture_finished_wall - MAX_FRAME_AGE_SECONDS
-                or wall_time > capture_finished_wall + FUTURE_FRAME_TOLERANCE_SECONDS
-            ):
-                raise ObserveError("automation publication is stale or future-dated")
-            snapshot = candidate
+    capture_started_wall = 0.0
 
-    current_identities = matcher.identities()
-    current_window = source.observe([identity.pid]) if current_identities == (identity,) else None
-    if (
-        current_identities != (identity,)
-        or current_window is None
-        or not current_window.ok
-        or not current_window.fullscreen
-        or current_window.xid != window.xid
-        or clock() - began > MAX_FRAME_AGE_SECONDS
-    ):
-        raise ObserveError("process, window, or original capture changed during observation")
-    if session_provider is not None and session_provider.current().fingerprint != session_fingerprint:
-        raise ObserveError("desktop session changed during observation")
+    def verify_observation_owner() -> WindowState:
+        current_identities = matcher.identities()
+        current_window = source.observe([identity.pid]) if current_identities == (identity,) else None
+        if (
+            current_identities != (identity,)
+            or current_window is None
+            or not current_window.ok
+            or not current_window.fullscreen
+            or current_window.xid != window.xid
+            or clock() - began > MAX_FRAME_AGE_SECONDS
+        ):
+            raise ObserveError("process, window, or original capture changed during observation")
+        if session_provider is not None and session_provider.current().fingerprint != session_fingerprint:
+            raise ObserveError("desktop session changed during observation")
+        return current_window
+
+    for capture_attempt in range(2):
+        capture_started_monotonic = clock()
+        capture_started_wall = wall_clock()
+        try:
+            from crowley_common.platform.paths import XdgDirs
+
+            dirs = XdgDirs.from_environ(os.environ)
+            image = ScreenCanvas(dirs.crowley_runtime / "automation-capture", env_provider).capture(
+                window.display
+            )
+        except (OSError, ValueError) as error:
+            raise ObserveError("desktop capture failed") from error
+        capture_finished_wall = wall_clock()
+        canvas = crop_canvas(image, window.display, config.canvas_crop, "automation canvas")
+        if has_frame_signature(canvas):
+            decoder = PixelDecoder(expected_kind="automation", crop=config.canvas_crop)
+            try:
+                sample = decoder.decode(
+                    canvas,
+                    monotonic=capture_started_monotonic,
+                    window_identity=f"{identity.pid}:{identity.start_ticks}:{window.xid}",
+                )
+            except ProtocolError as error:
+                raise ObserveError("automation canvas frame is corrupt") from error
+            if sample.frame is not None:
+                candidate = sample.frame.snapshot.value
+                context = candidate["context"]
+                expected = {
+                    "character": config.character,
+                    "realm": config.realm,
+                    "playerFaction": config.faction,
+                    "clientBuild": config.build.rsplit(".", 1)[1],
+                    "interface": config.interface,
+                    "nativeRegion": config.native_region,
+                }
+                if any(context[key] != value for key, value in expected.items()):
+                    raise ObserveError("automation publication identity does not match configuration")
+                wall_time = candidate["wallTime"]
+                too_old = wall_time < capture_finished_wall - MAX_FRAME_AGE_SECONDS
+                too_future = wall_time > capture_finished_wall + FUTURE_FRAME_TOLERANCE_SECONDS
+                if too_old or too_future:
+                    if too_old and capture_attempt == 0:
+                        verify_observation_owner()
+                        continue
+                    age = max(-999.999, min(999.999, capture_finished_wall - wall_time))
+                    capture_elapsed = max(0.0, min(999.999, capture_finished_wall - capture_started_wall))
+                    raise ObserveError(
+                        "automation publication is stale or future-dated "
+                        f"(age={age:.3f}s, capture={capture_elapsed:.3f}s)"
+                    )
+                snapshot = candidate
+        break
+
+    current_window = verify_observation_owner()
     return NativeWorldObservation(
         identity, current_window, snapshot, capture_started_wall, session_fingerprint
     )

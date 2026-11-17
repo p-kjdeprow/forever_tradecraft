@@ -7,6 +7,7 @@ from dataclasses import replace
 import pytest
 from crowley_automation.gui.process import ProcessIdentity
 from crowley_host.scan.policy import (
+    AH_STAGE_S,
     SET_BINDING_COMMAND,
     Action,
     CommandTx,
@@ -380,6 +381,58 @@ def closed(**kw: object) -> Observation:
     return obs(snap(ah_open=False, **kw))
 
 
+def _type_ah_command_and_return(
+    start: Observation, state: LoopState, *, delay: float
+) -> tuple[Decision, Observation]:
+    assert state.tx is not None
+    command = state.tx.command
+    opening = replace(
+        start,
+        state=state,
+        snapshot=replace(start.snapshot, chat_active=True, chat_focused=True, chat_text=""),
+    )
+    typed = decide(opening)
+    check(typed, Action.TYPE_COMMAND)
+    return_wall = opening.wall + delay
+    readback = replace(
+        opening,
+        wall=return_wall,
+        mono=opening.mono + delay,
+        last_frame_at=return_wall - 0.5,
+        state=typed.state,
+        snapshot=replace(
+            opening.snapshot,
+            chat_text=command,
+            received_at=return_wall - 0.5,
+        ),
+    )
+    submitted = decide(readback)
+    check(submitted, Action.PRESS_RETURN)
+    return submitted, readback
+
+
+def _close_submitted_chat(
+    readback: Observation, submitted: Decision, **snapshot_updates: object
+) -> tuple[Observation, Decision]:
+    close_wall = readback.wall + 1.0
+    closed_observation = replace(
+        readback,
+        wall=close_wall,
+        mono=readback.mono + 1.0,
+        last_frame_at=close_wall - 0.5,
+        state=submitted.state,
+        snapshot=replace(
+            readback.snapshot,
+            chat_active=False,
+            chat_focused=False,
+            chat_text="",
+            received_at=close_wall - 0.5,
+            **snapshot_updates,
+        ),
+    )
+    return closed_observation, decide(closed_observation)
+
+
 def test_row_11_steps_target_bind_interact() -> None:
     d = decide(closed(target_present=False, auctioneer_name="", range_available=False, in_range=False))
     check(d, Action.OPEN_CHAT)
@@ -390,6 +443,104 @@ def test_row_11_steps_target_bind_interact() -> None:
     d = decide(closed())
     check(d, Action.PRESS_INTERACT)
     assert d.state.ah_stage == "interact_sent" and len(d.state.ah_attempts) == 1
+
+
+def test_slow_target_and_binding_typing_keep_one_ah_attempt() -> None:
+    start = closed(
+        target_present=False,
+        auctioneer_name="",
+        range_available=False,
+        in_range=False,
+        binding_action="",
+    )
+    target = decide(start)
+    check(target, Action.OPEN_CHAT)
+    assert target.purpose == "target_auctioneer"
+    attempts = target.state.ah_attempts
+
+    target_return, target_readback = _type_ah_command_and_return(start, target.state, delay=80.0)
+    assert target_return.state.ah_stage == "targeting"
+    assert target_return.state.ah_stage_at == target_readback.wall
+    assert target_return.state.ah_attempts == attempts
+    after_target, bind = _close_submitted_chat(
+        target_readback,
+        target_return,
+        target_present=True,
+        auctioneer_name=JAXON,
+        range_available=True,
+        in_range=True,
+    )
+    check(bind, Action.OPEN_CHAT)
+    assert bind.purpose == "bind_interact"
+    assert bind.state.ah_attempts == attempts
+
+    bind_return, bind_readback = _type_ah_command_and_return(after_target, bind.state, delay=90.0)
+    assert bind_return.state.ah_stage == "binding"
+    assert bind_return.state.ah_stage_at == bind_readback.wall
+    assert bind_return.state.ah_attempts == attempts
+    _after_binding, interact = _close_submitted_chat(
+        bind_readback,
+        bind_return,
+        target_present=True,
+        auctioneer_name=JAXON,
+        range_available=True,
+        in_range=True,
+        binding_action="INTERACTTARGET",
+    )
+    check(interact, Action.PRESS_INTERACT)
+    assert interact.state.ah_stage == "interact_sent"
+    assert interact.state.ah_attempts == attempts
+
+
+def test_target_postcondition_timeout_after_return_consumes_bounded_retry() -> None:
+    start = closed(target_present=False, auctioneer_name="", range_available=False, in_range=False)
+    target = decide(start)
+    check(target, Action.OPEN_CHAT)
+    returned, readback = _type_ah_command_and_return(start, target.state, delay=80.0)
+    _, waiting = _close_submitted_chat(readback, returned)
+    check(waiting, Action.WAIT)
+    assert waiting.detail == "waiting_for_target"
+    assert waiting.state.ah_attempts == (WALL,)
+
+    timeout_wall = returned.state.ah_stage_at + AH_STAGE_S + 1.0
+    timeout_obs = replace(
+        start,
+        wall=timeout_wall,
+        mono=start.mono + timeout_wall - start.wall,
+        last_frame_at=timeout_wall - 0.5,
+        state=waiting.state,
+        snapshot=replace(start.snapshot, received_at=timeout_wall - 0.5),
+    )
+    retry = decide(timeout_obs)
+    check(retry, Action.OPEN_CHAT)
+    assert retry.purpose == "target_auctioneer"
+    assert retry.state.ah_attempts == (WALL, timeout_wall)
+
+
+def test_binding_postcondition_timeout_after_return_consumes_bounded_retry() -> None:
+    start = closed(binding_action="")
+    binding = decide(start)
+    check(binding, Action.OPEN_CHAT)
+    assert binding.purpose == "bind_interact"
+    returned, readback = _type_ah_command_and_return(start, binding.state, delay=80.0)
+    _, waiting = _close_submitted_chat(readback, returned)
+    check(waiting, Action.WAIT)
+    assert waiting.detail == "waiting_for_binding"
+    assert waiting.state.ah_attempts == (WALL,)
+
+    timeout_wall = returned.state.ah_stage_at + AH_STAGE_S + 1.0
+    timeout_obs = replace(
+        start,
+        wall=timeout_wall,
+        mono=start.mono + timeout_wall - start.wall,
+        last_frame_at=timeout_wall - 0.5,
+        state=waiting.state,
+        snapshot=replace(start.snapshot, received_at=timeout_wall - 0.5),
+    )
+    retry = decide(timeout_obs)
+    check(retry, Action.OPEN_CHAT)
+    assert retry.purpose == "bind_interact"
+    assert retry.state.ah_attempts == (WALL, timeout_wall)
 
 
 @pytest.mark.parametrize(
@@ -546,11 +697,13 @@ def flush_obs(boot: str, flush_at: float, seen: float | None, **kw: object) -> O
 
 def test_flush_return_records_uid_boot_and_reload_time() -> None:
     o = chat_obs("/reload", Step.TYPED, last_saved_uid=S1, pending_ids=frozenset({S1}))
+    o = replace(o, state=replace(o.state, ah_stage="targeting", ah_stage_at=WALL - 20))
     o = replace(o, snapshot=replace(o.snapshot, received_at=WALL - 0.2))
     d = decide(o)
     check(d, Action.PRESS_RETURN)
     s = d.state
     assert (s.flush_uid, s.flush_boot, s.flush_at, s.last_ack_reload_at) == (S1, "boot-1", WALL, WALL)
+    assert s.ah_stage_at == WALL - 20
 
 
 def test_flush_not_persisted_fault_and_30_min_retry() -> None:

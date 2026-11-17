@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable, Mapping
 from contextlib import contextmanager
@@ -34,6 +35,8 @@ from .policy import (
     Target,
     allowed_commands,
 )
+
+_LOG = logging.getLogger(__name__)
 
 
 class MaintenanceBlocked(desktop_input.ActError):
@@ -193,7 +196,9 @@ class Actor:
             raise ActionNotAdmitted("automation_native_busy")
         try:
             current = self._native_observe()
-        except (ObserveError, DesktopSessionUnavailable):
+        except (ObserveError, DesktopSessionUnavailable) as exc:
+            message = f"native observation failed: {type(exc).__name__}: {' '.join(str(exc).split())}"
+            _LOG.warning("%s", message[:200])
             raise ActionNotAdmitted("native_observation_changed") from None
         identity = observation.process_identity
         if (

@@ -35,6 +35,11 @@ cannot authorize a replacement instance; an already dispatched Play keeps its or
 
 Phase deadlines, the overall episode deadline, next retry and dispatched action are separate
 status facts. A dispatch does not prove the expected UI/process/native postcondition.
+Native observation may discard one otherwise-valid stale image and take one new screenshot
+within the original three-second observation budget. The replacement must independently pass
+the unchanged age, identity, window and session checks; its timestamp is its actual capture start.
+Future, corrupt or contradictory evidence is refused. Targeting and binding postcondition timers
+start at the admitted command submission, so guarded typing does not consume that waiting budget.
 
 ## Configuration and qualification
 

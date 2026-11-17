@@ -70,6 +70,9 @@ persistence and ACK facts. Automation schema 3 carries native context/UI, motion
 arguments, bounded inspections, targeted seller queries and structured native receipts. Malformed automation facts cannot invalidate
 scanner bytes. A decoder rejects unknown boots unless an explicitly expected reload arms
 that transition; cached observations keep their original capture times.
+One stale native image may be replaced by one new capture under the original observation deadline
+and identity. The age limit is unchanged, and the discarded image never authorizes input. AH
+target/binding postcondition clocks begin at admitted Return; attempt history remains independent.
 
 Automation stages an exact action through bounded allowlisted slash commands. Staging and
 inspection cannot call protected APIs. Python reads back actual action fields and recomputes

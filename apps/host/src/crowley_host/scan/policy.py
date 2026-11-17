@@ -666,6 +666,8 @@ def _before_return(obs: Observation, st: LoopState, snap: Snapshot, tx: CommandT
         return _abort(obs, st, tx)
     submitted = replace(tx, step=Step.SUBMITTED, at=0.0)
     st = replace(st, tx=submitted)
+    if tx.purpose in ("target_auctioneer", "bind_interact"):
+        st = replace(st, ah_stage_at=obs.wall)
     if reload:
         st = replace(st, last_ack_reload_at=obs.wall)
         if tx.purpose == "save_flush":

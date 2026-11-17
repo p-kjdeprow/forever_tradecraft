@@ -4,9 +4,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from crowley_automation import desktop_cli, desktop_observe
 from crowley_automation.config import AutomationConfig
 from crowley_automation.desktop_observe import WindowState
+from crowley_automation.desktop_session import DesktopSession
 from crowley_automation.gui.process import ProcessIdentity
 from crowley_automation.ledger import Ledger
 from crowley_automation.model import Batch, CollectMail
@@ -32,6 +34,19 @@ def _screen(frame: bytes) -> Image.Image:
     screen = Image.new("RGB", DISPLAY, (17, 17, 17))
     screen.paste(crop, (CROP[0], CROP[1]))
     return screen
+
+
+def _native_screen(wall_time: int, *, character: str = "Tester", corrupt: bool = False) -> Image.Image:
+    client = NativeHarness()
+    client.state.now = wall_time
+    client.state.character = character
+    client.fire("PLAYER_ENTERING_WORLD")
+    frame = client.frame_bytes
+    if corrupt:
+        damaged = bytearray(frame)
+        damaged[26] ^= 1
+        frame = bytes(damaged)
+    return _screen(frame)
 
 
 def _config(tmp_path: Path) -> AutomationConfig:
@@ -89,6 +104,55 @@ def _pin_probe(
     monkeypatch.setattr(desktop_observe, "X11Window", Window)
     monkeypatch.setattr(desktop_observe, "ScreenCanvas", Canvas)
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+
+def _pin_observation_sources(
+    tmp_path: Path,
+    monkeypatch: Any,
+    screens: list[Image.Image],
+    *,
+    on_capture: Any = None,
+) -> tuple[AutomationConfig, list[Image.Image], list[ProcessIdentity], list[WindowState]]:
+    selected = _config(tmp_path)
+    identity = ProcessIdentity(17, 99, 1000, selected.game_argv0, selected.wine_prefix)
+    identities = [identity]
+    windows = [WindowState(42, 1, True, True, DISPLAY, fullscreen=True)]
+    captures: list[Image.Image] = []
+
+    class Matcher:
+        def identities(self) -> tuple[ProcessIdentity, ...]:
+            return (identities[0],)
+
+    class MatcherFactory:
+        @staticmethod
+        def for_game(**_kwargs: str) -> Matcher:
+            return Matcher()
+
+    class Window:
+        def __init__(self, *_args: object) -> None: ...
+
+        def observe(self, _pids: list[int], *, include_hidden: bool = False) -> WindowState:
+            assert not include_hidden
+            return windows[0]
+
+    class Canvas:
+        def __init__(self, *_args: object) -> None: ...
+
+        def capture(self, _display: tuple[int, int]) -> Image.Image:
+            index = len(captures)
+            if index >= len(screens):
+                raise AssertionError("unexpected additional screenshot")
+            captures.append(screens[index])
+            if on_capture is not None:
+                on_capture(index, identities, windows)
+            return screens[index]
+
+    monkeypatch.setattr(desktop_observe, "x11_environment", lambda _display: {})
+    monkeypatch.setattr(desktop_observe, "OwnedGameMatcher", MatcherFactory)
+    monkeypatch.setattr(desktop_observe, "X11Window", Window)
+    monkeypatch.setattr(desktop_observe, "ScreenCanvas", Canvas)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    return selected, captures, identities, windows
 
 
 def test_probe_rejects_a_decodable_but_stale_automation_canvas(
@@ -174,6 +238,194 @@ def test_native_observation_timestamp_is_capture_start_not_capture_completion(
     )
     assert observation.observed_wall == 100.0
     assert clocks["wall"] == 101.0
+
+
+def test_stale_frame_gets_one_new_capture_and_returns_that_captures_original_start(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    selected, captures, _identities, _windows = _pin_observation_sources(
+        tmp_path,
+        monkeypatch,
+        [_native_screen(995), _native_screen(1002)],
+    )
+    wall_times = iter([1000.0, 1001.2, 1001.2, 1002.4])
+    decode_starts: list[float] = []
+    decode = desktop_observe.PixelDecoder.decode
+
+    def track_decode(self: Any, canvas: Any, *, monotonic: float, window_identity: str) -> Any:
+        decode_starts.append(monotonic)
+        return decode(self, canvas, monotonic=monotonic, window_identity=window_identity)
+
+    monkeypatch.setattr(desktop_observe.PixelDecoder, "decode", track_decode)
+    observation = desktop_observe.observe_native_world(
+        selected,
+        clock=lambda: 0.5 * len(captures),
+        wall_clock=lambda: next(wall_times),
+    )
+
+    assert len(captures) == 2
+    assert observation.snapshot is not None
+    assert observation.snapshot["wallTime"] == 1002
+    assert observation.observed_wall == 1001.2
+    assert decode_starts == [0.0, 0.5]
+
+
+def test_two_stale_frames_are_rejected_with_bounded_freshness_diagnostics(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    selected, captures, _identities, _windows = _pin_observation_sources(
+        tmp_path,
+        monkeypatch,
+        [_native_screen(995), _native_screen(997)],
+    )
+    wall_times = iter([1000.0, 1001.0, 1001.0, 1002.0])
+
+    with pytest.raises(desktop_observe.ObserveError) as error:
+        desktop_observe.observe_native_world(
+            selected,
+            clock=lambda: 0.5 * len(captures),
+            wall_clock=lambda: next(wall_times),
+        )
+
+    assert len(captures) == 2
+    assert str(error.value).startswith("automation publication is stale or future-dated")
+    assert "age=" in str(error.value) and "capture=" in str(error.value)
+
+
+def test_future_frame_diagnostic_clamps_numeric_values(tmp_path: Path, monkeypatch: Any) -> None:
+    selected, captures, _identities, _windows = _pin_observation_sources(
+        tmp_path, monkeypatch, [_native_screen(1_000_000_000), _native_screen(1002)]
+    )
+    wall_times = iter([1000.0, 1001.0])
+
+    with pytest.raises(desktop_observe.ObserveError) as error:
+        desktop_observe.observe_native_world(
+            selected,
+            clock=lambda: 0.5 * len(captures),
+            wall_clock=lambda: next(wall_times),
+        )
+
+    assert len(captures) == 1
+    assert str(error.value).endswith("age=-999.999s, capture=1.000s)")
+    assert len(str(error.value)) < 160
+
+
+@pytest.mark.parametrize(
+    ("screen", "message"),
+    [
+        (_native_screen(1005), "stale or future-dated"),
+        (_native_screen(1001, corrupt=True), "automation canvas frame is corrupt"),
+        (_native_screen(1001, character="Other"), "publication identity does not match configuration"),
+    ],
+)
+def test_future_corrupt_or_wrong_context_frame_does_not_retry(
+    tmp_path: Path, monkeypatch: Any, screen: Image.Image, message: str
+) -> None:
+    selected, captures, _identities, _windows = _pin_observation_sources(
+        tmp_path, monkeypatch, [screen, _native_screen(1002)]
+    )
+    wall_times = iter([1000.0, 1001.0])
+
+    with pytest.raises(desktop_observe.ObserveError, match=message):
+        desktop_observe.observe_native_world(
+            selected,
+            clock=lambda: 0.5 * len(captures),
+            wall_clock=lambda: next(wall_times),
+        )
+
+    assert len(captures) == 1
+
+
+def test_missing_frame_signature_stays_absent_without_a_second_capture(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    selected, captures, _identities, _windows = _pin_observation_sources(
+        tmp_path,
+        monkeypatch,
+        [Image.new("RGB", DISPLAY, (17, 17, 17)), _native_screen(1002)],
+    )
+    wall_times = iter([1000.0, 1001.0])
+    observation = desktop_observe.observe_native_world(
+        selected,
+        clock=lambda: 0.5 * len(captures),
+        wall_clock=lambda: next(wall_times),
+    )
+
+    assert len(captures) == 1
+    assert observation.snapshot is None
+    assert observation.observed_wall == 1000.0
+
+
+@pytest.mark.parametrize("drift", ["process", "window", "session"])
+def test_stale_frame_retry_rejects_process_window_or_session_drift(
+    tmp_path: Path, monkeypatch: Any, drift: str
+) -> None:
+    def drift_after_capture(
+        index: int, identities: list[ProcessIdentity], windows: list[WindowState]
+    ) -> None:
+        if index != 0:
+            return
+        if drift == "process":
+            original = identities[0]
+            identities[0] = ProcessIdentity(
+                original.pid, original.start_ticks + 1, original.uid, original.argv0, original.wine_prefix
+            )
+        elif drift == "window":
+            windows[0] = WindowState(43, 1, True, True, DISPLAY, fullscreen=True)
+
+    selected, captures, _identities, _windows = _pin_observation_sources(
+        tmp_path,
+        monkeypatch,
+        [_native_screen(995), _native_screen(1002)],
+        on_capture=drift_after_capture,
+    )
+    wall_times = iter([1000.0, 1001.0])
+
+    class SessionProvider:
+        calls = 0
+
+        def current(self) -> DesktopSession:
+            self.calls += 1
+            fingerprint = "initial" if self.calls == 1 else "changed"
+            return DesktopSession({}, fingerprint)
+
+    session_provider = SessionProvider()
+    options: dict[str, Any] = {
+        "clock": lambda: 0.5 * len(captures),
+        "wall_clock": lambda: next(wall_times),
+    }
+    if drift == "session":
+        options["session_provider"] = session_provider
+
+    with pytest.raises(desktop_observe.ObserveError) as error:
+        desktop_observe.observe_native_world(selected, **options)
+
+    assert len(captures) == 1
+    if drift == "session":
+        assert str(error.value) == "desktop session changed during observation"
+    else:
+        assert str(error.value) == "process, window, or original capture changed during observation"
+
+
+def test_fresh_second_frame_does_not_reset_original_observation_deadline(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    selected, captures, _identities, _windows = _pin_observation_sources(
+        tmp_path,
+        monkeypatch,
+        [_native_screen(995), _native_screen(1002)],
+    )
+    wall_times = iter([1000.0, 1001.0, 1001.0, 1002.0])
+
+    with pytest.raises(desktop_observe.ObserveError) as error:
+        desktop_observe.observe_native_world(
+            selected,
+            clock=lambda: 1.6 * len(captures),
+            wall_clock=lambda: next(wall_times),
+        )
+
+    assert len(captures) == 2
+    assert str(error.value) == "process, window, or original capture changed during observation"
 
 
 def test_probe_rejects_a_corrupt_frame_with_a_valid_signature(

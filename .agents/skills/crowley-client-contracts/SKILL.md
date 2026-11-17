@@ -15,6 +15,9 @@ final edit and checks. Map each assigned race or deadline requirement to its act
 total does not cover an omitted case. Validate scalar types before sentinel comparisons: Python's `False == 0`
 and falsey `None` can bypass malformed-input rejection. Per-field byte ceilings and the aggregate compressed-frame
 limit are separate; measure varied real compositions and assert oversize publication fails closed.
+Test coarse publication cadence, integer timestamp quantization and capture latency together at freshness
+boundaries. Discard stale proof; a new capture must retain its own timestamps and the original observation
+deadline/identity. Never retimestamp an old image or widen freshness to make a live check pass.
 
 Derive stub return shapes from the selected client's API/UI source; do not invent
 convenient fields or boolean success returns for APIs that return nothing.

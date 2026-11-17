@@ -5,9 +5,16 @@ and independent Sol review loops, commits on main/origin/main, and task artifact
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
-The urgent typing/dashboard repair is installed. **Keep `crowley-host` stopped**:
-the user's stop instruction remains active, and the user manually closed WoW.
-Companion remains active. No screenshots or game input were used during this repair.
+The urgent typing/dashboard repair is installed. The user's latest instruction
+authorizes resuming collection and requires a fully functional website. Host and
+companion are now active: the host launched one client, entered the world, targeted
+the auctioneer, installed the binding and opened the AH. Fresh sweep 906 completed
+and reached the website through the normal save/upload/ACK path. All 470 planned
+items were queried successfully; 10,825 positive-price rows were retained. Actual
+collection ran 18:58:08–19:08:02 UTC (594 seconds), similar to the preceding build
+70959 sweep's 583 seconds. The original saved payload is preserved privately.
+Do not stop collection based on the earlier stop instruction; it was superseded.
+No screenshots or game input were used during the preceding offline repair.
 See [the recovery record](URGENT_RECOVERY_PLAN.md) for causes, checks and limitations.
 User-managed alerts are paused; their unfinished changes are preserved privately.
 
@@ -16,8 +23,11 @@ character. Commands now use one explicit key transition chain through one monito
 child, with cheap stop/presence/maintenance/session/process/focus checks during typing.
 Fresh screen checks and exact complete text remain mandatory before the separate
 Return action. This removes capture/helper cost proportional to command length.
-Live typing speed has not been measured because the host remains stopped. The local
-host/scanner/startup runtime makes no model calls; agent diagnostics are separate.
+Live startup now confirms the 123-character binding step completes approximately
+10 seconds after the preceding chat action (including the next observation/admission),
+versus approximately 397 seconds before the repair. Exact keystroke-only duration
+is not independently measured. The local host/scanner/startup runtime makes no model
+calls; agent diagnostics are separate.
 
 All five coordinated desktop packages 0.2.0 are installed from the current repair
 wheels, with installed namespaces verified byte-for-byte. `crowley-ops doctor` passes.
@@ -33,9 +43,16 @@ The server now runs image
 The original database container and DB/raw mounts are unchanged. All twelve applied
 migrations retain their original bytes. The supported client-data exporter and loader
 imported genuine build 1.60.1.70959 data (export 5: 2,282 recipes, 4,556 items).
-Trading-summary now returns HTTP 200 for sweep 905: 470 queried and 470 successful.
-Current filters produce zero qualifying opportunities. Served dashboard bytes match
-source; refresh an existing browser tab to load the repaired recipe-watch validator.
+Trading-summary now returns HTTP 200 for sweep 906: 470 queried and 470 successful.
+A headless browser verified automatic refresh from 905 to 906, matching summary and
+watch identities, a fresh scan indicator, no JavaScript errors, and HTTP 200 on all
+API calls. Profit preferences persist across reload and invalid house input is
+rejected. No browser screenshots were taken. Current filters produce zero qualifying
+opportunities; this is a visible empty result, not a loading failure. Served dashboard
+bytes match source; refresh a tab loaded before deployment to obtain the repaired
+recipe-watch validator. Resume evidence is in `~/.local/state/crowley/resume-20261117/`.
+The health command's only remaining issue is the previously deferred stale backup
+record; neither scanner nor website health is currently flagged.
 Historical 70938 item/export facts are preserved; no schema change or trade occurred.
 
 The current selected target, operational catalog and generated addon target are all
@@ -46,7 +63,10 @@ Normal cold-start previously adopted one client, entered Dandune, verified fulls
 and native readiness, and opened the AH. The first 70959 sweep ran from approximately
 17:25:36 to 17:27:02 UTC (86 seconds); its saved payload was accepted with 2,002
 positive-price rows and an ACK was written. A later loaded ACK is not independently
-verified. A subsequent accepted sweep is now the dashboard's latest (905).
+verified. A subsequent accepted sweep (905) was the dashboard's latest before
+resumption; the current browser now shows 906. ACK 905 was independently observed
+loaded in the resumed client. ACK 906 is written; its later loaded state remains
+separate from server acceptance.
 The original Battle.net instance was preserved through recovery; do not duplicate it.
 
 Earlier build promotion passed 1497 tests / 31 skipped. The backup interpreter fix

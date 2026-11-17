@@ -83,7 +83,10 @@ def test_wine_is_not_a_control_tool_or_serialized_child_record(tmp_path: Path) -
     )
 
 
-def test_stop_cancels_exact_input_child_releases_key_and_keeps_lease_until_reap(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cancel_mode", ["stop", "monitor"])
+def test_stop_cancels_exact_input_child_releases_key_and_keeps_lease_until_reap(
+    tmp_path: Path, cancel_mode: str
+) -> None:
     private_dir = tmp_path / "private"
     private_dir.mkdir(mode=0o700)
     lease = GuiLease(private_dir / "gui.lock", timeout=0.1)
@@ -122,7 +125,11 @@ def test_stop_cancels_exact_input_child_releases_key_and_keeps_lease_until_reap(
     def stopping() -> bool:
         nonlocal stop_checks
         stop_checks += 1
-        return stop_checks >= 4
+        return cancel_mode == "stop" and stop_checks >= 4
+
+    def during() -> None:
+        if cancel_mode == "monitor":
+            raise RuntimeError("focus changed during text entry")
 
     try:
         with lease.hold():
@@ -132,10 +139,11 @@ def test_stop_cancels_exact_input_child_releases_key_and_keeps_lease_until_reap(
                 environment=_session_environment(tmp_path),
                 stopping=stopping,
                 guard=lambda: None,
+                during=during,
                 popen=fake_popen,
                 sleep=lambda _duration: None,
             )
-            with pytest.raises(ControlChildCancelled):
+            with pytest.raises(ControlChildCancelled if cancel_mode == "stop" else RuntimeError):
                 runner.run(
                     [tool.proc_path, "keydown", "38", "keyup", "38"],
                     pass_fds=(descriptor,),

@@ -312,7 +312,7 @@ class Actor:
         ):
             raise ActionNotAdmitted("blocking_ui")
 
-    def _check_dynamic(self, observation: Observation, decision: Decision) -> None:
+    def _check_dynamic(self, observation: Observation, decision: Decision, *, typing: bool = False) -> None:
         self._check_stopping()
         try:
             session = self._session_provider.current()
@@ -326,8 +326,19 @@ class Actor:
         if human:
             raise ActionNotAdmitted("human_active")
         identity = observation.process_identity
-        if identity is None or self._matcher.identities() != (identity,):
+        if identity is None or (
+            not self._matcher.still_matches(identity) if typing else self._matcher.identities() != (identity,)
+        ):
             raise ActionNotAdmitted("process_identity_changed")
+        if typing:
+            if observation.window_xid is None:
+                raise ActionNotAdmitted("game_window_changed")
+            owned, focused = self._window.focus_state(observation.window_xid, identity.pid)
+            if not owned:
+                raise ActionNotAdmitted("game_window_changed")
+            if not focused:
+                raise ActionNotAdmitted("window_focus_changed")
+            return
         window = self._window.observe([identity.pid])
         if (
             not window.ok
@@ -454,9 +465,20 @@ class Actor:
         observation, decision = self._observation, self._decision
         if observation is None or decision is None:
             raise ActionNotAdmitted("no_admitted_action")
-        self._check_dynamic(observation, decision)
+        self._check_dynamic(observation, decision, typing=decision.action is Action.TYPE_COMMAND)
+        if decision.action is Action.TYPE_COMMAND:
+            # Text entry cannot submit a command. Check the world at admission and
+            # require fresh, exact full-text readback before the separate Return
+            # action; screen capture between characters stalls normal typing.
+            return
         self._check_native(observation, decision, emission=True)
         self._check_scan_readiness(observation, decision, emission=True)
+
+    def during_emit(self) -> None:
+        """Keep text entry interruptible without observing the screen mid-command."""
+
+        if self._decision is not None and self._decision.action is Action.TYPE_COMMAND:
+            self.before_emit()
 
     def execute(self, decision: Decision, observation: Observation) -> str:
         """Carry out one policy action after its original observation is revalidated."""

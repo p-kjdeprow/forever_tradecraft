@@ -86,13 +86,28 @@ def test_press_and_chord_argv() -> None:
     ]
 
 
-def test_type_text_is_one_action_per_character_with_shift_nested() -> None:
+def test_type_text_is_one_explicit_transition_chain_with_shift_nested() -> None:
     runner = Runner()
     keys(runner).type_text("/Ad")
     assert [c[1:] for c in sent(runner)] == [
-        ["keydown", "061", "keyup", "061"],
-        ["keydown", "050", "keydown", "038", "keyup", "038", "keyup", "050"],
-        ["keydown", "040", "keyup", "040"],
+        [
+            "keydown",
+            "061",
+            "keyup",
+            "061",
+            "keydown",
+            "050",
+            "keydown",
+            "038",
+            "keyup",
+            "038",
+            "keyup",
+            "050",
+            "keydown",
+            "040",
+            "keyup",
+            "040",
+        ]
     ]
 
 
@@ -203,6 +218,9 @@ class Matcher:
     def identities(self) -> tuple[ProcessIdentity, ...]:
         return self.current
 
+    def still_matches(self, identity: ProcessIdentity) -> bool:
+        return identity in self.current
+
 
 class Window:
     def __init__(self) -> None:
@@ -212,6 +230,9 @@ class Window:
     def observe(self, pids: list[int]) -> Any:
         self.calls.append(pids)
         return self.current
+
+    def focus_state(self, xid: int, pid: int) -> tuple[bool, bool]:
+        return self.current.ok and self.current.xid == xid, self.current.focused
 
 
 class Recovery:
@@ -709,7 +730,7 @@ def test_latest_complete_scan_observation_rechecks_each_admission_fact(
     assert recording.events == []
 
 
-def test_type_command_allows_partial_prefix_but_stops_on_new_operation(tmp_path: Path) -> None:
+def test_type_command_stops_on_new_operation_in_the_maintenance_ledger(tmp_path: Path) -> None:
     runner, _recording, _order, _matcher, window, _recovery, _session = actor(tmp_path)
     obs = ready_observation(chat_active=True, chat_focused=True)
     native = ready_automation(chat_active=True, chat_focused=True)
@@ -751,12 +772,13 @@ def test_type_command_allows_partial_prefix_but_stops_on_new_operation(tmp_path:
                     native["operation"]["batchId"] = "new-batch"
 
     runner._keys = BusyAfterFirstCharacter()  # type: ignore[assignment]
-    with pytest.raises(act.ActionNotAdmitted, match="automation_native_busy"):
+    runner._maintenance_blocker = lambda: "automation_running" if native["operation"]["batchId"] else None
+    with pytest.raises(act.MaintenanceBlocked, match="automation_running"):
         runner.execute(decision(Action.TYPE_COMMAND, command="/reload"), obs)
     assert emitted == ["/"]
 
 
-def test_long_type_command_uses_fresh_frames_after_original_frame_ages_out(
+def test_long_text_entry_does_not_capture_the_screen_between_characters(
     tmp_path: Path,
 ) -> None:
     runner, _recording, _order, _matcher, window, _recovery, _session = actor(tmp_path)
@@ -764,8 +786,16 @@ def test_long_type_command_uses_fresh_frames_after_original_frame_ages_out(
     runner._clock = lambda: now[0]
     obs = ready_observation(chat_active=True, chat_focused=True)
     native = ready_automation(chat_active=True, chat_focused=True)
-    source = runner._scan_observer
     emitted: list[str] = []
+    captures = {"native": 0, "paired": 0}
+    original_observe = runner._scan_observer.observe
+
+    def paired_observe(state: LoopState) -> Observation:
+        captures["paired"] += 1
+        now[0] += 1.2
+        return original_observe(state)
+
+    runner._scan_observer.observe = paired_observe  # type: ignore[method-assign]
 
     class FreshCharacterKeys:
         def press(self, _key: str) -> None:
@@ -776,32 +806,32 @@ def test_long_type_command_uses_fresh_frames_after_original_frame_ages_out(
 
         def type_text(self, text: str) -> None:
             for char in text:
-                now[0] += 0.2
+                now[0] += 0.03
                 native["chatEdit"]["text"] = "".join(emitted)
-                current_snapshot = replace(obs.snapshot, received_at=now[0])
-                source.current = replace(  # type: ignore[attr-defined]
-                    obs,
-                    wall=now[0],
-                    last_frame_at=now[0],
-                    snapshot=current_snapshot,
-                )
                 runner.before_emit()
                 emitted.append(char)
 
-    runner._native_observe = lambda: SimpleNamespace(
-        identity=IDENTITY,
-        window=window.current,
-        snapshot=native,
-        session_fingerprint="session-1",
-    )
+    def native_observe() -> Any:
+        captures["native"] += 1
+        now[0] += 1.2
+        return SimpleNamespace(
+            identity=IDENTITY,
+            window=window.current,
+            snapshot=native,
+            session_fingerprint="session-1",
+        )
+
+    runner._native_observe = native_observe
     runner._keys = FreshCharacterKeys()  # type: ignore[assignment]
     command = SET_BINDING_COMMAND
     runner.execute(decision(Action.TYPE_COMMAND, command=command), obs)
     assert "".join(emitted) == command
-    assert now[0] - obs.snapshot.received_at > act.STALE_FRAME_S
+    assert captures == {"native": 1, "paired": 1}
+    assert now[0] - obs.wall == pytest.approx(2.4 + 0.03 * len(command))
+    assert now[0] - obs.wall < 7
 
 
-def test_type_command_stops_when_the_current_scan_frame_is_stale(tmp_path: Path) -> None:
+def test_stale_text_entry_observation_cannot_submit_the_command(tmp_path: Path) -> None:
     runner, _recording, _order, _matcher, window, _recovery, _session = actor(tmp_path)
     now = [1000.0]
     runner._clock = lambda: now[0]
@@ -830,9 +860,10 @@ def test_type_command_stops_when_the_current_scan_frame_is_stale(tmp_path: Path)
         session_fingerprint="session-1",
     )
     runner._keys = StaleCharacterKeys()  # type: ignore[assignment]
+    runner.execute(decision(Action.TYPE_COMMAND, command="/reload"), obs)
+    assert "".join(emitted) == "/reload"
     with pytest.raises(act.ActionNotAdmitted, match="scanner_observation_stale"):
-        runner.execute(decision(Action.TYPE_COMMAND, command="/reload"), obs)
-    assert emitted == []
+        runner.execute(decision(Action.PRESS_RETURN, command="/reload"), obs)
 
 
 def test_control_child_stop_is_a_skipped_action_and_helper_failure_is_visible(tmp_path: Path) -> None:
@@ -1018,9 +1049,9 @@ def test_fresh_native_busy_or_popup_race_skips_input(tmp_path: Path) -> None:
     assert recording.events == []
 
 
-def test_type_emissions_run_a_fresh_guard_for_each_character() -> None:
+def test_text_entry_is_admitted_once_instead_of_spawning_per_character() -> None:
     runner, guards = Runner(), []
     sender = keys(runner, before_emit=lambda: guards.append("checked"))
     sender.type_text("/Ad")
-    assert len(guards) == 3
-    assert len(sent(runner)) == 3
+    assert len(guards) == 1
+    assert len(sent(runner)) == 1

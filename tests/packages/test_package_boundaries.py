@@ -13,6 +13,27 @@ _REPOSITORY = Path(__file__).resolve().parents[2]
 _PACKAGES = _REPOSITORY / "packages"
 
 
+def test_scanning_and_startup_have_no_model_clients_or_agent_launches() -> None:
+    roots = [
+        _REPOSITORY / "apps/host/src/crowley_host/scan",
+        _PACKAGES / "scanner/src/crowley_scanner",
+    ]
+    sources = [path for root in roots for path in root.rglob("*.py")]
+    sources.extend((_PACKAGES / "automation/src/crowley_automation").glob("startup*.py"))
+    forbidden = {"openai", "anthropic", "litellm", "langchain", "ollama", "codex", "claude"}
+    for path in sources:
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert not {alias.name.split(".")[0] for alias in node.names} & forbidden, path
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                assert node.module.split(".")[0] not in forbidden, path
+            elif isinstance(node, (ast.List, ast.Tuple)) and node.elts:
+                first = node.elts[0]
+                if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    assert Path(first.value).name not in forbidden, path
+
+
 def _source_files(root: Path) -> dict[str, bytes]:
     return {
         path.relative_to(root).as_posix(): path.read_bytes()

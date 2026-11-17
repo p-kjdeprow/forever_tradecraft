@@ -7,6 +7,8 @@ import subprocess
 from fractions import Fraction
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).parents[1]
 DASHBOARD = ROOT / "packages/market/src/crowley_market/server/static/trading-dashboard.html"
 
@@ -155,6 +157,16 @@ def _recipe_watch(house: str = "us-normal-alliance", status: str = "low_price") 
         },
         "notes": ["Observed depletion is not confirmed sales.", "Personal sales are unmeasured."],
     }
+
+
+@pytest.mark.parametrize("build", ["1.60.1.70938", "1.60.1.70959"])
+def test_watch_accepts_valid_builds_independently_of_the_initial_cache_build(build: str) -> None:
+    watch = _recipe_watch(status="awaiting_scan")
+    watch["client_build"] = build
+    actual = _node(
+        f"{_pure_script()}\nconsole.log(JSON.stringify(validateRecipeWatch({json.dumps(watch)}, 'us-normal-alliance', 1_800_000_060).client_build));"
+    )
+    assert actual == build
 
 
 def test_recipe_watch_validation_preserves_status_and_measured_zero_semantics():

@@ -258,8 +258,15 @@ class XtestKeys:
         self._send(argv, held)
 
     def type_text(self, text: str) -> None:
-        for argv, held in keyboard.type_text_argv(text, self._keymap()):
-            self._send(argv, held)
+        actions = keyboard.type_text_argv(text, self._keymap())
+        if not actions:
+            return
+        argv = ["xdotool"]
+        held: set[str] = set()
+        for command, controls in actions:
+            argv.extend(command[1:])
+            held.update(controls)
+        self._send(argv, frozenset(held))
 
     def hold(self, key: str, seconds: float, guard: Callable[[], None]) -> None:
         """Hold one measured movement key briefly, after a fresh caller guard."""

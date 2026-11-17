@@ -174,6 +174,7 @@ class ControlChildRunner:
         environment: EnvironmentProvider,
         stopping: Callable[[], bool],
         guard: Callable[[], None],
+        during: Callable[[], None] | None = None,
         extra_tools: Mapping[str, PinnedControlTool] | None = None,
         window_xid: int | None = None,
         popen: Callable[..., Any] = subprocess.Popen,
@@ -185,6 +186,7 @@ class ControlChildRunner:
         self._environment = environment
         self._stopping = stopping
         self._guard = guard
+        self._during = during
         self._extra_tools = dict(extra_tools or {})
         self._window_xid = window_xid
         self._popen = popen
@@ -388,6 +390,12 @@ class ControlChildRunner:
                     self._cancel_and_reap()
                     self.release_only()
                     raise ControlChildCancelled("control child cancelled by stop")
+                if not cleanup and operation == "key" and self._during is not None:
+                    try:
+                        self._during()
+                    except BaseException:
+                        self._cancel_and_reap()
+                        raise
                 remaining = deadline - self._clock()
                 if remaining <= 0:
                     self._cancel_and_reap()

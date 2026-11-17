@@ -97,7 +97,7 @@ def test_run_wires_the_loop_and_restores_state(env: Path, monkeypatch: pytest.Mo
     assert created["observer"]._session_environment is created["actor"]._session_environment
 
 
-def test_run_keeps_one_final_actor_guard_per_pinned_key_emission(
+def test_run_types_one_guarded_command_child_with_continuous_monitoring(
     env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from crowley_automation import startup as automation_startup
@@ -134,9 +134,15 @@ def test_run_keeps_one_final_actor_guard_per_pinned_key_emission(
         def identities(self) -> tuple[ProcessIdentity, ...]:
             return (identity,)
 
+        def still_matches(self, expected: ProcessIdentity) -> bool:
+            return expected == identity
+
     class WindowSource:
         def observe(self, _pids: list[int]) -> WindowState:
             return window
+
+        def focus_state(self, xid: int, pid: int) -> tuple[bool, bool]:
+            return xid == window.xid and pid == identity.pid, window.focused
 
     class Observer:
         window_source = WindowSource()
@@ -168,8 +174,10 @@ def test_run_keeps_one_final_actor_guard_per_pinned_key_emission(
         child_pid = None
         cleanup_failed = False
 
-        def __init__(self, _lease: Any, _tool: Any, *, environment: Any, guard: Any, **_kwargs: Any) -> None:
-            self.environment, self.guard = environment, guard
+        def __init__(
+            self, _lease: Any, _tool: Any, *, environment: Any, guard: Any, during: Any, **_kwargs: Any
+        ) -> None:
+            self.environment, self.guard, self.during = environment, guard, during
 
         def run(self, argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
             assert self.environment()["DISPLAY"] == ":0"
@@ -184,8 +192,10 @@ def test_run_keeps_one_final_actor_guard_per_pinned_key_emission(
                 "038": "a",
                 "040": "d",
             }
-            if len(argv) > 2 and argv[1] == "keydown" and argv[2] in key_chars:
-                native_value["chatEdit"]["text"] += key_chars[argv[2]]
+            for index in range(1, len(argv), 2):
+                if argv[index] == "keydown" and argv[index + 1] in key_chars:
+                    self.during()
+                    native_value["chatEdit"]["text"] += key_chars[argv[index + 1]]
             events.append("emission")
             return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -242,12 +252,10 @@ def test_run_keeps_one_final_actor_guard_per_pinned_key_emission(
 
     command_length = len("/reload")
     guard_positions = [index for index, event in enumerate(events) if event == "actor_guard"]
-    assert len(guard_positions) == command_length
-    for guard_at in guard_positions:
-        assert events[guard_at - 1] == "runner_environment_resolved"
-        assert events[guard_at + 1 : guard_at + 3] == ["native_capture", "paired_capture"]
-    assert events.count("native_capture") == command_length + 1  # initial plus each final guard
-    assert events.count("paired_capture") == command_length + 1
+    assert len(guard_positions) == command_length + 1
+    assert events.count("runner_environment_resolved") == 1
+    assert events.count("native_capture") == 1
+    assert events.count("paired_capture") == 1
     assert native_value["chatEdit"]["text"] == "/reload"
     assert events[-1] == "emission"
 

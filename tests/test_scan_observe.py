@@ -429,6 +429,22 @@ def test_window_exactly_one_owned_fullscreen_focused() -> None:
     assert calls[0] == ["xdotool", "search", "--onlyvisible", "--class", "^wow\\.exe$"]
 
 
+@pytest.mark.parametrize("focus", ["77\n", "78\n"])
+def test_typing_focus_check_accepts_owned_window_and_its_child_without_discovery(focus: str) -> None:
+    run, calls = x11_runner(focus=focus)
+    assert window(run).focus_state(77, 10) == (True, True)
+    assert len(calls) == 4
+    assert all(call[1] not in {"search", "getdisplaygeometry", "getwindowgeometry"} for call in calls)
+
+
+def test_typing_focus_check_rejects_foreign_owner_and_focus() -> None:
+    run, calls = x11_runner(pids={"77": "999"})
+    assert window(run).focus_state(77, 10) == (False, False)
+    assert len(calls) == 2
+    run, _ = x11_runner(focus="999\n")
+    assert window(run).focus_state(77, 10) == (True, False)
+
+
 def test_window_match_requires_title_and_owned_pid() -> None:
     run, _ = x11_runner(ids="77\n78\n", names={"78": "Other"}, pids={"77": "10", "78": "10"})
     assert window(run).observe([10]).xid == 77  # 78 has the wrong title

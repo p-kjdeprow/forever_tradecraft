@@ -77,6 +77,12 @@ trading, account changes or unrelated display changes.
 
 ## Make input observable
 
+- Keep command typing bounded: admit once, send explicit measured key transitions
+  through one guarded child, monitor stop/presence/session/process/focus without
+  screenshots, then require fresh exact full-text readback before Return. Capturing
+  images or spawning a helper per character makes typing unusably slow. Local pixel
+  decoding/OCR is separate from model usage; inspect the actual call path before
+  attributing quota consumption to screenshots.
 - Exit code zero from an input tool proves dispatch, not effect. Read the result from a fresh HUD frame
   (`crowley-desktop probe-frame`, `crowley-host status`) before the next dependent step; XTEST keys can land up to about
   1 s late and go to the compositor-focused window, which is not always the X "active window".

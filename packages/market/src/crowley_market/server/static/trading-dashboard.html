@@ -400,7 +400,7 @@
     function validateRecipeWatch(value, expectedHouse, nowEpoch = Date.now() / 1000) {
       objectValue(value, "recipe watch");
       if (value.watch_id !== "draught-of-water-walking" || value.house !== expectedHouse) throw new Error("recipe watch belongs to a different house or watch");
-      if (value.client_build !== DEFAULT_CLIENT_BUILD) throw new Error("recipe watch belongs to a different client build");
+      if (typeof value.client_build !== "string" || !/^\d+\.\d+\.\d+\.\d+$/.test(value.client_build)) throw new Error("recipe watch client build is invalid");
       integerValue(value.as_of_sweep, "recipe watch.as_of_sweep");
       if (typeof value.as_of_epoch !== "number" || !Number.isFinite(value.as_of_epoch) || value.as_of_epoch < 0) throw new Error("recipe watch.as_of_epoch is invalid");
       const recipe = objectValue(value.recipe, "recipe");
@@ -846,6 +846,7 @@
         const request = ++state.watchGeneration;
         try {
           const watch = validateRecipeWatch(await getJson(`/v1/houses/${encodeURIComponent(house)}/recipe-watch`), house);
+          if (state.latest && watch.client_build !== state.latest.client_build) throw new Error("recipe watch belongs to a different client build");
           if (generation !== state.generation || request !== state.watchGeneration || house !== state.house) return;
           renderWatch(watch);
         } catch (error) {

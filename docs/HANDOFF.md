@@ -5,61 +5,63 @@ and independent Sol review loops, commits on main/origin/main, and task artifact
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
-The coordinated desktop packages 0.2.0 are installed from reviewed code commit `5164928`.
-`crowley-host` replaces the retired legacy `crowley-scan`; both host and companion are active.
-All pre-existing disabled timers remain disabled. Both game addons are 0.3.0; scanner frame
-schema is 1 and automation schema is 3. See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
+The urgent typing/dashboard repair is installed. **Keep `crowley-host` stopped**:
+the user's stop instruction remains active, and the user manually closed WoW.
+Companion remains active. No screenshots or game input were used during this repair.
+See [the recovery record](URGENT_RECOVERY_PLAN.md) for causes, checks and limitations.
+User-managed alerts are paused; their unfinished changes are preserved privately.
 
-The user explicitly authorized termination of the stranded headless client. One exact-process
-SIGTERM ended it; no SIGKILL was needed. The original Battle.net instance remains intact.
-A separate native Linux crash-notification dialog ignored the one guarded XTEST Cancel click.
-After verifying its exact identity and installed response behavior, one ordinary SIGTERM
-ended only that notification without opening or sending a report. Its crash files remain.
+The cold-start refactor introduced two full captures and a Python child per typed
+character. Commands now use one explicit key transition chain through one monitored
+child, with cheap stop/presence/maintenance/session/process/focus checks during typing.
+Fresh screen checks and exact complete text remain mandatory before the separate
+Return action. This removes capture/helper cost proportional to command length.
+Live typing speed has not been measured because the host remains stopped. The local
+host/scanner/startup runtime makes no model calls; agent diagnostics are separate.
 
-Battle.net had independently updated wowf to 1.60.1.70959 while the old client was headless.
-The selected target, operational catalog build and generated addon target are now promoted
-together, preserving revision 9, all 807 item IDs/pools, cadence/caps and historical item/export
-facts. [Build promotion plan](BUILD_70959_PLAN.md). New plan hash:
+All five coordinated desktop packages 0.2.0 are installed from the current repair
+wheels, with installed namespaces verified byte-for-byte. `crowley-ops doctor` passes.
+The repair passed 134 focused tests, Ruff check/format and Pyright (zero errors).
+The final batching design was completed by the parent after Luna workers reached
+their usage limit; it has not received an independent final Sol review.
+`crowley-host` replaces legacy `crowley-scan`; pre-existing disabled timers remain
+disabled. Both addons remain 0.3.0, scanner schema 1 and automation schema 3.
+See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
+
+The server now runs image
+`sha256:e6230b4abd20bd383ff51e2e03abc07eb1548ef4a1375f1c5562253d7f8b5994`.
+The original database container and DB/raw mounts are unchanged. All twelve applied
+migrations retain their original bytes. The supported client-data exporter and loader
+imported genuine build 1.60.1.70959 data (export 5: 2,282 recipes, 4,556 items).
+Trading-summary now returns HTTP 200 for sweep 905: 470 queried and 470 successful.
+Current filters produce zero qualifying opportunities. Served dashboard bytes match
+source; refresh an existing browser tab to load the repaired recipe-watch validator.
+Historical 70938 item/export facts are preserved; no schema change or trade occurred.
+
+The current selected target, operational catalog and generated addon target are all
+1.60.1.70959, preserving revision 9, 807 IDs/pools, cadence and caps. Plan hash:
 `814c25b46d4f5fc2d24355ca2e712bf07cdd2bcf2dd39852b006ba1f220285ee`.
-Historical 70938 item/export facts and the separately qualified seller build are unchanged;
-this promotion does not qualify selling, movement or a new client-data export.
+See [build promotion](BUILD_70959_PLAN.md). This does not qualify selling or movement.
+Normal cold-start previously adopted one client, entered Dandune, verified fullscreen
+and native readiness, and opened the AH. The first 70959 sweep ran from approximately
+17:25:36 to 17:27:02 UTC (86 seconds); its saved payload was accepted with 2,002
+positive-price rows and an ACK was written. A later loaded ACK is not independently
+verified. A subsequent accepted sweep is now the dashboard's latest (905).
+The original Battle.net instance was preserved through recovery; do not duplicate it.
 
-The market server now runs reviewed image
-`sha256:5d336ea2487bf8821a1b91f167d8806846e4fc145cf5a05afa8de7db90798e1b`.
-Its health and authenticated canonical-plan response pass. The original database container,
-DB/raw mounts and all twelve migration checksums are unchanged. No schema change, manual
-production database write or trade was performed. Companion wrote the exact canonical
-three-field Data.lua and the matching 70959 plan before normal host restart.
+Earlier build promotion passed 1497 tests / 31 skipped. The backup interpreter fix
+passed 129 affected tests / 1 skipped with Sol review; see
+[the bounded fix](BACKUP_IMAGE_RUNTIME_FIX.md). These are historical checks, separate
+from the final urgent repair's 134-test focused run.
 
-Normal host cold-start successfully dispatched Play, adopted exactly one new client, entered
-`Dandune Hillmont`, repaired/verified fullscreen and reached matching native world readiness
-with an independent scanner ready publication. Strict expected build 70959/interface 16001
-passed native readiness. Normal guarded targeting and binding completed, and interaction
-opened the AH. The first 70959 sweep began at approximately 17:25:36 UTC; fresh status at
-17:25:38 reported AH open, scanner phase item and sweep_running. Collection is active and no
-user intervention was needed. First saved-payload acceptance, retained prices and loaded ACK
-are still unverified; the existing read-only observer is following the normal save/upload
-boundary. Leave collection running and honor the standard human-presence hold.
-
-The 70959 promotion passed the full suite: 1497 tests / 31 skipped. The subsequent one-line
-backup verifier fix passed 129 affected tests / 1 skipped, with independent Sol READY reviews,
-Ruff check/format and zero Pyright errors. All five installed namespaces byte-match reviewed
-wheels. The backup verifier now inspects migrations with the packaged server interpreter;
-see [the bounded fix](BACKUP_IMAGE_RUNTIME_FIX.md).
-
-A completed legacy snapshot has validated original dump/raw bytes. Its disposable restore
-is NOT qualified: after correcting migration inspection, a fresh isolated attempt failed at
-create_database and verified cleanup removed only its own disposable resources. The user
-then explicitly prioritized immediate scanner recovery, so the remaining restore investigation
-was deferred before the reviewed server-only cutover. Do not weaken restore checks, label the
-backup restore-verified, or reset scan policy history. The original server image, secret/config
-rollback copy, saved-data backups and exact receipts are retained privately under
-~/.local/state/crowley/startup-rollout-20261117; the snapshot is under market-backups.
-
-Remaining collection evidence is completion of the first AH sweep, original saved payload acceptance,
-retained positive prices, ACK publication versus later loaded ACK, and a quiet warm host
-restart preserving the game. A previous aggregate native-observation refusal during long
-binding input remains unclassified; do not widen freshness/deadlines without actual evidence.
+A completed legacy snapshot has validated original dump/raw bytes. Its disposable
+restore is NOT qualified: after correcting migration inspection, an isolated attempt
+failed at create_database and cleaned up only its own disposable resources. The user
+deferred further restore investigation to prioritize scanner recovery. Do not label it
+restore-verified or reset policy history. Rollback copies and exact receipts remain in
+`~/.local/state/crowley/startup-rollout-20261117/`; the snapshot is in market-backups.
+Current repair receipts/wheels and paused alert patches are in
+`~/.local/state/crowley/urgent-recovery-20261117/`.
 
 Retain the main dashboard and recipe watch, existing AH collection, scan/probe transport,
 health/diagnosis and backup/restore. Delete every inactive workflow, then build fresh automation

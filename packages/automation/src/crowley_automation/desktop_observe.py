@@ -254,6 +254,10 @@ _CHILD = re.compile(r"^\s+(0x[0-9a-fA-F]+)\s.*?\s(\d+)x(\d+)([+-]\d+)([+-]\d+)\s
 
 
 class WindowSource(Protocol):
+    def focus_state(self, xid: int, pid: int) -> tuple[bool, bool]:
+        """Verify a previously admitted window's owner and current keyboard focus."""
+        ...
+
     def observe(self, pids: list[int], *, include_hidden: bool = False) -> WindowState:
         """The one visible game window owned by *pids*."""
         ...
@@ -304,6 +308,14 @@ class X11Window:
     def _owned(self, xid: int, pids: list[int]) -> bool:
         title_matches, owned = self._candidate_identity(xid, pids)
         return title_matches and owned
+
+    def focus_state(self, xid: int, pid: int) -> tuple[bool, bool]:
+        """Check keyboard delivery without repeating display/geometry discovery."""
+
+        if not self._owned(xid, [pid]):
+            return False, False
+        children = self._children(xid)
+        return True, self._focused(xid, [child for child, _rect in children])
 
     def _candidate_identity(self, xid: int, pids: list[int]) -> tuple[bool, bool]:
         code, title = self._run(["xdotool", "getwindowname", str(xid)])

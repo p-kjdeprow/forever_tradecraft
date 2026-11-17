@@ -115,12 +115,18 @@ def _run(_args: argparse.Namespace) -> int:
                 raise desktop_input.ActError("action guard is not initialized")
             actor_ref[0].before_emit()
 
+        def during() -> None:
+            if not actor_ref:
+                raise desktop_input.ActError("action guard is not initialized")
+            actor_ref[0].during_emit()
+
         control = ControlChildRunner(
             lease,
             tool,
             environment=environment,
             stopping=is_stopping,
             guard=guard,
+            during=during,
         )
         keys = desktop_input.XtestKeys(
             tool,

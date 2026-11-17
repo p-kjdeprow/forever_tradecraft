@@ -5,20 +5,41 @@ and independent Sol review loops, commits on main, and cleanup of task worktrees
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
-Cold-start recovery is currently being implemented and qualified; see [STARTUP_PLAN](STARTUP_PLAN.md)
-and [STARTUP](STARTUP.md). The installed desktop still runs legacy crowley 0.1.0 / crowley-scan;
-source packages have not been installed during this task. Collection was restored after controlled
-UI capture. The actual selected UI label is `Dandune Hillmont`, paired to native Dandune and the
-pinned native realm; no realm is displayed on character selection. Required character_select_name
-records that literal independently of native pins. Battle.net's mutable comm is CrBrowserMain;
-identity uses exact executable argv0, UID, prefix and process start ticks. A real same-process
-Battle.net Updates release-information window is retained for cold-start qualification.
-Both host and automation source reviews are READY. Final source verification passed 1442 tests
-with 31 skipped, Ruff check/format, zero Pyright errors, and all five reviewed wheels installed
-outside the checkout against locked runtime dependencies with ten CLI help checks. All twelve
-applied migrations retain their original bytes. Installed-runtime qualification remains in progress.
-Private rollback/proposal artifacts are under
-~/.local/state/crowley/startup-rollout-20261117. No market image/database or trade changed.
+Cold-start source fixes are independently reviewed and installed as the five component
+packages at version 0.2.0, code commit `8ff9912`. `crowley-host` replaces the retired legacy
+`crowley-scan`; companion remains enabled and active. All pre-existing disabled timers remain
+disabled. See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
+
+Live qualification reached a normal cold Play, automatic recovery of a real initial window-restore
+timeout, fullscreen repair, verified `Dandune Hillmont` entry, and independent fresh scanner/native
+publications on build 70938. Both game addons are 0.3.0; scanner frame schema is 1 and automation
+schema is 3. The selected display label is independent of native Dandune and the pinned native realm;
+no realm is displayed on character selection. Battle.net identity uses exact executable argv0,
+UID, prefix and start ticks because its mutable comm is CrBrowserMain.
+
+End-to-end collection is NOT yet qualified. Long binding input exposed a native observation refusal;
+the measured stale case now gets one fresh capture within the unchanged observation deadline, and
+AH postcondition clocks begin at admitted Return. A later aggregate observation refusal remains
+unclassified: thirty read-only samples passed, so do not label it process drift or elapsed-time
+exhaustion, or change a limit without evidence. No new sweep or trade occurred on this boot.
+
+Current recovery is blocked by one headless WoW process. The old recovery implementation used
+xdotool's XDestroyWindow command, removing its main window without ending its process. The corrected
+source uses an exact-XID normal `wmctrl -i -c` request and rejects destructive close/kill forms.
+A separately verified Win32 WM_CLOSE-only request flushed SavedVariables but did not end the
+remaining process. Host is deliberately stopped; companion and the original Battle.net remain
+running. Explicit user authorization for termination of only the verified remaining process is
+pending. Do not send signals, start a duplicate client, reset policy history, or reuse old GUI proof.
+Private exact identities, pidfd termination proposal, backups and receipts are under
+~/.local/state/crowley/startup-rollout-20261117/qualification.
+
+Source verification passed 1497 tests / 31 skipped, Ruff check and format, and Pyright with zero
+errors. All five installed namespaces match their reviewed wheels byte for byte; package tests
+also exercise isolated distributions. All twelve applied migrations retain their original bytes.
+No server image, schema, manual database write or live trading was performed. Remaining live gates
+are safe client recovery, the actual AH sweep, original saved payload acceptance and retained prices,
+ACK write versus loaded ACK on a real boot, and a quiet host restart preserving the game process.
+Private release/rollback artifacts remain at ~/.local/state/crowley/startup-rollout-20261117.
 
 Retain the main dashboard and recipe watch, existing AH collection, scan/probe transport,
 health/diagnosis and backup/restore. Delete every inactive workflow, then build fresh automation
@@ -36,7 +57,8 @@ The source refactor is complete. Cleanup, independent packages, strict operation
 measured movement, host cutover and concrete native/desktop execution passed independent Sol
 reviews after Luna implementation/fix loops. The canonical source is in packages/ and apps/host/;
 the old src/crowley and root addon/deploy resource copies are removed. Installed addons are
-copies, not links, and this work did not deploy packages or change running services.
+copies, not links, and the earlier refactor was source-only. The cold-start task subsequently
+installed the coordinated desktop set described above.
 
 The [continuous seller](SELLER.md) is implemented in source through parallel Luna/Sol loops.
 See the [completion record](SELLER_IMPLEMENTATION.md) and [approved plan](SELLER_PLAN.md).
@@ -76,7 +98,7 @@ house, character, calibrated signed turn rates and measured waypoints. Do not re
 coordinates. Stored native API probes establish 70862 availability, not 70938 protected behavior.
 Current-client qualification is still required before a real operation is armed.
 
-Final seller verification: full default suite 1323 passed / 31 skipped; parent automation suite
+Earlier seller-only verification: full default suite 1323 passed / 31 skipped; parent automation suite
 283 passed, plus Store 35 passed after the final message-only edit. Ruff check and format pass,
 Pyright reports zero errors, and generated target validation passes. The full suite includes
 isolated wheel/SDIST rebuilds, exact package resources, installation of all five wheels outside

@@ -27,6 +27,19 @@ these candidates, retain activity as informational evidence, and keep the user's
 minimum-profit preference. Old filtered browser caches are isolated by the changed
 policy key. See [the change record](PROFIT_FILTER_REMOVAL.md).
 
+The dashboard now also has a saved **Maximum profession skill** control: 150, 225
+(default), or 300, applied to both Alchemy and Tailoring. The server computes a full
+pool through 300, and the browser applies skill and profit preferences before the
+top-ten limit without another API call. Exact learning ranks and verified yellow
+upper bounds remain distinct; unknown learning ranks retain their warning. The new
+cache profile prevents reuse of the previous 225-limited pool. Live sweep 912 has
+72/125/149 profitable candidates at the three skill limits before the minimum-profit
+preference. All selections, reload persistence, composition with profit and mobile
+layout passed real browser checks; 52 focused tests, Ruff and scoped Pyright pass.
+Only the server was redeployed; scanner/companion PIDs and DB/raw mounts are unchanged.
+See [the filter record](PROFESSION_SKILL_FILTER.md). Private deployment and browser
+receipts are in `~/.local/state/crowley/profession-skill-20261117/`.
+
 The cold-start refactor introduced two full captures and a Python child per typed
 character. Commands now use one explicit key transition chain through one monitored
 child, with cheap stop/presence/maintenance/session/process/focus checks during typing.
@@ -48,16 +61,16 @@ disabled. Both addons remain 0.3.0, scanner schema 1 and automation schema 3.
 See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
 
 The server now runs image
-`sha256:4d544dea56b8a4adcf8fc2d9066eb9a4688aa62e10c9a3cce9a393c185cc96d0`.
+`sha256:cf2caeac7bc3d0d4284c35ff1b5a78cfec5d2dd5c0bfb1ad26ed7eae8b1cefc1`.
 The original database container and DB/raw mounts are unchanged. All twelve applied
 migrations retain their original bytes. The supported client-data exporter and loader
 imported genuine build 1.60.1.70959 data (export 5: 2,282 recipes, 4,556 items).
-Trading-summary now returns HTTP 200 for sweep 906: 470 queried and 470 successful.
+Resumption verified HTTP 200 for sweep 906: 470 queried and 470 successful.
 A headless browser verified automatic refresh from 905 to 906, matching summary and
 watch identities, a fresh scan indicator, no JavaScript errors, and HTTP 200 on all
 API calls. Profit preferences persist across reload and invalid house input is
 rejected. No browser screenshots were taken. Following the activity-filter removal,
-sweep 906 returns 100 profitable candidates and a populated top ten. Unknown activity
+sweep 906 returned 100 profitable candidates and a populated top ten. Unknown activity
 is explicitly labeled. Served dashboard bytes match source; refresh a tab loaded
 before deployment to obtain the updated profit-only view. Resume evidence is in
 `~/.local/state/crowley/resume-20261117/`; filter audit, deployment and browser proofs

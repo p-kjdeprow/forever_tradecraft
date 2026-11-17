@@ -27,7 +27,7 @@ from crowley_market.models import ItemFacts, Recipe
 
 ALCHEMY_SKILL = 225
 TAILORING_SKILL = 150
-TAILORING_PLANNING_CAP = 225
+PROFESSION_SKILL_CAP = 300
 BUDGET_COPPER = 100_000
 SHARE = Fraction(1, 10)
 PRICE_MAX_AGE_SECONDS = 3 * 60 * 60
@@ -40,7 +40,7 @@ PROFILE_KEY = (
     ALCHEMY_SKILL,
     "tailoring",
     TAILORING_SKILL,
-    TAILORING_PLANNING_CAP,
+    PROFESSION_SKILL_CAP,
     BUDGET_COPPER,
     "profit-only",
 )
@@ -101,6 +101,8 @@ class _Eligibility:
     required_skill: int | None
     needs_leveling: bool
     note: str
+    # Exact learning rank, or the verified yellow upper bound when rank is unknown.
+    skill_level: int
 
 
 def exact_money(value: Fraction | int) -> str:
@@ -294,7 +296,7 @@ def _eligibility(recipe: Recipe) -> _Eligibility | None:
     """Resolve learning requirements without treating a yellow point as an exact rank."""
 
     profile = {"alchemy": ALCHEMY_SKILL, "tailoring": TAILORING_SKILL}
-    caps = {"alchemy": ALCHEMY_SKILL, "tailoring": TAILORING_PLANNING_CAP}
+    caps = {"alchemy": PROFESSION_SKILL_CAP, "tailoring": PROFESSION_SKILL_CAP}
     candidates: list[_Eligibility] = []
     for profession in sorted(recipe.professions & profile.keys()):
         current = profile[profession]
@@ -307,10 +309,12 @@ def _eligibility(recipe: Recipe) -> _Eligibility | None:
         if exact_ranks:
             rank = min(exact_ranks)
             if rank <= current:
-                candidates.append(_Eligibility(profession, rank, False, f"{profession.title()} {rank}"))
+                candidates.append(_Eligibility(profession, rank, False, f"{profession.title()} {rank}", rank))
             elif rank <= cap:
                 candidates.append(
-                    _Eligibility(profession, rank, True, f"{profession.title()} {rank}; leveling target")
+                    _Eligibility(
+                        profession, rank, True, f"{profession.title()} {rank}; leveling target", rank
+                    )
                 )
             continue
         yellows = [line.yellow for line in skill_lines if line.yellow > 0]
@@ -326,6 +330,7 @@ def _eligibility(recipe: Recipe) -> _Eligibility | None:
                     None,
                     True,
                     f"Eligibility by {yellow}; learning rank unknown; verify training",
+                    yellow,
                 )
             )
         else:
@@ -335,6 +340,7 @@ def _eligibility(recipe: Recipe) -> _Eligibility | None:
                     None,
                     False,
                     f"Eligibility by {yellow}; learning rank unknown; verify training",
+                    yellow,
                 )
             )
     if not candidates:
@@ -448,6 +454,7 @@ def _opportunity(
         "name": inputs.names.get(item_id, f"Item {item_id}"),
         "profession": eligibility.profession,
         "required_skill": eligibility.required_skill,
+        "eligibility_skill": eligibility.skill_level,
         "skill_note": _eligibility_note(eligibility, eligibility.profession),
         "needs_leveling": eligibility.needs_leveling,
         "crafts": crafts,
@@ -527,7 +534,8 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
         "profile": {
             "alchemy": ALCHEMY_SKILL,
             "tailoring": TAILORING_SKILL,
-            "tailoring_planning_cap": TAILORING_PLANNING_CAP,
+            "alchemy_planning_cap": PROFESSION_SKILL_CAP,
+            "tailoring_planning_cap": PROFESSION_SKILL_CAP,
             "budget_copper": BUDGET_COPPER,
             "recipes_assumed_owned": True,
         },
@@ -546,7 +554,7 @@ def build_trading_summary(inputs: TradingSummaryInputs) -> dict[str, Any]:
             "Tools, categories, and focus requirements are shown per recipe.",
             "Positive-margin opportunities are shown regardless of observed market activity. "
             "Unknown activity does not establish demand or a sale probability. "
-            "All skill planning stays within 225.",
+            "All skill planning stays within 300; the dashboard applies the selected skill limit.",
             "Batch sizing and ranking assume a 10% share of observed market activity; "
             "this is not a personal sales forecast.",
             "Recipes with the same cooldown group share one timer; rows are alternatives, not a "

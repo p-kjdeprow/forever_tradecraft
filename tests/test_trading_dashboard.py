@@ -55,7 +55,7 @@ class FakeNode {
   addEventListener(name, handler) { this.listeners[name] = handler; }
 }
 const mountDashboard = (storage) => {
-  const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+  const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "profession-skill", "profile", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
   const nodes = new Map(ids.map((id) => [id, new FakeNode("div")]));
   global.document = {
     getElementById: (id) => nodes.get(id),
@@ -224,6 +224,7 @@ def _item(index: int) -> dict:
         "name": "<img src=x onerror=alert(1)>" if index == 0 else f"Item {index}",
         "profession": "tailoring" if leveling else "alchemy",
         "required_skill": 205 if leveling else 195,
+        "eligibility_skill": 205 if leveling else 195,
         "skill_note": "Tailoring yellow by 205; check trainer before leveling" if leveling else "Alchemy 195",
         "needs_leveling": leveling,
         "crafts": 2 if index == 0 else 1,
@@ -278,7 +279,8 @@ def _summary(sweep_id: int, finished_epoch: int, count: int = 12) -> dict:
         "profile": {
             "alchemy": 225,
             "tailoring": 150,
-            "tailoring_planning_cap": 225,
+            "alchemy_planning_cap": 300,
+            "tailoring_planning_cap": 300,
             "budget_copper": 100000,
             "recipes_assumed_owned": True,
         },
@@ -362,7 +364,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const nodes = new Map(["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"].map((id) => [id, new FakeNode("div")]));
+const nodes = new Map(["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "profession-skill", "profile", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"].map((id) => [id, new FakeNode("div")]));
 global.document = {{
   getElementById: (id) => nodes.get(id),
   createElement: (tag) => new FakeNode(tag),
@@ -839,8 +841,8 @@ def test_corrupt_profile_mismatched_and_blocked_storage_do_not_block_live_render
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938.alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
-const malformedStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps({**wrong_profile, "summary": malformed, "profile_key": "alchemy225-tailoring150-cap225-budget100000-owned-profit-only"})}) : null, setItem: () => {{}} }};
+const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938.alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
+const malformedStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps({**wrong_profile, "summary": malformed, "profile_key": "alchemy225-tailoring150-cap300-budget100000-owned-profit-only"})}) : null, setItem: () => {{}} }};
 const mismatchStorage = {{ getItem: (requested) => requested === key ? JSON.stringify({json.dumps(wrong_profile)}) : null, setItem: () => {{}} }};
 const blockedStorage = new Proxy({{}}, {{ get: () => {{ throw new Error("storage blocked"); }} }});
 function reply(value, ok = true, status = 200) {{ return {{ ok, status, json: () => Promise.resolve(value) }}; }}
@@ -908,7 +910,7 @@ def test_house_build_and_profile_cache_isolation_and_old_house_response_race():
     actual = _node(
         f"""
 const values = new Map();
-const profileKey = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
+const profileKey = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
 const cacheKey = (house, build) => `crowley.trading-summary.v1.${{encodeURIComponent(house)}}.${{encodeURIComponent(build)}}.${{profileKey}}`;
 const cacheEntry = (summary, override = {{}}) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profileKey, summary, ...override }});
 values.set(cacheKey("us-normal-alliance", "1.60.1.70938"), cacheEntry({json.dumps(default_summary)}));
@@ -1008,7 +1010,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "profession-skill", "profile", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
 const nodes = new Map(ids.map((id) => [id, new FakeNode()]));
 global.document = {{ getElementById: (id) => nodes.get(id), createElement: (tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode("#text", text) }};
 global.window = {{ setInterval: () => 1 }};
@@ -1089,7 +1091,7 @@ class FakeNode {{
   replaceChildren(...children) {{ this._text = ""; this.children = [...children]; }}
   addEventListener(name, handler) {{ this.listeners[name] = handler; }}
 }}
-const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
+const ids = ["scan-time", "scan-age", "scan-counts", "status", "summary-source", "opportunities", "notes", "house-form", "house-key", "minimum-profit", "profession-skill", "profile", "recipe-watch-state", "recipe-watch-alert", "recipe-watch-content", "recipe-watch-notes"];
 const nodes = new Map(ids.map((id) => [id, new FakeNode()]));
 global.document = {{ getElementById: (id) => nodes.get(id), createElement: (tag) => new FakeNode(tag), createTextNode: (text) => new FakeNode("#text", text) }};
 let intervalCallback;
@@ -1131,7 +1133,11 @@ def test_page_has_no_token_prompt_session_storage_or_external_runtime_assets():
     html = DASHBOARD.read_text(encoding="utf-8")
     assert "/dashboard/advanced" not in html
     assert "localStorage" in html
-    assert re.findall(r'<option value="(\d+)">', html) == ["50", "100", "300", "500", "1000"]
+    profit_select = re.search(r'<select id="minimum-profit"[^>]*>(.*?)</select>', html, re.DOTALL)
+    skill_select = re.search(r'<select id="profession-skill"[^>]*>(.*?)</select>', html, re.DOTALL)
+    assert profit_select and skill_select
+    assert re.findall(r'<option value="(\d+)">', profit_select[1]) == ["50", "100", "300", "500", "1000"]
+    assert re.findall(r'<option value="(\d+)"(?: selected)?>', skill_select[1]) == ["150", "225", "300"]
     assert "Net profit is shown per item" in html
     assert not re.search(
         r"(?:sessionStorage|\.prompt\s*\(|Authorization\s*:|api[_-]?token)", html, re.IGNORECASE
@@ -1270,7 +1276,7 @@ def test_old_top_ten_cache_stays_limited_until_full_pool_refresh_then_upgrades()
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
+const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
 const legacyKey = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
 const currentKey = "crowley.trading-summary.v2.us-normal-alliance.1.60.1.70938." + profile;
 const values = new Map([[legacyKey, JSON.stringify({{ version: 1, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: profile, summary: {json.dumps(legacy_summary)} }})]]);
@@ -1333,7 +1339,7 @@ def test_v1_bridge_cache_with_full_candidates_is_restored_and_malformed_pool_is_
     runtime = _dashboard_runtime()
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
+const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
 const key = "crowley.trading-summary.v1.us-normal-alliance.1.60.1.70938." + profile;
 const entry = (summary) => JSON.stringify({{ version: 1, house: summary.house, client_build: summary.client_build, profile_key: profile, summary }});
 const validValues = new Map([[key, entry({json.dumps(bridge_summary)})]]);
@@ -1388,7 +1394,7 @@ def test_unknown_zero_and_slow_activity_render_in_fresh_and_saved_profit_pool():
     summary.update(candidates=candidates, opportunities=candidates[:10])
     actual = _node(
         f"""
-const profile = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
+const profile = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
 const key = "crowley.trading-summary.v2.us-normal-alliance.1.60.1.70938." + profile;
 const values = new Map([[key, JSON.stringify({{ version: 2, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: profile, summary: {json.dumps(summary)} }})]]);
 const storage = {{ getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) }};
@@ -1424,3 +1430,77 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
         assert "Activity unknown" in cards[4]
         assert "unknown usable h" in cards[4]
         assert "0 units/h" in cards[5]
+
+
+def test_profession_skill_filters_full_pool_locally_and_persists_with_profit_preference():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 51,
+        "finished_epoch": 1_800_003_000,
+        "client_build": "1.60.1.70938",
+    }
+    candidates = [_ranked_candidate(index, "1000", 1) for index in range(1, 33)]
+    for row, skill in zip(candidates, [300] * 10 + [225] * 10 + [150] * 12, strict=True):
+        row.update(required_skill=skill, eligibility_skill=skill)
+    candidates[20].update(profit="100", profit_per_item="100", sale_proceeds="200")
+    # Unknown exact learning ranks use their verified yellow upper bound, not zero.
+    candidates[0].update(required_skill=None)
+    summary = _summary(51, latest["finished_epoch"], count=0)
+    summary.update(candidates=candidates, opportunities=candidates[:10])
+    actual = _node(
+        f"""
+const values = new Map();
+const storage = {{ getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v) }};
+let summaryCalls = 0;
+function reply(value) {{ return {{ ok: true, status: 200, json: () => Promise.resolve(value) }}; }}
+global.fetch = (path) => {{
+  if (path.endsWith('/trading-summary')) summaryCalls += 1;
+  return Promise.resolve(reply(path.endsWith('/sweeps/latest') ? {json.dumps(latest)} : path.endsWith('/recipe-watch') ? {json.dumps(_recipe_watch(status="awaiting_scan"))} : {json.dumps(summary)}));
+}};
+const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.resolve(); await new Promise(setImmediate); }};
+{_dashboard_runtime()}
+(async () => {{
+  const page = mountDashboard(storage);
+  await settle();
+  const snapshot = () => ({{ selected: page.nodes.get('profession-skill').value, cards: page.nodes.get('opportunities').children.map(n => n.textContent), profile: page.nodes.get('profile').textContent }});
+  const initial = snapshot();
+  const select = (id, value) => {{ page.nodes.get(id).value = value; page.nodes.get(id).listeners.change(); }};
+  const changes = {{}};
+  for (const skill of ['150', '225', '300']) {{ select('profession-skill', skill); changes[skill] = snapshot(); }}
+  const callsAfterFilters = summaryCalls;
+  select('profession-skill', '999');
+  const invalid = snapshot();
+  select('profession-skill', '150');
+  select('minimum-profit', '1000');
+  const combined = snapshot();
+  const reloaded = mountDashboard(storage);
+  await settle();
+  const reload = {{ skill: reloaded.nodes.get('profession-skill').value, profit: reloaded.nodes.get('minimum-profit').value, cards: reloaded.nodes.get('opportunities').children.map(n => n.textContent) }};
+  values.set('crowley.dashboard.maximum-profession-skill.v1', '999');
+  const corrupted = mountDashboard(storage);
+  await settle();
+  const corruptSelection = corrupted.nodes.get('profession-skill').value;
+  const blocked = mountDashboard({{ getItem: () => {{ throw new Error('blocked'); }}, setItem: () => {{ throw new Error('blocked'); }} }});
+  await settle();
+  blocked.nodes.get('profession-skill').value = '300';
+  blocked.nodes.get('profession-skill').listeners.change();
+  console.log(JSON.stringify({{initial, changes, callsAfterFilters, invalid, combined, reload, corruptSelection, blockedSelection:blocked.nodes.get('profession-skill').value}}));
+}})().catch(error => {{ console.error(error); process.exitCode = 1; }});
+"""
+    )
+    assert actual["initial"]["selected"] == "225"
+    assert "Rank 11" in actual["initial"]["cards"][0]
+    for skill, first in [("150", "Rank 21"), ("225", "Rank 11"), ("300", "Rank 01")]:
+        result = actual["changes"][skill]
+        assert result["selected"] == skill
+        assert len(result["cards"]) == 10
+        assert first in result["cards"][0]
+        assert f"Maximum skill {skill}" in result["profile"]
+    assert actual["callsAfterFilters"] == 1
+    assert actual["invalid"]["selected"] == "300"
+    assert "Rank 22" in actual["combined"]["cards"][0]
+    assert actual["reload"]["skill"] == "150"
+    assert actual["reload"]["profit"] == "1000"
+    assert actual["reload"]["cards"] == actual["combined"]["cards"]
+    assert actual["corruptSelection"] == "225"
+    assert actual["blockedSelection"] == "300"

@@ -339,7 +339,7 @@ def test_tailoring_caps_distinguish_exact_rank_from_yellow_threshold():
         learning_rank=None,
         yellow=205,
     )
-    over_cap = _recipe(spell_id=12, profession="tailoring", output_id=1000, learning_rank=226)
+    over_cap = _recipe(spell_id=12, profession="tailoring", output_id=1000, learning_rank=301)
     unknown = replace(exact_leveling, spell_id=13, acquisition=RecipeAcquisition())
     inputs = _inputs(
         [exact_leveling, yellow_leveling, over_cap, unknown],
@@ -351,10 +351,29 @@ def test_tailoring_caps_distinguish_exact_rank_from_yellow_threshold():
 
     assert rows[10]["needs_leveling"] is True
     assert rows[10]["required_skill"] == 195
+    assert rows[10]["eligibility_skill"] == 195
     assert rows[11]["needs_leveling"] is True
     assert rows[11]["required_skill"] is None
+    assert rows[11]["eligibility_skill"] == 205
     assert rows[11]["skill_note"] == "Eligibility by 205; learning rank unknown; verify training"
     assert 12 not in rows and 13 not in rows
+
+
+@pytest.mark.parametrize("profession", ["alchemy", "tailoring"])
+def test_candidate_pool_includes_skill_boundaries_through_300(profession):
+    ranks = [150, 151, 225, 226, 300, 301]
+    recipes = [_recipe(spell_id=rank, profession=profession, learning_rank=rank) for rank in ranks]
+    result = summary.build_trading_summary(
+        _inputs(
+            recipes,
+            books={1000: _commodity_history(1000)},
+            facts=_facts(reagent_vendor_size=1, reagent_vendor_price=1),
+        )
+    )
+    rows = {row["spell_id"]: row for row in result["candidates"]}
+    assert set(rows) == {150, 151, 225, 226, 300}
+    assert all(row["eligibility_skill"] == rank for rank, row in rows.items())
+    assert rows[300]["needs_leveling"] is True
 
 
 def test_long_gaps_and_grouped_item_books_keep_profitable_rows_with_unknown_activity():
@@ -632,7 +651,8 @@ def test_missing_output_or_reagent_prices_are_excluded_and_empty_summary_is_vali
     assert empty["profile"] == {
         "alchemy": 225,
         "tailoring": 150,
-        "tailoring_planning_cap": 225,
+        "alchemy_planning_cap": 300,
+        "tailoring_planning_cap": 300,
         "budget_copper": 100_000,
         "recipes_assumed_owned": True,
     }

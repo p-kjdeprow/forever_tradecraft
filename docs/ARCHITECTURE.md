@@ -58,6 +58,15 @@ with complete source coverage are full. Exact wrapped uint32 time-left values de
 inside the documented negative window. Unknown identity or incomplete coverage never
 becomes zero supply or a guessed sale. See [ANALYSIS](ANALYSIS.md).
 
+The main dashboard receives the complete positive-margin candidate pool through
+profession skill 300. A persisted browser control selects a shared maximum skill
+of 150, 225 (default), or 300 for Alchemy and Tailoring, combined with the existing
+minimum-profit preference before taking the top ten. Activity remains informational.
+Each row carries `eligibility_skill`: its exact learning rank, or the verified yellow
+upper bound when the rank is unknown. `required_skill` stays null in that latter case;
+missing learning evidence never becomes skill zero. The wider pool uses a distinct
+cache profile so an old 225-limited pool cannot suppress recipes at skill 300.
+
 All twelve applied SQL migrations retain their original bytes. Retiring an API removes
 its runtime consumers, not historical tables or raw evidence. New schema changes require
 a new numbered migration. Backup checks bind an exact pinned server image and migration

@@ -157,9 +157,15 @@
         <h2>Top 10 crafting strategies</h2>
         <p class="muted">Positive estimated profit at current prices. Activity history is informational. Batches use the assumed 10 g budget.</p>
       </div>
-      <div id="profile" class="profile">Alchemy 225 · Tailoring 150 (planning through 225) · 10 g assumed</div>
+      <div id="profile" class="profile">Alchemy 225 · Tailoring 150 · Maximum skill 225 · 10 g assumed</div>
     </div>
     <div class="summary-controls">
+      <label for="profession-skill">Maximum profession skill</label>
+      <select id="profession-skill" name="profession-skill">
+        <option value="150">150</option>
+        <option value="225" selected>225</option>
+        <option value="300">300</option>
+      </select>
       <label for="minimum-profit">Minimum net profit per item</label>
       <select id="minimum-profit" name="minimum-profit">
         <option value="50">50c</option>
@@ -192,7 +198,8 @@
     const DASHBOARD_PROFILE = Object.freeze({
       alchemy: 225,
       tailoring: 150,
-      tailoring_planning_cap: 225,
+      alchemy_planning_cap: 300,
+      tailoring_planning_cap: 300,
       budget_copper: 100000,
       recipes_assumed_owned: true,
     });
@@ -200,7 +207,10 @@
     const SUMMARY_CACHE_PREFIX = "crowley.trading-summary";
     const SUMMARY_TIMEOUT_MS = 60_000;
     const LATEST_TIMEOUT_MS = 30_000;
-    const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap225-budget100000-owned-profit-only";
+    const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only";
+    const PROFESSION_SKILL_LIMITS = [150, 225, 300];
+    const DEFAULT_PROFESSION_SKILL = 225;
+    const PROFESSION_SKILL_PREFERENCE_KEY = "crowley.dashboard.maximum-profession-skill.v1";
     const MIN_PROFIT_THRESHOLDS = [50, 100, 300, 500, 1000];
     const DEFAULT_MIN_PROFIT_COPPER = 50;
     const MIN_PROFIT_PREFERENCE_KEY = "crowley.dashboard.minimum-profit-per-item.v1";
@@ -279,6 +289,8 @@
           if (item[key] !== null) integerValue(item[key], `${itemLabel}.${key}`);
         }
         const quantity = integerValue(item.quantity, `${itemLabel}.quantity`, 1);
+        const eligibilitySkill = integerValue(item.eligibility_skill, `${itemLabel}.eligibility_skill`);
+        if (eligibilitySkill > 300 || (item.required_skill !== null && eligibilitySkill !== item.required_skill)) throw new Error(`${itemLabel}.eligibility_skill is inconsistent`);
         if (typeof item.name !== "string" || !item.name || !["alchemy", "tailoring"].includes(item.profession) || typeof item.skill_note !== "string") throw new Error(`${itemLabel} has invalid identity`);
         if (typeof item.needs_leveling !== "boolean") throw new Error(`${itemLabel}.needs_leveling is invalid`);
         if (item.cooldown_group != null && typeof item.cooldown_group !== "string") throw new Error(`${itemLabel}.cooldown_group is invalid`);
@@ -450,6 +462,7 @@
         latestRequest: null, latestRequestId: 0, summaryRequest: null, summaryRequestId: 0,
         summaryErrorMessage: "", latestErrorMessage: "", summaryFromCache: false,
         minimumProfitCopper: DEFAULT_MIN_PROFIT_COPPER,
+        professionSkill: DEFAULT_PROFESSION_SKILL,
         watch: null, watchInFlight: false, watchGeneration: 0,
       };
       const el = (tag, text = "", className = "") => {
@@ -485,6 +498,16 @@
       function writeMinimumProfitPreference(value) {
         try { browserStorage()?.setItem(MIN_PROFIT_PREFERENCE_KEY, String(value)); }
         catch (_) { /* Storage is optional; the current selection still works. */ }
+      }
+      function readProfessionSkillPreference() {
+        try {
+          const value = Number(browserStorage()?.getItem(PROFESSION_SKILL_PREFERENCE_KEY));
+          return PROFESSION_SKILL_LIMITS.includes(value) ? value : DEFAULT_PROFESSION_SKILL;
+        } catch (_) { return DEFAULT_PROFESSION_SKILL; }
+      }
+      function writeProfessionSkillPreference(value) {
+        try { browserStorage()?.setItem(PROFESSION_SKILL_PREFERENCE_KEY, String(value)); }
+        catch (_) { /* The current selection still works without storage. */ }
       }
       function readSummaryCache(house, clientBuild) {
         const storage = browserStorage();
@@ -693,8 +716,8 @@
       }
       function renderSummary(summary, { fromCache = false, preserveStatus = false, filterChange = false } = {}) {
         const nextPriceAgeEntries = [];
-        const filtered = summary.candidates.filter((item) => profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
-        let emptyMessage = "No strategies meet this minimum net profit per item at current prices.";
+        const filtered = summary.candidates.filter((item) => item.eligibility_skill <= state.professionSkill && profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
+        let emptyMessage = "No strategies meet this minimum net profit per item and maximum profession skill at current prices.";
         if (!summary.candidatePoolComplete && filtered.length === 0) {
           emptyMessage = "No saved top-ten strategies meet this minimum. Lower-ranked results are unavailable until the complete candidate pool refreshes.";
         }
@@ -717,11 +740,11 @@
         updatePriceAges();
         if (!preserveStatus && filterChange) {
           if (!summary.candidatePoolComplete && filtered.length === 0) setStatus("No saved top-ten strategies meet this minimum; lower-ranked results are unavailable until the complete pool refreshes.");
-          else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item in the candidate pool.");
+          else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item and maximum profession skill in the candidate pool.");
           else setStatus("Showing " + filtered.length + " of up to 10 strategies at this minimum.");
         } else if (!preserveStatus && !fromCache && isLatest) {
           if (filtered.length === 0 && !summary.candidatePoolComplete) setStatus("Showing a limited saved top-ten view while refreshing the complete candidate pool.");
-          else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item for the latest scan.");
+          else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item and maximum profession skill for the latest scan.");
           else setStatus("Showing " + filtered.length + " of up to 10 strategies at this minimum. Refreshes every 60 seconds when a new scan arrives.");
         } else if (!preserveStatus && fromCache) {
           setStatus(summary.candidatePoolComplete
@@ -1058,6 +1081,24 @@
       $("house-form").addEventListener("submit", (event) => {
         event.preventDefault();
         changeHouse($("house-key").value);
+      });
+      state.professionSkill = readProfessionSkillPreference();
+      $("profession-skill").value = String(state.professionSkill);
+      const updateProfile = () => { $("profile").textContent = `Alchemy 225 · Tailoring 150 · Maximum skill ${state.professionSkill} · 10 g assumed`; };
+      updateProfile();
+      $("profession-skill").addEventListener("change", () => {
+        const selected = Number($("profession-skill").value);
+        if (!PROFESSION_SKILL_LIMITS.includes(selected)) {
+          $("profession-skill").value = String(state.professionSkill);
+          return;
+        }
+        state.professionSkill = selected;
+        writeProfessionSkillPreference(selected);
+        updateProfile();
+        if (state.summary) {
+          const preserveStatus = Boolean(state.latestRequest || state.summaryRequest || state.summaryErrorMessage || state.latestErrorMessage);
+          renderSummary(state.summary, { fromCache: state.summaryFromCache, preserveStatus, filterChange: true });
+        }
       });
       state.minimumProfitCopper = readMinimumProfitPreference();
       $("minimum-profit").value = String(state.minimumProfitCopper);

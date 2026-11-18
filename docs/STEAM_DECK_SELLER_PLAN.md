@@ -5,6 +5,10 @@ the only execution host. The exact installed `Crowley_Automation` addon and the
 staged package bundle were hash-verified and removed from the Deck. Other addons,
 SavedVariables, SSH access and existing services were untouched. No game was
 launched and no trading session was armed during preparation or removal.
+WoW was running at the final removal check. The files are absent, but an already
+loaded copy may remain in memory until the user reloads the UI or quits normally.
+No input was sent to that game session; do not infer an in-memory unload from
+filesystem removal alone.
 
 Do not resume the cancelled Gamescope port or deploy further Deck components.
 The previous account-selection question is obsolete under the user's latest

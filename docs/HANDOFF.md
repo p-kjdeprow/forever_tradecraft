@@ -9,6 +9,9 @@ The user cancelled Steam Deck deployment and selected this desktop for selling.
 The exact Deck addon and staged wheels were verified and removed; no other addons,
 SavedVariables, SSH keys or services were changed. The Deck account question is
 obsolete. Do not resume the Gamescope port or deploy anything further to the Deck.
+WoW was running at the final removal check; the user was told to `/reload` or quit
+normally to unload any in-memory copy. No remote game input was sent, and an actual
+in-memory unload is not yet verified.
 
 Desktop preparation passes doctor and 283 automation tests. The installed coordinated
 addon's eight files and pinned input helper are verified. A fresh supported native

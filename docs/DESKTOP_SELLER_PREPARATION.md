@@ -2,6 +2,8 @@
 
 The user selected this desktop as the only seller host and cancelled the Deck
 deployment. Its addon and staged bundle have been removed and absence verified.
+WoW was running on the Deck at the final check; an in-memory copy requires the
+user's normal reload or exit to unload. No remote game input was sent.
 The scanner, companion and website remain running on the desktop.
 
 ## Completed checks

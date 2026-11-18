@@ -15,6 +15,11 @@ for that concrete unchanged batch and a separate expiring current-boot arm. Exis
 batch authorization persists; do not request it again without a material spec/session change.
 A dry-run or market recommendation is not authorization to trade.
 
+An agent/SSH shell can lack XAUTHORITY even while the desktop owner is healthy.
+Resolve the authenticated user-manager environment with DesktopSessionProvider
+before invoking the installed CLI; never guess cookies or relax identity checks.
+See the [desktop invocation recipe](../../../docs/DESKTOP_SELLER_PREPARATION.md).
+
 For continuous commodity selling read [SELLER](../../../docs/SELLER.md). Inspect the exact
 policy, preview fresh decisions, then obtain authorization for its full digest and explicitly
 arm the observed boot. Use seller start/status/revoke. The runner derives child batches within

@@ -5,6 +5,19 @@ and independent Sol review loops, commits on main/origin/main, and task artifact
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
+Steam Deck seller preparation is now separate from the running scanner. SSH was
+verified using the existing key and trusted host identity. The Deck has SteamOS
+Gaming Mode/Gamescope and the matching 70959 WoW build. The standalone automation
+addon 0.3.0/schema 3 is installed and all eight files byte-verified; the two matching
+component wheels are staged. The game/runtime/services were not launched, and no
+trading policy/session is armed. GNOME capture/presence services and the graphical
+environment required by the current desktop controller are absent there; full
+seller operation needs a qualified Gamescope path and current-client trials.
+The account arrangement is pending before any Deck login. Current machine scanner
+and website remain active. See [the deployment/addon plan](STEAM_DECK_SELLER_PLAN.md).
+Private inventory, bundle and installation receipts are under
+`~/.local/state/crowley/steamdeck-prep-20261117/`.
+
 The urgent typing/dashboard repair is installed. The user's latest instruction
 authorizes resuming collection and requires a fully functional website. Host and
 companion are now active: the host launched one client, entered the world, targeted

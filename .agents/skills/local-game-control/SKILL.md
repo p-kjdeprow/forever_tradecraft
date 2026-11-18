@@ -34,6 +34,12 @@ trading, account changes or unrelated display changes.
 
 ## Environment
 
+- SSH access does not establish graphical control. Inspect a remote host's actual
+  session and required services first; Gamescope/KDE cannot use GNOME capture or
+  Mutter presence merely because Xwayland exists. Record missing capabilities and
+  qualify the target path rather than guessing authority or reporting false idleness.
+- An mDNS name can lack a known-host record while its resolved IP is already trusted.
+  Verify and use that existing identity; never disable host-key checking to fix an alias.
 - Derive the server address, addon-data path and container names from installed configuration and the package-owned
   Compose project. Do not treat a failed check against guessed defaults as a deployment fault.
 - A worker shell may lack the graphical environment. Take `DISPLAY` and `XAUTHORITY` from the graphical session or

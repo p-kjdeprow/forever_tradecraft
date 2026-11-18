@@ -290,8 +290,18 @@ def walk_waypoint(
     hold: Callable[[tuple[str, ...], float], None],
     monotonic: Callable[[], float],
     stop: Callable[[], bool],
+    continuous_forward: Callable[[float, float], None] | None = None,
+    release_forward: Callable[[], None] | None = None,
 ) -> WaypointResult:
-    """Walk one waypoint with fresh samples and <=250ms key holds."""
+    """Walk one waypoint; optional forward continuity is bounded by fresh feedback.
+
+    The continuous transport owns independent expiry and releases before receipt.
+    Turning remains stationary and uses the existing measured turn rates.
+    """
+    if continuous_forward is not None and not callable(continuous_forward):
+        raise MovementError("continuous_forward must be a bounded transport callback")
+    if continuous_forward is not None and not callable(release_forward):
+        raise MovementError("continuous movement requires an explicit release callback")
     if type(profile) is not RouteProfile or type(index) is not int or not 0 <= index < len(profile.waypoints):
         raise MovementError("profile or waypoint index is invalid")
     clock = _number(monotonic(), "monotonic clock", 0.0)
@@ -302,6 +312,7 @@ def walk_waypoint(
     boot: str | None = None
     observed_at: float | None = None
     no_progress = 0
+    forward_active = False
 
     def now() -> float:
         nonlocal clock
@@ -361,6 +372,17 @@ def walk_waypoint(
     if reason is not None:
         return done(reason)
     assert current is not None
+
+    def stopped_baseline() -> tuple[Motion | None, str | None]:
+        nonlocal forward_active
+        assert release_forward is not None
+        release_forward()
+        forward_active = False
+        while True:
+            baseline, failure = read()
+            if failure is not None or (baseline is not None and not baseline.moving):
+                return baseline, failure
+
     while True:
         if cancelled():
             return done("cancelled")
@@ -373,6 +395,12 @@ def walk_waypoint(
             return done("deadline")
         error = _angle(math.atan2(dy, dx) - current.facing)
         turning = abs(error) > HEADING_TOLERANCE
+        if turning and forward_active:
+            current, reason = stopped_baseline()
+            if reason is not None:
+                return done(reason)
+            assert current is not None
+            continue
         if turning:
             rate, key = profile.left_radians_per_second, "Left"
             if error * rate < 0.0:
@@ -380,7 +408,24 @@ def walk_waypoint(
             seconds = min(MAX_HOLD_SECONDS, abs(error / rate), remaining)
         else:
             rate, key = profile.forward_units_per_second, "Up"
-            seconds = min(MAX_HOLD_SECONDS, distance / rate, remaining)
+            if continuous_forward:
+                # An already-held key travels during observation too. A stopped
+                # baseline does not. Neither estimate can be rebased at delivery.
+                base = current.observed_at if forward_active else now()
+                travel_deadline = min(
+                    current.observed_at + MAX_OBSERVATION_AGE,
+                    base + max(0.0, distance - profile.tolerance * 0.5) / rate,
+                    deadline,
+                )
+                seconds = travel_deadline - now()
+                if seconds <= 0 and forward_active:
+                    current, reason = stopped_baseline()
+                    if reason is not None:
+                        return done(reason)
+                    assert current is not None
+                    continue
+            else:
+                seconds = min(MAX_HOLD_SECONDS, distance / rate, remaining)
         if seconds <= 0.0:
             return done("deadline")
         if len(holds) >= MAX_HOLDS:
@@ -390,8 +435,12 @@ def walk_waypoint(
         began = now()
         if began >= deadline:
             return done("deadline")
-        seconds = min(seconds, MAX_HOLD_SECONDS, deadline - began)
-        hold((key,), seconds)
+        seconds = min(seconds, deadline - began)
+        if continuous_forward is not None and not turning:
+            continuous_forward(travel_deadline, current.observed_at)
+            forward_active = True
+        else:
+            hold((key,), seconds)
         ended = now()
         holds.append(HoldEvidence((key,), seconds, began, ended))
         if cancelled():
@@ -402,6 +451,10 @@ def walk_waypoint(
         if reason is not None:
             return done(reason)
         assert following is not None
+        if continuous_forward and not turning:
+            # Capture latency is travel time too. The helper still caps exposure
+            # independently at the admitted feedback/travel deadlines.
+            seconds = min(seconds, now() - began)
         moved_x, moved_y = following.x - current.x, following.y - current.y
         displacement = math.hypot(moved_x, moved_y)
         if turning:

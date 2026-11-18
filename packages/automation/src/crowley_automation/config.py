@@ -7,7 +7,7 @@ import os
 import re
 import tomllib
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from crowley_common.house import House
 from crowley_common.platform.paths import XdgDirs
@@ -52,6 +52,8 @@ class AutomationConfig(BaseModel):
     interface: StrictInt
     native_region: StrictInt
     canvas_crop: tuple[StrictInt, StrictInt, StrictInt, StrictInt]
+    input_backend: Literal["xtest", "uinput"] = "xtest"
+    input_calibration: StrictStr | None = None
 
     @field_validator("wine_prefix", "game_root")
     @classmethod
@@ -140,6 +142,12 @@ class AutomationConfig(BaseModel):
     def validate_house_faction(self) -> AutomationConfig:
         if House.parse(self.house).faction != self.faction.lower():
             raise ValueError("house faction must match configured faction")
+        if self.input_backend == "uinput":
+            if self.input_calibration is None:
+                raise ValueError("uinput requires an explicit measured input_calibration file")
+            self.validate_path(self.input_calibration)
+        elif self.input_calibration is not None:
+            raise ValueError("input_calibration is only valid with selected uinput")
         return self
 
 
@@ -197,6 +205,9 @@ def render_automation_toml(config: AutomationConfig) -> str:
     for key in ("interface", "native_region"):
         rows.append(f"{key} = {values[key]}")
     rows.append(f"canvas_crop = {json.dumps(values['canvas_crop'])}")
+    if config.input_backend == "uinput":
+        rows.append('input_backend = "uinput"')
+        rows.append(f"input_calibration = {json.dumps(config.input_calibration)}")
     return "\n".join(rows) + "\n"
 
 

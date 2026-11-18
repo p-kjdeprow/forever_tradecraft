@@ -414,11 +414,11 @@ def _backend_context():
 @contextmanager
 def _leased_backend() -> Iterator[tuple[Any, GuiLease, DesktopBackend, dict[str, Any]]]:
     config, lease, backend, routes = _backend_context()
-    try:
-        with lease.hold():
+    with lease.hold():
+        try:
             yield config, lease, backend, routes
-    finally:
-        backend.close()
+        finally:
+            backend.close()
 
 
 def _arm(args: argparse.Namespace, batch: Batch, config: Any) -> tuple[BatchAuthorization, SessionArm]:

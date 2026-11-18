@@ -19,6 +19,7 @@ from crowley_common.platform.paths import XdgDirs
 
 from crowley_automation.gui import keyboard
 from crowley_automation.gui.input_tool import PinnedInputTool
+from crowley_automation.gui.timeline import plan_text
 
 LEASE_TIMEOUT_S = 30.0
 COMMAND_TIMEOUT_S = 10.0
@@ -50,6 +51,27 @@ class GuiLease:
         self._inherited_fd: int | None = None
         self._fd: int | None = None
         self.held = False
+        self._release_ready: Callable[[], bool] = lambda: True
+        self._retained = False
+
+    def protect_release(self, ready: Callable[[], bool]) -> None:
+        """Control cleanup must complete before the canonical lock can open."""
+        if self._retained or not self._release_ready():
+            raise ActError("GUI lease retained: input cleanup is incomplete")
+        self._release_ready = ready
+
+    @property
+    def retained(self) -> bool:
+        return self._retained
+
+    def release_retained(self) -> None:
+        if self._retained:
+            if not self._release_ready() or self._fd is None:
+                raise ActError("GUI lease retained: input cleanup is incomplete")
+            fcntl.flock(self._fd, fcntl.LOCK_UN)
+            os.close(self._fd)
+            self._fd = None
+            self.held = self._retained = False
 
     @property
     def fd(self) -> int | None:
@@ -98,6 +120,8 @@ class GuiLease:
 
     @contextmanager
     def hold(self) -> Iterator[None]:
+        if self._retained:
+            raise ActError("GUI lease retained: input cleanup is incomplete")
         if self._inherited_fd is not None:
             fd = self._inherited_fd
             self._verify_inherited_fd(fd)
@@ -141,11 +165,16 @@ class GuiLease:
             try:
                 yield
             finally:
+                self._retained = True
+                if not self._release_ready():
+                    raise ActError("GUI lease retained: input cleanup is incomplete")
+                self._retained = False
                 self.held = False
                 self._fd = None
                 fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
-            os.close(fd)
+            if not self._retained:
+                os.close(fd)
 
 
 # --- keys ---------------------------------------------------------------------------------
@@ -211,7 +240,7 @@ class XtestKeys:
             raise ActError(f"xmodmap exited {done.returncode}")
         return parse_keymap(done.stdout)
 
-    def _send(self, argv: list[str], held: frozenset[str]) -> None:
+    def _send(self, argv: list[str], held: frozenset[str], *, timeout: float = COMMAND_TIMEOUT_S) -> None:
         command = [self._tool.proc_path, *argv[1:]]
         try:
             if self._before_emit is not None and argv[1] != "keyup":
@@ -221,14 +250,16 @@ class XtestKeys:
                 capture_output=True,
                 text=True,
                 check=False,
-                timeout=COMMAND_TIMEOUT_S,
+                timeout=timeout,
                 env=self._environment(),
                 pass_fds=(self._tool.image.fd,),
             )
             failed = done.returncode != 0
-        except (OSError, subprocess.SubprocessError) as exc:
+        except BaseException as exc:
             self._release(held)
-            raise ActError(f"input tool failed: {exc}") from exc
+            if isinstance(exc, (OSError, subprocess.SubprocessError)):
+                raise ActError(f"input tool failed: {exc}") from exc
+            raise
         if failed:
             self._release(held)
             raise ActError(f"input tool exited {done.returncode}")
@@ -258,15 +289,11 @@ class XtestKeys:
         self._send(argv, held)
 
     def type_text(self, text: str) -> None:
-        actions = keyboard.type_text_argv(text, self._keymap())
-        if not actions:
+        plan = plan_text(text)
+        if not plan.events:
             return
-        argv = ["xdotool"]
-        held: set[str] = set()
-        for command, controls in actions:
-            argv.extend(command[1:])
-            held.update(controls)
-        self._send(argv, frozenset(held))
+        argv, held = plan.xtest(self._keymap())
+        self._send(argv, held, timeout=plan.timeout)
 
     def hold(self, key: str, seconds: float, guard: Callable[[], None]) -> None:
         """Hold one measured movement key briefly, after a fresh caller guard."""

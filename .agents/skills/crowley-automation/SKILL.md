@@ -39,6 +39,17 @@ must match the actual build/instance/house/character and content-derived filenam
 or stale provenance is a refusal, not permission to guess. Current live qualification is
 unverified until the required specific trials are observed and documented.
 
+Input transport selection and qualification are documented in
+[HUMAN_INPUT](../../../docs/HUMAN_INPUT.md). Keep new uinput delivery inactive until
+its session calibration and physical idle coverage are qualified. Never infer evdev
+codes from X keycodes or assume relative counts equal pixels. Short manual arms
+without qualified history must fail early; do not extend them to cover preparation.
+Input cleanup must finish before GUI lease release, including exceptions; keep the
+sealed tool and lease while a child/held control remains pending. Never rebase an
+absolute movement deadline after keymap or guard latency.
+Continuous forward holds end before each waypoint receipt/chat stage; moving turns
+are not qualified. Source tests never open real input devices or capture the game.
+
 Read per-primitive receipts. Dispatch, callback and native outcome are separate; listed
 is not sold. An uncertain effect prevents new work and is never retried automatically.
 Use stop/status/reconcile as documented. Missing conclusive causal evidence stays uncertain;

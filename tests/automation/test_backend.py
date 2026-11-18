@@ -931,3 +931,110 @@ def test_click_pre_admission_failure_never_releases_button_but_partial_emit_does
     assert io.button_down is False
     assert io.emissions[-1] == ["mouseup", "1"]
     assert len(harness.native_calls) == 1
+
+
+def test_standalone_text_is_one_timed_job_with_one_admission_and_no_capture(monkeypatch) -> None:
+    from crowley_automation.backend import DesktopIO
+
+    io = DesktopIO.__new__(DesktopIO)
+    jobs, admitted = [], []
+    monkeypatch.setattr(io, "_keymap", lambda: {"slash": 61, "a": 38, "Shift_L": 50})
+    monkeypatch.setattr(io, "_emit", lambda args, timeout: jobs.append((list(args), timeout)))
+    io.type_text("/Aa", lambda: admitted.append(True))
+    assert len(jobs) == len(admitted) == 1
+    args, timeout = jobs[0]
+    assert args.count("keydown") == args.count("keyup") == 4
+    assert "sleep" in args and timeout >= 5
+    with pytest.raises(RuntimeError):
+        io.type_text("/a\n", lambda: admitted.append(True))
+    assert len(jobs) == len(admitted) == 1
+
+
+def test_stationary_click_keeps_all_native_gates_without_motion() -> None:
+    harness = NativeHarness()
+    harness.add_item(count=4, commodity=True)
+    harness.fire("AUCTION_HOUSE_SHOW")
+    io = LuaBackendIO(harness)
+    action = PostCommodity("123", 1, 10, 12, 1_000)
+    backend, admission, digest, _ = stage_lua_action(action, harness, io)
+    rect = harness.snapshot["operation"]["buttonRect"]
+    io.x, io.y = rect["x"] + 2, rect["y"] + 2
+    backend.dispatch(
+        action, batch_id="a" * 64, ordinal=0, step_index=0, action_digest=digest, admission=admission
+    )
+    assert not any("mousemove" in args for args in io.emissions)
+    assert sum("mousedown" in args for args in io.emissions) == 1
+    assert sum("mouseup" in args for args in io.emissions) == 1
+    assert len(harness.native_calls) == 1
+
+
+@pytest.mark.parametrize("failure", ["release", "unreaped"])
+def test_desktop_close_retains_real_lease_and_sealed_tool_until_cleanup(tmp_path, failure):
+    from crowley_automation.backend import DesktopIO
+    from crowley_automation.desktop_input import ActError
+    from crowley_automation.gui.control_child import ControlChildError
+
+    lease = GuiLease(tmp_path / "private" / "gui.lock")
+    closed = []
+    io = DesktopIO.__new__(DesktopIO)
+
+    def close():
+        if failure == "unreaped" and control.child_pid is not None:
+            raise ControlChildError("unreaped child")
+
+    control = SimpleNamespace(
+        child_pid=123 if failure == "unreaped" else None,
+        possible_down=frozenset({"038"}),
+        cleanup_failed=True,
+        close=close,
+    )
+    io._control, io._devices = control, None
+    io._tool = SimpleNamespace(close=lambda: closed.append(True))
+    io.bind_input(
+        lease, during=lambda: None, stopping=lambda: False, deadline=lambda: 0, preparing=lambda: None
+    )
+    try:
+        with pytest.raises(ActError, match="retained"):
+            with lease.hold():
+                io.close()
+        assert lease.held and lease.retained
+        assert closed == []
+        with pytest.raises(ActError):
+            with GuiLease(lease.path, timeout=0.01).hold():
+                pass
+        control.child_pid = None
+        control.possible_down = frozenset()
+        control.cleanup_failed = False
+        io.close()
+        assert closed == [True]
+        assert not lease.held
+        with GuiLease(lease.path, timeout=0.01).hold():
+            pass
+    finally:
+        control.child_pid = None
+        control.possible_down = frozenset()
+        control.cleanup_failed = False
+        lease.release_retained()
+
+
+def test_forward_delivery_preserves_absolute_travel_budget_during_keymap_latency(monkeypatch):
+    from crowley_automation.backend import DesktopIO
+
+    io = DesktopIO.__new__(DesktopIO)
+    now = [10.0]
+    requests = []
+
+    def keymap():
+        now[0] += 0.5
+        return {"Up": 111}
+
+    monkeypatch.setattr(io, "_keymap", keymap)
+    monkeypatch.setattr(
+        io,
+        "_device_session",
+        lambda: SimpleNamespace(forward=lambda *args, **kwargs: requests.append(kwargs)),
+    )
+    monkeypatch.setattr(io, "monotonic", lambda: now[0])
+    io._calibration = {"x_to_evdev": {"111": 103}}
+    io.forward(11.0, 10.0)
+    assert requests == [{"feedback_deadline": 12.0, "travel_deadline": 11.0}]

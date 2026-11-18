@@ -231,3 +231,54 @@ def test_stop_cannot_clear_an_uncertain_effect(tmp_path: Path) -> None:
 
     with pytest.raises(UncertainEffectInterlock):
         ledger.clear_stop()
+
+
+def test_seller_runtime_closes_backend_before_unlock_even_on_error(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from crowley_automation import runtime
+    from crowley_automation.desktop_input import GuiLease
+
+    lease = GuiLease(tmp_path / "private" / "gui.lock")
+    closed = []
+    backend = SimpleNamespace(close=lambda: closed.append(lease.held))
+    monkeypatch.setattr(runtime, "_operation_ledger", lambda *_args: object())
+    monkeypatch.setattr(runtime, "_runtime_components", lambda **_kwargs: (object(), backend))
+    with pytest.raises(RuntimeError, match="cancelled"):
+        with runtime.seller_runtime(gui_lease=lease, config=object(), io=object()):
+            assert lease.held
+            raise RuntimeError("cancelled")
+    assert closed == [True]
+    assert not lease.held
+
+
+@pytest.mark.parametrize("operation", ["run_batch", "dry_run_batch"])
+def test_runtime_seeds_short_deadline_before_first_observation(tmp_path, monkeypatch, operation):
+    from types import SimpleNamespace
+
+    from crowley_automation import runtime
+    from crowley_automation.desktop_input import GuiLease
+    from crowley_automation.runner import BatchAuthorization, SessionArm
+
+    batch = make_batch()
+    authorization = BatchAuthorization(batch.batch_id, HOUSE, CHARACTER, NOW + 50)
+    arm = SessionArm("boot", HOUSE, CHARACTER, NOW + 40)
+    lease = GuiLease(tmp_path / "private" / "gui.lock")
+    deadlines, closed = [], []
+    backend = SimpleNamespace(
+        set_deadline=deadlines.append, cleanup_state="done", close=lambda: closed.append(lease.held)
+    )
+
+    def execute(*_args, **_kwargs):
+        # This seam represents the runner's first backend.observe call.
+        assert deadlines == [NOW + 40]
+        assert lease.held
+        return {}
+
+    runner = SimpleNamespace(run=execute, preflight=execute)
+    monkeypatch.setattr(runtime, "_operation_ledger", lambda *_args: object())
+    monkeypatch.setattr(runtime, "_runtime", lambda *_args, **_kwargs: (runner, backend))
+    getattr(runtime, operation)(
+        batch, authorization, arm, batch.batch_id, gui_lease=lease, config=object(), io=object()
+    )
+    assert closed == [True]

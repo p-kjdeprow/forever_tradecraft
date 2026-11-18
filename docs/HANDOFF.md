@@ -5,6 +5,21 @@ and independent Sol review loops, commits on main/origin/main, and task artifact
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
+The natural-input refactor is implemented in source, independently reviewed READY
+by Sol after two fix rounds, and remains separate from the installed runtime.
+Final verification: 575 affected tests, Ruff check/format and Pyright pass; all five
+matching wheels and SDISTs build with required input modules/resources. It shares bounded timed typing across host and standalone input,
+allows stationary clicks within safe bounds, and adds explicit calibrated uinput
+with exact physical-device monitoring and independent hold expiry/cleanup. Forward
+continuity is confined to one admitted waypoint; stationary turns and per-waypoint
+ledger/readback remain. Host/scanner transport stays XTEST. Cold short manual uinput
+arms need positively qualified keyboard/mouse idle coverage; other topologies need
+full idle observation in a foreground session. No authorization is renewed for this.
+See [input implementation and qualification](HUMAN_INPUT.md) and the
+[reviewed plan](HUMAN_INPUT_REFACTOR_PLAN.md). New device delivery, current-client
+movement and protected trades are not live-qualified. No game input, screenshots,
+service/config changes or new device permissions are part of this source task.
+
 The user cancelled Steam Deck deployment and selected this desktop for selling.
 The exact Deck addon and staged wheels were verified and removed; no other addons,
 SavedVariables, SSH keys or services were changed. The Deck account question is

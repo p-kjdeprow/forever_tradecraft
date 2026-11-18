@@ -18,8 +18,10 @@ from typing import Any
 
 from crowley_automation.desktop_input import GuiLease
 from crowley_automation.gui.input_tool import PinnedInputTool
+from crowley_automation.gui.keyboard import KeyboardError
 from crowley_automation.gui.pointer import PointerExecutionError, validate_pointer_motion_action
 from crowley_automation.gui.process import process_start_ticks
+from crowley_automation.gui.timeline import validate_timed_keys
 
 _MAX_COMMAND_SECONDS = 30.0
 _CLEANUP_SECONDS = 2.0
@@ -234,6 +236,8 @@ class ControlChildRunner:
             raise ControlChildError("control command timeout is outside its bound")
         args = tuple(argv[1:])
         operation = _classify(pinned.name, args, expected_window=self._window_xid)
+        if operation == "key" and validate_timed_keys(args) >= timeout:
+            raise ControlChildError("declared key timeline exceeds command deadline")
         if operation != "release":
             if self._stopping():
                 self.release_only()
@@ -533,31 +537,18 @@ def _classify(
     ):
         _delay(args[3])
         return "click"
+    if args and any(token in {"keydown", "keyup"} for token in args):
+        try:
+            validate_timed_keys(args)
+        except KeyboardError as error:
+            raise ControlChildError("key transition grammar is malformed") from error
+        return "key"
     if args and args[0] == "sleep":
         try:
             validate_pointer_motion_action(args)
         except PointerExecutionError as error:
             raise ControlChildError("pointer motion is outside the pinned gesture grammar") from error
         return "motion"
-    if args and all(args[index] in {"keydown", "keyup"} for index in range(0, len(args), 2)):
-        if len(args) % 2 or not args:
-            raise ControlChildError("key transition grammar is malformed")
-        held: set[str] = set()
-        for index in range(0, len(args), 2):
-            phase, code = args[index : index + 2]
-            if not code.isdecimal() or not 8 <= int(code) <= 255:
-                raise ControlChildError("key transition code is malformed")
-            if phase == "keydown":
-                if code in held:
-                    raise ControlChildError("key transition presses an already held key")
-                held.add(code)
-            elif code not in held:
-                raise ControlChildError("key transition releases a key that is not held")
-            else:
-                held.remove(code)
-        if held:
-            raise ControlChildError("key transition leaves a key held")
-        return "key"
     raise ControlChildError("control command is outside the pinned allowlist")
 
 
@@ -609,17 +600,84 @@ def _main(argv: Sequence[str]) -> int:
             return 125
         if not _verify_lease(lease_path, lease_fd) or not _verify_image(image_fd, digest, name):
             return 125
-        if not _set_parent_death_signal():
-            return 125
-        if os.getppid() != parent_pid or process_start_ticks(parent_pid) != parent_ticks:
-            return 125
-        os.set_inheritable(lease_fd, True)
-        executable = f"/proc/self/fd/{image_fd}"
-        os.set_inheritable(image_fd, True)
-        os.execv(executable, [executable, *args])
+        return _supervise(image_fd, lease_fd, tuple(args), parent_pid, parent_ticks)
     except (OSError, ValueError, ControlChildError):
         return 125
     return 125
+
+
+def _supervise(
+    image_fd: int, lease_fd: int, args: tuple[str, ...], parent_pid: int, parent_ticks: int
+) -> int:
+    """Survive parent loss long enough to reap emission and release under its lease.
+
+    This single-threaded helper forks the sealed native image once per job, never
+    per key. Only release retries may outlive a failed job; their inherited lock
+    prevents new automation while X11 cleanup is unavailable.
+    """
+    cancelled = False
+
+    def cancel(_signal: int, _frame: object) -> None:
+        nonlocal cancelled
+        cancelled = True
+
+    signal.signal(signal.SIGTERM, cancel)
+    signal.signal(signal.SIGINT, cancel)
+    if not _set_parent_death_signal(signal.SIGTERM):
+        return 125
+    if os.getppid() != parent_pid or process_start_ticks(parent_pid) != parent_ticks:
+        return 125
+    supervisor = os.getpid()
+
+    def emitter_setup() -> None:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        if not _set_parent_death_signal() or os.getppid() != supervisor:
+            os._exit(125)
+
+    executable = f"/proc/self/fd/{image_fd}"
+    controls: list[str] = []
+    for index, token in enumerate(args[:-1]):
+        value = args[index + 1]
+        if token == "keydown":
+            controls.extend(("keyup", value))
+        elif token == "mousedown":
+            controls.extend(("mouseup", value))
+    child = subprocess.Popen([executable, *args], pass_fds=(image_fd, lease_fd), preexec_fn=emitter_setup)
+    deadline = time.monotonic() + _MAX_COMMAND_SECONDS
+    code = 125
+    try:
+        while child.poll() is None:
+            if cancelled or time.monotonic() >= deadline:
+                child.terminate()
+                try:
+                    child.wait(timeout=_REAP_SECONDS)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait()
+                break
+            time.sleep(0.01)
+        code = int(child.returncode)
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.wait()
+        if (cancelled or code != 0) and controls:
+            while True:
+                try:
+                    cleanup = subprocess.run(
+                        [executable, *controls],
+                        pass_fds=(image_fd, lease_fd),
+                        preexec_fn=emitter_setup,
+                        timeout=_CLEANUP_SECONDS,
+                        check=False,
+                    )
+                    if cleanup.returncode == 0:
+                        break
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                time.sleep(1.0)
+    return 125 if cancelled else code
 
 
 def _verify_lease(path: Path, fd: int) -> bool:
@@ -662,7 +720,7 @@ def _verify_image(fd: int, digest: str, name: str) -> bool:
     return link.startswith(f"/memfd:crowley-{name}") and seals & required == required
 
 
-def _set_parent_death_signal() -> bool:
+def _set_parent_death_signal(signum: int = signal.SIGKILL) -> bool:
     libc = ctypes.CDLL(None, use_errno=True)
     try:
         prctl = libc.prctl
@@ -670,7 +728,7 @@ def _set_parent_death_signal() -> bool:
         return False
     prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
     prctl.restype = ctypes.c_int
-    if prctl(1, signal.SIGKILL, 0, 0, 0) != 0:
+    if prctl(1, signum, 0, 0, 0) != 0:
         return False
     return True
 

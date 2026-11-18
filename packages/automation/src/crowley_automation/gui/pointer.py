@@ -411,17 +411,22 @@ class PointerExecutionError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class HumanPointerPlan:
     seed: int
-    trajectory: PointerTrajectory
+    trajectory: PointerTrajectory | None
     waypoints: tuple[Point, ...]
     click: ClickPlan | None
+    stationary: Point | None = None
 
     @property
     def endpoint(self) -> Point:
+        if self.trajectory is None:
+            if self.stationary is None:
+                raise PointerExecutionError("stationary plan has no endpoint")
+            return self.stationary
         return self.trajectory.endpoint
 
     @property
     def movement_duration(self) -> float:
-        return self.trajectory.duration
+        return 0.0 if self.trajectory is None else self.trajectory.duration
 
     @property
     def dwell(self) -> float:
@@ -452,18 +457,6 @@ def _random_waypoints(
             point = client_bounds.clip(raw).to_pixel()
             if point not in (start, endpoint) and point not in candidates:
                 candidates.append(point)
-    else:
-        # Already-at-target still receives a real, bounded out-and-back
-        # submovement. The detour stays in the verified client, while the
-        # frozen final endpoint remains exactly the selected target pixel.
-        offsets = [(x, y) for x in (-12, -7, 7, 12) for y in (-8, -4, 4, 8)]
-        rng.shuffle(offsets)
-        for ox, oy in offsets:
-            point = client_bounds.clip(Point(start.x + ox, start.y + oy)).to_pixel()
-            if point != start and point not in candidates:
-                candidates.append(point)
-                if len(candidates) == 2:
-                    break
     if not candidates:
         raise PointerExecutionError("client has no safe pixel for a bounded pointer submovement")
     return tuple(candidates)
@@ -513,6 +506,21 @@ def plan_human_pointer(
         raise PointerExecutionError("gesture seed must be an unsigned 64-bit integer")
     rng = random.Random(selected_seed)
     safe = target.safe_bounds
+    start = start.to_pixel()
+    if safe.contains(start):
+        click_plan = (
+            None
+            if button is None
+            else ClickPlan(
+                start,
+                rng.uniform(profile.min_dwell, profile.max_dwell),
+                button,
+                target.binding,
+                target.control,
+                client_bounds,
+            )
+        )
+        return HumanPointerPlan(selected_seed, None, (), click_plan, start)
     endpoint = Point(
         rng.randint(int(safe.x), int(safe.right)),
         rng.randint(int(safe.y), int(safe.bottom)),
@@ -520,8 +528,7 @@ def plan_human_pointer(
     start = start.to_pixel()
     waypoints = _random_waypoints(start, endpoint, client_bounds, rng)
     points = (start, *waypoints, endpoint)
-    # The one-at-target case gets two detours. For an ordinary path, one or
-    # two seeded waypoints provide genuine submovements without a raw warp.
+    # One or two seeded waypoints provide submovements for actual travel.
     if len(points) < 3:
         raise PointerExecutionError("pointer gesture lacks a bounded submovement")
     distance = math.hypot(endpoint.x - start.x, endpoint.y - start.y)

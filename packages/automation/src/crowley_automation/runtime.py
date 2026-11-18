@@ -82,11 +82,11 @@ def seller_runtime(
     selected_config = load_config() if config is None else config
     lease = gui_lease or GuiLease(gui_lock_path())
     runner, backend = _runtime_components(config=selected_config, ledger=ledger, lease=lease, io=io)
-    try:
-        with _lease_scope(lease):
+    with _lease_scope(lease):
+        try:
             yield ledger, runner, backend, lease
-    finally:
-        backend.close()
+        finally:
+            backend.close()
 
 
 def run_seller_child(
@@ -163,8 +163,9 @@ def run_batch(
     selected_config = load_config() if config is None else config
     lease = gui_lease or GuiLease(gui_lock_path())
     runner, backend = _runtime(batch, config=selected_config, ledger=ledger, lease=lease, io=io)
-    try:
-        with _lease_scope(lease):
+    backend.set_deadline(min(batch.expires_at, authorization.expires_at, session_arm.expires_at))
+    with _lease_scope(lease):
+        try:
             status = runner.run(
                 batch,
                 authorization=authorization,
@@ -175,8 +176,8 @@ def run_batch(
             result = dict(status)
             result["cleanup"] = backend.cleanup_state
             return result
-    finally:
-        backend.close()
+        finally:
+            backend.close()
 
 
 def dry_run_batch(
@@ -196,8 +197,9 @@ def dry_run_batch(
     selected_config = load_config() if config is None else config
     lease = gui_lease or GuiLease(gui_lock_path())
     runner, backend = _runtime(batch, config=selected_config, ledger=ledger, lease=lease, io=io)
-    try:
-        with _lease_scope(lease):
+    backend.set_deadline(min(batch.expires_at, authorization.expires_at, session_arm.expires_at))
+    with _lease_scope(lease):
+        try:
             result = runner.preflight(
                 batch,
                 authorization=authorization,
@@ -207,8 +209,8 @@ def dry_run_batch(
             )
             result["cleanup"] = backend.cleanup_state
             return result
-    finally:
-        backend.close()
+        finally:
+            backend.close()
 
 
 def maintenance_blocker(ledger_path: str | Path | None = None) -> str | None:

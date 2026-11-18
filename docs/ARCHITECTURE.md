@@ -108,12 +108,22 @@ Mail and routes persist a bounded cursor. The ledger is a private SQLite file, n
 queue, workflow framework or automatically replayed evidence log.
 
 Desktop input uses one shared GUI lease and one hard process-shared click gate with at
-least 1.0 seconds between automated presses. Every click has seeded curved, Fitts-timed
-pointer movement, endpoint variation and real button press/release. Fresh process/window,
+least 1.0 seconds between automated presses. Pointer travel uses seeded curved,
+Fitts-timed movement and endpoint variation; a pointer already inside the safe target
+stays stationary. Every click still has a real button press/release. Fresh process/window,
 focus, human-presence, target geometry and action admission checks happen before press.
 There are no raw coordinate/arbitrary Lua operation APIs. Movement follows measured raw
 UnitPosition waypoints with calibrated turn rates, bounded key holds and feedback; it
 stops on stale data, identity/build/instance drift, combat/death/mount, takeover or no progress.
+The shared immutable keyboard timeline emits one monitored command per string, with
+bounded cadence/dwell, complete upfront validation and fresh exact readback before
+separate Return. A per-job XTEST supervisor releases possible controls after parent
+loss; pending cleanup retains the canonical lease and sealed tool. Host/scanner delivery remains XTEST. Standalone automation can
+explicitly select a calibrated uinput helper; it owns raw activity monitoring,
+relative-pointer feedback, held-state teardown and its inherited GUI lease.
+Only that transport supports forward continuity inside one admitted waypoint.
+Turning stays stationary; every waypoint releases before final readback/receipt.
+See [input contracts and qualification](HUMAN_INPUT.md).
 
 The GUI lease does not stop in-client scan timers. The optional Crowley_Host addon bridges
 only the public scanner suspend/quiescent/resume contract to automation AH ownership.
@@ -146,6 +156,8 @@ Client assumptions are explicit and bounded by their evidence:
 | Equal-price commodity purchase rank and cancellation-to-mail linkage are unavailable | Explicit seller policy uses one matched-price refresh per item per 60 seconds and exact commodity returns bounded by outstanding cancellation quantity |
 | Item result IDs can change after partial sales or reposts | Native evidence; market comparison uses owner/price continuity, not disappearing IDs alone |
 | Mutter IdleMonitor measures physical input without counting XTEST | Existing host qualification; unavailable presence fails input admission |
+| uinput is an explicit, unqualified virtual-device transport | Requires current-session mapping/pointer calibration, complete physical coverage, qualified keyboard/mouse idle bootstrap or full observed idle history; no XTEST fallback |
+| Continuous forward movement is limited to one admitted waypoint | Independent feedback/travel/auth/watchdog budgets; release before stationary turns, native receipt and next chat staging; moving turns remain unsupported |
 | XTEST delivery can lag about a second and compositor focus matters | Existing host qualification; commands wait for fresh chat readback before Return |
 | UnitPosition heading follows atan2(dy,dx), forward=(cos facing,sin facing) | Historical measured route evidence only; each route profile pins current build/instance and calibrated signed rates |
 | Arrow bindings identify forward/left/right | Native binding readback required before holds; no default W/A/D assumptions |

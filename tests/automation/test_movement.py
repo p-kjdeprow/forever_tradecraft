@@ -345,3 +345,105 @@ def test_motion_rejects_bool_numbers_bad_facing_and_non_boolean_flags() -> None:
         Motion(
             "boot", 0.0, 0.0, 0.0, 0.0, 1, "1.60.1.70938", "us-normal-horde", "Tester", 1, False, False, False
         )
+
+
+def test_continuous_forward_preserves_key_through_feedback_but_releases_at_waypoint():
+    from types import SimpleNamespace
+
+    from crowley_automation.gui.uinput_worker import DeviceState
+
+    route = profile(waypoints=((1.0, 0.0), (2.0, 0.0)))
+    world = SimulatedMotion(route)
+    events = []
+    device = SimpleNamespace(write=lambda *args: events.append(args), syn=lambda: None)
+    monitor = SimpleNamespace(check=lambda: None, active=lambda: False)
+    state = DeviceState(device, monitor, clock=lambda: world.now, wall=lambda: 1000)
+    budgets = []
+
+    def hold(keys, budget):
+        assert keys == ("Up",)
+        budgets.append(budget)
+        state.authorize(2000)
+        state.feedback = world.now + 2
+        state.travel = world.now + budget
+        state.heartbeat = world.now
+        state.key(103, True)
+        # Feedback cadence is independent of the hold's travel/freshness budget.
+        duration = min(0.1, budget)
+        world.now += duration
+        world.x += duration
+
+    for index in range(2):
+        try:
+            result = walk_waypoint(
+                route,
+                index,
+                sample=world.sample,
+                hold=hold,
+                monotonic=lambda: world.now,
+                stop=lambda: False,
+                continuous_forward=lambda deadline, _observed: hold(("Up",), deadline - world.now),
+                release_forward=state.release,
+            )
+            assert result.reached
+        finally:
+            state.release()
+        assert not state.held
+    assert max(budgets) > MAX_HOLD_SECONDS
+    assert events == [(1, 103, 1), (1, 103, 0), (1, 103, 1), (1, 103, 0)]
+
+
+def test_continuous_approach_rebaselines_after_stopping_before_stationary_turn():
+    from dataclasses import replace
+
+    route = profile(waypoints=((1.0, 0.12),))
+    world = SimulatedMotion(route)
+    active = [False]
+    stopped_samples, turns = [], []
+
+    def advance(seconds):
+        if active[0]:
+            world.x += math.cos(world.facing) * seconds
+            world.y += math.sin(world.facing) * seconds
+        world.now += seconds
+
+    def sample():
+        # Capture reports its starting position, with real travel during return latency.
+        value = replace(world.sample(), moving=active[0])
+        advance(0.12)
+        if not active[0]:
+            stopped_samples.append((value.x, value.y))
+        return value
+
+    def forward(deadline, _observed):
+        assert deadline > world.now
+        active[0] = True
+        advance(min(0.1, deadline - world.now))
+
+    def release():
+        if active[0]:
+            advance(0.03)  # release transport latency while the old key is still held
+        active[0] = False
+
+    def hold(keys, seconds):
+        assert not active[0]
+        assert stopped_samples[-1] == pytest.approx((world.x, world.y))
+        turns.append(keys)
+        world.hold(keys, seconds)
+
+    try:
+        result = walk_waypoint(
+            route,
+            0,
+            sample=sample,
+            hold=hold,
+            monotonic=lambda: world.now,
+            stop=lambda: False,
+            continuous_forward=forward,
+            release_forward=release,
+        )
+        assert result.reached, result.reason
+        assert turns and all(keys in {("Left",), ("Right",)} for keys in turns)
+        assert len(stopped_samples) > 1
+    finally:
+        release()

@@ -357,8 +357,12 @@ def click_control(
         )
         if plan.click is None:
             raise BattleNetPlayError("startup pointer plan has no click")
-        chain = build_pointer_motion_chain(plan.trajectory, (0, 0, display[0], display[1]))
-        first = plan.trajectory.samples[0].point
+        chain = (
+            None
+            if plan.trajectory is None
+            else build_pointer_motion_chain(plan.trajectory, (0, 0, display[0], display[1]))
+        )
+        first = plan.endpoint if plan.trajectory is None else plan.trajectory.samples[0].point
         endpoint = (int(plan.endpoint.x), int(plan.endpoint.y))
         evidence.update(
             {
@@ -370,16 +374,18 @@ def click_control(
                 "movementDuration": plan.movement_duration,
                 "dwell": plan.click.dwell,
                 "samples": [
-                    [sample.at, sample.point.x, sample.point.y] for sample in plan.trajectory.samples
+                    [sample.at, sample.point.x, sample.point.y]
+                    for sample in (() if plan.trajectory is None else plan.trajectory.samples)
                 ],
-                "motionArgv": chain[1:],
+                "motionArgv": [] if chain is None else chain[1:],
             }
         )
         _write_evidence(evidence_path, evidence)
         if _pointer_position_with_runner(tool, control_run, current_env)[:2] != (int(first.x), int(first.y)):
             raise BattleNetPlayError("pointer start changed before startup motion")
         guard()
-        emit(chain[1:], plan.movement_duration + _COMMAND_TIMEOUT_SECONDS)
+        if chain is not None:
+            emit(chain[1:], plan.movement_duration + _COMMAND_TIMEOUT_SECONDS)
         end_x, end_y, end_window = _pointer_position_with_runner(tool, control_run, current_env)
         if (end_x, end_y) != endpoint or not _is_window_or_descendant(end_window, window, env=current_env):
             raise BattleNetPlayError("pointer did not reach the verified startup control")

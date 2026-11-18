@@ -99,16 +99,3 @@ def char_transitions(char: str) -> tuple[KeyStep, ...]:
         [("press", component) for component in components]
         + [("release", component) for component in reversed(components)]
     )
-
-
-def type_text_argv(text: str, keymap: Mapping[str, int]) -> list[tuple[list[str], frozenset[str]]]:
-    """Return one ``(argv, held_keys)`` action per character of ``text``.
-
-    ``xdotool type`` emits one opaque command with no way to correlate each
-    character's raw/delivered press and release, so each character is its own
-    XTEST key action.  Characters are validated lazily by the caller iterating
-    ``char_transitions`` when execution order matters; this helper validates
-    the whole text up front.
-    """
-
-    return [transition_argv(char_transitions(char), keymap) for char in text]

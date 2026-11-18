@@ -89,7 +89,9 @@ def test_press_and_chord_argv() -> None:
 def test_type_text_is_one_explicit_transition_chain_with_shift_nested() -> None:
     runner = Runner()
     keys(runner).type_text("/Ad")
-    assert [c[1:] for c in sent(runner)] == [
+    assert [
+        [token for i, token in enumerate(c[1:]) if c[1:][i - i % 2] != "sleep"] for c in sent(runner)
+    ] == [
         [
             "keydown",
             "061",

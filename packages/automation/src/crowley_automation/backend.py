@@ -28,9 +28,11 @@ from .desktop_observe import (
     x11_environment,
     x11_runner,
 )
+from .desktop_session import DesktopSessionProvider
 from .gui.click_gate import ClickRatePermit, acquire_click_rate_permit
+from .gui.control_child import ControlChildRunner
 from .gui.input_tool import PinnedInputTool
-from .gui.keyboard import char_transitions, key_argv, transition_argv
+from .gui.keyboard import key_argv, transition_argv
 from .gui.pointer import (
     BindingMetadata,
     Point,
@@ -41,6 +43,8 @@ from .gui.pointer import (
     plan_human_pointer,
 )
 from .gui.process import OwnedGameMatcher
+from .gui.timeline import plan_text
+from .gui.uinput import UinputSession, calibration
 from .movement import Motion, RouteProfile, WaypointResult, walk_waypoint
 from .presence import Presence
 from .runner import Admission, DispatchReceipt
@@ -129,15 +133,117 @@ class DesktopIO:
         self._presence = presence or Presence()
         self._tool: PinnedInputTool | None = None
         self._keys: XtestKeys | None = None
+        self._control: ControlChildRunner | None = None
+        self._devices: UinputSession | None = None
+        self._calibration: dict[str, Any] | None = None
+        self._lease: GuiLease | None = None
+        self._during: Callable[[], None] = lambda: None
+        self._preparing: Callable[[], None] = lambda: None
+        self._stopping: Callable[[], bool] = lambda: False
+        self._deadline: Callable[[], float] = lambda: 0.0
+        self._session = DesktopSessionProvider(config.display)
+        self._session_fingerprint: str | None = None
+        self._process_identities: tuple[Any, ...] | None = None
+        self._display_size: tuple[int, int] | None = None
+
+    def bind_input(
+        self,
+        lease: GuiLease,
+        *,
+        during: Callable[[], None],
+        stopping: Callable[[], bool],
+        deadline: Callable[[], float],
+        preparing: Callable[[], None],
+    ) -> None:
+        self._lease, self._during, self._stopping, self._deadline = lease, during, stopping, deadline
+        self._preparing = preparing
+        lease.protect_release(self._input_released)
+
+    def _input_released(self) -> bool:
+        control = self._control
+        control_ready = control is None or (
+            control.child_pid is None and not control.possible_down and not control.cleanup_failed
+        )
+        return control_ready and (self._devices is None or self._devices.released)
+
+    def _device_session(self) -> UinputSession:
+        if self._devices is None:
+            if self._lease is None or self.config.input_calibration is None:
+                raise DesktopBackendError("selected device transport is not bound and calibrated")
+            measured = calibration(self.config.input_calibration, environment=self._env)
+            if not measured["idle_coverage"] and 0 < self._deadline() - time.time() <= 300:
+                raise DesktopBackendError(
+                    "cold uinput lacks qualified idle history for this short arm; "
+                    "qualify keyboard/mouse idle coverage or prepare a foreground seller session"
+                )
+            if self._display_size is not None and self._display_size != tuple(measured["display_size"]):
+                raise DesktopBackendError("calibrated display dimensions changed")
+            self._calibration = measured
+            self._devices = UinputSession(
+                self._lease,
+                measured,
+                environment=self._env,
+                guard=self._during,
+                deadline=self._deadline,
+                preparing=self._preparing,
+            )
+        return self._devices
+
+    def _human_active(self) -> tuple[bool, str]:
+        if self.config.input_backend == "uinput":
+            if self._calibration is not None and self._display_size != tuple(
+                self._calibration["display_size"]
+            ):
+                raise DesktopBackendError("calibrated display dimensions changed")
+            return self._device_session().human_active()
+        return self._presence.human_active()
+
+    def check_emission(self, captured: CapturedFrame) -> None:
+        """No capture and no reuse of stale native evidence as admission."""
+        session = self._session.current()
+        if self._session_fingerprint is None or session.fingerprint != self._session_fingerprint:
+            raise DesktopBackendError("graphical session changed during input")
+        pids = tuple(self._process.pids())
+        if pids != captured.pids or captured.window.xid is None or len(pids) != 1:
+            raise DesktopBackendError("owned process changed during input")
+        if self._process.identities() != self._process_identities:
+            raise DesktopBackendError("owned process instance changed during input")
+        owned, focused = self._window_source.focus_state(captured.window.xid, pids[0])
+        if not owned or not focused:
+            raise DesktopBackendError("owned game focus changed during input")
+        # The helper monitors physical devices independently; nested status requests
+        # during an executing job would corrupt the request/response stream.
+        if self.config.input_backend == "xtest" and self._presence.human_active()[0]:
+            raise DesktopBackendError("human presence blocks input")
 
     def _ensure_input(self) -> tuple[PinnedInputTool, XtestKeys]:
         if self._tool is None:
             self._tool = PinnedInputTool.load()
-            self._keys = XtestKeys(self._tool, self._env, run=self._runner)
+            if self._lease is None:
+                raise DesktopBackendError("input requires its bound GUI lease")
+            self._control = ControlChildRunner(
+                self._lease,
+                self._tool,
+                environment=self._env,
+                stopping=self._stopping,
+                guard=self._during,
+                during=self._during,
+            )
+            self._keys = XtestKeys(self._tool, self._env, run=self._control.run, query_run=self._runner)
         assert self._keys is not None
         return self._tool, self._keys
 
     def capture(self, *, timeout: float = 5.0) -> CapturedFrame:
+        if self.config.input_backend == "uinput":
+            # Device preparation can establish initial idle coverage. Do it
+            # before starting any native-frame freshness clock.
+            self._device_session()
+        session = self._session.current()
+        if dict(session.environment).get("XAUTHORITY") != self._env.get("XAUTHORITY"):
+            raise DesktopBackendError("authenticated graphical session changed")
+        if self._session_fingerprint is not None and self._session_fingerprint != session.fingerprint:
+            raise DesktopBackendError("graphical session identity changed")
+        self._session_fingerprint = session.fingerprint
         deadline = time.monotonic() + timeout
         last_reason = "automation publication has not advanced"
         while time.monotonic() < deadline:
@@ -145,6 +251,10 @@ class DesktopIO:
             pids = tuple(self._process.pids())
             if not pids:
                 raise DesktopBackendError("no owned game process")
+            identities = self._process.identities()
+            if self._process_identities is not None and identities != self._process_identities:
+                raise DesktopBackendError("owned game process instance changed")
+            self._process_identities = identities
             window = self._window_source.observe(list(pids))
             if not window.ok or window.xid is None:
                 raise DesktopBackendError(f"game window is not valid: {window.detail}")
@@ -165,7 +275,8 @@ class DesktopIO:
                 or time.monotonic() - began > MAX_FRAME_AGE_SECONDS
             ):
                 raise DesktopBackendError("process, window, or capture age changed during observation")
-            active, reason = self._presence.human_active()
+            self._display_size = window.display
+            active, reason = self._human_active()
             if sample.kind == "FRESH" and sample.frame is not None:
                 self._validate_identity(sample.frame.snapshot.value)
                 return CapturedFrame(sample, current_window, pids, active, reason)
@@ -188,7 +299,7 @@ class DesktopIO:
             or time.monotonic() - captured.sample.capture_monotonic > MAX_FRAME_AGE_SECONDS
         ):
             raise DesktopBackendError("process, window, or original capture changed during input")
-        active, reason = self._presence.human_active()
+        active, reason = self._human_active()
         return replace(captured, window=window, human_active=active, human_reason=reason)
 
     def _validate_identity(self, snapshot: dict[str, Any]) -> None:
@@ -218,6 +329,10 @@ class DesktopIO:
             raise DesktopBackendError("measured keymap is unavailable") from exc
         if done.returncode != 0:
             raise DesktopBackendError("measured keymap query failed")
+        if self._calibration is not None and (
+            hashlib.sha256(done.stdout.encode()).hexdigest() != self._calibration["x_keymap_sha256"]
+        ):
+            raise DesktopBackendError("qualified keyboard layout changed")
         return parse_keymap(done.stdout)
 
     def _send_keys(self, argv: list[str], held: frozenset[str], guard: Callable[[], None]) -> None:
@@ -241,9 +356,20 @@ class DesktopIO:
         self._send_keys(argv, held, guard)
 
     def _emit(self, args: Sequence[str], timeout: float) -> str:
+        if self.config.input_backend == "uinput" and tuple(args) != ("getmouselocation", "--shell"):
+            devices = self._device_session()
+            if args and args[0] in {"sleep", "mousedown"}:
+                if (
+                    calibration(self.config.input_calibration or "", environment=self._env)
+                    != self._calibration
+                ):
+                    raise DesktopBackendError("qualified pointer settings or calibration changed")
+            devices.execute(args, timeout=timeout)
+            return ""
         tool, _keys = self._ensure_input()
+        assert self._control is not None
         try:
-            done = self._runner(
+            done = self._control.run(
                 [tool.proc_path, *args],
                 capture_output=True,
                 text=True,
@@ -259,24 +385,47 @@ class DesktopIO:
         return done.stdout
 
     def type_text(self, text: str, guard: Callable[[], None]) -> None:
-        # Every character is its own guarded XTEST transition.
-        keymap = self._keymap()
-        for char in text:
-            argv, held = transition_argv(char_transitions(char), keymap)
-            guard()
-            try:
-                self._emit(argv[1:], COMMAND_TIMEOUT_SECONDS)
-            except BaseException:
-                for code in sorted(held, reverse=True):
-                    try:
-                        self._emit(["keyup", code], 2.0)
-                    except Exception:
-                        pass
-                raise
+        plan = plan_text(text)
+        if not plan.events:
+            return
+        argv, _held = plan.xtest(self._keymap())
+        guard()
+        try:
+            self._emit(argv[1:], plan.timeout)
+        except BaseException:
+            if self._control is not None:
+                self._control.release_only()
+            if self._devices is not None:
+                self._devices.close()
+            raise
 
     def hold(self, key: str, seconds: float, guard: Callable[[], None]) -> None:
+        if self.config.input_backend == "uinput":
+            if key not in {"Up", "Left", "Right"} or not 0 < seconds <= 0.25:
+                raise DesktopBackendError("bounded movement hold is invalid")
+            argv, _held = key_argv(key, self._keymap())
+            guard()
+            self._emit([*argv[1:3], "sleep", str(seconds), *argv[3:]], seconds + 3)
+            return
         _tool, keys = self._ensure_input()
         keys.hold(key, seconds, guard)
+
+    def forward(self, travel_deadline: float, observed_at: float) -> None:
+        code = self._keymap().get("Up")
+        if code is None:
+            raise DesktopBackendError("forward key has no measured mapping")
+        devices = self._device_session()
+        # X and evdev codes are separate; only the explicit qualified mapping is used.
+        measured = self._calibration
+        assert measured is not None
+        evdev_code = measured["x_to_evdev"].get(str(code))
+        if evdev_code is None:
+            raise DesktopBackendError("forward key has no qualified evdev mapping")
+        devices.forward(evdev_code, feedback_deadline=observed_at + 2.0, travel_deadline=travel_deadline)
+
+    def release_movement(self) -> None:
+        if self._devices is not None:
+            self._devices.release_all()
 
     def pointer_position(self) -> tuple[int, int, int]:
         output = self._emit(["getmouselocation", "--shell"], COMMAND_TIMEOUT_SECONDS)
@@ -326,10 +475,18 @@ class DesktopIO:
         time.sleep(seconds)
 
     def close(self) -> None:
+        if self._devices is not None:
+            self._devices.close()
+        if self._control is not None:
+            self._control.close()
+        if not self._input_released():
+            raise DesktopBackendError("input cleanup is incomplete; GUI lease remains held")
         if self._tool is not None:
             self._tool.close()
             self._tool = None
             self._keys = None
+        if self._lease is not None:
+            self._lease.release_retained()
 
 
 class DesktopBackend:
@@ -358,6 +515,21 @@ class DesktopBackend:
         self.preflight_gold: int | None = None
         self.cleanup_state = "not_needed"
         self.evidence_state = "not_written"
+        if isinstance(self.io, DesktopIO):
+            self.io.bind_input(
+                lease,
+                during=self._emission_guard,
+                stopping=lambda: self.stop_requested(),
+                deadline=lambda: float(self._deadline_wall),
+                preparing=self._check_controls,
+            )
+
+    def _emission_guard(self) -> None:
+        self._check_controls()
+        if self._snapshot is None or not isinstance(self.io, DesktopIO):
+            raise DesktopBackendError("input has no admitted desktop snapshot")
+        self.io.check_emission(self._snapshot)
+        self._check_controls()
 
     def set_deadline(self, expires_at: int) -> None:
         self._deadline_wall = expires_at
@@ -434,6 +606,8 @@ class DesktopBackend:
             raise DesktopBackendError("durable stop is active")
         if not self.lease.held:
             raise DesktopBackendError("shared GUI lease is not held")
+        if self.lease.retained:
+            raise DesktopBackendError("input cleanup is incomplete; GUI lease remains held")
         if self._deadline_wall and self.io.wall_time() >= self._deadline_wall:
             raise DesktopBackendError("batch, authorization, or session arm expired")
 
@@ -865,14 +1039,19 @@ class DesktopBackend:
             if plan.click is None:
                 raise DesktopBackendError("pointer plan has no left click")
             endpoint = (int(plan.endpoint.x), int(plan.endpoint.y))
-            first = plan.trajectory.samples[0].point
+            first = plan.endpoint if plan.trajectory is None else plan.trajectory.samples[0].point
             if (x, y) != (int(first.x), int(first.y)):
                 raise DesktopBackendError("pointer changed before its planned path")
-            chain = build_pointer_motion_chain(plan.trajectory, (0, 0, width, height))
+            chain = (
+                None
+                if plan.trajectory is None
+                else build_pointer_motion_chain(plan.trajectory, (0, 0, width, height))
+            )
             self._write_evidence(
                 batch_id, ordinal, step, plan.seed, (x, y), endpoint, plan.movement_duration, 0, 0
             )
-            self.io.emit(chain[1:], plan.movement_duration + COMMAND_TIMEOUT_SECONDS)
+            if chain is not None:
+                self.io.emit(chain[1:], plan.movement_duration + COMMAND_TIMEOUT_SECONDS)
             self._guard()
             end_x, end_y, end_window = self.io.pointer_position()
             if (end_x, end_y) != endpoint or not bounds.contains(Point(end_x, end_y)):
@@ -1171,6 +1350,10 @@ class DesktopBackend:
         if route is None:
             raise DesktopBackendError("route profile is not configured")
 
+        continuous_io = (
+            self.io if isinstance(self.io, DesktopIO) and self.config.input_backend == "uinput" else None
+        )
+
         def sample() -> Motion:
             captured = self._fresh_guard()
             value = captured.value
@@ -1195,6 +1378,8 @@ class DesktopBackend:
         def hold(keys: tuple[str, ...], seconds: float) -> None:
             if len(keys) != 1 or keys[0] not in {"Up", "Left", "Right"}:
                 raise DesktopBackendError("movement controller selected an unsupported key")
+            if continuous_io is not None:
+                continuous_io.release_movement()
 
             def hold_guard() -> None:
                 captured = self._fresh_guard()
@@ -1205,14 +1390,25 @@ class DesktopBackend:
             hold_guard()
             self.io.hold(keys[0], seconds, hold_guard)
 
-        result: WaypointResult = walk_waypoint(
-            route,
-            step,
-            sample=sample,
-            hold=hold,
-            monotonic=self.io.monotonic,
-            stop=self.stop_requested,
-        )
+        def forward(travel_deadline: float, observed_at: float) -> None:
+            assert continuous_io is not None
+            continuous_io.forward(travel_deadline, observed_at)
+            self.io.sleep(max(0.0, min(0.1, travel_deadline - self.io.monotonic())))
+
+        try:
+            result: WaypointResult = walk_waypoint(
+                route,
+                step,
+                sample=sample,
+                hold=hold,
+                monotonic=self.io.monotonic,
+                stop=self.stop_requested,
+                continuous_forward=forward if continuous_io is not None else None,
+                release_forward=continuous_io.release_movement if continuous_io is not None else None,
+            )
+        finally:
+            if continuous_io is not None:
+                continuous_io.release_movement()
         final = self._fresh_guard()
         final_motion, final_context = final.value["motion"], final.value["context"]
         self._check_route_bindings(final_motion, route, final_context, self.config)
@@ -1328,6 +1524,10 @@ class DesktopBackend:
         if kind not in {"inventory", "owned", "mail"} or type(page) is not int or not 0 <= page <= 4095:
             raise DesktopBackendError("inspection kind or page is invalid")
         before = self._fresh_guard()
+        if not self._deadline_wall:
+            # Read-only preparation (including initial history) precedes this
+            # bounded command deadline. Existing authorizations never renew.
+            self.set_deadline(int(self.io.wall_time()) + 120)
         before_frame = before.sample.frame
         if before_frame is None:
             raise DesktopBackendError("native inspection baseline has no frame sequence")

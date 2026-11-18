@@ -619,7 +619,14 @@ def test_single_character_helper_runs_exactly_one_fresh_full_admission_guard(tmp
 
     def fake_popen(command, **_kwargs):
         events.append("popen")
-        assert command[-4:] == ["keydown", "038", "keyup", "038"]
+        start = command.index("keydown")
+        actions = command[start:]
+        assert [token for i, token in enumerate(actions) if actions[i - i % 2] != "sleep"] == [
+            "keydown",
+            "038",
+            "keyup",
+            "038",
+        ]
         return CompletedChild()
 
     def query_run(*_args, **_kwargs):
@@ -734,3 +741,66 @@ def test_parent_death_kills_exact_delayed_control_and_releases_lease(tmp_path: P
 
     with GuiLease(lock_path, timeout=0.2).hold():
         pass
+
+
+def test_parent_death_releases_pressed_fake_key_before_inherited_lease_opens(tmp_path: Path) -> None:
+    source = tmp_path / "fake-input.c"
+    binary = tmp_path / "fake-input"
+    source.write_text(r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+int main(int argc, char **argv) {
+    if (argc < 3) return 2;
+    FILE *f = fopen(getenv("FAKE_KEY_EVENTS"), "a");
+    if (!f) return 3;
+    fputs(strcmp(argv[1], "keydown") == 0 ? "down\n" : "up\n", f);
+    fclose(f);
+    if (strcmp(argv[1], "keydown") == 0) sleep(60);
+    return 0;
+}
+""")
+    subprocess.run(["cc", str(source), "-o", str(binary)], check=True)
+    lock = tmp_path / "private" / "gui.lock"
+    log = tmp_path / "keys"
+    helper = r"""
+import fcntl, hashlib, os, sys
+from pathlib import Path
+from types import SimpleNamespace
+from crowley_automation.desktop_input import GuiLease
+from crowley_automation.gui.control_child import ControlChildRunner, _memfd_create, _write_all, _F_ADD_SEALS, _SEAL_WRITE, _SEAL_GROW, _SEAL_SHRINK, _SEAL_SEAL
+binary, lock, log = map(Path, sys.argv[1:])
+data = binary.read_bytes()
+image = _memfd_create('crowley-xdotool')
+_write_all(image,data)
+os.fchmod(image,0o700)
+fcntl.fcntl(image,_F_ADD_SEALS,_SEAL_WRITE|_SEAL_GROW|_SEAL_SHRINK|_SEAL_SEAL)
+tool = SimpleNamespace(image=SimpleNamespace(fd=image),proc_path=f'/proc/self/fd/{image}',digest=hashlib.sha256(data).hexdigest())
+lease = GuiLease(lock)
+with lease.hold():
+    runner = ControlChildRunner(lease,tool,environment={'DISPLAY':':99','XAUTHORITY':'/fake/authority','FAKE_KEY_EVENTS':str(log)},stopping=lambda:False,guard=lambda:None)
+    runner.run([tool.proc_path,'keydown','038','sleep','1','keyup','038'],pass_fds=(image,),timeout=30)
+"""
+    parent = subprocess.Popen(
+        [sys.executable, "-c", helper, str(binary), str(lock), str(log)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and (not log.exists() or not log.read_text()):
+            if parent.poll() is not None:
+                pytest.fail(parent.communicate()[1])
+            time.sleep(0.01)
+        assert log.read_text() == "down\n"
+        parent.kill()
+        parent.wait(timeout=2)
+        # Acquisition itself waits for the surviving supervisor's cleanup.
+        with GuiLease(lock, timeout=3).hold():
+            assert log.read_text().splitlines() == ["down", "up"]
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+            parent.wait(timeout=2)

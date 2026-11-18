@@ -55,10 +55,10 @@ def test_already_at_target_and_edge_target_keep_exact_endpoint_inside_client() -
     tiny = PointerTarget("edge", Rect(0, 0, 1, 1), _binding(), padding=0)
     plan = pointer_exec.plan_human_pointer(Point(0, 0), tiny, bounds, seed=5)
     assert plan.endpoint == Point(0, 0)
-    assert len(plan.waypoints) >= 2
-    assert plan.trajectory.samples[-1].point == Point(0, 0)
-    assert all(bounds.contains(sample.point) for sample in plan.trajectory.samples)
-    assert len({sample.point for sample in plan.trajectory.samples}) > 2
+    assert plan.waypoints == ()
+    assert plan.trajectory is None
+    assert plan.movement_duration == 0
+    assert plan.click is not None and plan.click.point == Point(0, 0)
 
 
 def test_native_motion_argv_is_positive_bounded_and_rejects_warp() -> None:

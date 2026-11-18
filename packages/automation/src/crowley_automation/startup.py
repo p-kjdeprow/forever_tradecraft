@@ -359,9 +359,14 @@ class StartupRecovery:
                 identity=None,
                 window=None,
             )
-        except CaptureError as error:
+        except (CaptureError, ObserveError) as error:
             message = f"{type(error).__name__}: {' '.join(str(error).split())}"
-            prefix = "startup screen capture failed: "
+            observation_failed = isinstance(error, ObserveError)
+            prefix = (
+                "startup desktop observation failed: "
+                if observation_failed
+                else "startup screen capture failed: "
+            )
             _LOG.warning("%s%s", prefix, message[: 200 - len(prefix)])
             self._last_native = None
             phase = self._phase()
@@ -388,9 +393,18 @@ class StartupRecovery:
                     identity=self._last_identity,
                     window=self._last_window,
                 )
+            if self._clock() >= deadline:
+                reason = (
+                    "episode_deadline_expired"
+                    if self._clock() >= self._episode_deadline
+                    else "observation_deadline_expired"
+                )
+                return self._finish("failed", phase, reason)
             return self._wait(
                 phase,
-                "screen_capture_failed_reobserve",
+                "desktop_observation_failed_reobserve"
+                if observation_failed
+                else "screen_capture_failed_reobserve",
                 identity=self._last_identity,
                 window=self._last_window,
                 deadline=deadline,
@@ -415,7 +429,6 @@ class StartupRecovery:
                 )
             return self._finish("failed", self._phase(), _safe_failure_reason(error))
         except (
-            ObserveError,
             ControlChildCancelled,
             ControlChildError,
             BattleNetPlayError,

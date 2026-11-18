@@ -1,9 +1,32 @@
 # Current handoff
 
-Updated 2026-11-17. The user authorized the repository refactor, parallel Luna implementation
+Updated 2026-11-18. The user authorized the repository refactor, parallel Luna implementation
 and independent Sol review loops, commits on main/origin/main, and task artifact cleanup.
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
+
+Scanner recovery on Nov 18 found the host alive but permanently latched in
+`startup_failed/desktop_observation_failed` since Nov 17 20:42 CST. The last accepted
+sweep was 937 (21:06 CST), and the existing client showed WOW51900319. A guarded
+normal WM close verified exact process exit; the existing Battle.net instance
+relaunched the client. Initial character-entry revalidation refused a changed
+control before press; a fresh attempt entered Dandune. Another single observation
+error latched during binding despite a later healthy native read.
+
+A narrow startup hotfix now treats ObserveError like existing capture failure:
+release owned controls, invalidate stale proof, and retry observation under the
+original episode/phase deadlines. Expiry remains terminal and unreaped controls
+retain ownership. Sol reviewed READY after the phase-expiry regression; 148 focused
+tests, Ruff and Pyright pass. The deployed automation wheel was built from the
+installed 8b755b9 baseline plus only startup.py; all 47 package resources were checked
+and only that module differs. Installed bytes match the wheel, doctor passes, and
+listing/uinput changes remain undeployed. Recovery sweep 939 finished Nov 18 at
+00:36:53 CST and uploaded at 00:37:27: all 471 planned items queried successfully,
+14,038 listings accepted. The website, trading summary (123 candidates, ten
+opportunities) and recipe watch all serve that sweep with HTTP 200. Private receipts
+and exact rollback wheel are in `~/.local/state/crowley/scanner-recovery-20261118/`.
+Do not equate unit activity/website HTTP success with successful collection. See
+[the incident record](SCANNER_RECOVERY_20261118.md).
 
 New listing policies and manual batches now default to **two hours** when
 `durationHours` is omitted; canonical inspection makes that value explicit before

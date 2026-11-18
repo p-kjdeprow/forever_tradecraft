@@ -15,6 +15,9 @@ trading, account changes or unrelated display changes.
 - Look first, do not act: `systemctl --user status crowley-host`, `crowley-host status` (action, fault code,
   observation summary), `journalctl --user -u crowley-host -n 50`, `crowley-desktop probe-frame`
   (exit 0 frame decoded, 1 verified none, 3 error).
+- An active service and HTTP 200 do not establish collection. Check the host fault/detail,
+  fresh native/scanner progress and a newly accepted sweep before reporting the scanner
+  online. A failed startup can leave its process alive while collection is stalled.
 - Any physical input holds the loop for 5 minutes (Mutter IdleMonitor), so a human using the desktop is safe.
   For longer manual work stop the loop: `systemctl --user stop crowley-host` (the game keeps running) and start it
   again when done.

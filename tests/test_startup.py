@@ -1698,8 +1698,12 @@ def test_capture_that_takes_too_long_is_waited_and_reobserved_as_stale(
     assert recovery.active
 
 
+@pytest.mark.parametrize("error_type", [CaptureError, startup_module.ObserveError])
 def test_capture_failure_releases_lease_and_reobserves_with_original_deadlines(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    error_type: type[Exception],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     recovery, clock, provider, lease, _presence = _fake_recovery(tmp_path, monkeypatch)
     provider.available = True
@@ -1715,7 +1719,7 @@ def test_capture_failure_releases_lease_and_reobserves_with_original_deadlines(
         nonlocal attempts
         attempts += 1
         if attempts == 1:
-            raise CaptureError("diagnostic details that must not enter status")
+            raise error_type("diagnostic details that must not enter status")
         return recovery._finish("ready", "native_ready", "matching_native_world_ready", native=True)
 
     monkeypatch.setattr(recovery, "_step_locked", observe)
@@ -1723,7 +1727,12 @@ def test_capture_failure_releases_lease_and_reobserves_with_original_deadlines(
         unavailable = recovery.step()
     original_deadline = recovery._episode_deadline
     assert unavailable.outcome == "waiting"
-    assert unavailable.reason == "screen_capture_failed_reobserve"
+    expected_reason = (
+        "desktop_observation_failed_reobserve"
+        if error_type is startup_module.ObserveError
+        else "screen_capture_failed_reobserve"
+    )
+    assert unavailable.reason == expected_reason
     assert unavailable.deadline_at == pytest.approx(10_015.0)
     assert "diagnostic details" not in unavailable.reason
     assert not recovery.active
@@ -1740,15 +1749,16 @@ def test_capture_failure_releases_lease_and_reobserves_with_original_deadlines(
     assert recovery._play_attempts == 2
 
 
+@pytest.mark.parametrize("error_type", [CaptureError, startup_module.ObserveError])
 def test_repeated_capture_failures_expire_original_episode_deadline(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    error_type: type[Exception], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recovery, clock, provider, _lease, _presence = _fake_recovery(tmp_path, monkeypatch)
     provider.available = True
     monkeypatch.setattr(
         recovery,
         "_step_locked",
-        lambda _session: (_ for _ in ()).throw(CaptureError("capture unavailable")),
+        lambda _session: (_ for _ in ()).throw(error_type("capture unavailable")),
     )
 
     first = recovery.step()
@@ -1761,8 +1771,9 @@ def test_repeated_capture_failures_expire_original_episode_deadline(
     assert recovery._episode_deadline == original_deadline == pytest.approx(600.0)
 
 
+@pytest.mark.parametrize("error_type", [CaptureError, startup_module.ObserveError])
 def test_capture_failure_with_unreaped_control_retains_gui_ownership(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    error_type: type[Exception], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recovery, _clock, provider, lease, _presence = _fake_recovery(tmp_path, monkeypatch)
     provider.available = True
@@ -1779,7 +1790,7 @@ def test_capture_failure_with_unreaped_control_retains_gui_ownership(
     monkeypatch.setattr(
         recovery,
         "_step_locked",
-        lambda _session: (_ for _ in ()).throw(CaptureError("capture unavailable")),
+        lambda _session: (_ for _ in ()).throw(error_type("capture unavailable")),
     )
 
     status = recovery.step()
@@ -1905,3 +1916,28 @@ def test_capture_child_gets_portal_switch_without_mutating_source_environment(
     assert source_environment == source_before
     assert os.environ["HDY_DISABLE_PORTAL"] == "0"
     assert dict(os.environ) == process_environment_before
+
+
+@pytest.mark.parametrize("error_type", [CaptureError, startup_module.ObserveError])
+def test_repeated_observation_errors_expire_original_world_phase_before_episode(
+    error_type: type[Exception], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recovery, clock, provider, lease, _presence = _fake_recovery(tmp_path, monkeypatch)
+    provider.available = True
+    recovery._world_deadline = 5.0
+    recovery._last_identity = ProcessIdentity(21, 200, 1000, "Wow.exe", str(tmp_path / "wine"))
+    monkeypatch.setattr(
+        recovery,
+        "_step_locked",
+        lambda _session: (_ for _ in ()).throw(error_type("observation unavailable")),
+    )
+    waiting = recovery.step()
+    assert waiting.outcome == "waiting"
+    assert waiting.deadline_at == pytest.approx(10_005.0)
+    clock.value = 5.0
+    expired = recovery.step()
+    assert expired.outcome == "failed"
+    assert expired.reason == "observation_deadline_expired"
+    assert recovery._episode_deadline == pytest.approx(600.0)
+    assert recovery._world_deadline == 5.0
+    assert not lease.held

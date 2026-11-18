@@ -11,6 +11,11 @@ import pytest
 
 ROOT = Path(__file__).parents[1]
 DASHBOARD = ROOT / "packages/market/src/crowley_market/server/static/trading-dashboard.html"
+CARD_HELPER = """
+function strategyCards(root) {
+  return root.children.flatMap(node => node.className.split(' ').includes('strategy') ? [node] : strategyCards(node));
+}
+"""
 
 
 def _node(script: str) -> dict:
@@ -23,7 +28,7 @@ def _node(script: str) -> dict:
 
 def _script() -> str:
     html = DASHBOARD.read_text(encoding="utf-8")
-    return html[html.index("<script>") + len("<script>") : html.index("</script>")]
+    return CARD_HELPER + html[html.index("<script>") + len("<script>") : html.index("</script>")]
 
 
 def _pure_script() -> str:
@@ -34,7 +39,9 @@ def _pure_script() -> str:
 
 
 def _dashboard_runtime() -> str:
-    return """
+    return (
+        CARD_HELPER
+        + """
 class FakeNode {
   constructor(tag = "div", text = "") {
     if (global.failElementTag === tag) throw new Error("render failed");
@@ -69,6 +76,7 @@ const mountDashboard = (storage) => {
   return { nodes, dashboard: window.__crowleyTradingDashboardTest, tick: () => intervalCallback(), intervalMs: () => intervalMs };
 };
 """.replace("__DASHBOARD_SCRIPT__", _script())
+    )
 
 
 def test_exact_money_rounding_and_stale_scan_model():
@@ -386,7 +394,7 @@ const rendered2 = {{
   scanAge: nodes.get("scan-age").textContent,
   counts: nodes.get("scan-counts").textContent,
   status: nodes.get("status").textContent,
-  count: nodes.get("opportunities").children.length,
+  count: strategyCards(nodes.get("opportunities")).length,
   cards: nodes.get("opportunities").textContent,
   cardsAreSafeText: !tags.includes("img"),
   intervalMs,
@@ -439,7 +447,7 @@ const emptyTurnover = {{
   scanAge: nodes.get("scan-age").textContent,
   counts: nodes.get("scan-counts").textContent,
   cards: nodes.get("opportunities").textContent,
-  cardClass: nodes.get("opportunities").children[0]?.className,
+  cardClass: nodes.get("opportunities").children[0]?.children[2]?.children[0]?.className,
   status: nodes.get("status").textContent,
   watchState: nodes.get("recipe-watch-state").textContent,
   watchAlert: nodes.get("recipe-watch-alert").textContent,
@@ -1200,14 +1208,14 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
   for (const threshold of thresholds) {{
     select.value = String(threshold);
     select.listeners.change();
-    const cards = page.nodes.get("opportunities").children.map((node) => node.textContent);
+    const cards = strategyCards(page.nodes.get("opportunities")).map((node) => node.textContent);
     snapshots.push({{ threshold, count: cards.length, first: cards[0] ?? "", last: cards.at(-1) ?? "", status: page.nodes.get("status").textContent, ranks: cards.map((card, index) => card.includes("#" + (index + 1) + "Rank ")) }});
   }}
   const callsAfterFiltering = calls.length;
   const preference = values.get("crowley.dashboard.minimum-profit-per-item.v1");
   const reloaded = mountDashboard(storage);
   await settle();
-  const afterReload = {{ selected: reloaded.nodes.get("minimum-profit").value, count: reloaded.nodes.get("opportunities").children.length, first: reloaded.nodes.get("opportunities").children[0]?.textContent ?? "", summaryCalls: calls.filter((path) => path.endsWith("/trading-summary")).length }};
+  const afterReload = {{ selected: reloaded.nodes.get("minimum-profit").value, count: strategyCards(reloaded.nodes.get("opportunities")).length, first: strategyCards(reloaded.nodes.get("opportunities"))[0]?.textContent ?? "", summaryCalls: calls.filter((path) => path.endsWith("/trading-summary")).length }};
   console.log(JSON.stringify({{ defaultCopper, defaultValue, snapshots, callsAfterFiltering, preference, afterReload, callsAfterReload: calls.length }}));
 }})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
 """
@@ -1215,15 +1223,15 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
     assert actual["defaultCopper"] == 50
     assert actual["defaultValue"] == "50"
     snapshots = actual["snapshots"]
-    assert [row["count"] for row in snapshots] == [10, 10, 9, 7, 5]
-    assert "Rank 01" in snapshots[0]["first"] and "Rank 11" in snapshots[0]["last"]
-    assert "Rank 05" in snapshots[1]["first"] and "Rank 14" in snapshots[1]["last"]
+    assert [row["count"] for row in snapshots] == [14, 11, 9, 7, 5]
+    assert "Rank 01" in snapshots[0]["first"] and "Rank 15" in snapshots[0]["last"]
+    assert "Rank 05" in snapshots[1]["first"] and "Rank 15" in snapshots[1]["last"]
     assert "Rank 07" in snapshots[2]["first"] and "Rank 15" in snapshots[2]["last"]
     assert "Rank 09" in snapshots[3]["first"] and "Rank 15" in snapshots[3]["last"]
     assert "Rank 11" in snapshots[4]["first"] and "Rank 15" in snapshots[4]["last"]
-    assert "Showing 10 of up to 10" in snapshots[0]["status"]
-    assert "Showing 9 of up to 10" in snapshots[2]["status"]
-    assert "Showing 5 of up to 10" in snapshots[4]["status"]
+    assert "Showing 14 strategies, up to 25 per profession" in snapshots[0]["status"]
+    assert "Showing 9 strategies, up to 25 per profession" in snapshots[2]["status"]
+    assert "Showing 5 strategies, up to 25 per profession" in snapshots[4]["status"]
     assert all(all(row["ranks"]) for row in snapshots)
     assert actual["callsAfterFiltering"] == 3
     assert actual["preference"] == "1000"
@@ -1405,17 +1413,17 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
 (async () => {{
   const cached = mountDashboard(storage);
   await settle();
-  const savedCards = cached.nodes.get("opportunities").children.map((n) => n.textContent);
+  const savedCards = strategyCards(cached.nodes.get("opportunities")).map((n) => n.textContent);
   const obsoleteProfile = profile.replace("-profit-only", "");
   const obsoleteKey = key.replace("-profit-only", "");
   const obsoleteEntry = JSON.stringify({{ version: 2, house: "us-normal-alliance", client_build: "1.60.1.70938", profile_key: obsoleteProfile, summary: {{ ...{json.dumps(summary)}, candidates: [], opportunities: [] }} }});
   const obsolete = mountDashboard({{ getItem: (k) => k === obsoleteKey ? obsoleteEntry : null, setItem: () => {{}} }});
   const restoredObsoletePool = obsolete.dashboard.state.summary !== null;
   await settle();
-  const recoveredCards = obsolete.nodes.get("opportunities").children.map((n) => n.textContent);
+  const recoveredCards = strategyCards(obsolete.nodes.get("opportunities")).map((n) => n.textContent);
   const fresh = mountDashboard({{ getItem: () => null, setItem: () => {{}} }});
   await settle();
-  const freshCards = fresh.nodes.get("opportunities").children.map((n) => n.textContent);
+  const freshCards = strategyCards(fresh.nodes.get("opportunities")).map((n) => n.textContent);
   console.log(JSON.stringify({{ savedCards, freshCards, recoveredCards, restoredObsoletePool }}));
 }})().catch((error) => {{ console.error(error); process.exitCode = 1; }});
 """
@@ -1423,10 +1431,10 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
     assert actual["restoredObsoletePool"] is False
     for key in ("savedCards", "freshCards", "recoveredCards"):
         cards = actual[key]
-        assert len(cards) == 10
+        assert len(cards) == 14
         assert "Rank 01" in cards[0]
         assert "Rank 02" in cards[1]
-        assert "Rank 10" in cards[-1]
+        assert "Rank 14" in cards[-1]
         assert "Activity unknown" in cards[4]
         assert "unknown usable h" in cards[4]
         assert "0 units/h" in cards[5]
@@ -1462,7 +1470,7 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
 (async () => {{
   const page = mountDashboard(storage);
   await settle();
-  const snapshot = () => ({{ selected: page.nodes.get('profession-skill').value, cards: page.nodes.get('opportunities').children.map(n => n.textContent), profile: page.nodes.get('profile').textContent }});
+  const snapshot = () => ({{ selected: page.nodes.get('profession-skill').value, cards: strategyCards(page.nodes.get('opportunities')).map(n => n.textContent), profile: page.nodes.get('profile').textContent }});
   const initial = snapshot();
   const select = (id, value) => {{ page.nodes.get(id).value = value; page.nodes.get(id).listeners.change(); }};
   const changes = {{}};
@@ -1475,7 +1483,7 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
   const combined = snapshot();
   const reloaded = mountDashboard(storage);
   await settle();
-  const reload = {{ skill: reloaded.nodes.get('profession-skill').value, profit: reloaded.nodes.get('minimum-profit').value, cards: reloaded.nodes.get('opportunities').children.map(n => n.textContent) }};
+  const reload = {{ skill: reloaded.nodes.get('profession-skill').value, profit: reloaded.nodes.get('minimum-profit').value, cards: strategyCards(reloaded.nodes.get('opportunities')).map(n => n.textContent) }};
   values.set('crowley.dashboard.maximum-profession-skill.v1', '999');
   const corrupted = mountDashboard(storage);
   await settle();
@@ -1490,10 +1498,10 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
     )
     assert actual["initial"]["selected"] == "225"
     assert "Rank 11" in actual["initial"]["cards"][0]
-    for skill, first in [("150", "Rank 21"), ("225", "Rank 11"), ("300", "Rank 01")]:
+    for skill, first, count in [("150", "Rank 21", 12), ("225", "Rank 11", 22), ("300", "Rank 01", 25)]:
         result = actual["changes"][skill]
         assert result["selected"] == skill
-        assert len(result["cards"]) == 10
+        assert len(result["cards"]) == count
         assert first in result["cards"][0]
         assert f"Maximum skill {skill}" in result["profile"]
     assert actual["callsAfterFilters"] == 1
@@ -1504,3 +1512,73 @@ const settle = async () => {{ for (let i = 0; i < 12; i += 1) await Promise.reso
     assert actual["reload"]["cards"] == actual["combined"]["cards"]
     assert actual["corruptSelection"] == "225"
     assert actual["blockedSelection"] == "300"
+
+
+def test_profession_groups_have_independent_limits_after_filters_and_survive_cache_reload():
+    latest = {
+        "house": "us-normal-alliance",
+        "sweep_id": 61,
+        "finished_epoch": 1_800_003_600,
+        "client_build": "1.60.1.70938",
+    }
+    candidates = [_ranked_candidate(index, "1000", 1) for index in range(1, 71)]
+    for index, row in enumerate(candidates):
+        row["profession"] = "alchemy" if index < 35 else "tailoring"
+        row.update(required_skill=300 if index % 7 == 0 else 150)
+        row["eligibility_skill"] = row["required_skill"]
+    summary = _summary(61, latest["finished_epoch"], count=0)
+    summary.update(candidates=candidates, opportunities=candidates[:10])
+    actual = _node(
+        f"""
+const values = new Map();
+const storage = {{ getItem: k => values.get(k) ?? null, setItem: (k,v) => values.set(k,v) }};
+let summaryCalls = 0;
+function reply(value) {{ return {{ ok: true, status: 200, json: () => Promise.resolve(value) }}; }}
+global.fetch = path => {{
+  if (path.endsWith('/trading-summary')) summaryCalls += 1;
+  return Promise.resolve(reply(path.endsWith('/sweeps/latest') ? {json.dumps(latest)} : path.endsWith('/recipe-watch') ? {json.dumps(_recipe_watch(status="awaiting_scan"))} : {json.dumps(summary)}));
+}};
+const settle = async () => {{ for (let i=0;i<12;i++) await Promise.resolve(); await new Promise(setImmediate); }};
+{_dashboard_runtime()}
+const snapshot = page => page.nodes.get('opportunities').children.map(group => ({{
+  heading: group.children[0].textContent,
+  count: group.children[1].textContent,
+  cards: strategyCards(group).map(card => card.children[0].children[0].children[0].textContent),
+  text: group.textContent,
+}}));
+(async () => {{
+  const page = mountDashboard(storage);
+  await settle();
+  const initial = snapshot(page);
+  page.nodes.get('profession-skill').value = '300';
+  page.nodes.get('profession-skill').listeners.change();
+  const skill300 = snapshot(page);
+  page.nodes.get('minimum-profit').value = '1000';
+  page.nodes.get('minimum-profit').listeners.change();
+  const reloaded = mountDashboard(storage);
+  await settle();
+  const cached = snapshot(reloaded);
+  reloaded.dashboard.state.summary.candidates = reloaded.dashboard.state.summary.candidates.filter(row => row.profession === 'tailoring');
+  reloaded.nodes.get('profession-skill').value = '150';
+  reloaded.nodes.get('profession-skill').listeners.change();
+  const emptyAlchemy = snapshot(reloaded);
+  console.log(JSON.stringify({{ initial, skill300, cached, emptyAlchemy, summaryCalls }}));
+}})().catch(error => {{ console.error(error); process.exitCode=1; }});
+"""
+    )
+    for snapshot in (actual["initial"], actual["skill300"], actual["cached"]):
+        assert [group["heading"] for group in snapshot] == ["Alchemy", "Tailoring"]
+        assert [len(group["cards"]) for group in snapshot] == [25, 25]
+        assert all(group["cards"][0].startswith("#1Rank ") for group in snapshot)
+        assert all(group["cards"][-1].startswith("#25Rank ") for group in snapshot)
+    assert "of 30 matching" in actual["initial"][0]["count"]
+    assert "of 35 matching" in actual["skill300"][0]["count"]
+    assert actual["initial"][0]["cards"][0] == "#1Rank 02"
+    assert actual["initial"][1]["cards"][0] == "#1Rank 37"
+    assert actual["skill300"][0]["cards"][0] == "#1Rank 01"
+    assert actual["skill300"][1]["cards"][0] == "#1Rank 36"
+    assert actual["cached"] == actual["skill300"]
+    assert actual["summaryCalls"] == 1
+    assert actual["emptyAlchemy"][0]["cards"] == []
+    assert "No strategies meet" in actual["emptyAlchemy"][0]["text"]
+    assert len(actual["emptyAlchemy"][1]["cards"]) == 25

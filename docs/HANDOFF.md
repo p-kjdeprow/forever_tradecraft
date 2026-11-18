@@ -5,6 +5,20 @@ and independent Sol review loops, commits on main/origin/main, and task artifact
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
+The dashboard now separates crafting strategies into Alchemy and Tailoring sections,
+each showing up to 25 results after the saved skill and minimum-profit filters.
+Ranks restart within each profession; each section shows its matching count and
+an explicit empty state. The complete candidate pool and existing API contract
+are unchanged; filtering still makes no additional requests. Long training notes
+wrap on mobile. The website-only deployment keeps the exact installed common
+wheel and changes only the market package's dashboard HTML. Scanner/companion
+processes, database and mounts are unchanged. Verification: 55 focused tests pass;
+live browser checks pass for nine skill/profit combinations, saved preferences,
+independent limits and 390px layout without errors or screenshots. Current server
+image: `sha256:1bf35121ab746d728d6e97be69240ad9cdec26f7e0c82dc1d51c1abcdf8a3e2d`.
+Browser results and deployment receipts are retained privately under
+`~/.local/state/crowley/profession-groups-20261118/`.
+
 Scanner recovery on Nov 18 found the host alive but permanently latched in
 `startup_failed/desktop_observation_failed` since Nov 17 20:42 CST. The last accepted
 sweep was 937 (21:06 CST), and the existing client showed WOW51900319. A guarded
@@ -147,7 +161,7 @@ their usage limit; it has not received an independent final Sol review.
 disabled. Both addons remain 0.3.0, scanner schema 1 and automation schema 3.
 See [STARTUP](STARTUP.md) and [STARTUP_PLAN](STARTUP_PLAN.md).
 
-The server now runs image
+The earlier profit-filter removal deployed image
 `sha256:9ff7338ea59d7ca52a57a672bb4c09df76bd6f6b98c74b96a1b1b28d6dbea0e1`.
 The original database container and DB/raw mounts are unchanged. All twelve applied
 migrations retain their original bytes. The supported client-data exporter and loader

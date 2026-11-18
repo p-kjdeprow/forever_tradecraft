@@ -31,7 +31,7 @@
     body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, sans-serif; }
     header, main { max-width: 1180px; margin: 0 auto; padding: 1rem; }
     header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-    h1, h2, h3, p { margin-top: 0; }
+    h1, h2, h3, h4, p { margin-top: 0; }
     h1 { margin-bottom: .15rem; font-size: clamp(1.45rem, 4vw, 2rem); }
     h2 { margin-bottom: .2rem; font-size: 1.2rem; }
     h3 { margin-bottom: .35rem; font-size: 1.05rem; }
@@ -64,7 +64,7 @@
     .watch-notes { margin: .7rem 0 0; color: var(--muted); font-size: .9rem; }
     .main-heading { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin: 1.2rem 0 .65rem; }
     .profile { color: var(--muted); text-align: right; }
-    .summary-controls { display: flex; align-items: center; gap: .5rem; margin: .45rem 0; }
+    .summary-controls { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin: .45rem 0; }
     .summary-controls label { font-weight: 650; }
     .summary-note { color: var(--muted); margin: .3rem 0 .9rem; }
     .summary-source { color: var(--muted); margin: .35rem 0 .75rem; min-height: 1.2em; }
@@ -72,13 +72,15 @@
     .status { min-height: 1.45rem; color: var(--muted); }
     .status.error { font-weight: 650; }
     .cards { display: grid; grid-template-columns: 1fr; gap: .75rem; }
+    .profession-strategies { margin-bottom: 1.5rem; }
+    .profession-strategies > h3 { font-size: 1.2rem; }
     .strategy { min-width: 0; }
     .strategy-head { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
-    .strategy-name { min-width: 0; }
-    .strategy-name h3 { overflow-wrap: anywhere; }
+    .strategy-name { min-width: 0; max-width: 100%; }
+    .strategy-name h4 { overflow-wrap: anywhere; margin-bottom: .35rem; font-size: 1.05rem; }
     .rank { color: var(--muted); font-variant-numeric: tabular-nums; margin-right: .25rem; }
     .badge { display: inline-block; border-radius: 99px; padding: .1rem .5rem; margin: 0 .25rem .2rem 0; font-size: .78rem; font-weight: 700; white-space: nowrap; }
-    .badge.level { color: var(--warn); background: var(--accent-soft); }
+    .badge.level { color: var(--warn); background: var(--accent-soft); max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
     .badge.ready { color: var(--good); background: color-mix(in srgb, var(--good) 15%, transparent); }
     .numbers { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .6rem; margin: .75rem 0; }
     .metric { min-width: 0; border-left: 2px solid var(--line); padding-left: .55rem; }
@@ -154,8 +156,8 @@
 
     <div class="main-heading">
       <div>
-        <h2>Top 10 crafting strategies</h2>
-        <p class="muted">Positive estimated profit at current prices. Activity history is informational. Batches use the assumed 10 g budget.</p>
+        <h2>Crafting strategies by profession</h2>
+        <p class="muted">Up to 25 strategies per profession with positive estimated profit at current prices. Activity history is informational. Batches use the assumed 10 g budget.</p>
       </div>
       <div id="profile" class="profile">Alchemy 225 · Tailoring 150 · Maximum skill 225 · 10 g assumed</div>
     </div>
@@ -178,7 +180,7 @@
     <p class="summary-note">Net profit is shown per item; cost and sale proceeds are batch totals. Profit assumes sale at the target price after the auction house cut. Cost includes materials and a 12-hour deposit; recipe and leveling costs are excluded.</p>
     <div id="status" class="status" role="status" aria-live="polite">Loading market summary…</div>
     <p id="summary-source" class="summary-source" aria-live="polite"></p>
-    <section id="opportunities" class="cards" aria-label="Crafting opportunities" aria-live="polite"></section>
+    <section id="opportunities" aria-label="Crafting opportunities" aria-live="polite"></section>
     <p id="notes" class="notes"></p>
 
     <details class="house-change">
@@ -210,6 +212,7 @@
     const SUMMARY_PROFILE_KEY = "alchemy225-tailoring150-cap300-budget100000-owned-profit-only-rank-flow";
     const PROFESSION_SKILL_LIMITS = [150, 225, 300];
     const DEFAULT_PROFESSION_SKILL = 225;
+    const STRATEGIES_PER_PROFESSION = 25;
     const PROFESSION_SKILL_PREFERENCE_KEY = "crowley.dashboard.maximum-profession-skill.v1";
     const MIN_PROFIT_THRESHOLDS = [50, 100, 300, 500, 1000];
     const DEFAULT_MIN_PROFIT_COPPER = 50;
@@ -657,7 +660,7 @@
         const card = el("article", "", "panel strategy");
         const title = el("div", "", "strategy-head");
         const name = el("div", "", "strategy-name");
-        const heading = el("h3");
+        const heading = el("h4");
         append(heading, el("span", `#${index + 1}`, "rank"), document.createTextNode(item.name));
         append(name, heading);
         const profession = el("div");
@@ -716,19 +719,31 @@
       }
       function renderSummary(summary, { fromCache = false, preserveStatus = false, filterChange = false } = {}) {
         const nextPriceAgeEntries = [];
-        const filtered = summary.candidates.filter((item) => item.eligibility_skill <= state.professionSkill && profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper)).slice(0, 10);
+        const filtered = summary.candidates.filter((item) => item.eligibility_skill <= state.professionSkill && profitMeetsThreshold(item.profit_per_item, state.minimumProfitCopper));
         let emptyMessage = "No strategies meet this minimum net profit per item and maximum profession skill at current prices.";
         if (!summary.candidatePoolComplete && filtered.length === 0) {
           emptyMessage = "No saved top-ten strategies meet this minimum. Lower-ranked results are unavailable until the complete candidate pool refreshes.";
         }
-        const nextCards = filtered.length === 0
-          ? [el("p", emptyMessage, "panel empty")]
-          : filtered.map((item, index) => renderOpportunity(item, index, summary.finished_epoch, summary.activity_window_hours, nextPriceAgeEntries));
+        let shown = 0;
+        const nextGroups = ["alchemy", "tailoring"].map((profession) => {
+          const eligible = filtered.filter((item) => item.profession === profession);
+          const visible = eligible.slice(0, STRATEGIES_PER_PROFESSION);
+          shown += visible.length;
+          const group = el("section", "", "profession-strategies");
+          const heading = el("h3", profession[0].toUpperCase() + profession.slice(1));
+          const count = el("p", `Showing ${visible.length} of ${eligible.length} matching strategies · up to ${STRATEGIES_PER_PROFESSION}`, "muted");
+          const cards = el("div", "", "cards");
+          append(cards, ...(visible.length
+            ? visible.map((item, index) => renderOpportunity(item, index, summary.finished_epoch, summary.activity_window_hours, nextPriceAgeEntries))
+            : [el("p", emptyMessage, "panel empty")]));
+          append(group, heading, count, cards);
+          return group;
+        });
         const nextNotes = (summary.notes || []).map((note) => el("span", note));
         const isLatest = summaryMatchesLatest(summary);
 
         if (isLatest) $("scan-counts").replaceChildren(...countNodes(summary.scan));
-        $("opportunities").replaceChildren(...nextCards);
+        $("opportunities").replaceChildren(...nextGroups);
         $("notes").replaceChildren(...nextNotes);
         state.priceAgeEntries = nextPriceAgeEntries;
         state.summary = summary;
@@ -741,11 +756,11 @@
         if (!preserveStatus && filterChange) {
           if (!summary.candidatePoolComplete && filtered.length === 0) setStatus("No saved top-ten strategies meet this minimum; lower-ranked results are unavailable until the complete pool refreshes.");
           else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item and maximum profession skill in the candidate pool.");
-          else setStatus("Showing " + filtered.length + " of up to 10 strategies at this minimum.");
+          else setStatus(`Showing ${shown} strategies, up to ${STRATEGIES_PER_PROFESSION} per profession at this minimum.`);
         } else if (!preserveStatus && !fromCache && isLatest) {
           if (filtered.length === 0 && !summary.candidatePoolComplete) setStatus("Showing a limited saved top-ten view while refreshing the complete candidate pool.");
           else if (filtered.length === 0) setStatus("No strategies meet this minimum net profit per item and maximum profession skill for the latest scan.");
-          else setStatus("Showing " + filtered.length + " of up to 10 strategies at this minimum. Refreshes every 60 seconds when a new scan arrives.");
+          else setStatus(`Showing ${shown} strategies, up to ${STRATEGIES_PER_PROFESSION} per profession at this minimum. Refreshes every 60 seconds when a new scan arrives.`);
         } else if (!preserveStatus && fromCache) {
           setStatus(summary.candidatePoolComplete
             ? "Showing saved strategy results while checking for a newer scan."

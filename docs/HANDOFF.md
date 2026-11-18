@@ -5,6 +5,42 @@ and independent Sol review loops, commits on main/origin/main, and task artifact
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
+The Merchant's Favor tab is implemented and deployed at `/dashboard/merchant-favor`
+with a read-only Alliance API. Its sourced catalog covers 28 Alchemy recipes costing
+3,780 Favor, gated through Honored, and 30 empty crates with 96 fill materials.
+User progress starts at Neutral 2,150, about 30 Favor and level 35, all editable and
+saved locally. The pre-Friendly gap is 850 reputation through writs (not priced);
+subsequent Friendly-to-Honored forged returns cost 1,800 Favor and 120 empty crates.
+The remaining full recipe/receipt target is 5,550 Favor after the starting balance.
+Unknown Artisan cash payouts are not ranked. Quotes require fresh, complete buyable
+depth and exclude owner/account-owned groups; bulk estimates are explicitly not
+reserved shopping carts. No purchases, forging, quest actions or Favor spending occur.
+
+Catalog/target revision 10 preserves all previous scan IDs and promotes all 126
+dependencies to core: 482 core + 60 per cold slice = 542 planned per sweep, with
+the same 900-second cadence and 750-second cap. The compatible desktop deployment
+changes only two common data files and scanner GeneratedTarget.lua; unqualified
+input/listing changes remain undeployed. Source and cutover helper both received
+Sol READY. All 227 focused tests, Ruff, Pyright, generated-target checks, installed
+resource comparison and doctor pass. Live browser checks pass for table counts,
+initial targets, saved progress/ownership, both tabs and mobile layout with no
+screenshots/errors. Server image is
+`sha256:f173a7ae1dc3cecd1f16d97cfe12e9795a378b6c1b2b6f0a30934f60c65f8940`;
+database identity and mounts are unchanged. One character-entry control changed
+before click; a fresh host episode entered Dandune and restored the AH. First
+new-plan sweep 1005 queried all 542 items successfully, including all 126 watched
+IDs; all 126 have current priced books. It completed in 745 seconds. Sweep 1006
+also queried all 542 successfully, including all 126 dependencies, in 633 seconds;
+starts were exactly 900 seconds apart. Observed watched-item query gaps were
+791–899 seconds as the second scan warmed; two samples do not establish a p95.
+Initial sweep 1005 ranked Apprentice Ingots + ten Bronze Bars first, but sweep
+1006 shifted the cheapest fill to Journeyman Fabrics + two Cured Medium Hides:
+48s56c upfront, 38s56c net per 20 Favor, 90 observed complete fills. The page flags
+insufficient bulk stock explicitly. Cheapest forging stock in 1006 was Expert
+Curiosities at 1s25c; prices update with each accepted scan. Main strategy and
+recipe-watch APIs also agree on 1006; host/companion remain healthy. See [the feature record](MERCHANT_FAVOR.md)
+and private receipts under `~/.local/state/crowley/merchant-favor-20261118/`.
+
 The dashboard now separates crafting strategies into Alchemy and Tailoring sections,
 each showing up to 25 results after the saved skill and minimum-profit filters.
 Ranks restart within each profession; each section shows its matching count and
@@ -14,7 +50,7 @@ wrap on mobile. The website-only deployment keeps the exact installed common
 wheel and changes only the market package's dashboard HTML. Scanner/companion
 processes, database and mounts are unchanged. Verification: 55 focused tests pass;
 live browser checks pass for nine skill/profit combinations, saved preferences,
-independent limits and 390px layout without errors or screenshots. Current server
+independent limits and 390px layout without errors or screenshots. That deployment's server
 image: `sha256:1bf35121ab746d728d6e97be69240ad9cdec26f7e0c82dc1d51c1abcdf8a3e2d`.
 Browser results and deployment receipts are retained privately under
 `~/.local/state/crowley/profession-groups-20261118/`.

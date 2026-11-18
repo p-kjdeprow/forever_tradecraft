@@ -14,8 +14,8 @@ and physical input presence. Pure policy selects one bounded action. Unknown/mal
 prevent input. Commands are allowlisted and typed text must read back exactly before Return.
 
 Sweeps start 900 seconds apart under the selected target, with target-defined query/sweep budgets.
-Hot items run every sweep and cold items rotate through six recorded slices. Revision 9 remains
-the selected catalog. Runtime counts come from its canonical plan, not historical documentation.
+Hot items run every sweep and cold items rotate through six recorded slices. Revision 10 adds
+the Merchant's Favor crate/fill coverage. Runtime counts come from its canonical plan, not historical documentation.
 Query failures and unqueried items do not count as empty markets. Two successful sweeps do not
 establish a runtime p95 or full cold-rotation reliability.
 

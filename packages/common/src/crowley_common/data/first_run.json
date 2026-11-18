@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "id": "first-run",
-  "revision": 9,
+  "revision": 10,
   "client_build": "1.60.1.70959",
-  "reviewed_on": "2026-11-14",
+  "reviewed_on": "2026-11-18",
   "initial_price_levels": 20,
   "items": [
     {
@@ -93,7 +93,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -111,7 +112,8 @@
       "source_urls": [
         "https://bindonforever.com/item/765",
         "https://bindonforever.com/professions/alchemy",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=765"
       ]
     },
     {
@@ -177,7 +179,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -197,7 +200,8 @@
         "https://bindonforever.com/item/785",
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/cooking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=785"
       ]
     },
     {
@@ -674,7 +678,8 @@
       "tags": [
         "leather",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -701,7 +706,8 @@
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=2318"
       ]
     },
     {
@@ -711,7 +717,8 @@
       "tags": [
         "leather",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -738,7 +745,8 @@
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
+        "https://www.wowhead.com/forever/item=2319"
       ]
     },
     {
@@ -882,7 +890,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -904,7 +913,8 @@
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/cooking",
         "https://bindonforever.com/professions/first-aid",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=2447"
       ]
     },
     {
@@ -914,7 +924,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -932,7 +943,8 @@
       "source_urls": [
         "https://bindonforever.com/item/2449",
         "https://bindonforever.com/professions/alchemy",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=2449"
       ]
     },
     {
@@ -942,7 +954,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -962,7 +975,8 @@
         "https://bindonforever.com/item/2450",
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/first-aid",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=2450"
       ]
     },
     {
@@ -1000,7 +1014,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -1020,7 +1035,8 @@
         "https://bindonforever.com/item/2453",
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/first-aid",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=2453"
       ]
     },
     {
@@ -1584,7 +1600,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -1609,7 +1626,8 @@
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/first-aid-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=2589"
       ]
     },
     {
@@ -1619,7 +1637,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering",
@@ -1641,7 +1660,8 @@
         "https://bindonforever.com/professions/first-aid",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=2592"
       ]
     },
     {
@@ -1780,7 +1800,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "mining"
@@ -1789,14 +1810,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/2770",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=2770"
       ]
     },
     {
@@ -1805,7 +1827,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "mining"
@@ -1814,14 +1837,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/2771",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=2771"
       ]
     },
     {
@@ -1830,7 +1854,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -1840,7 +1865,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -1848,7 +1873,8 @@
       "source_urls": [
         "https://bindonforever.com/item/2772",
         "https://bindonforever.com/professions/enchanting",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=2772"
       ]
     },
     {
@@ -1857,7 +1883,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -1867,7 +1894,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -1875,7 +1902,8 @@
       "source_urls": [
         "https://bindonforever.com/item/2775",
         "https://bindonforever.com/professions/enchanting",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=2775"
       ]
     },
     {
@@ -1884,7 +1912,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "mining"
@@ -1893,14 +1922,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/2776",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=2776"
       ]
     },
     {
@@ -2025,7 +2055,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -2037,7 +2068,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -2049,7 +2080,8 @@
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/mining",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=2840"
       ]
     },
     {
@@ -2059,7 +2091,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -2070,7 +2103,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -2081,7 +2114,8 @@
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/mining",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=2841"
       ]
     },
     {
@@ -2091,7 +2125,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -2114,7 +2149,8 @@
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/mining",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
+        "https://www.wowhead.com/forever/item=2842"
       ]
     },
     {
@@ -2254,7 +2290,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering",
@@ -2274,7 +2311,8 @@
         "https://bindonforever.com/item/2996",
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=2996"
       ]
     },
     {
@@ -2284,7 +2322,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "leatherworking",
@@ -2305,7 +2344,8 @@
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=2997"
       ]
     },
     {
@@ -2364,7 +2404,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -2382,7 +2423,8 @@
       "source_urls": [
         "https://bindonforever.com/item/3355",
         "https://bindonforever.com/professions/alchemy",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=3355"
       ]
     },
     {
@@ -2392,7 +2434,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -2414,7 +2457,8 @@
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/leatherworking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=3356"
       ]
     },
     {
@@ -2424,7 +2468,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -2446,7 +2491,8 @@
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/cooking",
         "https://bindonforever.com/professions/first-aid",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=3357"
       ]
     },
     {
@@ -2456,7 +2502,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -2474,7 +2521,8 @@
       "source_urls": [
         "https://bindonforever.com/item/3358",
         "https://bindonforever.com/professions/alchemy",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=3358"
       ]
     },
     {
@@ -2483,7 +2531,8 @@
       "category": "trade_goods",
       "tags": [
         "herb",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -2500,7 +2549,8 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/3369",
-        "https://bindonforever.com/professions/alchemy"
+        "https://bindonforever.com/professions/alchemy",
+        "https://www.wowhead.com/forever/item=3369"
       ]
     },
     {
@@ -3046,7 +3096,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3071,7 +3122,8 @@
         "https://bindonforever.com/professions/mining",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=3575"
       ]
     },
     {
@@ -3080,7 +3132,8 @@
       "category": "trade_goods",
       "tags": [
         "metal",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "mining"
@@ -3089,14 +3142,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/3576",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=3576"
       ]
     },
     {
@@ -3106,7 +3160,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3133,7 +3188,8 @@
         "https://bindonforever.com/professions/mining",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=3577"
       ]
     },
     {
@@ -3168,7 +3224,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3188,7 +3245,8 @@
         "https://bindonforever.com/item/3818",
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/cooking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=3818"
       ]
     },
     {
@@ -3196,7 +3254,8 @@
       "name": "Wintersbite",
       "category": "trade_goods",
       "tags": [
-        "herb"
+        "herb",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3215,7 +3274,8 @@
       "source_urls": [
         "https://bindonforever.com/item/3819",
         "https://bindonforever.com/professions/alchemy",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=3819"
       ]
     },
     {
@@ -3225,7 +3285,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3243,7 +3304,8 @@
       "source_urls": [
         "https://bindonforever.com/item/3820",
         "https://bindonforever.com/professions/alchemy",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=3820"
       ]
     },
     {
@@ -3253,7 +3315,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3273,7 +3336,8 @@
         "https://bindonforever.com/item/3821",
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/cooking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=3821"
       ]
     },
     {
@@ -3591,7 +3655,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3609,7 +3674,8 @@
       "source_urls": [
         "https://bindonforever.com/item/3858",
         "https://bindonforever.com/professions/alchemy",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=3858"
       ]
     },
     {
@@ -3619,7 +3685,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -3630,7 +3697,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -3641,7 +3708,8 @@
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/mining",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=3859"
       ]
     },
     {
@@ -3651,7 +3719,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -3675,7 +3744,8 @@
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/mining",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=3860"
       ]
     },
     {
@@ -3740,7 +3810,8 @@
       "category": "trade_goods",
       "tags": [
         "leather",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "leatherworking",
@@ -3750,7 +3821,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -3758,7 +3829,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4231",
         "https://bindonforever.com/professions/leatherworking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
+        "https://www.wowhead.com/forever/item=4231"
       ]
     },
     {
@@ -3795,7 +3867,8 @@
       "category": "components",
       "tags": [
         "leather",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "leatherworking",
@@ -3806,7 +3879,7 @@
         "intermediate"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -3814,7 +3887,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4233",
         "https://bindonforever.com/professions/leatherworking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
+        "https://www.wowhead.com/forever/item=4233"
       ]
     },
     {
@@ -3824,7 +3898,8 @@
       "tags": [
         "leather",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -3852,7 +3927,8 @@
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=4234"
       ]
     },
     {
@@ -3887,7 +3963,8 @@
       "category": "trade_goods",
       "tags": [
         "leather",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "leatherworking",
@@ -3897,7 +3974,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -3905,7 +3982,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4236",
         "https://bindonforever.com/professions/leatherworking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
+        "https://www.wowhead.com/forever/item=4236"
       ]
     },
     {
@@ -4223,7 +4301,8 @@
       "tags": [
         "leather",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -4253,7 +4332,8 @@
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=4304"
       ]
     },
     {
@@ -4263,7 +4343,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering",
@@ -4286,7 +4367,8 @@
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=4305"
       ]
     },
     {
@@ -4296,7 +4378,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering",
@@ -4319,7 +4402,8 @@
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/first-aid-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=4306"
       ]
     },
     {
@@ -5082,7 +5166,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -5110,7 +5195,8 @@
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/first-aid-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=4338"
       ]
     },
     {
@@ -5120,7 +5206,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering",
@@ -5140,7 +5227,8 @@
         "https://bindonforever.com/item/4339",
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=4339"
       ]
     },
     {
@@ -5323,7 +5411,8 @@
       "tags": [
         "engineering",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -5334,7 +5423,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -5342,7 +5431,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4359",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=4359"
       ]
     },
     {
@@ -5377,7 +5467,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -5388,7 +5479,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -5396,7 +5487,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4361",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=4361"
       ]
     },
     {
@@ -5429,7 +5521,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -5438,7 +5531,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -5446,7 +5539,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4363",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=4363"
       ]
     },
     {
@@ -5583,7 +5677,8 @@
       "tags": [
         "engineering",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -5594,7 +5689,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -5602,7 +5697,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4371",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=4371"
       ]
     },
     {
@@ -5659,7 +5755,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -5669,7 +5766,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -5677,7 +5774,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4375",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=4375"
       ]
     },
     {
@@ -5786,7 +5884,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -5796,7 +5895,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -5804,7 +5903,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4382",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=4382"
       ]
     },
     {
@@ -5912,7 +6012,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -5922,7 +6023,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -5930,7 +6031,8 @@
       "source_urls": [
         "https://bindonforever.com/item/4387",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=4387"
       ]
     },
     {
@@ -6599,7 +6701,8 @@
       "category": "trade_goods",
       "tags": [
         "herb",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -6620,7 +6723,8 @@
         "https://bindonforever.com/item/4625",
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/enchanting",
-        "https://bindonforever.com/professions/tailoring"
+        "https://bindonforever.com/professions/tailoring",
+        "https://www.wowhead.com/forever/item=4625"
       ]
     },
     {
@@ -7307,7 +7411,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -7334,7 +7439,8 @@
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/mining",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
+        "https://www.wowhead.com/forever/item=6037"
       ]
     },
     {
@@ -10017,7 +10123,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "mining"
@@ -10026,14 +10133,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/7911",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=7911"
       ]
     },
     {
@@ -10585,7 +10693,8 @@
       "category": "trade_goods",
       "tags": [
         "leather",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -10612,7 +10721,8 @@
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/first-aid",
         "https://bindonforever.com/professions/leatherworking",
-        "https://bindonforever.com/professions/tailoring"
+        "https://bindonforever.com/professions/tailoring",
+        "https://www.wowhead.com/forever/item=8170"
       ]
     },
     {
@@ -10649,7 +10759,8 @@
       "category": "trade_goods",
       "tags": [
         "leather",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "leatherworking",
@@ -10659,7 +10770,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -10667,7 +10778,8 @@
       "source_urls": [
         "https://bindonforever.com/item/8172",
         "https://bindonforever.com/professions/leatherworking",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
+        "https://www.wowhead.com/forever/item=8172"
       ]
     },
     {
@@ -10833,7 +10945,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -10857,7 +10970,8 @@
         "https://bindonforever.com/professions/blacksmithing",
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=8831"
       ]
     },
     {
@@ -10865,7 +10979,8 @@
       "name": "Arthas' Tears",
       "category": "trade_goods",
       "tags": [
-        "herb"
+        "herb",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -10882,7 +10997,8 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/8836",
-        "https://bindonforever.com/professions/alchemy"
+        "https://bindonforever.com/professions/alchemy",
+        "https://www.wowhead.com/forever/item=8836"
       ]
     },
     {
@@ -10892,7 +11008,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -10916,7 +11033,8 @@
         "https://bindonforever.com/professions/cooking",
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/first-aid",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=8838"
       ]
     },
     {
@@ -10926,7 +11044,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -10944,7 +11063,8 @@
       "source_urls": [
         "https://bindonforever.com/item/8839",
         "https://bindonforever.com/professions/alchemy",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=8839"
       ]
     },
     {
@@ -10953,7 +11073,8 @@
       "category": "trade_goods",
       "tags": [
         "herb",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -10963,14 +11084,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/8845",
-        "https://bindonforever.com/professions/alchemy"
+        "https://bindonforever.com/professions/alchemy",
+        "https://www.wowhead.com/forever/item=8845"
       ]
     },
     {
@@ -10980,7 +11102,8 @@
       "tags": [
         "herb",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -10998,7 +11121,8 @@
       "source_urls": [
         "https://bindonforever.com/item/8846",
         "https://bindonforever.com/professions/alchemy",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/alchemy-plans.json",
+        "https://www.wowhead.com/forever/item=8846"
       ]
     },
     {
@@ -13192,7 +13316,8 @@
       "tags": [
         "engineering",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -13202,7 +13327,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13210,7 +13335,8 @@
       "source_urls": [
         "https://bindonforever.com/item/10558",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=10558"
       ]
     },
     {
@@ -13218,7 +13344,8 @@
       "name": "Mithril Tube",
       "category": "components",
       "tags": [
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -13227,14 +13354,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/10559",
-        "https://bindonforever.com/professions/engineering"
+        "https://bindonforever.com/professions/engineering",
+        "https://www.wowhead.com/forever/item=10559"
       ]
     },
     {
@@ -13243,7 +13371,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -13252,7 +13381,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13260,7 +13389,8 @@
       "source_urls": [
         "https://bindonforever.com/item/10560",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=10560"
       ]
     },
     {
@@ -13269,7 +13399,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -13278,7 +13409,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13286,7 +13417,8 @@
       "source_urls": [
         "https://bindonforever.com/item/10561",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=10561"
       ]
     },
     {
@@ -13418,7 +13550,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -13428,7 +13561,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13436,7 +13569,8 @@
       "source_urls": [
         "https://bindonforever.com/item/10620",
         "https://bindonforever.com/professions/alchemy",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=10620"
       ]
     },
     {
@@ -13620,7 +13754,8 @@
       "name": "Greater Magic Essence",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting"
@@ -13629,14 +13764,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/10939",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=10939"
       ]
     },
     {
@@ -13646,7 +13782,8 @@
       "tags": [
         "enchanting",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -13657,7 +13794,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13668,7 +13805,8 @@
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/leatherworking",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
+        "https://www.wowhead.com/forever/item=10940"
       ]
     },
     {
@@ -13676,7 +13814,8 @@
       "name": "Small Glimmering Shard",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting"
@@ -13685,14 +13824,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/10978",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=10978"
       ]
     },
     {
@@ -13724,7 +13864,8 @@
       "name": "Greater Astral Essence",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -13742,7 +13883,8 @@
       "source_urls": [
         "https://bindonforever.com/item/11082",
         "https://bindonforever.com/professions/enchanting",
-        "https://bindonforever.com/professions/tailoring"
+        "https://bindonforever.com/professions/tailoring",
+        "https://www.wowhead.com/forever/item=11082"
       ]
     },
     {
@@ -13752,7 +13894,8 @@
       "tags": [
         "enchanting",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -13772,7 +13915,8 @@
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/leatherworking",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/leatherworking-plans.json",
+        "https://www.wowhead.com/forever/item=11083"
       ]
     },
     {
@@ -13780,7 +13924,8 @@
       "name": "Large Glimmering Shard",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting"
@@ -13789,14 +13934,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/11084",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=11084"
       ]
     },
     {
@@ -13832,7 +13978,8 @@
       "name": "Greater Mystic Essence",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting"
@@ -13841,14 +13988,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/11135",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=11135"
       ]
     },
     {
@@ -13858,7 +14006,8 @@
       "tags": [
         "enchanting",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -13880,7 +14029,8 @@
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/tailoring-plans.json",
+        "https://www.wowhead.com/forever/item=11137"
       ]
     },
     {
@@ -13888,7 +14038,8 @@
       "name": "Small Glowing Shard",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting"
@@ -13897,14 +14048,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/11138",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=11138"
       ]
     },
     {
@@ -13912,7 +14064,8 @@
       "name": "Large Glowing Shard",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -13922,7 +14075,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -13930,7 +14083,8 @@
       "source_urls": [
         "https://bindonforever.com/item/11139",
         "https://bindonforever.com/professions/blacksmithing",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=11139"
       ]
     },
     {
@@ -13965,7 +14119,8 @@
       "category": "trade_goods",
       "tags": [
         "enchanting",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -13986,7 +14141,8 @@
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json",
+        "https://www.wowhead.com/forever/item=11175"
       ]
     },
     {
@@ -13996,7 +14152,8 @@
       "tags": [
         "enchanting",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -14008,7 +14165,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -14019,7 +14176,8 @@
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json",
+        "https://www.wowhead.com/forever/item=11176"
       ]
     },
     {
@@ -14027,7 +14185,8 @@
       "name": "Small Radiant Shard",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting"
@@ -14036,14 +14195,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 7 to make room for the complete Alchemy/Tailoring planning-skill-225 output graph. This item remains active for periodic price discovery; the tier change is not a claim of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/11177",
-        "https://bindonforever.com/professions/enchanting"
+        "https://bindonforever.com/professions/enchanting",
+        "https://www.wowhead.com/forever/item=11177"
       ]
     },
     {
@@ -14052,7 +14212,8 @@
       "category": "trade_goods",
       "tags": [
         "enchanting",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -14071,7 +14232,8 @@
         "https://bindonforever.com/item/11178",
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/tailoring",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json",
+        "https://www.wowhead.com/forever/item=11178"
       ]
     },
     {
@@ -14157,7 +14319,8 @@
       "category": "trade_goods",
       "tags": [
         "ore",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "mining"
@@ -14165,7 +14328,7 @@
       "roles": [
         "input"
       ],
-      "status": "research",
+      "status": "active",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -14173,7 +14336,8 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/11370",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=11370"
       ]
     },
     {
@@ -14181,7 +14345,8 @@
       "name": "Dark Iron Bar",
       "category": "trade_goods",
       "tags": [
-        "metal"
+        "metal",
+        "merchant_favor"
       ],
       "professions": [
         "blacksmithing",
@@ -14191,7 +14356,7 @@
       "roles": [
         "input"
       ],
-      "status": "research",
+      "status": "active",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -14201,7 +14366,8 @@
         "https://bindonforever.com/item/11371",
         "https://bindonforever.com/professions/blacksmithing",
         "https://bindonforever.com/professions/engineering",
-        "https://bindonforever.com/professions/mining"
+        "https://bindonforever.com/professions/mining",
+        "https://www.wowhead.com/forever/item=11371"
       ]
     },
     {
@@ -14458,7 +14624,8 @@
       "tags": [
         "metal",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -14471,7 +14638,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -14484,7 +14651,8 @@
         "https://bindonforever.com/professions/engineering",
         "https://bindonforever.com/professions/mining",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/blacksmithing-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=12359"
       ]
     },
     {
@@ -15545,7 +15713,8 @@
       "category": "trade_goods",
       "tags": [
         "herb",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -15555,14 +15724,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/13463",
-        "https://bindonforever.com/professions/alchemy"
+        "https://bindonforever.com/professions/alchemy",
+        "https://www.wowhead.com/forever/item=13463"
       ]
     },
     {
@@ -15571,7 +15741,8 @@
       "category": "trade_goods",
       "tags": [
         "herb",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -15582,7 +15753,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15590,7 +15761,8 @@
       "source_urls": [
         "https://bindonforever.com/item/13464",
         "https://bindonforever.com/professions/alchemy",
-        "https://bindonforever.com/professions/first-aid"
+        "https://bindonforever.com/professions/first-aid",
+        "https://www.wowhead.com/forever/item=13464"
       ]
     },
     {
@@ -15599,7 +15771,8 @@
       "category": "trade_goods",
       "tags": [
         "herb",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -15610,7 +15783,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15618,7 +15791,8 @@
       "source_urls": [
         "https://bindonforever.com/item/13465",
         "https://bindonforever.com/professions/alchemy",
-        "https://bindonforever.com/professions/cooking"
+        "https://bindonforever.com/professions/cooking",
+        "https://www.wowhead.com/forever/item=13465"
       ]
     },
     {
@@ -15626,7 +15800,8 @@
       "name": "Plaguebloom",
       "category": "trade_goods",
       "tags": [
-        "herb"
+        "herb",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -15636,14 +15811,15 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/13466",
-        "https://bindonforever.com/professions/alchemy"
+        "https://bindonforever.com/professions/alchemy",
+        "https://www.wowhead.com/forever/item=13466"
       ]
     },
     {
@@ -15652,7 +15828,8 @@
       "category": "trade_goods",
       "tags": [
         "herb",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "alchemy",
@@ -15664,7 +15841,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -15673,7 +15850,8 @@
         "https://bindonforever.com/item/13467",
         "https://bindonforever.com/professions/alchemy",
         "https://bindonforever.com/professions/enchanting",
-        "https://bindonforever.com/professions/engineering"
+        "https://bindonforever.com/professions/engineering",
+        "https://www.wowhead.com/forever/item=13467"
       ]
     },
     {
@@ -16839,7 +17017,8 @@
       "tags": [
         "cloth",
         "recipe-dependency",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering",
@@ -16863,7 +17042,8 @@
         "https://bindonforever.com/professions/leatherworking",
         "https://bindonforever.com/professions/tailoring",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/first-aid-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/first-aid-plans.json",
+        "https://www.wowhead.com/forever/item=14047"
       ]
     },
     {
@@ -16872,7 +17052,8 @@
       "category": "trade_goods",
       "tags": [
         "cloth",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "fishing",
@@ -16892,7 +17073,8 @@
         "https://bindonforever.com/item/14048",
         "https://bindonforever.com/professions/fishing",
         "https://bindonforever.com/professions/leatherworking",
-        "https://bindonforever.com/professions/tailoring"
+        "https://bindonforever.com/professions/tailoring",
+        "https://www.wowhead.com/forever/item=14048"
       ]
     },
     {
@@ -17174,7 +17356,8 @@
       "name": "Small Brilliant Shard",
       "category": "trade_goods",
       "tags": [
-        "enchanting"
+        "enchanting",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -17184,7 +17367,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -17192,7 +17375,8 @@
       "source_urls": [
         "https://bindonforever.com/item/14343",
         "https://bindonforever.com/professions/enchanting",
-        "https://bindonforever.com/professions/tailoring"
+        "https://bindonforever.com/professions/tailoring",
+        "https://www.wowhead.com/forever/item=14343"
       ]
     },
     {
@@ -17201,7 +17385,8 @@
       "category": "trade_goods",
       "tags": [
         "enchanting",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "enchanting",
@@ -17212,7 +17397,7 @@
         "input"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Moved to cold in revision 8: outside the protected Alchemy/Tailoring planning-skill-225 graphs and unresolved vendor/disenchant dependencies. Remains active for periodic market discovery; this is not a finding of permanent unprofitability.",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -17221,7 +17406,8 @@
         "https://bindonforever.com/item/14344",
         "https://bindonforever.com/professions/enchanting",
         "https://bindonforever.com/professions/engineering",
-        "https://bindonforever.com/professions/tailoring"
+        "https://bindonforever.com/professions/tailoring",
+        "https://www.wowhead.com/forever/item=14344"
       ]
     },
     {
@@ -17610,7 +17796,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "recipe-dependency"
+        "recipe-dependency",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -17619,7 +17806,7 @@
         "input",
         "output"
       ],
-      "status": "research",
+      "status": "active",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -17627,7 +17814,8 @@
       "binding": "none_in_tooltip",
       "source_urls": [
         "https://bindonforever.com/item/15994",
-        "https://bindonforever.com/professions/engineering"
+        "https://bindonforever.com/professions/engineering",
+        "https://www.wowhead.com/forever/item=15994"
       ]
     },
     {
@@ -17652,6 +17840,27 @@
       "source_urls": [
         "https://bindonforever.com/item/15997",
         "https://bindonforever.com/professions/engineering"
+      ]
+    },
+    {
+      "item_id": 16000,
+      "name": "Thorium Tube",
+      "category": "trade_goods",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=16000"
       ]
     },
     {
@@ -18333,7 +18542,8 @@
       "category": "components",
       "tags": [
         "engineering",
-        "reference-route"
+        "reference-route",
+        "merchant_favor"
       ],
       "professions": [
         "engineering"
@@ -18342,7 +18552,7 @@
         "input",
         "output"
       ],
-      "status": "research",
+      "status": "active",
       "pool": "core",
       "reason": "Price a selected material or intermediate used by profession chains; compare buying it with crafting it where a recipe exists.",
       "evidence": "client_data",
@@ -18351,7 +18561,8 @@
       "source_urls": [
         "https://bindonforever.com/item/18631",
         "https://bindonforever.com/professions/engineering",
-        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json"
+        "https://foreverwowcraft.com/data/classicbetapve--horde/plans/engineering-plans.json",
+        "https://www.wowhead.com/forever/item=18631"
       ]
     },
     {
@@ -20421,6 +20632,636 @@
         "https://bindonforever.com/item/247786",
         "https://bindonforever.com/professions/enchanting",
         "https://foreverwowcraft.com/data/classicbetapve--horde/plans/enchanting-plans.json"
+      ]
+    },
+    {
+      "item_id": 248682,
+      "name": "Waylaid Crate: Apprentice Herbs",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248682"
+      ]
+    },
+    {
+      "item_id": 248683,
+      "name": "Waylaid Crate: Apprentice Ore",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248683"
+      ]
+    },
+    {
+      "item_id": 248684,
+      "name": "Waylaid Crate: Apprentice Textiles",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248684"
+      ]
+    },
+    {
+      "item_id": 248685,
+      "name": "Waylaid Crate: Apprentice Curiosities",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248685"
+      ]
+    },
+    {
+      "item_id": 248686,
+      "name": "Waylaid Crate: Journeyman Herbs",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248686"
+      ]
+    },
+    {
+      "item_id": 248687,
+      "name": "Waylaid Crate: Journeyman Ore",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248687"
+      ]
+    },
+    {
+      "item_id": 248688,
+      "name": "Waylaid Crate: Journeyman Textiles",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248688"
+      ]
+    },
+    {
+      "item_id": 248689,
+      "name": "Waylaid Crate: Journeyman Curiosities",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248689"
+      ]
+    },
+    {
+      "item_id": 248690,
+      "name": "Waylaid Crate: Earthly Expert Herbs",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248690"
+      ]
+    },
+    {
+      "item_id": 248691,
+      "name": "Waylaid Crate: Flowering Expert Herbs",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248691"
+      ]
+    },
+    {
+      "item_id": 248692,
+      "name": "Waylaid Crate: Expert Ore",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248692"
+      ]
+    },
+    {
+      "item_id": 248693,
+      "name": "Waylaid Crate: Expert Textiles",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248693"
+      ]
+    },
+    {
+      "item_id": 248694,
+      "name": "Waylaid Crate: Expert Curiosities",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248694"
+      ]
+    },
+    {
+      "item_id": 248695,
+      "name": "Waylaid Crate: Earthly Artisan Herbs",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248695"
+      ]
+    },
+    {
+      "item_id": 248696,
+      "name": "Waylaid Crate: Flowering Artisan Herbs",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248696"
+      ]
+    },
+    {
+      "item_id": 248697,
+      "name": "Waylaid Crate: Artisan Ore",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248697"
+      ]
+    },
+    {
+      "item_id": 248698,
+      "name": "Waylaid Crate: Artisan Textiles",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248698"
+      ]
+    },
+    {
+      "item_id": 248699,
+      "name": "Waylaid Crate: Artisan Curiosities",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248699"
+      ]
+    },
+    {
+      "item_id": 248702,
+      "name": "Waylaid Crate: Apprentice Fabrics",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248702"
+      ]
+    },
+    {
+      "item_id": 248703,
+      "name": "Waylaid Crate: Apprentice Ingots",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248703"
+      ]
+    },
+    {
+      "item_id": 248704,
+      "name": "Waylaid Crate: Apprentice Parts",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248704"
+      ]
+    },
+    {
+      "item_id": 248705,
+      "name": "Waylaid Crate: Journeyman Fabrics",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248705"
+      ]
+    },
+    {
+      "item_id": 248706,
+      "name": "Waylaid Crate: Journeyman Ingots",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248706"
+      ]
+    },
+    {
+      "item_id": 248707,
+      "name": "Waylaid Crate: Journeyman Parts",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248707"
+      ]
+    },
+    {
+      "item_id": 248708,
+      "name": "Waylaid Crate: Expert Fabrics",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248708"
+      ]
+    },
+    {
+      "item_id": 248709,
+      "name": "Waylaid Crate: Expert Ingots",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248709"
+      ]
+    },
+    {
+      "item_id": 248710,
+      "name": "Waylaid Crate: Expert Parts",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248710"
+      ]
+    },
+    {
+      "item_id": 248711,
+      "name": "Waylaid Crate: Artisan Fabrics",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248711"
+      ]
+    },
+    {
+      "item_id": 248712,
+      "name": "Waylaid Crate: Artisan Ingots",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248712"
+      ]
+    },
+    {
+      "item_id": 248713,
+      "name": "Waylaid Crate: Artisan Parts",
+      "category": "utility",
+      "tags": [
+        "merchant_favor"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Observe empty Waylaid Crates and complete fill-bundle materials for Merchant Favor cost comparisons; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=248713"
       ]
     },
     {

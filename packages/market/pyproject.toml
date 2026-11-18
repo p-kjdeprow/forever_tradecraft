@@ -25,6 +25,8 @@ packages = ["src/crowley_market"]
 artifacts = [
   "src/crowley_market/server/migrations/*.sql",
   "src/crowley_market/server/static/trading-dashboard.html",
+  "src/crowley_market/server/static/merchant-favor.html",
+  "src/crowley_market/resources/merchant_favor.json",
   "src/crowley_market/resources/docker-compose.yml",
   "src/crowley_market/py.typed",
 ]

@@ -74,6 +74,10 @@ client-reachable behavior.
   A timeout with zero rows
   does not establish an empty market. Inspect diagnostics before repeating a
   long sweep that has already produced only timeouts.
+- Buy-side cost comparisons must exclude owner/account-owned rows. A mixed grouped
+  row does not expose the independently buyable quantity; do not count its entire
+  quantity as purchasable. Price a complete required bundle through retained depth,
+  and keep unqueried, failed, stale and successfully empty observations distinct.
 - Scanner completion can transition directly to `scheduled`, not only `ready`.
   Detect a fresh saved UID for the observed run, its pending ownership and terminal
   scanner state; preserve partial results too. Read actual start/finish timestamps

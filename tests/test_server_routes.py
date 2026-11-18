@@ -23,9 +23,11 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/v1/houses/{key}/sweeps/latest", None),
         ("GET", "/v1/houses/{key}/trading-summary", None),
         ("GET", "/v1/houses/{key}/recipe-watch", None),
+        ("GET", "/v1/houses/{key}/merchant-favor", None),
         ("GET", "/v1/scan-plan", "require_token"),
         ("POST", "/v1/addon-data", "require_token"),
         ("GET", "/dashboard", None),
+        ("GET", "/dashboard/merchant-favor", None),
     }
 )
 
@@ -65,7 +67,7 @@ def test_addon_data_contract_excludes_shopping_lists() -> None:
 def test_dashboard_paths_and_summary_route_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
     trading = dashboard_routes.dashboard()
     assert trading.status_code == 200
-    assert "Top 10 crafting strategies" in trading.body.decode()
+    assert "Crafting strategies by profession" in trading.body.decode()
     assert "dashboard/advanced" not in trading.body.decode()
 
     class Pool:
@@ -115,6 +117,24 @@ def test_latest_sweep_route_returns_the_dashboard_scan_identity(monkeypatch: pyt
     with pytest.raises(HTTPException) as absent:
         dashboard_routes.latest_house_sweep("us-normal-alliance", request)
     assert absent.value.status_code == 404
+
+
+def test_merchant_favor_routes_are_public_read_only_and_alliance_scoped(monkeypatch):
+    page = dashboard_routes.merchant_favor_dashboard()
+    assert page.status_code == 200
+    assert "Alchemy unlock catalog" in page.body.decode()
+    assert "unsafe-eval" not in page.headers["content-security-policy"]
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(pool=SimpleNamespace(connection=lambda: nullcontext(object())))
+        )
+    )
+    monkeypatch.setattr(dashboard_routes, "load_merchant_favor", lambda conn, key: {"house": key})
+    assert dashboard_routes.merchant_favor("us-normal-alliance", request) == {"house": "us-normal-alliance"}
+    for house in ["invalid-house", "us-normal-horde"]:
+        with pytest.raises(HTTPException) as invalid:
+            dashboard_routes.merchant_favor(house, request)
+        assert invalid.value.status_code == 400
 
 
 def test_recipe_watch_route_is_read_only_public_get(monkeypatch: pytest.MonkeyPatch) -> None:

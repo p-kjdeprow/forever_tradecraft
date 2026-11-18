@@ -39,6 +39,8 @@
     a { color: var(--accent); font-weight: 650; }
     .muted, small { color: var(--muted); }
     .header-links { display: flex; align-items: center; gap: 1rem; white-space: nowrap; }
+    .dashboard-tabs { display: flex; flex-wrap: wrap; gap: 1rem; }
+    .dashboard-tabs [aria-current="page"] { text-decoration: none; color: var(--text); }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: .7rem; box-shadow: var(--shadow); padding: 1rem; }
     .scan-panel { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .6rem 1.2rem; }
     .scan-title { min-width: 14rem; }
@@ -127,6 +129,10 @@
       <h1>Crowley crafting board</h1>
       <p class="muted">Positive 24-hour observed activity · read only</p>
     </div>
+    <nav class="dashboard-tabs" aria-label="Dashboard tabs">
+      <a href="/dashboard" aria-current="page">Crafting</a>
+      <a href="/dashboard/merchant-favor">Merchant's Favor</a>
+    </nav>
   </header>
   <main>
     <section class="panel scan-panel" aria-labelledby="scan-heading">

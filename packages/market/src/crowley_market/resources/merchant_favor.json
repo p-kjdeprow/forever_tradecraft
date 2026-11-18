@@ -1,0 +1,1153 @@
+{
+  "schema_version": 1,
+  "reviewed_on": "2026-11-18",
+  "client_build": "1.60.1.70959",
+  "faction": "Azeroth Commerce Authority",
+  "vendor": "Nina Surefire",
+  "location": "Three Corners, Redridge Mountains",
+  "sources": [
+    "https://www.wow-professions.com/forever/merchants-favor-durotar-supply-azeroth-commerce",
+    "https://www.wow-professions.com/forever/npc/nina-surefire",
+    "https://www.wowhead.com/forever/item=262902/forged-delivery-receipt",
+    "https://www.curseforge.com/wow/addons/waylaid-auction-helper/files/9580959"
+  ],
+  "recipes": [
+    {
+      "spell_id": 1251743,
+      "name": "Mender's Potion",
+      "skill": 130,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1251743",
+      "recipe_item_id": 250990,
+      "output_item_id": 250946
+    },
+    {
+      "spell_id": 1251731,
+      "name": "Spellblasting Potion",
+      "skill": 135,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1251731",
+      "recipe_item_id": 250978,
+      "output_item_id": 250934
+    },
+    {
+      "spell_id": 1251737,
+      "name": "Frenzy Potion",
+      "skill": 140,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1251737",
+      "recipe_item_id": 250984,
+      "output_item_id": 250940
+    },
+    {
+      "spell_id": 1251751,
+      "name": "Dragonfire Potion",
+      "skill": 245,
+      "favor": 120,
+      "reputation": "Friendly",
+      "reputation_total": 3000,
+      "source_url": "https://www.wowhead.com/forever/spell=1251751",
+      "recipe_item_id": 250997,
+      "output_item_id": 250953
+    },
+    {
+      "spell_id": 1251749,
+      "name": "Caustic Smog Potion",
+      "skill": 265,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1251749",
+      "recipe_item_id": 250995,
+      "output_item_id": 250951
+    },
+    {
+      "spell_id": 1251748,
+      "name": "Potion of Venomous Blood",
+      "skill": 275,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1251748",
+      "recipe_item_id": 250994,
+      "output_item_id": 250950
+    },
+    {
+      "spell_id": 1251747,
+      "name": "Major Mender's Potion",
+      "skill": 280,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1251747",
+      "recipe_item_id": 250993,
+      "output_item_id": 250949
+    },
+    {
+      "spell_id": 1251752,
+      "name": "Potion of Elemental Purging",
+      "skill": 280,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1251752",
+      "recipe_item_id": 250998,
+      "output_item_id": 250954
+    },
+    {
+      "spell_id": 1251734,
+      "name": "Major Spellblasting Potion",
+      "skill": 285,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1251734",
+      "recipe_item_id": 250981,
+      "output_item_id": 250937
+    },
+    {
+      "spell_id": 1251740,
+      "name": "Major Frenzy Potion",
+      "skill": 290,
+      "favor": 240,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1251740",
+      "recipe_item_id": 250987,
+      "output_item_id": 250943
+    },
+    {
+      "spell_id": 1250794,
+      "name": "Elixir of Lesser Spirit",
+      "skill": 65,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1250794",
+      "recipe_item_id": 250381,
+      "output_item_id": 250345
+    },
+    {
+      "spell_id": 1250789,
+      "name": "Lesser Mageblood Elixir",
+      "skill": 75,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1250789",
+      "recipe_item_id": 250376,
+      "output_item_id": 250340
+    },
+    {
+      "spell_id": 1250801,
+      "name": "Elixir of Lesser Intellect",
+      "skill": 95,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1250801",
+      "recipe_item_id": 250388,
+      "output_item_id": 250353
+    },
+    {
+      "spell_id": 1250780,
+      "name": "Lesser Cleric's Elixir",
+      "skill": 95,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1250780",
+      "recipe_item_id": 250367,
+      "output_item_id": 250331
+    },
+    {
+      "spell_id": 1250791,
+      "name": "Lesser Arcane Elixir",
+      "skill": 120,
+      "favor": 45,
+      "reputation": "Neutral",
+      "reputation_total": 0,
+      "source_url": "https://www.wowhead.com/forever/spell=1250791",
+      "recipe_item_id": 250378,
+      "output_item_id": 250342
+    },
+    {
+      "spell_id": 1250796,
+      "name": "Elixir of Greater Spirit",
+      "skill": 165,
+      "favor": 120,
+      "reputation": "Friendly",
+      "reputation_total": 3000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250796",
+      "recipe_item_id": 250383,
+      "output_item_id": 250347
+    },
+    {
+      "spell_id": 1250790,
+      "name": "Greater Mageblood Elixir",
+      "skill": 175,
+      "favor": 120,
+      "reputation": "Friendly",
+      "reputation_total": 3000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250790",
+      "recipe_item_id": 250377,
+      "output_item_id": 250341
+    },
+    {
+      "spell_id": 1250782,
+      "name": "Greater Cleric's Elixir",
+      "skill": 195,
+      "favor": 120,
+      "reputation": "Friendly",
+      "reputation_total": 3000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250782",
+      "recipe_item_id": 250369,
+      "output_item_id": 250333
+    },
+    {
+      "spell_id": 1250784,
+      "name": "Elixir of Greater Fortitude",
+      "skill": 200,
+      "favor": 120,
+      "reputation": "Friendly",
+      "reputation_total": 3000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250784",
+      "recipe_item_id": 250371,
+      "output_item_id": 250335
+    },
+    {
+      "spell_id": 1250778,
+      "name": "Elixir of the Phalanx",
+      "skill": 250,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250778",
+      "recipe_item_id": 250365,
+      "output_item_id": 250329
+    },
+    {
+      "spell_id": 1250777,
+      "name": "Elixir of Cunning",
+      "skill": 275,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250777",
+      "recipe_item_id": 250364,
+      "output_item_id": 250328
+    },
+    {
+      "spell_id": 1250799,
+      "name": "Elixir of Ferocity",
+      "skill": 275,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250799",
+      "recipe_item_id": 250386,
+      "output_item_id": 250350
+    },
+    {
+      "spell_id": 1250787,
+      "name": "Elixir of Sages",
+      "skill": 275,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250787",
+      "recipe_item_id": 250374,
+      "output_item_id": 250338
+    },
+    {
+      "spell_id": 1250797,
+      "name": "Elixir of the Whale",
+      "skill": 275,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250797",
+      "recipe_item_id": 250384,
+      "output_item_id": 250348
+    },
+    {
+      "spell_id": 1250786,
+      "name": "Elixir of the Owl",
+      "skill": 280,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250786",
+      "recipe_item_id": 250373,
+      "output_item_id": 250337
+    },
+    {
+      "spell_id": 1250792,
+      "name": "Elixir of Nature Power",
+      "skill": 285,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250792",
+      "recipe_item_id": 250379,
+      "output_item_id": 250343
+    },
+    {
+      "spell_id": 1250785,
+      "name": "Elixir of Wicked Regeneration",
+      "skill": 285,
+      "favor": 180,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250785",
+      "recipe_item_id": 250372,
+      "output_item_id": 250336
+    },
+    {
+      "spell_id": 1250800,
+      "name": "Elixir of the Grizzly",
+      "skill": 300,
+      "favor": 240,
+      "reputation": "Honored",
+      "reputation_total": 9000,
+      "source_url": "https://www.wowhead.com/forever/spell=1250800",
+      "recipe_item_id": 250387,
+      "output_item_id": 250351
+    }
+  ],
+  "crates": [
+    {
+      "item_id": 248684,
+      "name": "Waylaid Crate: Apprentice Textiles",
+      "min_level": 10,
+      "favor": 5,
+      "money": 250,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Linen Cloth",
+          "quantity": 40,
+          "item_id": 2589
+        },
+        {
+          "name": "Light Leather",
+          "quantity": 20,
+          "item_id": 2318
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248684"
+    },
+    {
+      "item_id": 248683,
+      "name": "Waylaid Crate: Apprentice Ore",
+      "min_level": 10,
+      "favor": 5,
+      "money": 250,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Copper Ore",
+          "quantity": 20,
+          "item_id": 2770
+        },
+        {
+          "name": "Tin Ore",
+          "quantity": 20,
+          "item_id": 2771
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248683"
+    },
+    {
+      "item_id": 248682,
+      "name": "Waylaid Crate: Apprentice Herbs",
+      "min_level": 10,
+      "favor": 5,
+      "money": 250,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Peacebloom",
+          "quantity": 20,
+          "item_id": 2447
+        },
+        {
+          "name": "Silverleaf",
+          "quantity": 20,
+          "item_id": 765
+        },
+        {
+          "name": "Earthroot",
+          "quantity": 10,
+          "item_id": 2449
+        },
+        {
+          "name": "Mageroyal",
+          "quantity": 10,
+          "item_id": 785
+        },
+        {
+          "name": "Briarthorn",
+          "quantity": 10,
+          "item_id": 2450
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248682"
+    },
+    {
+      "item_id": 248685,
+      "name": "Waylaid Crate: Apprentice Curiosities",
+      "min_level": 10,
+      "favor": 5,
+      "money": 250,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Strange Dust",
+          "quantity": 20,
+          "item_id": 10940
+        },
+        {
+          "name": "Greater Magic Essence",
+          "quantity": 4,
+          "item_id": 10939
+        },
+        {
+          "name": "Small Glimmering Shard",
+          "quantity": 6,
+          "item_id": 10978
+        },
+        {
+          "name": "Large Glimmering Shard",
+          "quantity": 2,
+          "item_id": 11084
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248685"
+    },
+    {
+      "item_id": 248702,
+      "name": "Waylaid Crate: Apprentice Fabrics",
+      "min_level": 10,
+      "favor": 10,
+      "money": 500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Cured Light Hide",
+          "quantity": 2,
+          "item_id": 4231
+        },
+        {
+          "name": "Bolt of Linen Cloth",
+          "quantity": 20,
+          "item_id": 2996
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248702"
+    },
+    {
+      "item_id": 248703,
+      "name": "Waylaid Crate: Apprentice Ingots",
+      "min_level": 10,
+      "favor": 10,
+      "money": 500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Copper Bar",
+          "quantity": 20,
+          "item_id": 2840
+        },
+        {
+          "name": "Tin Bar",
+          "quantity": 20,
+          "item_id": 3576
+        },
+        {
+          "name": "Bronze Bar",
+          "quantity": 10,
+          "item_id": 2841
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248703"
+    },
+    {
+      "item_id": 248704,
+      "name": "Waylaid Crate: Apprentice Parts",
+      "min_level": 10,
+      "favor": 10,
+      "money": 500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Handful of Copper Bolts",
+          "quantity": 16,
+          "item_id": 4359
+        },
+        {
+          "name": "Copper Tube",
+          "quantity": 16,
+          "item_id": 4361
+        },
+        {
+          "name": "Copper Modulator",
+          "quantity": 4,
+          "item_id": 4363
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248704"
+    },
+    {
+      "item_id": 248688,
+      "name": "Waylaid Crate: Journeyman Textiles",
+      "min_level": 10,
+      "favor": 10,
+      "money": 500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Wool Cloth",
+          "quantity": 40,
+          "item_id": 2592
+        },
+        {
+          "name": "Silk Cloth",
+          "quantity": 40,
+          "item_id": 4306
+        },
+        {
+          "name": "Medium Leather",
+          "quantity": 20,
+          "item_id": 2319
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248688"
+    },
+    {
+      "item_id": 248687,
+      "name": "Waylaid Crate: Journeyman Ore",
+      "min_level": 10,
+      "favor": 10,
+      "money": 500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Silver Ore",
+          "quantity": 10,
+          "item_id": 2775
+        },
+        {
+          "name": "Iron Ore",
+          "quantity": 20,
+          "item_id": 2772
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248687"
+    },
+    {
+      "item_id": 248686,
+      "name": "Waylaid Crate: Journeyman Herbs",
+      "min_level": 10,
+      "favor": 10,
+      "money": 500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Stranglekelp",
+          "quantity": 10,
+          "item_id": 3820
+        },
+        {
+          "name": "Bruiseweed",
+          "quantity": 10,
+          "item_id": 2453
+        },
+        {
+          "name": "Wild Steelbloom",
+          "quantity": 10,
+          "item_id": 3355
+        },
+        {
+          "name": "Grave Moss",
+          "quantity": 10,
+          "item_id": 3369
+        },
+        {
+          "name": "Kingsblood",
+          "quantity": 10,
+          "item_id": 3356
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248686"
+    },
+    {
+      "item_id": 248689,
+      "name": "Waylaid Crate: Journeyman Curiosities",
+      "min_level": 10,
+      "favor": 10,
+      "money": 500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Soul Dust",
+          "quantity": 20,
+          "item_id": 11083
+        },
+        {
+          "name": "Greater Astral Essence",
+          "quantity": 4,
+          "item_id": 11082
+        },
+        {
+          "name": "Small Glowing Shard",
+          "quantity": 6,
+          "item_id": 11138
+        },
+        {
+          "name": "Large Glowing Shard",
+          "quantity": 2,
+          "item_id": 11139
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248689"
+    },
+    {
+      "item_id": 248705,
+      "name": "Waylaid Crate: Journeyman Fabrics",
+      "min_level": 10,
+      "favor": 20,
+      "money": 1000,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Bolt of Woolen Cloth",
+          "quantity": 6,
+          "item_id": 2997
+        },
+        {
+          "name": "Bolt of Silk Cloth",
+          "quantity": 10,
+          "item_id": 4305
+        },
+        {
+          "name": "Cured Medium Hide",
+          "quantity": 2,
+          "item_id": 4233
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248705"
+    },
+    {
+      "item_id": 248706,
+      "name": "Waylaid Crate: Journeyman Ingots",
+      "min_level": 10,
+      "favor": 20,
+      "money": 1000,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Silver Bar",
+          "quantity": 10,
+          "item_id": 2842
+        },
+        {
+          "name": "Iron Bar",
+          "quantity": 20,
+          "item_id": 3575
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248706"
+    },
+    {
+      "item_id": 248707,
+      "name": "Waylaid Crate: Journeyman Parts",
+      "min_level": 10,
+      "favor": 20,
+      "money": 1000,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Bronze Tube",
+          "quantity": 8,
+          "item_id": 4371
+        },
+        {
+          "name": "Whirring Bronze Gizmo",
+          "quantity": 7,
+          "item_id": 4375
+        },
+        {
+          "name": "Bronze Framework",
+          "quantity": 4,
+          "item_id": 4382
+        },
+        {
+          "name": "Gold Power Core",
+          "quantity": 45,
+          "item_id": 10558
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248707"
+    },
+    {
+      "item_id": 248693,
+      "name": "Waylaid Crate: Expert Textiles",
+      "min_level": 20,
+      "favor": 15,
+      "money": 750,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Mageweave Cloth",
+          "quantity": 40,
+          "item_id": 4338
+        },
+        {
+          "name": "Heavy Leather",
+          "quantity": 20,
+          "item_id": 4234
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248693"
+    },
+    {
+      "item_id": 248692,
+      "name": "Waylaid Crate: Expert Ore",
+      "min_level": 20,
+      "favor": 15,
+      "money": 750,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Gold Ore",
+          "quantity": 10,
+          "item_id": 2776
+        },
+        {
+          "name": "Mithril Ore",
+          "quantity": 20,
+          "item_id": 3858
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248692"
+    },
+    {
+      "item_id": 248690,
+      "name": "Waylaid Crate: Earthly Expert Herbs",
+      "min_level": 20,
+      "favor": 15,
+      "money": 750,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Liferoot",
+          "quantity": 20,
+          "item_id": 3357
+        },
+        {
+          "name": "Fadeleaf",
+          "quantity": 10,
+          "item_id": 3818
+        },
+        {
+          "name": "Goldthorn",
+          "quantity": 10,
+          "item_id": 3821
+        },
+        {
+          "name": "Khadgar's Whisker",
+          "quantity": 10,
+          "item_id": 3358
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248690"
+    },
+    {
+      "item_id": 248691,
+      "name": "Waylaid Crate: Flowering Expert Herbs",
+      "min_level": 20,
+      "favor": 15,
+      "money": 750,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Wintersbite",
+          "quantity": 10,
+          "item_id": 3819
+        },
+        {
+          "name": "Firebloom",
+          "quantity": 10,
+          "item_id": 4625
+        },
+        {
+          "name": "Purple Lotus",
+          "quantity": 20,
+          "item_id": 8831
+        },
+        {
+          "name": "Arthas' Tears",
+          "quantity": 10,
+          "item_id": 8836
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248691"
+    },
+    {
+      "item_id": 248694,
+      "name": "Waylaid Crate: Expert Curiosities",
+      "min_level": 20,
+      "favor": 15,
+      "money": 750,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Vision Dust",
+          "quantity": 20,
+          "item_id": 11137
+        },
+        {
+          "name": "Greater Mystic Essence",
+          "quantity": 4,
+          "item_id": 11135
+        },
+        {
+          "name": "Small Radiant Shard",
+          "quantity": 6,
+          "item_id": 11177
+        },
+        {
+          "name": "Large Radiant Shard",
+          "quantity": 2,
+          "item_id": 11178
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248694"
+    },
+    {
+      "item_id": 248708,
+      "name": "Waylaid Crate: Expert Fabrics",
+      "min_level": 20,
+      "favor": 30,
+      "money": 1500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Bolt of Mageweave",
+          "quantity": 8,
+          "item_id": 4339
+        },
+        {
+          "name": "Cured Heavy Hide",
+          "quantity": 2,
+          "item_id": 4236
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248708"
+    },
+    {
+      "item_id": 248709,
+      "name": "Waylaid Crate: Expert Ingots",
+      "min_level": 20,
+      "favor": 30,
+      "money": 1500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Mithril Bar",
+          "quantity": 20,
+          "item_id": 3860
+        },
+        {
+          "name": "Steel Bar",
+          "quantity": 15,
+          "item_id": 3859
+        },
+        {
+          "name": "Gold Bar",
+          "quantity": 10,
+          "item_id": 3577
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248709"
+    },
+    {
+      "item_id": 248710,
+      "name": "Waylaid Crate: Expert Parts",
+      "min_level": 20,
+      "favor": 30,
+      "money": 1500,
+      "reward_status": "guide_verified",
+      "options": [
+        {
+          "name": "Iron Strut",
+          "quantity": 8,
+          "item_id": 4387
+        },
+        {
+          "name": "Mithril Tube",
+          "quantity": 5,
+          "item_id": 10559
+        },
+        {
+          "name": "Unstable Trigger",
+          "quantity": 12,
+          "item_id": 10560
+        },
+        {
+          "name": "Mithril Casing",
+          "quantity": 5,
+          "item_id": 10561
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248710"
+    },
+    {
+      "item_id": 248698,
+      "name": "Waylaid Crate: Artisan Textiles",
+      "min_level": 35,
+      "favor": 20,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Runecloth",
+          "quantity": 40,
+          "item_id": 14047
+        },
+        {
+          "name": "Thick Leather",
+          "quantity": 20,
+          "item_id": 4304
+        },
+        {
+          "name": "Rugged Leather",
+          "quantity": 20,
+          "item_id": 8170
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248698"
+    },
+    {
+      "item_id": 248697,
+      "name": "Waylaid Crate: Artisan Ore",
+      "min_level": 35,
+      "favor": 20,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Truesilver Ore",
+          "quantity": 10,
+          "item_id": 7911
+        },
+        {
+          "name": "Thorium Ore",
+          "quantity": 20,
+          "item_id": 10620
+        },
+        {
+          "name": "Dark Iron Ore",
+          "quantity": 20,
+          "item_id": 11370
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248697"
+    },
+    {
+      "item_id": 248695,
+      "name": "Waylaid Crate: Earthly Artisan Herbs",
+      "min_level": 35,
+      "favor": 20,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Golden Sansam",
+          "quantity": 10,
+          "item_id": 13464
+        },
+        {
+          "name": "Sungrass",
+          "quantity": 20,
+          "item_id": 8838
+        },
+        {
+          "name": "Blindweed",
+          "quantity": 10,
+          "item_id": 8839
+        },
+        {
+          "name": "Ghost Mushroom",
+          "quantity": 10,
+          "item_id": 8845
+        },
+        {
+          "name": "Gromsblood",
+          "quantity": 10,
+          "item_id": 8846
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248695"
+    },
+    {
+      "item_id": 248696,
+      "name": "Waylaid Crate: Flowering Artisan Herbs",
+      "min_level": 35,
+      "favor": 20,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Dreamfoil",
+          "quantity": 20,
+          "item_id": 13463
+        },
+        {
+          "name": "Mountain Silversage",
+          "quantity": 20,
+          "item_id": 13465
+        },
+        {
+          "name": "Plaguebloom",
+          "quantity": 20,
+          "item_id": 13466
+        },
+        {
+          "name": "Icecap",
+          "quantity": 20,
+          "item_id": 13467
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248696"
+    },
+    {
+      "item_id": 248699,
+      "name": "Waylaid Crate: Artisan Curiosities",
+      "min_level": 35,
+      "favor": 20,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Dream Dust",
+          "quantity": 20,
+          "item_id": 11176
+        },
+        {
+          "name": "Greater Nether Essence",
+          "quantity": 4,
+          "item_id": 11175
+        },
+        {
+          "name": "Small Brilliant Shard",
+          "quantity": 6,
+          "item_id": 14343
+        },
+        {
+          "name": "Large Brilliant Shard",
+          "quantity": 2,
+          "item_id": 14344
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248699"
+    },
+    {
+      "item_id": 248711,
+      "name": "Waylaid Crate: Artisan Fabrics",
+      "min_level": 35,
+      "favor": 40,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Bolt of Runecloth",
+          "quantity": 8,
+          "item_id": 14048
+        },
+        {
+          "name": "Cured Thick Hide",
+          "quantity": 2,
+          "item_id": 8172
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248711"
+    },
+    {
+      "item_id": 248712,
+      "name": "Waylaid Crate: Artisan Ingots",
+      "min_level": 35,
+      "favor": 40,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Dark Iron Bar",
+          "quantity": 2,
+          "item_id": 11371
+        },
+        {
+          "name": "Truesilver Bar",
+          "quantity": 10,
+          "item_id": 6037
+        },
+        {
+          "name": "Thorium Bar",
+          "quantity": 20,
+          "item_id": 12359
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248712"
+    },
+    {
+      "item_id": 248713,
+      "name": "Waylaid Crate: Artisan Parts",
+      "min_level": 35,
+      "favor": 40,
+      "money": null,
+      "reward_status": "reported",
+      "options": [
+        {
+          "name": "Thorium Widget",
+          "quantity": 5,
+          "item_id": 15994
+        },
+        {
+          "name": "Truesilver Transformer",
+          "quantity": 5,
+          "item_id": 18631
+        },
+        {
+          "name": "Thorium Tube",
+          "quantity": 2,
+          "item_id": 16000
+        }
+      ],
+      "source_url": "https://www.wowhead.com/forever/item=248713"
+    }
+  ],
+  "forgery": {
+    "receipt_item_id": 262902,
+    "container_item_id": 262917,
+    "favor_cost": 15,
+    "reputation": 50,
+    "money": 100,
+    "minimum_reputation": 3000
+  },
+  "introduction": {
+    "reputation": 2000,
+    "favor": 50
+  },
+  "notes": [
+    "Current guide lists 28 recipes; older 29-recipe lists include the removed Disorienting Smog Potion.",
+    "Artisan Favor 20/40 is addon-author reported. Cash payout remains unverified; these crates do not determine the verified cheapest route.",
+    "Costs and reputation are base values, without racial or event bonuses. Character progress is entered by the user."
+  ]
+}

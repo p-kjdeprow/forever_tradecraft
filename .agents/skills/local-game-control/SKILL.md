@@ -24,7 +24,7 @@ trading, account changes or unrelated display changes.
 - Your own synthetic input (XTEST) does not register as a human, so it will not hold the loop. Stop the unit
   before sending any, and obey the click rules in `CLAUDE.md` (at most one automated click per second, curved
   human pointer motion through `crowley_automation.gui`, never warp the pointer).
-- Validate helper imports, CLI argument formats and restoration paths before stopping the owner. Bounded
+- Validate helper imports, installed lease/context-manager APIs, CLI arguments and restoration paths before stopping the owner. Bounded
   focus-only inspections need automatic restoration in `finally`, with fresh ownership checks and stop honored;
   do not depend on a later model turn to restore focus or resume collection.
 - Check processes and map windows to PIDs before launching anything. Match the owned game by uid, Windows argv0

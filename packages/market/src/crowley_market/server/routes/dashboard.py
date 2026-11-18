@@ -7,6 +7,7 @@ from crowley_common.house import House
 from fastapi import APIRouter, HTTPException, Request
 from starlette.responses import HTMLResponse
 
+from crowley_market.analysis.merchant_favor import load_merchant_favor
 from crowley_market.analysis.recipe_watch import load_recipe_watch
 from crowley_market.analysis.trading_summary import load_trading_summary
 
@@ -16,6 +17,7 @@ router = APIRouter()
 
 _STATIC = Path(__file__).parent.parent / "static"
 _TRADING_DASHBOARD_HTML = (_STATIC / "trading-dashboard.html").read_text(encoding="utf-8")
+_MERCHANT_FAVOR_HTML = (_STATIC / "merchant-favor.html").read_text(encoding="utf-8")
 _SECURITY_HEADERS = {
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
@@ -31,6 +33,26 @@ def dashboard() -> HTMLResponse:
         _TRADING_DASHBOARD_HTML,
         headers=_SECURITY_HEADERS,
     )
+
+
+@router.get("/dashboard/merchant-favor", response_class=HTMLResponse)
+def merchant_favor_dashboard() -> HTMLResponse:
+    return HTMLResponse(_MERCHANT_FAVOR_HTML, headers=_SECURITY_HEADERS)
+
+
+@router.get("/v1/houses/{key}/merchant-favor")
+def merchant_favor(key: str, request: Request) -> dict:
+    try:
+        House.parse(key)
+        if key != "us-normal-alliance":
+            raise ValueError("Merchant's Favor supports us-normal-alliance")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        with request.app.state.pool.connection() as conn:
+            return load_merchant_favor(conn, key)
+    except MarketDataNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/v1/houses/{key}/sweeps/latest")

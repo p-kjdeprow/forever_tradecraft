@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Crowley · Merchant's Favor</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#f5f2ea; --panel:#fffefa; --text:#24221e; --muted:#676158; --line:#d9d2c7; --accent:#8a5a00; }
+    @media(prefers-color-scheme:dark) { :root { --bg:#171614; --panel:#24221e; --text:#f2eee6; --muted:#bdb5a8; --line:#4b463e; --accent:#e5b64e; } }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font:15px/1.45 system-ui,sans-serif; }
+    header,main { max-width:1180px; margin:auto; padding:1rem; }
+    header { display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap; }
+    h1,h2,h3,p { margin:0 0 .6rem; }
+    h1 { font-size:1.8rem; } h2 { font-size:1.25rem; } h3 { font-size:1.05rem; }
+    a { color:var(--accent); } nav { display:flex; flex-wrap:wrap; gap:1rem; } nav a { font-weight:650; } nav [aria-current] { text-decoration:none; color:var(--text); }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:.7rem; padding:1rem; margin-bottom:1rem; }
+    .muted,small { color:var(--muted); } .error { color:#c44; font-weight:650; }
+    .controls { display:flex; flex-wrap:wrap; align-items:end; gap:1rem; } label { display:flex; flex-direction:column; gap:.25rem; }
+    input,select { min-height:2.4rem; max-width:100%; border:1px solid var(--line); border-radius:.4rem; padding:.3rem .5rem; background:var(--panel); color:var(--text); font:inherit; }
+    input[type=number] { width:10rem; } input[type=checkbox] { width:1.2rem; min-height:1.2rem; }
+    .table-wrap { overflow-x:auto; } table { width:100%; border-collapse:collapse; text-align:left; }
+    th,td { padding:.6rem; border-bottom:1px solid var(--line); vertical-align:top; } th { font-size:.85rem; color:var(--muted); }
+    .route { border-left:3px solid var(--accent); padding-left:1rem; margin:.8rem 0; }
+    .grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }
+    .grid > * { min-width:0; } .badge { color:var(--muted); font-size:.85rem; }
+    details { margin:.5rem 0; } summary { cursor:pointer; font-weight:650; }
+    #status { min-height:1.5rem; } #coverage { overflow-wrap:anywhere; }
+    @media(max-width:650px) { .grid { grid-template-columns:1fr; } header,main { padding:.7rem; } .panel { padding:.75rem; } }
+  </style>
+</head>
+<body>
+<header>
+  <div><h1>Merchant's Favor</h1><p class="muted">Azeroth Commerce Authority · Three Corners, Redridge Mountains</p></div>
+  <nav aria-label="Dashboard tabs"><a href="/dashboard">Crafting</a><a href="/dashboard/merchant-favor" aria-current="page">Merchant's Favor</a></nav>
+</header>
+<main>
+  <section class="panel" aria-labelledby="progress-heading">
+    <h2 id="progress-heading">Your starting point</h2>
+    <div class="controls">
+      <label>Reputation standing<select id="standing"><option value="0">Neutral</option><option value="3000">Friendly</option><option value="9000">Honored</option><option value="21000">Revered</option><option value="42000">Exalted</option></select></label>
+      <label>Points within standing<input id="rep" type="number" min="0" max="2999" step="1" value="2150"></label>
+      <label>Merchant's Favor balance<input id="favor" type="number" min="0" max="1000000" step="1" value="30"></label>
+      <label>Character level<input id="level" type="number" min="1" max="60" step="1" value="35"></label>
+    </div>
+    <p class="muted">Starting estimate: Neutral 2,150, about 30 Favor, level 35. Update these after turn-ins; this page does not read your character's reputation or currency.</p>
+  </section>
+  <p id="status" role="status" aria-live="polite">Loading current crate prices…</p>
+  <section class="panel" aria-labelledby="plan-heading"><h2 id="plan-heading">Route to your selected recipes</h2><div id="plan">Loading recipe requirements…</div></section>
+  <div class="grid">
+    <section class="panel"><h2>1. Earn Favor</h2><div id="best-fill">Waiting for crate observations.</div></section>
+    <section class="panel"><h2>2. Exchange Favor for reputation</h2><div id="best-forge">Waiting for empty-crate observations.</div></section>
+  </div>
+  <section class="panel" aria-labelledby="fill-heading"><h2 id="fill-heading">Buy and fill: cost per Favor</h2><p class="muted">One empty crate + one complete alternative material bundle, less the turn-in coin reward. Materials are bought from the AH; crafting subcomponents and your bags are not assumed.</p><div class="table-wrap"><table><thead><tr><th>Crate / level</th><th>Cheapest complete fill</th><th>Upfront cost</th><th>Refund / Favor</th><th>Net cost per Favor</th><th>Observed capacity</th></tr></thead><tbody id="fills"></tbody></table></div></section>
+  <section class="panel" aria-labelledby="forge-heading"><h2 id="forge-heading">Empty crates for forged receipts</h2><p class="muted">Each return consumes an empty crate and a receipt costing 15 Favor, granting 50 base reputation and 1 silver. Requires Friendly. The gold-per-reputation comparison includes earning that Favor.</p><div class="table-wrap"><table><thead><tr><th>Empty crate</th><th>AH price / supply</th><th>Favor used</th><th>Rep gained</th><th>Estimated net cost per rep</th></tr></thead><tbody id="forgeries"></tbody></table></div><p class="muted">No crate-type exclusion is documented, but the server-side forging target whitelist and its level checks are not independently verified. Never fill the crate you intend to forge.</p></section>
+  <section class="panel" aria-labelledby="recipes-heading"><h2 id="recipes-heading">Alchemy unlock catalog</h2><p id="recipe-total">28 recipes · 3,780 Favor total · Honored for the final unlocks. Certification is a separate, optional 1,000 Favor title.</p><p class="muted">Mark recipes you already own to remove them from the target. Recipe learning also requires the listed Alchemy skill; character use levels are separate.</p><div class="table-wrap"><table><thead><tr><th>Owned</th><th>Recipe</th><th>Alchemy</th><th>Favor</th><th>Reputation gate</th></tr></thead><tbody id="recipes"></tbody></table></div></section>
+  <section class="panel"><h2>Scan coverage and assumptions</h2><p id="source"></p><p id="coverage"></p><ul id="notes"></ul><p class="muted">Normal crate turn-ins give Favor and coin, not repeatable reputation. The one-time Shipping Label quest grants 2,000 base reputation and 50 Favor; do not count it twice. Before Friendly, Craftsman's Writs give 75/125/200 base reputation for Journeyman/Expert/Artisan orders, each exact order once a day. Writ purchase and delivery costs are outside this crate comparison.</p><p><a href="https://www.wow-professions.com/forever/npc/nina-surefire" target="_blank" rel="noopener">Alchemy vendor catalog</a> · <a href="https://www.wow-professions.com/forever/merchants-favor-durotar-supply-azeroth-commerce" target="_blank" rel="noopener">Crates, writs and receipts</a> · <a href="https://www.wowhead.com/forever/item=262902/forged-delivery-receipt" target="_blank" rel="noopener">Receipt tooltip</a></p></section>
+</main>
+<script>
+"use strict";
+/* FAVOR PURE LOGIC START */
+const PROFILE_KEY = "crowley.merchant-favor.progress.v1";
+const DEFAULT_PROGRESS = {standing:0, rep:2150, favor:30, level:35, owned:[]};
+function rational(value) { const [a,b="1"]=String(value).split('/'); return [BigInt(a),BigInt(b)]; }
+function add(a,b) { return [a[0]*b[1]+b[0]*a[1],a[1]*b[1]]; }
+function times(a,n) { return [a[0]*BigInt(n),a[1]]; }
+function divide(a,n) { return [a[0],a[1]*BigInt(n)]; }
+function compare(a,b) { const d=a[0]*b[1]-b[0]*a[1]; return d<0n?-1:d>0n?1:0; }
+function money(value) {
+  if(value===null || value===undefined) return "Unknown";
+  const [a,b]=Array.isArray(value)?value:rational(value); const sign=a<0n?"−":""; const abs=a<0n?-a:a;
+  const c=(abs+b-1n)/b; const g=c/10000n,s=c%10000n/100n, copper=c%100n;
+  return (abs%b?"≈":"")+sign+[g?`${g}g`:"",s?`${s}s`:"",copper||!g&&!s?`${copper}c`:""].filter(Boolean).join(' ');
+}
+function progress(value) {
+  const bounds={0:2999,3000:5999,9000:11999,21000:20999,42000:999};
+  if(!value || !Object.hasOwn(bounds,value.standing) || !Number.isInteger(value.standing) || !Number.isInteger(value.rep) || value.rep<0 || value.rep>bounds[value.standing] || !Number.isInteger(value.favor) || value.favor<0 || value.favor>1000000 || !Number.isInteger(value.level) || value.level<1 || value.level>60 || !Array.isArray(value.owned) || value.owned.some(id=>!Number.isInteger(id)||id<=0)) throw new Error("Enter valid standing points, Favor and character level.");
+  return value;
+}
+function target(data,p) {
+  const needed=data.catalog.recipes.filter(r=>!p.owned.includes(r.recipe_item_id));
+  const favor=needed.reduce((sum,r)=>sum+r.favor,0), rep=needed.reduce((maximum,r)=>Math.max(maximum,r.reputation_total),0);
+  const current=p.standing+p.rep, beforeFriendly=rep>current?Math.max(0,Math.min(rep,3000)-current):0;
+  const receipts=Math.ceil(Math.max(0,rep-Math.max(current,3000))/data.catalog.forgery.reputation);
+  return {recipes:needed.length,recipeFavor:favor,targetRep:rep,beforeFriendly,receipts,receiptFavor:receipts*data.catalog.forgery.favor_cost,favorNeeded:Math.max(0,favor+receipts*data.catalog.forgery.favor_cost-p.favor)};
+}
+function rankedFills(data,p,now) {
+  return data.fills.filter(c=>c.best && c.min_level<=p.level && now-c.best.observed_at<=data.max_price_age_seconds)
+    .sort((a,b)=>compare(rational(a.best.cost_per_favor),rational(b.best.cost_per_favor))||a.item_id-b.item_id);
+}
+function forgeCost(row,fill) { return divide(add(add(rational(row.crate_price),times(rational(fill.best.cost_per_favor),row.favor_cost)),[-BigInt(row.money),1n]),row.reputation); }
+/* FAVOR PURE LOGIC END */
+const $=id=>document.getElementById(id);
+function el(tag,text="",className="") { const n=document.createElement(tag);n.textContent=String(text);n.className=className;return n; }
+function itemLink(id,name) {const a=el('a',name);a.href=`https://www.wowhead.com/forever/item=${id}`;a.target='_blank';a.rel='noopener';return a;}
+function cell(row,text) {const td=el('td');td.append(text instanceof Node?text:document.createTextNode(String(text)));row.append(td);return td;}
+let state={data:null,profile:{...DEFAULT_PROGRESS,owned:[]},busy:false,error:""};
+try {const raw=localStorage.getItem(PROFILE_KEY);if(raw) state.profile=progress(JSON.parse(raw));} catch (_) { /* Invalid or blocked local storage does not prevent using the page. */ }
+function restoreInputs() { for(const id of ['standing','rep','favor','level']) $(id).value=String(state.profile[id]); const widths={0:2999,3000:5999,9000:11999,21000:20999,42000:999};$('rep').max=String(widths[state.profile.standing]); }
+function save() {try {localStorage.setItem(PROFILE_KEY,JSON.stringify(state.profile));}catch (_) {}}
+function recipeRows() {
+  const rows=state.data.catalog.recipes.map(r=>{const tr=el('tr'),box=el('input');box.type='checkbox';box.checked=state.profile.owned.includes(r.recipe_item_id);box.setAttribute('aria-label',`Already own ${r.name}`);box.addEventListener('change',()=>{state.profile.owned=box.checked?[...new Set([...state.profile.owned,r.recipe_item_id])]:state.profile.owned.filter(id=>id!==r.recipe_item_id);save();render();});cell(tr,box);cell(tr,itemLink(r.recipe_item_id,r.name));cell(tr,r.skill);cell(tr,r.favor);cell(tr,r.reputation);return tr;});$('recipes').replaceChildren(...rows);
+}
+function render() {
+  const d=state.data;if(!d)return;
+  const now=Date.now()/1000,p=state.profile,t=target(d,p),fills=rankedFills(d,p,now),best=fills[0];
+  const forgeries=d.forgeries.filter(r=>r.crate_price!==null && now-r.observed_at<=d.max_price_age_seconds).sort((a,b)=>compare(rational(a.crate_price),rational(b.crate_price))||a.item_id-b.item_id),forge=forgeries[0];
+  $('status').className=state.error?'error':'';$('status').textContent=state.error||`Sweep #${d.sweep_id} · prices refresh with new scans; comparisons expire after 30 minutes.`;
+  $('plan').replaceChildren(el('p',`${t.recipes} recipes still needed: ${t.recipeFavor} Favor. Selected unlocks require ${t.targetRep===9000?'Honored':t.targetRep===3000?'Friendly':'no reputation gate'}.`),el('p',`${t.beforeFriendly} reputation remains before the required Friendly gate. ${t.receipts} forged returns afterward consume ${t.receiptFavor} Favor. After your ${p.favor} Favor balance, earn ${t.favorNeeded} more Favor.`));
+  if(t.beforeFriendly) $('plan').append(el('p',`You cannot use receipts yet. Earn ${t.beforeFriendly} reputation with writs first (for example, ${Math.ceil(t.beforeFriendly/125)} different Expert writs at 125 each). This step is not priced here. The daily limit applies to each exact writ.`, 'route'));
+  if(best && t.favorNeeded) {const n=Math.ceil(t.favorNeeded/best.favor);$('plan').append(el('p',`Unit-price budget estimate: ${n} × ${best.name} using ${best.best.quantity} ${best.best.name} each = ${n*best.favor} Favor, ${money(times(rational(best.best.net_cost),n))} net. ${t.receipts} additional empty crates are needed for forging. This extrapolates the next fill price; it does not reserve bulk stock or include the unpriced writ step.`, 'muted'));if(forge&&t.receipts)$('plan').append(el('p',`Forging crate budget at the next observed price: ${money(times(add(rational(forge.crate_price),[-BigInt(forge.money),1n]),t.receipts))} net, plus Favor funding already counted above. Fill and forging stock overlap and cannot be double-counted.`, 'muted'));}
+  if(best && Math.ceil(t.favorNeeded/best.favor)>best.best.available_turnins) $('plan').append(el('p',`This source alone cannot cover your target: ${best.best.available_turnins} complete fills are observed, versus ${Math.ceil(t.favorNeeded/best.favor)} needed. Use other available routes or wait for a new scan. Even within that capacity, costs rise through the retained price levels.`, 'route'));
+  $('best-fill').replaceChildren(best?el('p',`${best.name}: ${best.best.quantity} × ${best.best.name}. ${money(best.best.gross_cost)} upfront; ${money(best.best.net_cost)} net for ${best.favor} Favor (${money(best.best.cost_per_favor)} / Favor).`):el('p','No fresh, fully priced fill route is available yet. See missing coverage below.'));
+  $('best-forge').replaceChildren(forge?el('p',`${forge.name}: ${money(forge.crate_price)} per empty crate + 15 Favor, for 50 base reputation and 1s back.${best?` Estimated ${money(forgeCost(forge,best))} per reputation including earning Favor.`:' Favor funding cost is unknown until a complete fill route is priced.'}`):el('p','No fresh empty-crate quote is available yet.'));
+  if(p.standing+p.rep<3000)$('best-forge').append(el('p','Locked until Friendly; this is a future route comparison.','muted'));
+  const ordered=[...fills,...d.fills.filter(c=>!fills.includes(c))];
+  $('fills').replaceChildren(...ordered.map(c=>{const tr=el('tr'),valid=fills.includes(c),choice=c.best;const title=el('div');title.append(itemLink(c.item_id,c.name),el('small',` · level ${c.min_level}${c.reward_status==='reported'?' · reported Artisan payout':''}`));cell(tr,title);const options=el('div');options.append(el('p',choice?`${choice.quantity} × ${choice.name}`:'No complete verified quote'));const detail=el('details'),summary=el('summary','All fill alternatives');detail.append(summary);for(const o of c.options)detail.append(el('p',`${o.quantity} ${o.name}: ${o.gross_cost===null?o.material_state+' / insufficient stock':money(o.gross_cost)+' upfront'}; ${o.available_turnins} observed turn-ins`));options.append(detail);cell(tr,options);cell(tr,valid?money(choice.gross_cost):'Unknown / unavailable');cell(tr,`${c.money===null?'Unknown refund':money(c.money)} / ${c.favor} Favor`);cell(tr,valid?money(choice.cost_per_favor):c.min_level>p.level?'Level too low':c.reward_status==='reported'?'Unverified cash reward':c.crate_state==='priced'?'Materials / depth missing':c.crate_state.replaceAll('_',' '));cell(tr,valid?`${choice.available_turnins} at all retained prices (price rises with depth)`:'Unknown');return tr;}));
+  $('forgeries').replaceChildren(...d.forgeries.map(r=>{const tr=el('tr'),fresh=forgeries.includes(r);cell(tr,itemLink(r.item_id,r.name));cell(tr,fresh?`${money(r.crate_price)} / ${r.crate_supply} units`:r.crate_state==='priced'?'Stale':r.crate_state.replaceAll('_',' '));cell(tr,r.favor_cost);cell(tr,r.reputation);cell(tr,fresh&&best?money(forgeCost(r,best)):'Unknown');return tr;}));
+  $('source').textContent=`${d.house} · build ${d.client_build} · sweep #${d.sweep_id} · completed ${new Date(d.finished_epoch*1000).toLocaleString()}`;
+  const counts={};for(const r of d.coverage){const key=r.observed_at&&now-r.observed_at>d.max_price_age_seconds?'stale':r.state;counts[key]=(counts[key]||0)+1;}$('coverage').textContent=`126 scan items: ${Object.entries(counts).map(([k,n])=>`${n} ${k.replaceAll('_',' ')}`).join(' · ')}. No listing and no successful query are different states.`;
+  $('notes').replaceChildren(...[d.scope,...d.catalog.notes].map(note=>el('li',note)));
+}
+for(const id of ['standing','rep','favor','level']) $(id).addEventListener('change',()=>{
+  try {const next={...state.profile};for(const key of ['standing','rep','favor','level']) {if(!$(key).value.trim()) throw new Error('Enter all progress fields.');next[key]=Number($(key).value);}if(id==='standing')next.rep=0;state.profile=progress(next);restoreInputs();save();state.error='';render();}
+  catch(error){restoreInputs();$('status').textContent=error.message;$('status').className='error';}
+});
+restoreInputs();
+async function get(path) {const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),30000);try{const r=await fetch(path,{signal:controller.signal});if(!r.ok)throw new Error(`Request failed: HTTP ${r.status}`);return await r.json();}finally{clearTimeout(timer);}}
+async function refresh() {if(state.busy)return;state.busy=true;try{const latest=await get('/v1/houses/us-normal-alliance/sweeps/latest');if(!state.data||latest.sweep_id!==state.data.sweep_id){const d=await get('/v1/houses/us-normal-alliance/merchant-favor');if(d.house!=='us-normal-alliance'||d.client_build!==latest.client_build||d.sweep_id<latest.sweep_id)throw new Error('Comparison does not match the latest house and build.');state.data=d;recipeRows();}state.error='';render();}catch(error){state.error=`Prices could not refresh: ${error.message}. Retained comparisons expire after 30 minutes.`;if(state.data)render();else{$('status').textContent=state.error;$('status').className='error';}}finally{state.busy=false;}}
+void refresh();window.setInterval(()=>{render();void refresh();},60000);
+</script>
+</body>
+</html>

@@ -21,7 +21,11 @@ deadline/identity. Never retimestamp an old image or widen freshness to make a l
 
 Derive stub return shapes from the selected client's API/UI source; do not invent
 convenient fields or boolean success returns for APIs that return nothing.
-Copy enum names and numeric values from that source too.
+Copy enum names and numeric values from that source too. Listing duration is a
+native ordinal, not hours: check the selected product's duration labels/constants
+against the UI ordinal mapping, not generic addon radio values. Change posting and
+deposit indices, canonical policy/batch defaults, receipt validation and the shared
+frame reader together; verify both defaulted and explicit durations end to end.
 Absence from generated docs or one UI consumer does not establish a legacy global
 is unavailable; check primary callers and its actual guarded return contract.
 Lua API stubs must forward varargs to argument counters; fixed signatures discard

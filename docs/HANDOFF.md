@@ -5,6 +5,17 @@ and independent Sol review loops, commits on main/origin/main, and task artifact
 This supersedes the normal commit-confirmation rule for this task. It does not authorize a
 real trade. Exact immutable batch authorization and a separate current-session arm are required.
 
+New listing policies and manual batches now default to **two hours** when
+`durationHours` is omitted; canonical inspection makes that value explicit before
+hashing/authorization. Forever durations are 2/8/24 hours (native indices 1/2/3),
+verified from the installed Forever-specific Auctionator 341 constants and radio
+mapping. The old Retail 12/24/48 assumption is removed from the automation model,
+policy schema, Lua staging/post/deposit mapping, receipt checks and shared frame
+reader. Old 12/48-hour policies refuse rather than being reinterpreted. Per-item
+`batchSize` independently limits each posting, clipped to admitted bag stock; total
+`quantity` remains the separate stock cap. Existing policies/grants and installed
+runtime are unchanged. See [listing defaults](LISTING_DEFAULTS.md).
+
 The natural-input refactor is implemented in source, independently reviewed READY
 by Sol after two fix rounds, and remains separate from the installed runtime.
 Final verification: 575 affected tests, Ruff check/format and Pyright pass; all five

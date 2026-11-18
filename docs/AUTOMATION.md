@@ -50,7 +50,9 @@ the batch ID; any field change changes the ID and requires matching authorizatio
 | move_route | routeId |
 
 Each action includes kind. Prices/cost caps are integer copper, posting quantity is 1..200, duration
-is 12/24/48 hours, and messageLimit is 1..50. Posting matches the full canonical itemKey and
+defaults to 2 hours when omitted (explicit choices: 2/8/24), and messageLimit is 1..50.
+Inspection expands omitted durationHours before hashing the batch; the native staged
+action always contains an explicit duration. Posting matches the full canonical itemKey and
 actual bag identity. Item prices are unit prices in the public spec; native item posting
 uses total bid/buyout. The native callback recomputes stock, variant, costs, funds and
 ownership. Unavailable facts refuse; no names or older observations substitute for identity.

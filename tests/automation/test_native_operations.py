@@ -135,7 +135,7 @@ def test_post_commodity_uses_exact_native_arguments_and_one_button_click() -> No
     assert call["kind"] == "post_commodity"
     assert len(call["args"]) == 4
     assert call["args"][0] == {"bag": 0, "slot": 1}
-    assert call["args"][1:] == [2, 5, 100]
+    assert call["args"][1:] == [3, 5, 100]
     assert harness.snapshot["operation"]["receipt"]["postcondition"] == "unknown"
 
     harness.add_owned(auction_id=99, quantity=5, buyout=500)
@@ -269,7 +269,7 @@ def test_native_button_layering_and_hidden_button_readiness() -> None:
     assert local.native_calls == []
 
 
-@pytest.mark.parametrize(("duration", "index"), [(12, 1), (24, 2), (48, 3)])
+@pytest.mark.parametrize(("duration", "index"), [(2, 1), (8, 2), (24, 3)])
 def test_post_item_uses_equal_total_bid_and_buyout_and_exact_arity(duration: int, index: int) -> None:
     harness = NativeHarness()
     harness.add_item(count=4, commodity=False)
@@ -294,7 +294,7 @@ def test_variant_matching_uses_bonus_ids_from_link_and_allows_duplicates() -> No
         harness,
         "post_commodity",
         item_key="123:b3.8.8",
-        fields={"quantity": 2, "unitPriceCopper": 9, "durationHours": 12, "maxDepositCopper": 1000},
+        fields={"quantity": 2, "unitPriceCopper": 9, "durationHours": 2, "maxDepositCopper": 1000},
     )
     assert harness.snapshot["operation"]["ready"]
     harness.hardware_click()
@@ -1661,3 +1661,45 @@ def test_motion_cursor_is_physical_and_independent_of_ui_scale() -> None:
         "width": 440,
         "height": 88,
     }
+
+
+@pytest.mark.parametrize("kind", ["post_commodity", "post_item"])
+@pytest.mark.parametrize(("hours", "index"), [(2, 1), (8, 2), (24, 3)])
+def test_forever_duration_matches_deposit_and_protected_post_and_wire_readback(kind, hours, index):
+    harness = NativeHarness()
+    harness.add_item(count=4, commodity=kind == "post_commodity")
+    admit_market_stage(
+        harness,
+        kind,
+        item_key="123",
+        fields={"quantity": 2, "unitPriceCopper": 100, "durationHours": hours, "maxDepositCopper": 1000},
+    )
+    decoded = decode_frame(harness.frame_bytes, expected_kind="automation").snapshot.value
+    assert decoded["operation"]["ready"]
+    assert decoded["operation"]["action"]["durationHours"] == hours
+    deposits = harness._from_lua(harness.state.depositCalls)
+    assert deposits and all(call["args"][1] == index for call in deposits)
+    harness.hardware_click()
+    assert len(harness.native_calls) == 1
+    assert harness.native_calls[0]["args"][1] == index
+
+
+def test_native_old_retail_short_duration_is_rejected_instead_of_reinterpreted():
+    harness = NativeHarness()
+    harness.add_item(count=4, commodity=True)
+    for row in (
+        f"begin {BATCH} 0 0",
+        "kind post_commodity",
+        "key 1 123",
+        "arg quantity 2",
+        "arg unitPriceCopper 100",
+        "arg durationHours 12",
+        "arg maxDepositCopper 1000",
+        f"expires {int(harness.state.now) + 90}",
+    ):
+        command(harness, row)
+    assert harness.slash("seal") is False
+    assert not harness.snapshot["operation"]["ready"]
+    assert harness.snapshot["operation"]["error"] == "posting_bounds_invalid"
+    harness.hardware_click()
+    assert harness.native_calls == []

@@ -16,6 +16,10 @@ from crowley_common.house import House
 from crowley_common.scanformat import ScanFormatError
 from crowley_common.scanformat import validate_item_key as _validate_shared_item_key
 
+# Forever short/medium/long durations; native API indices are 1/2/3.
+DEFAULT_LISTING_DURATION_HOURS = 2
+LISTING_DURATIONS_HOURS = (2, 8, 24)
+
 MAX_BATCH_BYTES = 16_384
 MAX_ACTIONS = 32
 MAX_INTEGER = 9_007_199_254_740_991
@@ -68,9 +72,9 @@ class PostCommodity:
         _integer(self.unit_price_copper, "unitPriceCopper", minimum=1)
         if self.unit_price_copper * self.quantity > MAX_INTEGER:
             raise BatchError("unitPriceCopper times quantity exceeds the safe-integer limit")
-        _integer(self.duration_hours, "durationHours", minimum=12, maximum=48)
-        if self.duration_hours not in (12, 24, 48):
-            raise BatchError("durationHours must be 12, 24, or 48")
+        _integer(self.duration_hours, "durationHours", minimum=2, maximum=24)
+        if self.duration_hours not in LISTING_DURATIONS_HOURS:
+            raise BatchError("durationHours must be 2, 8, or 24")
         _integer(self.max_deposit_copper, "maxDepositCopper")
 
 
@@ -195,7 +199,7 @@ def _parse_action(value: object) -> Action:
     kind = value["kind"]
     if kind in ("post_commodity", "post_item"):
         fields = {"kind", "itemKey", "quantity", "unitPriceCopper", "durationHours", "maxDepositCopper"}
-        row = _exact_keys(value, fields, kind)
+        row = _exact_keys({"durationHours": DEFAULT_LISTING_DURATION_HOURS, **value}, fields, kind)
         args = (
             row["itemKey"],
             row["quantity"],

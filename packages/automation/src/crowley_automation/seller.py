@@ -11,6 +11,8 @@ from typing import Literal
 from crowley_common.house import House
 
 from .model import (
+    DEFAULT_LISTING_DURATION_HOURS,
+    LISTING_DURATIONS_HOURS,
     MAX_INTEGER,
     MAX_QUANTITY,
     Action,
@@ -71,7 +73,6 @@ SELLER_POLICY_SCHEMA: dict[str, object] = {
                     "batchSize",
                     "minUnitPriceCopper",
                     "startUnitPriceCopper",
-                    "durationHours",
                     "maxDepositCopper",
                     "maxCancelCostCopper",
                     "kind",
@@ -87,7 +88,10 @@ SELLER_POLICY_SCHEMA: dict[str, object] = {
                             {"type": "null"},
                         ]
                     },
-                    "durationHours": {"enum": [12, 24, 48]},
+                    "durationHours": {
+                        "enum": list(LISTING_DURATIONS_HOURS),
+                        "default": DEFAULT_LISTING_DURATION_HOURS,
+                    },
                     "maxDepositCopper": {"type": "integer", "minimum": 0, "maximum": MAX_INTEGER},
                     "maxCancelCostCopper": {"type": "integer", "minimum": 0, "maximum": MAX_INTEGER},
                     "kind": {"const": "commodity"},
@@ -117,7 +121,7 @@ SELLER_POLICY_EXAMPLE: dict[str, object] = {
             "batchSize": 20,
             "minUnitPriceCopper": 100,
             "startUnitPriceCopper": 150,
-            "durationHours": 24,
+            "durationHours": DEFAULT_LISTING_DURATION_HOURS,
             "maxDepositCopper": 50,
             "maxCancelCostCopper": 10,
             "kind": "commodity",
@@ -206,8 +210,8 @@ class SellerItemPolicy:
             _integer(self.start_unit_price_copper, "startUnitPriceCopper", minimum=1)
             if self.start_unit_price_copper < self.min_unit_price_copper:
                 raise SellerPolicyError("startUnitPriceCopper must not be below minUnitPriceCopper")
-        if type(self.duration_hours) is not int or self.duration_hours not in (12, 24, 48):
-            raise SellerPolicyError("durationHours must be 12, 24, or 48")
+        if type(self.duration_hours) is not int or self.duration_hours not in LISTING_DURATIONS_HOURS:
+            raise SellerPolicyError("durationHours must be 2, 8, or 24")
         _integer(self.max_deposit_copper, "maxDepositCopper")
         _integer(self.max_cancel_cost_copper, "maxCancelCostCopper")
         if self.kind != "commodity":
@@ -370,7 +374,11 @@ class SellerPolicy:
         }
         items: list[SellerItemPolicy] = []
         for raw_item in item_rows:
-            row = _exact_keys(raw_item, item_fields, "seller item")
+            if type(raw_item) is not dict:
+                raise SellerPolicyError("seller item must be an object")
+            row = _exact_keys(
+                {"durationHours": DEFAULT_LISTING_DURATION_HOURS, **raw_item}, item_fields, "seller item"
+            )
             if row["kind"] != "commodity":
                 raise SellerPolicyError("only commodity item policies are supported")
             items.append(

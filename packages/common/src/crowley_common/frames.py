@@ -814,9 +814,9 @@ def _validate_native_action(value: Any) -> None:
         _action_integer(row["quantity"], "operation.action.quantity", minimum=1, maximum=200)
         price = _action_integer(row["unitPriceCopper"], "operation.action.unitPriceCopper", minimum=1)
         duration = _action_integer(
-            row["durationHours"], "operation.action.durationHours", minimum=12, maximum=48
+            row["durationHours"], "operation.action.durationHours", minimum=2, maximum=24
         )
-        if duration not in {12, 24, 48} or price * row["quantity"] > 9_007_199_254_740_991:
+        if duration not in {2, 8, 24} or price * row["quantity"] > 9_007_199_254_740_991:
             raise _error("operation.action", "posting duration or total price is outside bounds")
         _action_integer(row["maxDepositCopper"], "operation.action.maxDepositCopper")
     elif kind == "cancel_auction":

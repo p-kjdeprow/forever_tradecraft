@@ -412,7 +412,11 @@ def test_session_restart_preserves_stock_and_child_reservation(tmp_path: Path) -
             selected.house,
             selected.character,
             batch.expires_at,
-            (PostCommodity(ITEM, 5, batch.actions[0].unit_price_copper + 1, 24, 50),),
+            (
+                PostCommodity(
+                    ITEM, 5, batch.actions[0].unit_price_copper + 1, batch.actions[0].duration_hours, 50
+                ),
+            ),
         )
         store.prepare_child(session_id, decision.decision_id, tampered, now=NOW)
 

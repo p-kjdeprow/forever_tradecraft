@@ -150,6 +150,7 @@ Client assumptions are explicit and bounded by their evidence:
 | Fact or assumption | Evidence and consequence |
 |---|---|
 | Selected Forever target/build/interface/house | Packaged common target descriptor; mismatches fail, automation independently pins native identity |
+| Forever listing durations are 2/8/24 hours, native indices 1/2/3; new policies/batches default to two hours | Installed Auctionator 341 Forever constants and its duration radio/index mapping; [contract record](LISTING_DEFAULTS.md); protected effects still require live qualification |
 | Native PostCommodity(location,duration,quantity,unitPrice) and PostItem(location,duration,quantity,minBid,buyout) signatures | Installed Auctionator source and historical 70862 API probe; actual protected behavior on 70938 still needs live qualification |
 | Empty native Lua tables serialize as arrays | Captured scanner fixtures; keyed collections normalize only through the strict scan contract |
 | Search events lack request IDs and foreign same-key work is ambiguous | Native scanner evidence; overlapping queries become incomplete |

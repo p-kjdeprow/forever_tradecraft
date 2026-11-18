@@ -51,7 +51,7 @@ exact integers. No buys, crafting, vendors, arbitrary Lua, or arbitrary screen a
 An immutable batch contains schema version, expected house and character, expiration, and ordered
 actions. Its full SHA256 canonical JSON digest is the batch ID. Supported actions are post_commodity,
 post_item, cancel_auction, collect_mail, interact, and move_route. Posting identifies exact itemKey,
-quantity, integer unit price, 12/24/48-hour duration, and maximum deposit. Cancellation names the exact
+quantity, integer unit price, 2/8/24-hour duration (two hours by default), and maximum deposit. Cancellation names the exact
 auction ID and maximum cancellation cost. Mail has a bounded message limit and never pays COD or
 sends mail. Interaction/route targets are explicitly configured known targets/routes, not fuzzy names.
 

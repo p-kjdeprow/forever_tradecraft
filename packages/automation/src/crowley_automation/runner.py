@@ -18,6 +18,7 @@ from typing import Literal, Protocol
 
 from .ledger import BatchStatus, Ledger, ReadyStep, UncertainEffectInterlock
 from .model import (
+    DEFAULT_LISTING_DURATION_HOURS,
     MAX_INTEGER,
     Action,
     Batch,
@@ -53,7 +54,7 @@ def _validate_dispatch_result(value: object) -> dict[str, object]:
             value["itemKey"],  # type: ignore[arg-type]
             value["quantity"],  # type: ignore[arg-type]
             value["unitPriceCopper"],  # type: ignore[arg-type]
-            12,
+            DEFAULT_LISTING_DURATION_HOURS,
             0,
         )
         if type(value["auctionId"]) is not int or value["auctionId"] < 1:
@@ -70,7 +71,7 @@ def _validate_dispatch_result(value: object) -> dict[str, object]:
             value["itemKey"],  # type: ignore[arg-type]
             value["quantity"],  # type: ignore[arg-type]
             value["unitPriceCopper"],  # type: ignore[arg-type]
-            12,
+            DEFAULT_LISTING_DURATION_HOURS,
             0,
         )
         if type(value["auctionId"]) is not int or value["auctionId"] < 1:

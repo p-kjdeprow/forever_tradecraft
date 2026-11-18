@@ -244,3 +244,40 @@ def test_large_managed_set_is_cancelled_in_exact_bounded_chunks() -> None:
 def test_conservation_rejects_stock_inflation() -> None:
     with pytest.raises(SellerPolicyError, match="conserve"):
         stock(admitted=20, bag=21)
+
+
+def test_two_hour_default_is_explicit_in_policy_digest_and_derived_posting():
+    source = json.loads(json.dumps(SELLER_POLICY_EXAMPLE))
+    del source["items"][0]["durationHours"]
+    normalized = SellerPolicy.from_json(json.dumps(source))
+    explicit = SellerPolicy.from_json(json.dumps(SELLER_POLICY_EXAMPLE))
+    assert normalized.policy_id == explicit.policy_id
+    assert normalized.object()["items"][0]["durationHours"] == 2
+    for invalid in (None, True, 12, 48):
+        source["items"][0]["durationHours"] = invalid
+        with pytest.raises(SellerPolicyError, match="durationHours"):
+            SellerPolicy.from_json(json.dumps(source))
+
+
+def test_independent_item_batches_and_final_remainder_preserve_total_stock_limit():
+    source = json.loads(json.dumps(SELLER_POLICY_EXAMPLE))
+    first = source["items"][0]
+    first.update(quantity=20, batchSize=2)
+    source["items"] = [first, {**first, "itemKey": "456", "batchSize": 10}]
+    selected = SellerPolicy.from_json(json.dumps(source))
+    for item, expected in zip(selected.items, (2, 10), strict=True):
+        facts = replace(market(), item_key=item.item_key)
+        admitted = replace(stock(), item_key=item.item_key)
+        decision = decide(selected, item, facts, admitted, NOW)
+        assert decision.kind == "post"
+        assert decision.quantity == decision.actions[0].quantity == expected
+        assert decision.actions[0].duration_hours == 2
+    item = selected.items[1]
+    remainder = decide(
+        selected,
+        item,
+        replace(market(), item_key=item.item_key),
+        replace(stock(bag=3, sold=17), item_key=item.item_key),
+        NOW,
+    )
+    assert remainder.quantity == remainder.actions[0].quantity == 3

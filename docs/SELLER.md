@@ -28,10 +28,19 @@ Policy JSON has exactly these keys; optional starting prices are represented by 
 | outboundRouteId, returnRouteId | Reviewed route IDs for AH to mailbox and back |
 
 Each item has exactly kind="commodity", itemKey, quantity, batchSize, minUnitPriceCopper,
-startUnitPriceCopper, durationHours, maxDepositCopper and maxCancelCostCopper. Quantity is the
-total admitted stock, batchSize is 1..200, durationHours is 12/24/48, and prices/caps are integer
-copper. A null startUnitPriceCopper leaves empty-market pricing unavailable. Unknown/duplicate
+startUnitPriceCopper, maxDepositCopper and maxCancelCostCopper. `durationHours` is optional
+and defaults to **2 hours**; explicit overrides are 8 or 24 hours. Canonical inspection
+materializes the duration before computing the authorization digest. Quantity is the
+total admitted stock, batchSize is 1..200, and prices/caps are integer copper. A null startUnitPriceCopper leaves empty-market pricing unavailable. Unknown/duplicate
 keys, floating-point numbers, booleans in integer fields and unsupported item kinds fail validation.
+
+`batchSize` is per exact itemKey, never a single global stack size. For example,
+one item can post 2 units at a time, another 5 and another 20. Every new posting is
+`min(batchSize, admitted bag quantity)`, so a final remainder can be smaller. Total
+`quantity` separately caps the stock available to the session. Sizes are explicit
+user policy; the agent does not infer demand or silently enlarge a batch. The
+one-post-per-item-per-minute interval and stock/spending caps still apply. Changing
+a size changes the immutable policy digest; existing grants are not rewritten.
 
 The public interface is:
 

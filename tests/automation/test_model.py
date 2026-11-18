@@ -34,7 +34,7 @@ def batch_json(action: dict[str, object] | None = None) -> str:
 def test_round_trip_supported_actions_and_canonical_digest() -> None:
     actions = (
         PostCommodity("123:s5:b2.2:l10", 2, 1234, 24, 400),
-        PostItem("456:p7", 1, 999, 12, 12),
+        PostItem("456:p7", 1, 999, 2, 12),
         CancelAuction(42, 500),
         CollectMail(3),
         Interact("auctioneer_main"),
@@ -90,9 +90,9 @@ def test_rejects_bad_item_identity(item_key: str) -> None:
 
 def test_action_numeric_bounds_are_exact_and_safe() -> None:
     with pytest.raises(BatchError):
-        PostCommodity("123", True, 1, 12, 0)
+        PostCommodity("123", True, 1, 2, 0)
     with pytest.raises(BatchError, match="safe-integer"):
-        PostItem("123", 2, MAX_INTEGER // 2 + 1, 12, 0)
+        PostItem("123", 2, MAX_INTEGER // 2 + 1, 2, 0)
     with pytest.raises(BatchError):
         CancelAuction(2**53, 0)
     with pytest.raises(BatchError):
@@ -108,3 +108,16 @@ def test_batch_order_changes_identity_and_constructor_is_immutable() -> None:
     assert left.batch_id != right.batch_id
     with pytest.raises(BatchError, match="tuple"):
         Batch("us-normal-horde", "Tester", 100, [a])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("kind", ["post_item", "post_commodity"])
+def test_missing_duration_defaults_to_two_hours_and_canonicalizes_before_confirmation(kind):
+    action = {"kind": kind, "itemKey": "123", "quantity": 2, "unitPriceCopper": 100, "maxDepositCopper": 50}
+    defaulted = Batch.from_json(batch_json(action))
+    explicit = Batch.from_json(batch_json({**action, "durationHours": 2}))
+    assert defaulted == explicit
+    assert defaulted.batch_id == explicit.batch_id
+    assert defaulted.object()["actions"][0]["durationHours"] == 2
+    for invalid in (None, True, 12, 48):
+        with pytest.raises(BatchError):
+            Batch.from_json(batch_json({**action, "durationHours": invalid}))

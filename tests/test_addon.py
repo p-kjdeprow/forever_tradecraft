@@ -366,7 +366,7 @@ def test_combined_host_holds_native_market_grant_until_real_scanner_finishes():
         f"key 1 {item.item_id}",
         "arg quantity 1",
         "arg unitPriceCopper 100",
-        "arg durationHours 12",
+        "arg durationHours 2",
         "arg maxDepositCopper 0",
         "expires 1760000100",
         "seal",

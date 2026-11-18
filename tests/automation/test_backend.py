@@ -470,8 +470,8 @@ def stage_lua_action(
 @pytest.mark.parametrize(
     "action",
     [
-        PostCommodity("123:b2.2", 2, 500, 12, 200),
-        PostItem("123:b2.2", 1, 500, 12, 200),
+        PostCommodity("123:b2.2", 2, 500, 2, 200),
+        PostItem("123:b2.2", 1, 500, 2, 200),
         CancelAuction(42, 300),
         CollectMail(2),
         Interact("target-a"),
@@ -730,8 +730,8 @@ def test_real_lua_frames_dispatch_two_posts_then_each_mail_step(tmp_path: Path, 
         live_config.character,
         now + 100,
         (
-            PostCommodity("123", 1, 10, 12, 1_000),
-            PostCommodity("123", 1, 11, 12, 1_000),
+            PostCommodity("123", 1, 10, 2, 1_000),
+            PostCommodity("123", 1, 11, 2, 1_000),
             CollectMail(2),
         ),
     )
@@ -901,7 +901,7 @@ def test_click_pre_admission_failure_never_releases_button_but_partial_emit_does
     harness.fire("AUCTION_HOUSE_SHOW")
     io = LuaBackendIO(harness)
     stop = [False]
-    action = PostCommodity("123", 1, 10, 12, 1_000)
+    action = PostCommodity("123", 1, 10, 2, 1_000)
     backend, admission, digest, _lease = stage_lua_action(action, harness, io, stop_requested=lambda: stop[0])
     io.on_precommit = lambda: stop.__setitem__(0, True)
     with pytest.raises(DesktopBackendError, match="durable stop"):
@@ -955,7 +955,7 @@ def test_stationary_click_keeps_all_native_gates_without_motion() -> None:
     harness.add_item(count=4, commodity=True)
     harness.fire("AUCTION_HOUSE_SHOW")
     io = LuaBackendIO(harness)
-    action = PostCommodity("123", 1, 10, 12, 1_000)
+    action = PostCommodity("123", 1, 10, 2, 1_000)
     backend, admission, digest, _ = stage_lua_action(action, harness, io)
     rect = harness.snapshot["operation"]["buttonRect"]
     io.x, io.y = rect["x"] + 2, rect["y"] + 2

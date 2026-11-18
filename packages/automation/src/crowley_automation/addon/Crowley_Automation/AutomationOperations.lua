@@ -6,7 +6,7 @@ ns.AutomationOperations = Operations
 local MAX_SAFE, MAX_ITEM_KEY_BYTES, MAX_ACTION_BYTES = 9007199254740991, 128, 128
 local MAX_MARKET_RESULTS, MAX_MARKET_MORE_REQUESTS, MAX_MANAGED_IDS = 100000, 8, 1024
 local MARKET_QUERY_TIMEOUT_SECONDS, MARKET_ROWS_PER_UPDATE = 20, 256
-local DURATIONS = { [12] = 1, [24] = 2, [48] = 3 }
+local DURATIONS = { [2] = 1, [8] = 2, [24] = 3 }
 local NATIVE_KINDS = {
   post_commodity = true, post_item = true, cancel_auction = true, collect_mail = true, collect_return = true,
 }
@@ -1666,7 +1666,7 @@ function Operations.New()
       if field == "quantity" then
         parsed = integerText(value, 1, stage.actionKind == "collect_return" and MAX_SAFE or 200)
       elseif field == "unitPriceCopper" then parsed = integerText(value, 1, MAX_SAFE)
-      elseif field == "durationHours" then parsed = integerText(value, 12, 48)
+      elseif field == "durationHours" then parsed = integerText(value, 2, 24)
       elseif field == "maxDepositCopper" or field == "maxCancelCostCopper" then parsed = integerText(value, 0, MAX_SAFE)
       elseif field == "auctionId" then parsed = integerText(value, 1, MAX_SAFE)
       elseif field == "messageLimit" then parsed = integerText(value, 1, 50)

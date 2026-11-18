@@ -40,7 +40,7 @@ BOOT_ID = "boot-a"
 
 
 def make_batch(action: object | None = None, *, expires_at: int = NOW + 200) -> Batch:
-    selected = action or PostCommodity("123:b2.2", 2, 500, 12, 200)
+    selected = action or PostCommodity("123:b2.2", 2, 500, 2, 200)
     return Batch(HOUSE, CHARACTER, expires_at, (selected,))  # type: ignore[arg-type]
 
 
@@ -539,7 +539,7 @@ def test_success_requires_callback_and_verified_postcondition(tmp_path: Path) ->
 
 def test_manual_post_item_accepts_its_structured_native_result(tmp_path: Path) -> None:
     ledger, runner = runner_for(tmp_path / "ledger.sqlite3")
-    batch = make_batch(PostItem("456:p7", 1, 999, 12, 12))
+    batch = make_batch(PostItem("456:p7", 1, 999, 2, 12))
 
     class PostItemBackend(FakeBackend):
         def dispatch(

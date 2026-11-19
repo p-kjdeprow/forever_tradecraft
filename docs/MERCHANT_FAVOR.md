@@ -91,7 +91,7 @@ unlock at a time, with the full profitable roadmap underneath. After completing
 steps, update actual balances and mark the recipe/writs. The next accepted scan
 or profile change recalculates the plan. No game actions or purchases occur.
 
-A bounded integer optimizer jointly allocates fills, forged returns and daily
+A one-thread bounded integer optimizer jointly allocates fills, forged returns and daily
 writs. All alternatives share the same retained item quantities and marginal
 price tiers. A writ can be selected only once per daily reset; forging requires
 Friendly, including reaching it through selected writs first. The objective first
@@ -155,7 +155,7 @@ scarce fill/forge competition, optimal daily subsets, later writ rewards, surplu
 prevention, timeouts, query freshness, current plan, progress validation and routes.
 The compatible common/scanner wheels alter only two common data files and
 GeneratedTarget.lua; installed input/listing code remains unchanged. The new
-server image is `sha256:02ba2aac444db0a52a8266e351e61a7847cbbb947e5c6bcd991f5ad9f27c9aec`.
+server image is `sha256:05b0e637ec8cd6fb54f00d000caa78c60cace5bf6692118623c6a77167592cbe`.
 Forward and rollback paths verify the client-data field set and canonical hash
 before resuming collection. See HANDOFF for live collection/browser results.
 Private receipts and rollback wheels: `~/.local/state/crowley/favor-route-20261118/`.

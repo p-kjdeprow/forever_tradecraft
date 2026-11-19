@@ -32,13 +32,19 @@ installed wheels change only two common data files and GeneratedTarget.lua;
 unqualified input/listing changes remain undeployed. Source and bounded cutover
 helper received Sol READY. 160 focused tests pass (15 optional DB cases skipped),
 Ruff/Pyright and generation checks pass. The server image is
-`sha256:02ba2aac444db0a52a8266e351e61a7847cbbb947e5c6bcd991f5ad9f27c9aec`.
+`sha256:05b0e637ec8cd6fb54f00d000caa78c60cace5bf6692118623c6a77167592cbe`.
 The guarded normal close verified old sweep 1010 accepted, exact process exit,
 forward Data.lua field set/canonical hash and doctor before automatic resume.
 The host relaunched Dandune and opened the AH without manual intervention.
 Live browser checks pass for 28 recipes/11 writs, saved ownership/daily completion,
 reset, failed-profile refresh clearing, main page and 390px layout; no errors/images.
-First new-plan scan qualification is pending. Private rollback wheels, source
+First expanded sweep 1011 queried all 567 planned items successfully, including
+all 176 route dependencies, in 729 seconds. Its live page shows 23 positive margins
+and a complete first-unlock shopping/turn-in plan; browser checks pass against
+the actual checklist. Two consecutive full-sweep cadence qualification is pending.
+The optimizer is capped at one CPU thread; three fresh-server requests returned
+the identical route in 0.832–0.886s. Thirty independent exhaustive small-stock
+cases also match the optimizer. No model calls are added to collection. Private rollback wheels, source
 research and deployment/browser receipts are under
 `~/.local/state/crowley/favor-route-20261118/`.
 

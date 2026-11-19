@@ -251,7 +251,11 @@ def test_optimizer_timeout_never_emits_purchase_instructions(monkeypatch):
 
     from crowley_market.analysis import merchant_route_solver as solver
 
-    monkeypatch.setattr(solver, "milp", lambda *args, **kwargs: SimpleNamespace(status=1))
+    def timeout(*args, **kwargs):
+        assert kwargs["options"]["threads"] == 1
+        return SimpleNamespace(status=1)
+
+    monkeypatch.setattr(solver, "milp", timeout)
     c = next(c for c in catalog()["crates"] if c["money"] is not None)
     o = c["options"][0]
     route = plan([goal()], {c["item_id"]: book(c["item_id"], 100), o["item_id"]: book(o["item_id"], 10)})

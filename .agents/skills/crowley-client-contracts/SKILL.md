@@ -74,6 +74,10 @@ client-reachable behavior.
   A timeout with zero rows
   does not establish an empty market. Inspect diagnostics before repeating a
   long sweep that has already produced only timeouts.
+- For profit-based scan coverage, audit every recipe reagent against core queries or
+  explicitly admitted vendor supply, not only output IDs. Client buy prices alone do
+  not establish vendor availability; keep sourced admission and native bundle facts
+  separate. Distinguish consumed-unit margin from whole-pack upfront purchasing.
 - Buy-side cost comparisons must exclude owner/account-owned rows. A mixed grouped
   row does not expose the independently buyable quantity; do not count its entire
   quantity as purchasable. Price a complete required bundle through retained depth,

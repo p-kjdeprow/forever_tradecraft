@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Any
 
 import numpy as np
@@ -158,13 +159,24 @@ def allocate(
     objectives.append(np.array(costs))
     solution = None
     for objective in objectives:
-        solution = milp(
-            objective,
-            integrality=np.ones(len(costs)),
-            bounds=Bounds(0, upper),  # pyright: ignore[reportArgumentType] -- SciPy accepts arrays.
-            constraints=LinearConstraint(matrix, low, high),  # pyright: ignore[reportArgumentType]
-            options={"time_limit": 2.0, "mip_rel_gap": 0.0, "node_limit": 100000},
-        )
+        # SciPy forwards this documented HiGHS option. A route must not create
+        # one worker per host core; suppress only its known passthrough notice.
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                category=RuntimeWarning,
+                message=(
+                    r"Unrecognized options detected: \{'threads'\}\."
+                    r" These will be passed to HiGHS verbatim\."
+                ),
+            )
+            solution = milp(
+                objective,
+                integrality=np.ones(len(costs)),
+                bounds=Bounds(0, upper),  # pyright: ignore[reportArgumentType] -- SciPy accepts arrays.
+                constraints=LinearConstraint(matrix, low, high),  # pyright: ignore[reportArgumentType]
+                options={"time_limit": 2.0, "mip_rel_gap": 0.0, "node_limit": 100000, "threads": 1},
+            )
         if solution.status != 0:
             return {"actions": [], "error": "Route optimization did not finish; wait for the next scan."}
         values = np.rint(solution.x).astype(np.int64)

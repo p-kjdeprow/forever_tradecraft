@@ -24,6 +24,7 @@ EXPECTED_ROUTES = frozenset(
         ("GET", "/v1/houses/{key}/trading-summary", None),
         ("GET", "/v1/houses/{key}/recipe-watch", None),
         ("GET", "/v1/houses/{key}/merchant-favor", None),
+        ("GET", "/v1/houses/{key}/merchant-favor/route", None),
         ("GET", "/v1/scan-plan", "require_token"),
         ("POST", "/v1/addon-data", "require_token"),
         ("GET", "/dashboard", None),
@@ -122,7 +123,7 @@ def test_latest_sweep_route_returns_the_dashboard_scan_identity(monkeypatch: pyt
 def test_merchant_favor_routes_are_public_read_only_and_alliance_scoped(monkeypatch):
     page = dashboard_routes.merchant_favor_dashboard()
     assert page.status_code == 200
-    assert "Alchemy unlock catalog" in page.body.decode()
+    assert "Recipe unlock route" in page.body.decode()
     assert "unsafe-eval" not in page.headers["content-security-policy"]
     request = SimpleNamespace(
         app=SimpleNamespace(
@@ -157,3 +158,23 @@ def test_recipe_watch_route_is_read_only_public_get(monkeypatch: pytest.MonkeyPa
     with pytest.raises(HTTPException) as absent:
         dashboard_routes.recipe_watch("us-normal-alliance", request)
     assert absent.value.status_code == 404
+
+
+def test_merchant_route_progress_and_bad_ids(monkeypatch):
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(pool=SimpleNamespace(connection=lambda: nullcontext(object())))
+        )
+    )
+    monkeypatch.setattr(
+        dashboard_routes,
+        "load_merchant_route",
+        lambda conn, house, profile: {"house": house, "profile": profile},
+    )
+    params = dict(reputation=2150, favor=30, level=35, owned="3,1,3", completed_writs="94004")
+    result = dashboard_routes.merchant_route("us-normal-alliance", request, **params)
+    assert result["profile"].owned == (1, 3) and result["profile"].completed_writs == (94004,)
+    for invalid in [{**params, "owned": "bad"}, {**params, "owned": "-1"}, {**params, "level": 0}]:
+        with pytest.raises(HTTPException) as error:
+            dashboard_routes.merchant_route("us-normal-alliance", request, **invalid)
+        assert error.value.status_code == 400

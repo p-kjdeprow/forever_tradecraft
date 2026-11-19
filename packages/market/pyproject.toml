@@ -15,6 +15,7 @@ dependencies = [
   "pydantic-settings>=2.16.0",
   "starlette>=1.8.0",
   "uvicorn[standard]>=0.54.0",
+  "scipy>=1.16,<2",
 ]
 
 [project.scripts]
@@ -27,6 +28,7 @@ artifacts = [
   "src/crowley_market/server/static/trading-dashboard.html",
   "src/crowley_market/server/static/merchant-favor.html",
   "src/crowley_market/resources/merchant_favor.json",
+  "src/crowley_market/resources/merchant_writs.json",
   "src/crowley_market/resources/docker-compose.yml",
   "src/crowley_market/py.typed",
 ]

@@ -154,7 +154,9 @@ def build_comparison(
     }
 
 
-def _book(item_id: int, observation: dict[str, Any], rows: list[tuple], now: float) -> PriceBook:
+def _book(
+    item_id: int, observation: dict[str, Any], rows: list[tuple], now: float, *, exclude_owned: bool = True
+) -> PriceBook:
     query = observation["query"]
     if query.get("kind") == "unqueried":
         return PriceBook(item_id, "unqueried")
@@ -195,7 +197,7 @@ def _book(item_id: int, observation: dict[str, Any], rows: list[tuple], now: flo
             or type(owners.get("containsAccountItem")) is not bool
         ):
             return PriceBook(item_id, "ownership_unknown", started)
-        if owners["containsOwnerItem"] or owners["containsAccountItem"]:
+        if exclude_owned and (owners["containsOwnerItem"] or owners["containsAccountItem"]):
             # Mixed groups do not expose an independently purchasable quantity.
             excluded_own = True
             continue
@@ -220,6 +222,38 @@ def _book(item_id: int, observation: dict[str, Any], rows: list[tuple], now: flo
     return PriceBook(item_id, "priced", started, next(iter(keys)), tuple(levels))
 
 
+def load_price_books(
+    conn: Any, sweep_id: int, item_ids: list[int], now: float, *, exclude_owned: bool = True
+) -> dict[int, PriceBook]:
+    """Project exact buyable depth, or all ask prices for matching a sell price."""
+    observations = conn.execute(
+        """SELECT item_id, observation FROM market_observations
+           WHERE sweep_id=%s AND item_id=ANY(%s)""",
+        (sweep_id, item_ids),
+    ).fetchall()
+    captured = conn.execute(
+        """SELECT item_id, item_key, raw_item_key, unit_numerator, unit_denominator, quantity, row_data
+           FROM market_captured_rows WHERE sweep_id=%s AND item_id=ANY(%s)""",
+        (sweep_id, item_ids),
+    ).fetchall()
+    by_item: dict[int, list[tuple]] = {}
+    for item_id, *row in captured:
+        by_item.setdefault(int(item_id), []).append(tuple(row))
+    books = {}
+    for item_id, raw in observations:
+        normalized = {
+            "query": raw["query"],
+            "kind": raw["kind"],
+            "coverage": raw["coverage"],
+            "reason_code": raw["reasonCode"],
+            "source_complete": raw["sourceComplete"],
+        }
+        books[int(item_id)] = _book(
+            int(item_id), normalized, by_item.get(int(item_id), []), now, exclude_owned=exclude_owned
+        )
+    return books
+
+
 def load_merchant_favor(conn: Any, house: str, *, now_epoch: float | None = None) -> dict[str, Any]:
     House.parse(house)
     if house != "us-normal-alliance":
@@ -241,30 +275,7 @@ def load_merchant_favor(conn: Any, house: str, *, now_epoch: float | None = None
         sweep_id, finished, build = latest
         if str(build) != catalog()["client_build"]:
             raise MarketDataNotFound("Merchant's Favor catalog does not match the latest client build")
-        observations = conn.execute(
-            """SELECT item_id, observation FROM market_observations
-               WHERE sweep_id=%s AND item_id=ANY(%s)""",
-            (sweep_id, scan_item_ids()),
-        ).fetchall()
-        captured = conn.execute(
-            """SELECT item_id, item_key, raw_item_key, unit_numerator, unit_denominator, quantity, row_data
-               FROM market_captured_rows WHERE sweep_id=%s AND item_id=ANY(%s)""",
-            (sweep_id, scan_item_ids()),
-        ).fetchall()
-        by_item: dict[int, list[tuple]] = {}
-        for item_id, *row in captured:
-            by_item.setdefault(int(item_id), []).append(tuple(row))
-        # Database observation JSON uses the original camelCase wire contract.
-        books = {}
-        for item_id, raw in observations:
-            normalized = {
-                "query": raw["query"],
-                "kind": raw["kind"],
-                "coverage": raw["coverage"],
-                "reason_code": raw["reasonCode"],
-                "source_complete": raw["sourceComplete"],
-            }
-            books[int(item_id)] = _book(int(item_id), normalized, by_item.get(int(item_id), []), now)
+        books = load_price_books(conn, int(sweep_id), scan_item_ids(), now)
         return build_comparison(
             books,
             house=house,

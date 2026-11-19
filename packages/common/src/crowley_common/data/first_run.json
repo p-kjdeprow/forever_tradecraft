@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "id": "first-run",
-  "revision": 10,
+  "revision": 11,
   "client_build": "1.60.1.70959",
   "reviewed_on": "2026-11-18",
   "initial_price_levels": 20,
@@ -21825,7 +21825,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -21834,7 +21835,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -21850,7 +21851,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -21859,7 +21861,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -21898,7 +21900,8 @@
       "name": "Lesser Cleric's Elixir",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -21946,7 +21949,8 @@
       "name": "Greater Cleric's Elixir",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -21994,7 +21998,8 @@
       "name": "Elixir of Greater Fortitude",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22019,7 +22024,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22028,7 +22034,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22044,7 +22050,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22053,7 +22060,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22069,7 +22076,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22078,7 +22086,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22117,7 +22125,8 @@
       "name": "Lesser Mageblood Elixir",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22141,7 +22150,8 @@
       "name": "Greater Mageblood Elixir",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22165,7 +22175,8 @@
       "name": "Lesser Arcane Elixir",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22190,7 +22201,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22199,7 +22211,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22239,7 +22251,8 @@
       "name": "Elixir of Lesser Spirit",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22288,7 +22301,8 @@
       "name": "Elixir of Greater Spirit",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22313,7 +22327,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22322,7 +22337,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22362,7 +22377,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22371,7 +22387,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22387,7 +22403,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22396,7 +22413,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22411,7 +22428,8 @@
       "name": "Elixir of Lesser Intellect",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22560,7 +22578,8 @@
       "name": "Spellblasting Potion",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22634,7 +22653,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22643,7 +22663,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22708,7 +22728,8 @@
       "name": "Frenzy Potion",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22782,7 +22803,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22791,7 +22813,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22855,7 +22877,8 @@
       "name": "Mender's Potion",
       "category": "consumables",
       "tags": [
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22929,7 +22952,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22938,7 +22962,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22954,7 +22978,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22963,7 +22988,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -22979,7 +23004,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -22988,7 +23014,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -23004,7 +23030,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -23013,7 +23040,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -23029,7 +23056,8 @@
       "category": "consumables",
       "tags": [
         "cold-tier",
-        "potion"
+        "potion",
+        "merchant_unlock_profit"
       ],
       "professions": [
         "alchemy"
@@ -23038,7 +23066,7 @@
         "output"
       ],
       "status": "active",
-      "pool": "cold",
+      "pool": "core",
       "reason": "Cold-tier price-discovery item (priced once every 6 sweeps) for alchemy recipe coverage: stackable commodity; turnover is not yet measured. (client build 1.60.1.70862 export).",
       "evidence": "client_data",
       "auction_eligibility": "unverified",
@@ -24724,6 +24752,248 @@
       "source_urls": [
         "https://bindonforever.com/item/260805",
         "https://bindonforever.com/professions/engineering"
+      ]
+    },
+    {
+      "item_id": 264011,
+      "name": "Craftsman's Writ: Elixir of Ogre's Strength",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264011"
+      ]
+    },
+    {
+      "item_id": 264012,
+      "name": "Craftsman's Writ: Elixir of Wisdom",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264012"
+      ]
+    },
+    {
+      "item_id": 264015,
+      "name": "Craftsman's Writ: Free Action Potion",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264015"
+      ]
+    },
+    {
+      "item_id": 264017,
+      "name": "Craftsman's Writ: Lesser Troll's Blood Elixir",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264017"
+      ]
+    },
+    {
+      "item_id": 264047,
+      "name": "Craftsman's Writ: Lesser Wizard's Robe",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264047"
+      ]
+    },
+    {
+      "item_id": 264048,
+      "name": "Craftsman's Writ: Blue Overalls",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264048"
+      ]
+    },
+    {
+      "item_id": 264049,
+      "name": "Craftsman's Writ: Azure Silk Hood",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264049"
+      ]
+    },
+    {
+      "item_id": 264056,
+      "name": "Craftsman's Writ: Frost Protection Potion",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264056"
+      ]
+    },
+    {
+      "item_id": 264062,
+      "name": "Craftsman's Writ: Mana Potion",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264062"
+      ]
+    },
+    {
+      "item_id": 264065,
+      "name": "Craftsman's Writ: Goblin Rocket Fuel",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264065"
+      ]
+    },
+    {
+      "item_id": 264113,
+      "name": "Craftsman's Writ: White Bandit Mask",
+      "category": "utility",
+      "tags": [
+        "merchant_favor",
+        "starter_writ"
+      ],
+      "professions": [],
+      "roles": [
+        "input"
+      ],
+      "status": "active",
+      "pool": "core",
+      "reason": "Price one source-qualified daily starter writ and its existing core delivery good for the profitable Alchemy unlock route; observation only.",
+      "evidence": "client_data",
+      "auction_eligibility": "client_tradeable",
+      "binding": "none_in_tooltip",
+      "source_urls": [
+        "https://www.wowhead.com/forever/item=264113"
       ]
     },
     {

@@ -58,81 +58,101 @@ instead consumes one **empty** crate plus a Forged Delivery Receipt (item 262902
 15 Favor), producing a Notarized Shipping Container (262917). Its return awards
 50 base reputation and 1 silver. Forging earns no Favor.
 
-Friendly to Honored therefore needs 120 forged returns and 1,800 Favor before
-bonuses, plus 120 empty crates, returning 1g20s. All recipes plus that reputation
-step cost 5,580 Favor. At the user's reported **Neutral 2,150**, **about 30 Favor**,
-**level 35**, the dashboard starts with an **850 reputation pre-Friendly gap** and
-a **5,550 Favor deficit** for all unowned recipes plus subsequent receipts.
-These are editable estimates, saved locally; ownership checkboxes remove recipes
-from the goal. The page does not read character reputation, currency or bag stock.
+Without writs or bonuses, Friendly to Honored requires 120 forged returns,
+1,800 Favor and 120 empty crates. This is a reference calculation, not the route:
+the planner can replace receipts with cheaper eligible daily writs. It never
+repeats the one-time Shipping Label reward. User defaults are Neutral 2,150,
+30 Favor and character level 35, saved locally with recipe ownership and completed
+daily quest IDs. Actual currency, reputation and bag contents are entered manually.
 
-Before Friendly, use Craftsman's Writs. Their base rewards are 75/125/200 for
-Journeyman/Expert/Artisan; each exact order is daily, not the entire tier. For
-example, seven distinct Expert writs yield 875 reputation. Writ acquisition,
-required goods, delivery travel and eligibility are not priced by this crate tab;
-it explicitly marks that step unpriced and forged returns locked. The one-time
-Shipping Label quest gives 2,000 reputation and 50 Favor; existing progress must
-not receive that reward a second time. No racial, Legacy or event bonus is assumed.
+## Profit-first instructions
 
-## Price comparisons
+`GET /v1/houses/us-normal-alliance/merchant-favor/route` returns a read-only plan
+for the latest accepted house/build/sweep and entered progress. It joins all 28
+recipe identities to current output asks and complete one-craft reagent costs.
+It matches the lowest observed ask, deducts the house cut, and normalizes by output
+yield. Validated vendor bundles can supply reagents. Sold-auction deposits are
+refunded, so they are not a realized successful-sale expense; cancellation/expiry
+losses and demand are not predicted. Own asks can establish a matched selling
+price, while own/account-owned groups are excluded from purchases.
 
-Catalog revision 10 admits 30 named empty crates and 96 distinct fill materials,
-all in the regular core pool. Existing scan IDs are preserved. The plan has 482
-core IDs plus 360 cold IDs across six slices: 542 planned items per full sweep.
-The 900-second cadence, 750-second cap and native query algorithm are unchanged.
+Only positive current margins enter the unowned recipe queue, in descending net
+profit per produced item. Missing evidence is distinct from a negative margin.
+There is **no gold budget or Alchemy-skill gate**. Character level still determines
+crate eligibility; learning requirements are shown only for reference.
 
-`GET /v1/houses/us-normal-alliance/merchant-favor` pins a repeatable-read snapshot
-to one latest house/build/sweep. It reads only those 126 items. A next-turn-in quote
-includes the full empty-crate price and full material bundle through retained
-buyable price depth, less known coin returned. Own/account-owned groups are
-excluded; mixed groups cannot reveal a separately buyable quantity. Nontrivial
-variants are not silently merged. Missing, unqueried, failed, stale and genuinely
-empty observations remain distinct. Prices expire after 30 minutes.
+The page places the next recipe and **Do this scan** checklist first: exact AH
+shopping quantities/costs, daily-writ customers and zones, fills, empty crates to
+keep for forging, receipt spending, and the recipe purchase. It plans one next
+unlock at a time, with the full profitable roadmap underneath. After completing
+steps, update actual balances and mark the recipe/writs. The next accepted scan
+or profile change recalculates the plan. No game actions or purchases occur.
 
-Forgeries are ranked by fresh empty-crate cost. Their effective cost per rep also
-includes acquiring the spent Favor at the cheapest available complete fill rate:
-`(crate gold + 15 × gold per Favor − 100 copper) / 50`.
+A bounded integer optimizer jointly allocates fills, forged returns and daily
+writs. All alternatives share the same retained item quantities and marginal
+price tiers. A writ can be selected only once per daily reset; forging requires
+Friendly, including reaching it through selected writs first. The objective first
+maximizes reachable progress toward the next gate, then available recipe Favor,
+then minimizes known net cost. If complete funding exists, this yields its lowest
+known net cost within the qualified cohort and retained stock. Extra receipt/fill
+farming is excluded. Partial stock produces an explicit partial checklist; an
+optimizer timeout emits no shopping instructions. Variable writ Coin Pouch
+payouts are excluded from known refunds and cost comparisons. Travel time is not
+priced, so this is a monetary route rather than a fastest-travel claim.
 
-Capacity is counted across all retained prices and is not a promise that every
-turn-in costs the first quoted rate. Alternatives share stock and cannot be added
-together. Bulk recipe/receipt budgets explicitly extrapolate next-turn-in prices;
-they are not stock-reserved shopping lists or proofs of a globally cheapest bulk
-purchase. No auction purchase, filling, forging, spending or travel is performed.
+The qualified cohort contains **11 named daily writs worth 1,025 base reputation**
+per reset. Each has numeric writ/delivery/quest identities and sourced NPC/zone
+stops. Required character level 10 and daily scope were checked against primary
+tooltips. Reports and addon documentation support writ reputation after Friendly,
+but the server reward cap has not been independently observed. Black Mageweave
+Vest is excluded because of reported turn-in failures. The page can reset daily
+completion manually and does not assume that a new scan resets quests.
 
-Artisan Favor rewards of 20/40 are addon-author reports, while their cash rewards
-remain unverified in current guides. They are scanned and displayed with all fill
-options but do not determine the verified net-cost ranking. No public evidence
-independently qualifies every server-side forging target or level restriction;
-the page states that limit. Level 35 meets every listed crate filling gate.
+## Scan coverage and evidence
+
+Catalog revision **11** retains all prior IDs, adds the 11 writs, and promotes the
+16 slower faction-potion outputs. It has **509 core + 344 cold IDs**, 853 total;
+six cold slices produce 566 or 567 planned queries. All 28 recipe outputs, the 30
+crates, 96 fill materials and the cohort's delivery goods are in every sweep.
+The 900-second cadence, 750-second cap and query algorithm are unchanged.
+
+Prices are pinned to one repeatable-read house/build/sweep. The comparison API
+`GET /v1/houses/us-normal-alliance/merchant-favor` remains available separately.
+Its quotes include the complete empty crate plus material bundle through retained
+buyable depth, less verified cash rewards. Own/account-owned mixed groups cannot
+be separated and are excluded. Variants and missing/unqueried/failed/empty books
+stay explicit. The action plan requires the current canonical plan and expires
+from original query timestamps after 30 minutes, including time spent optimizing
+and time cached in the browser. Failed refreshes hide old purchase instructions;
+profile changes clear the previous focus, totals and priorities immediately.
+
+Artisan fills have reported Favor rewards but unverified cash payouts, so they
+remain visible in comparisons and excluded from optimized net-cost fills. Native
+server eligibility for every empty forging target has not been independently
+qualified; no trading authorization is inferred from this page.
 
 ## Sources and qualification
 
 Reviewed Nov 18, 2026:
 
-- [Nina Surefire's current vendor catalog](https://www.wow-professions.com/forever/npc/nina-surefire).
-- [Crate quantities, rewards, writs and receipts](https://www.wow-professions.com/forever/merchants-favor-durotar-supply-azeroth-commerce).
+- [Nina Surefire vendor catalog](https://www.wow-professions.com/forever/npc/nina-surefire).
+- [Crate rewards, writs and receipts](https://www.wow-professions.com/forever/merchants-favor-durotar-supply-azeroth-commerce).
 - [Receipt tooltip](https://www.wowhead.com/forever/item=262902/forged-delivery-receipt)
-  and [Crate Return quest](https://www.wowhead.com/forever/quest=93862/crate-return).
-- [Reported Artisan correction](https://www.curseforge.com/wow/addons/waylaid-auction-helper/files/9580959).
-- Each crate and recipe row retains its numeric Wowhead source URL; material IDs
-  and spell/recipe/output relationships also match the local build's client export.
+  and [Crate Return](https://www.wowhead.com/forever/quest=93862/crate-return).
+- [Writ reputation reports](https://www.wowhead.com/forever/guide/professions/craftsmans-writs-overview-recipes-rewards)
+  and [writ planner author documentation](https://www.curseforge.com/wow/addons/pugger-waylaid-companion).
+- [Blizzard's auction deposit rules](https://us.media.blizzard.com/manuals/wow/wow-classic-manual-enUS.pdf).
+- Every writ retains primary item/quest tooltip URLs, versioned addon-author data
+  and pinned QuestieDB provenance in `merchant_writs.json`; recipe relationships
+  also match the local build's client export.
 
-Sol's source review is READY after fixing owned-listing exclusion. Focused checks
-cover exact depth pricing, stock insufficiency, ownership, variants, stale/failed
-queries, house/build scope, progression arithmetic, target generation and routes.
-The offline headless browser checks all table counts, initial targets, local
-ownership/progress updates, persistence, and 390px layout without screenshots.
-Live qualification accepted sweeps 1005 and 1006: both queried all 542 items
-successfully, including every one of the 126 watched IDs. Both snapshots had
-126 priced books. Durations were 745 and 633 seconds, with starts exactly 900
-seconds apart and watched query gaps of 791–899 seconds as the second scan warmed.
-These two samples establish the observed coverage/cadence, not a runtime p95.
-The live browser also passed table counts, profile/ownership persistence, invalid
-input restoration, finite-stock warnings, both dashboard tabs and mobile layout,
-without errors or screenshots. The website retained its database and raw mounts;
-doctor passes. The compatible common/scanner wheels change only the catalog,
-selected target descriptor and generated scanner plan. Input/listing code remains
-on the previously installed qualified baseline. See the handoff for the image and
-initial market observations; prices themselves continue to change with new scans.
-Private wheels, rollback artifacts and receipts:
-`~/.local/state/crowley/merchant-favor-20261118/`.
+Sol reviewed the source and bounded deployment helper READY. Verification covers
+profit normalization, vendor bundles, refundable deposits, finite shared stock,
+scarce fill/forge competition, optimal daily subsets, later writ rewards, surplus
+prevention, timeouts, query freshness, current plan, progress validation and routes.
+The compatible common/scanner wheels alter only two common data files and
+GeneratedTarget.lua; installed input/listing code remains unchanged. The new
+server image is `sha256:26a41e6e3b850242234d3e91ee69462164b2b0ac91ea4202b12d0cc76f41f60b`.
+Forward and rollback paths verify the client-data field set and canonical hash
+before resuming collection. See HANDOFF for live collection/browser results.
+Private receipts and rollback wheels: `~/.local/state/crowley/favor-route-20261118/`.

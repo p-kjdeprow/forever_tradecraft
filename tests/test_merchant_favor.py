@@ -147,6 +147,7 @@ def test_owned_listings_and_mixed_owner_groups_are_not_buyable(flag):
     b = _book(1, observation(), [own, other], 1010)
     assert b.quote(10) == 200 and b.supply == 30
     assert _book(1, observation(), [own], 1010).state == "no_buyable_supply"
+    assert _book(1, observation(), [own], 1010, exclude_owned=False).quote(1) == 1
 
 
 def test_loader_pins_house_build_and_sweep_without_writes():
@@ -201,37 +202,24 @@ def test_loader_pins_house_build_and_sweep_without_writes():
         load_merchant_favor(conn, "us-normal-horde", now_epoch=1010)
 
 
-def test_page_math_respects_starting_progress_receipt_costs_and_owned_recipes():
+def test_page_progress_migrates_and_never_sends_skill_or_gold_limits():
     html = (
         Path(__file__).parents[1] / "packages/market/src/crowley_market/server/static/merchant-favor.html"
     ).read_text()
     pure = html.split("/* FAVOR PURE LOGIC START */")[1].split("/* FAVOR PURE LOGIC END */")[0]
-    d = comparison({248684: book(248684, 100), 2589: book(2589, 10)})
     script = (
         pure
-        + "\nconst d="
-        + json.dumps(d)
-        + """;
-const p=progress({...DEFAULT_PROGRESS,owned:[]});
-const t=target(d,p), friendly=target(d,{...p,standing:3000,rep:0}), owned=target(d,{...p,owned:d.catalog.recipes.map(r=>r.recipe_item_id)});
+        + """
+const p=progress({...DEFAULT_PROGRESS,owned:[123]});
 let invalid=0;for(const x of [{...p,rep:3000},{...p,favor:-1},{...p,level:61}]){try{progress(x);}catch(_){invalid++;}}
-const fill=rankedFills(d,p,1010)[0];
-console.log(JSON.stringify({t,friendly,owned,invalid,first:fill.item_id,stale:rankedFills(d,p,4000).length,forge:money(forgeCost(d.forgeries.find(r=>r.item_id===248684),fill))}));
+console.log(JSON.stringify({query:routeQuery(p),invalid,owned:p.owned,writs:p.completedWrits,money:money('750/50')}));
 """
     )
-    result = subprocess.run(["node"], input=script, text=True, capture_output=True, check=True)
-    actual = json.loads(result.stdout)
-    assert actual["t"] == {
-        "recipes": 28,
-        "recipeFavor": 3780,
-        "targetRep": 9000,
-        "beforeFriendly": 850,
-        "receipts": 120,
-        "receiptFavor": 1800,
-        "favorNeeded": 5550,
-    }
-    assert actual["friendly"]["beforeFriendly"] == 0 and actual["friendly"]["receipts"] == 120
-    assert actual["owned"]["favorNeeded"] == 0 and actual["owned"]["receipts"] == 0
-    assert actual["invalid"] == 3 and actual["stale"] == 0
-    # Fill250 net/5Favor=50c/Favor; forge100+15*50-100=750/50=15c/rep.
-    assert actual["forge"] == "15c"
+    actual = json.loads(
+        subprocess.run(["node"], input=script, text=True, capture_output=True, check=True).stdout
+    )
+    assert actual["invalid"] == 3
+    assert actual["owned"] == [123] and actual["writs"] == []
+    assert actual["money"] == "15c"
+    assert "owned=123" in actual["query"]
+    assert "skill" not in actual["query"] and "gold" not in actual["query"]

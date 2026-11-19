@@ -4,10 +4,11 @@ from pathlib import Path
 
 from crowley_common.errors import MarketDataNotFound
 from crowley_common.house import House
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import HTMLResponse
 
 from crowley_market.analysis.merchant_favor import load_merchant_favor
+from crowley_market.analysis.merchant_route import Progress, load_merchant_route
 from crowley_market.analysis.recipe_watch import load_recipe_watch
 from crowley_market.analysis.trading_summary import load_trading_summary
 
@@ -51,6 +52,36 @@ def merchant_favor(key: str, request: Request) -> dict:
     try:
         with request.app.state.pool.connection() as conn:
             return load_merchant_favor(conn, key)
+    except MarketDataNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/v1/houses/{key}/merchant-favor/route")
+def merchant_route(
+    key: str,
+    request: Request,
+    reputation: int = Query(2150, ge=0, le=42999),
+    favor: int = Query(30, ge=0, le=1000000),
+    level: int = Query(35, ge=1, le=60),
+    owned: str = Query("", max_length=4000),
+    completed_writs: str = Query("", max_length=4000),
+) -> dict:
+    try:
+        House.parse(key)
+        if key != "us-normal-alliance":
+            raise ValueError("Merchant's Favor supports us-normal-alliance")
+        profile = Progress(
+            reputation,
+            favor,
+            level,
+            tuple(sorted({int(v) for v in owned.split(",") if v})),
+            tuple(sorted({int(v) for v in completed_writs.split(",") if v})),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        with request.app.state.pool.connection() as conn:
+            return load_merchant_route(conn, key, profile)
     except MarketDataNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

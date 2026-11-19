@@ -1149,5 +1149,15 @@
     "Current guide lists 28 recipes; older 29-recipe lists include the removed Disorienting Smog Potion.",
     "Artisan Favor 20/40 is addon-author reported. Cash payout remains unverified; these crates do not determine the verified cheapest route.",
     "Costs and reputation are base values, without racial or event bonuses. Character progress is entered by the user."
+  ],
+  "vendor_supplies": [
+    {
+      "item_id": 18256,
+      "name": "Imbued Vial",
+      "vendor": "Alchemist Pestlezugg",
+      "location": "Gadgetzan, Tanaris",
+      "source_url": "https://www.wow-professions.com/forever/npc/alchemist-pestlezugg",
+      "evidence": "Vendor availability from Forever vendor catalog; price and bundle size from the pinned client export."
+    }
   ]
 }

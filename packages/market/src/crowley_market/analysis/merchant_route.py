@@ -161,18 +161,27 @@ def recipe_profitability(
             ah = None if book is None else book.quote(quantity)
             if book is not None and (book.observed_at is None or now - book.observed_at > MAX_PRICE_AGE):
                 ah = None
-            vendor = vendor_purchase(facts[item_id], quantity) if item_id in facts else None
-            if ah is not None and (vendor is None or ah <= vendor[1]):
+            fact = facts.get(item_id)
+            pack = vendor_purchase(fact, quantity) if fact is not None else None
+            vendor_cost = Fraction(pack[1] * quantity, pack[0]) if pack is not None else None
+            if ah is not None and (vendor_cost is None or ah <= vendor_cost):
                 cost, source = ah, "ah"
                 observed.append(book.observed_at)  # type: ignore[union-attr]
-            elif vendor is not None:
-                cost, source = Fraction(vendor[1]), "vendor"
+            elif vendor_cost is not None:
+                cost, source = vendor_cost, "vendor"
             else:
                 row["missing_item_ids"].append(item_id)
                 continue
             material_cost += cost
             inputs.append(
-                {"item_id": item_id, "quantity": quantity, "source": source, "cost": exact_money(cost)}
+                {
+                    "item_id": item_id,
+                    "quantity": quantity,
+                    "source": source,
+                    "cost": exact_money(cost),
+                    "vendor_purchase_quantity": pack[0] if source == "vendor" and pack else None,
+                    "vendor_purchase_cost": pack[1] if source == "vendor" and pack else None,
+                }
             )
         if row["missing_item_ids"]:
             result.append(row)
@@ -427,7 +436,9 @@ def load_merchant_route(
         sid, started, finished, build = int(latest[0]), int(latest[1]), int(latest[2]), str(latest[3])
         if build != catalog()["client_build"]:
             raise MarketDataNotFound("Route catalog differs from the client build")
-        facts, all_recipes = load_client_data(conn, build)
+        facts, all_recipes = load_client_data(
+            conn, build, extra_vendor_supply_ids=frozenset(v["item_id"] for v in catalog()["vendor_supplies"])
+        )
         spells = {r["spell_id"] for r in catalog()["recipes"]}
         recipes = tuple(r for r in all_recipes if r.spell_id in spells)
         ids = sorted(
@@ -473,7 +484,8 @@ def load_merchant_route(
             "item_names": names,
             "writ_catalog": writ_catalog(),
             "profit_basis": (
-                "Matched AH price, one craft, per produced item after materials and AH cut. "
+                "Matched AH price, per produced item after consumed materials and AH cut. "
+                "Vendor packs are valued per consumed unit; buying whole packs costs more upfront. "
                 "Successful sales refund the deposit; cancellation/expiry costs and sales are not forecast. "
                 "Recipe acquisition is separate."
             ),

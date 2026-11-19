@@ -18,7 +18,11 @@ returns an explicit partial plan if supply cannot finish the unlock. Original qu
 timestamps expire purchase instructions after 30 minutes; failed/profile-changed
 refreshes clear them. Current matched-price margins deduct materials and the AH
 cut; successful-sale deposits are refunded. Missing prices remain distinct from
-losses. No purchases/game trading are performed. See [feature record](MERCHANT_FAVOR.md)
+losses. A final dependency audit admitted sourced Imbued Vial vendor supply only
+for this route, using native 30,000c/five-vial facts. Vendor material value is
+prorated by consumption, with whole-pack upfront cost disclosed; other views
+retain their existing vendor assumptions. All 28 recipes now have either core
+queries or validated vendor sources for every reagent. No purchases/game trading are performed. See [feature record](MERCHANT_FAVOR.md)
 and [scope](MERCHANT_FAVOR_ROUTE_PLAN.md).
 
 Catalog/target revision **11** retains all prior IDs, adds 11 writs and promotes
@@ -26,9 +30,9 @@ Catalog/target revision **11** retains all prior IDs, adds 11 writs and promotes
 and 566/567 full-sweep queries. Cadence/cap remain 900/750 seconds. Compatible
 installed wheels change only two common data files and GeneratedTarget.lua;
 unqualified input/listing changes remain undeployed. Source and bounded cutover
-helper received Sol READY. 152 focused tests pass (14 optional DB cases skipped),
+helper received Sol READY. 160 focused tests pass (15 optional DB cases skipped),
 Ruff/Pyright and generation checks pass. The server image is
-`sha256:26a41e6e3b850242234d3e91ee69462164b2b0ac91ea4202b12d0cc76f41f60b`.
+`sha256:02ba2aac444db0a52a8266e351e61a7847cbbb947e5c6bcd991f5ad9f27c9aec`.
 The guarded normal close verified old sweep 1010 accepted, exact process exit,
 forward Data.lua field set/canonical hash and doctor before automatic resume.
 The host relaunched Dandune and opened the AH without manual intervention.

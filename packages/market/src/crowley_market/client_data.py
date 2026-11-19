@@ -125,11 +125,13 @@ def _latest_export(conn: Any, client_build: str) -> int:
     return int(row[0])
 
 
-def _load_facts(conn: Any, client_build: str) -> dict[int, ItemFacts]:
+def _load_facts(
+    conn: Any, client_build: str, *, extra_vendor_supply_ids: frozenset[int] = frozenset()
+) -> dict[int, ItemFacts]:
     """Load migration-005 item facts for the build used by the house's sweeps."""
 
     export_id = _latest_export(conn, client_build)
-    vendor_ids = vendor_supply_ids()
+    vendor_ids = vendor_supply_ids() | extra_vendor_supply_ids
     rows = tuple(
         _ItemFactsRow(*row)
         for row in conn.execute(
@@ -385,10 +387,14 @@ def _load_recipes(conn: Any, client_build: str) -> tuple[Recipe, ...]:
     return validate_recipes(result, client_data=True)
 
 
-def load_client_data(conn: Any, client_build: str) -> tuple[dict[int, ItemFacts], tuple[Recipe, ...]]:
+def load_client_data(
+    conn: Any, client_build: str, *, extra_vendor_supply_ids: frozenset[int] = frozenset()
+) -> tuple[dict[int, ItemFacts], tuple[Recipe, ...]]:
     """Load facts and recipes while the caller holds its read-only transaction."""
 
-    return _load_facts(conn, client_build), _load_recipes(conn, client_build)
+    return _load_facts(conn, client_build, extra_vendor_supply_ids=extra_vendor_supply_ids), _load_recipes(
+        conn, client_build
+    )
 
 
 def item_names(conn: Any, client_build: str, item_ids: Sequence[int]) -> dict[int, str]:

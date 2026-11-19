@@ -71,7 +71,10 @@ daily quest IDs. Actual currency, reputation and bag contents are entered manual
 for the latest accepted house/build/sweep and entered progress. It joins all 28
 recipe identities to current output asks and complete one-craft reagent costs.
 It matches the lowest observed ask, deducts the house cut, and normalizes by output
-yield. Validated vendor bundles can supply reagents. Sold-auction deposits are
+yield. Validated vendor bundles supply reagents at consumed-unit value; buying whole
+packs requires more upfront cash. The route explicitly admits Imbued Vials from
+a sourced vendor listing and the build-pinned native 30,000c/five-vial bundle.
+Other market views keep their existing supply assumptions. Sold-auction deposits are
 refunded, so they are not a realized successful-sale expense; cancellation/expiry
 losses and demand are not predicted. Own asks can establish a matched selling
 price, while own/account-owned groups are excluded from purchases.
@@ -152,7 +155,7 @@ scarce fill/forge competition, optimal daily subsets, later writ rewards, surplu
 prevention, timeouts, query freshness, current plan, progress validation and routes.
 The compatible common/scanner wheels alter only two common data files and
 GeneratedTarget.lua; installed input/listing code remains unchanged. The new
-server image is `sha256:26a41e6e3b850242234d3e91ee69462164b2b0ac91ea4202b12d0cc76f41f60b`.
+server image is `sha256:02ba2aac444db0a52a8266e351e61a7847cbbb947e5c6bcd991f5ad9f27c9aec`.
 Forward and rollback paths verify the client-data field set and canonical hash
 before resuming collection. See HANDOFF for live collection/browser results.
 Private receipts and rollback wheels: `~/.local/state/crowley/favor-route-20261118/`.

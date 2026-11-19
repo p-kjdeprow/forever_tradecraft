@@ -131,9 +131,11 @@ def test_one_craft_profit_matches_price_and_normalizes_yield_after_cut():
     )
     row = next(r for r in rows if r["recipe_item_id"] == entry["recipe_item_id"])
     assert row["matched_unit_price"] == 100
-    assert row["material_cost"] == "50" and row["sale_proceeds"] == 190
-    assert row["profit_per_item"] == "70" and row["deposit_refunded_on_sale"]
+    assert row["material_cost"] == "42" and row["sale_proceeds"] == 190
+    assert row["profit_per_item"] == "74" and row["deposit_refunded_on_sale"]
     assert row["reagents"][1]["source"] == "vendor"
+    assert row["reagents"][1]["vendor_purchase_quantity"] == 5
+    assert row["reagents"][1]["vendor_purchase_cost"] == 10
     negative = recipe_profitability(
         (recipe,), facts, {90001: book(90001, 100)}, {out: book(out, 100)}, "us-normal-alliance", NOW
     )
@@ -232,7 +234,7 @@ def test_loader_is_read_only_pinned_and_expires_original_query(
         return {1: book(1, 1, at=query_at)}
 
     monkeypatch.setattr(module, "canonical_plan", lambda: {"planHash": "current"})
-    monkeypatch.setattr(module, "load_client_data", lambda conn, build: ({}, ()))
+    monkeypatch.setattr(module, "load_client_data", lambda conn, build, **kwargs: ({}, ()))
     monkeypatch.setattr(module, "item_names", lambda conn, build, ids: {1: "Tracked"})
     monkeypatch.setattr(module, "load_price_books", books)
     monkeypatch.setattr(module, "recipe_profitability", lambda *args: [{**goal(), "observed_at": query_at}])
@@ -255,3 +257,24 @@ def test_optimizer_timeout_never_emits_purchase_instructions(monkeypatch):
     route = plan([goal()], {c["item_id"]: book(c["item_id"], 100), o["item_id"]: book(o["item_id"], 10)})
     assert not route["shopping"] and not route["planned_recipe_ids"]
     assert any("optimization did not finish" in s["title"] for s in route["steps"])
+
+
+def test_explicit_vial_vendor_admission_is_local_and_uses_native_bundle():
+    from crowley_market.client_data import _load_facts
+
+    class Result:
+        def fetchone(self):
+            return (1,)
+
+        def fetchall(self):
+            return [(18256, 1500, 30000, 5, 20, 0), (1000, 1, 200, 5, 20, 0)]
+
+    class Conn:
+        def execute(self, sql, params):
+            return Result()
+
+    ordinary = _load_facts(Conn(), "1.60.1.70959")
+    assert ordinary[18256].vendor_bundle_price is None
+    route = _load_facts(Conn(), "1.60.1.70959", extra_vendor_supply_ids=frozenset({18256}))
+    assert route[18256].vendor_bundle_price == 30000 and route[18256].vendor_bundle_size == 5
+    assert route[1000].vendor_bundle_price is None

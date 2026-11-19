@@ -18,6 +18,8 @@ Shared agent workflows live in `.agents/skills/`; see `AGENTS.md` for when to us
   release with fresh target/focus checks and the shared rate cap. Never warp or move linearly.
 - Keep the scan loop small: a new state, mode or safety layer needs a concrete invariant it
   protects or a failure it fixes.
+- Follow [the bounded agent workflow](docs/AGENT_WORKFLOW.md): local waits and checks,
+  compact artifacts, fresh task context, and no repeated review/testing without new evidence.
 - Ask before committing, pushing, or destroying data.
 
 ## Commands

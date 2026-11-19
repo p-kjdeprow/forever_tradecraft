@@ -48,7 +48,7 @@ The public commands are:
 | crowley-native | Build/verify the pinned XTEST tool |
 | crowley-automation | Run exact operation batches or bounded commodity selling sessions and read receipts |
 | crowley-host | Scan-aware host loop and status |
-| crowley-ops | Install, doctor, health, image build and market backup/restore |
+| crowley-ops | Install, doctor, health, scan qualification, local model usage and backup/restore |
 
 Use each command's --help for its installed version. Host configuration lives in private
 host.toml ([example](apps/host/src/crowley_host/ops/package_data/config/host.example.toml));
@@ -92,3 +92,5 @@ at least 6 observed market units/hour under recorded-cadence and outage-gap rule
 sale; listing depletion is not confirmed revenue. See the [agent operation guide](docs/AUTOMATION.md), [ANALYSIS](docs/ANALYSIS.md),
 [ARCHITECTURE](docs/ARCHITECTURE.md), [HANDOFF](docs/HANDOFF.md) and
 [MARKET_RECOVERY](docs/MARKET_RECOVERY.md).
+
+Agent efficiency and local monitoring commands: [bounded agent workflow](docs/AGENT_WORKFLOW.md).

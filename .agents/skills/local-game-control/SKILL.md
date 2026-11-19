@@ -12,6 +12,9 @@ trading, account changes or unrelated display changes.
 
 ## Before touching the game
 
+- Use one bounded `uv run crowley-ops watch --after-sweep ID --count 2 --output /private/receipt.json`
+  for scan qualification. Await its completion; do not spend model turns polling unchanged status.
+  It is read-only and preserves operator stops. Read the exact receipt before reporting success.
 - Look first, do not act: `systemctl --user status crowley-host`, `crowley-host status` (action, fault code,
   observation summary), `journalctl --user -u crowley-host -n 50`, `crowley-desktop probe-frame`
   (exit 0 frame decoded, 1 verified none, 3 error).

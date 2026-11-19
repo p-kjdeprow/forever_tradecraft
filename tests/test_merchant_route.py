@@ -282,3 +282,59 @@ def test_explicit_vial_vendor_admission_is_local_and_uses_native_bundle():
     route = _load_facts(Conn(), "1.60.1.70959", extra_vendor_supply_ids=frozenset({18256}))
     assert route[18256].vendor_bundle_price == 30000 and route[18256].vendor_bundle_size == 5
     assert route[1000].vendor_bundle_price is None
+
+
+def test_solver_relaxes_only_price_tiers_and_reconstructs_exact_depth(monkeypatch):
+    import numpy as np
+    from crowley_market.analysis import merchant_route_solver as solver
+
+    c = {
+        "item_id": 1,
+        "name": "Test crate",
+        "favor": 5,
+        "money": 0,
+        "min_level": 1,
+        "options": [{"item_id": 2, "quantity": 1}],
+    }
+    monkeypatch.setattr(solver, "catalog", lambda: {"crates": [c]})
+    real = solver.milp
+
+    def inspect(*args, **kwargs):
+        mask = kwargs["integrality"]
+        # First variable is the fill count, followed by the four price tiers.
+        assert mask[0] == 1 and np.all(mask[1:5] == 0) and np.all(mask[5:] == 1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(solver, "milp", inspect)
+    books = {i: PriceBook(i, "priced", 990, str(i), ((Fraction(1), 1), (Fraction(10), 1))) for i in (1, 2)}
+    result = solver.allocate(
+        books, reputation=3000, favor=0, level=35, goal_rep=3000, goal_favor=10, writs=[]
+    )
+    assert not result.get("error") and result["actions"][0]["count"] == 2
+    assert Inventory(books).buy({1: 2, 2: 2}, "fill") == 22
+
+
+def test_solver_rejects_fractional_action_counts(monkeypatch):
+    from types import SimpleNamespace
+
+    import numpy as np
+    from crowley_market.analysis import merchant_route_solver as solver
+
+    def fractional(objective, **kwargs):
+        values = np.zeros(len(objective))
+        values[0] = 0.5
+        return SimpleNamespace(status=0, x=values)
+
+    monkeypatch.setattr(solver, "milp", fractional)
+    c = next(c for c in catalog()["crates"] if c["money"] is not None)
+    o = c["options"][0]
+    with pytest.raises(ValueError, match="fractional action"):
+        solver.allocate(
+            {c["item_id"]: book(c["item_id"], 1), o["item_id"]: book(o["item_id"], 1)},
+            reputation=3000,
+            favor=0,
+            level=35,
+            goal_rep=3000,
+            goal_favor=5,
+            writs=[],
+        )

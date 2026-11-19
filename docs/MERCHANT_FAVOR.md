@@ -93,7 +93,8 @@ or profile change recalculates the plan. No game actions or purchases occur.
 
 A one-thread bounded integer optimizer jointly allocates fills, forged returns and daily
 writs. All alternatives share the same retained item quantities and marginal
-price tiers. A writ can be selected only once per daily reset; forging requires
+price tiers. Batch decisions are integral; continuous price tiers are reconstructed
+into exact unit purchases and validated after solving. A writ can be selected only once per daily reset; forging requires
 Friendly, including reaching it through selected writs first. The objective first
 maximizes reachable progress toward the next gate, then available recipe Favor,
 then minimizes known net cost. If complete funding exists, this yields its lowest
@@ -155,7 +156,14 @@ scarce fill/forge competition, optimal daily subsets, later writ rewards, surplu
 prevention, timeouts, query freshness, current plan, progress validation and routes.
 The compatible common/scanner wheels alter only two common data files and
 GeneratedTarget.lua; installed input/listing code remains unchanged. The new
-server image is `sha256:05b0e637ec8cd6fb54f00d000caa78c60cace5bf6692118623c6a77167592cbe`.
+server image is `sha256:eabc6a0298481938bfcc885706001e84dae29b55ad80c36cc64d692026e61356`.
 Forward and rollback paths verify the client-data field set and canonical hash
-before resuming collection. See HANDOFF for live collection/browser results.
+before resuming collection.
+Live sweeps 1011/1012 each queried all 567 items successfully, including all 176
+route dependencies, in 729/651 seconds. Starts were 900 seconds apart and observed
+watched-query gaps were 814–899 seconds; two samples do not establish a p95. The
+headless browser passes the real checklist quantities, profit queue, saved
+ownership/daily completions, reset, failed-refresh clearing and 390px layout, with
+no errors or screenshots. Main strategy, recipe watch and route APIs agree on
+sweep 1012. See HANDOFF for the current deployment.
 Private receipts and rollback wheels: `~/.local/state/crowley/favor-route-20261118/`.

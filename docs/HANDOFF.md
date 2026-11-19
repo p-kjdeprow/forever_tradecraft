@@ -30,20 +30,26 @@ Catalog/target revision **11** retains all prior IDs, adds 11 writs and promotes
 and 566/567 full-sweep queries. Cadence/cap remain 900/750 seconds. Compatible
 installed wheels change only two common data files and GeneratedTarget.lua;
 unqualified input/listing changes remain undeployed. Source and bounded cutover
-helper received Sol READY. 160 focused tests pass (15 optional DB cases skipped),
+helper received Sol READY. 162 focused tests pass (15 optional DB cases skipped),
 Ruff/Pyright and generation checks pass. The server image is
-`sha256:05b0e637ec8cd6fb54f00d000caa78c60cace5bf6692118623c6a77167592cbe`.
+`sha256:eabc6a0298481938bfcc885706001e84dae29b55ad80c36cc64d692026e61356`.
 The guarded normal close verified old sweep 1010 accepted, exact process exit,
 forward Data.lua field set/canonical hash and doctor before automatic resume.
 The host relaunched Dandune and opened the AH without manual intervention.
 Live browser checks pass for 28 recipes/11 writs, saved ownership/daily completion,
 reset, failed-profile refresh clearing, main page and 390px layout; no errors/images.
-First expanded sweep 1011 queried all 567 planned items successfully, including
-all 176 route dependencies, in 729 seconds. Its live page shows 23 positive margins
-and a complete first-unlock shopping/turn-in plan; browser checks pass against
-the actual checklist. Two consecutive full-sweep cadence qualification is pending.
+Expanded sweeps 1011 and 1012 each queried all 567 planned items successfully,
+including all 176 route dependencies, in 729 and 651 seconds. Starts were exactly
+900 seconds apart; observed watched-query gaps were 814–899 seconds. These two
+samples do not establish a runtime p95. The live page provides a complete next-
+unlock shopping/turn-in plan; browser checks pass against the actual checklist.
+Main strategy, recipe watch and route APIs all serve sweep 1012 with HTTP 200.
+The second stock mix exposed a cost-phase timeout from treating every price tier
+as an integer choice. Only actions/flags/deficits now need integer search; tier
+units are reconstructed exactly and all bounds/constraints rechecked. Replaying
+both immutable books gives complete optimal plans in 0.672/0.716 seconds.
 The optimizer is capped at one CPU thread; three fresh-server requests returned
-the identical route in 0.832–0.886s. Thirty independent exhaustive small-stock
+the identical route in 0.700–0.786s. Thirty independent exhaustive small-stock
 cases also match the optimizer. No model calls are added to collection. Private rollback wheels, source
 research and deployment/browser receipts are under
 `~/.local/state/crowley/favor-route-20261118/`.

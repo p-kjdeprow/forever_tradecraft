@@ -149,6 +149,12 @@ def allocate(
     forge_coeff[friendly] = -max_forges
     constraint(forge_coeff, -math.inf, 0)
 
+    # Price tiers are a continuous convex cost curve. Only the action counts,
+    # gate flags and deficits need integer search; tier units are reconstructed
+    # exactly from each selected action's integer demand below.
+    integrality = np.ones(len(costs))
+    for indices in tiers.values():
+        integrality[indices] = 0
     matrix = np.array(rows)
     low, high = np.array(lower_rows), np.array(upper_rows)
     objectives = []
@@ -172,7 +178,7 @@ def allocate(
             )
             solution = milp(
                 objective,
-                integrality=np.ones(len(costs)),
+                integrality=integrality,
                 bounds=Bounds(0, upper),  # pyright: ignore[reportArgumentType] -- SciPy accepts arrays.
                 constraints=LinearConstraint(matrix, low, high),  # pyright: ignore[reportArgumentType]
                 options={"time_limit": 2.0, "mip_rel_gap": 0.0, "node_limit": 100000, "threads": 1},
@@ -180,7 +186,7 @@ def allocate(
         if solution.status != 0:
             return {"actions": [], "error": "Route optimization did not finish; wait for the next scan."}
         values = np.rint(solution.x).astype(np.int64)
-        if np.max(np.abs(solution.x - values)) > 1e-5:
+        if np.max(np.abs(solution.x[integrality == 1] - values[integrality == 1])) > 1e-5:
             raise ValueError("route optimizer returned fractional action counts")
         if objective is not objectives[-1]:
             index = rep_slack if objective is objectives[0] else favor_slack
@@ -190,6 +196,16 @@ def allocate(
             low = np.append(low, values[index])
             high = np.append(high, values[index])
     assert solution is not None
+    for item_id, indices in tiers.items():
+        demand = sum(a["req"].get(item_id, 0) * int(values[j]) for j, a in enumerate(actions))
+        for index in indices:
+            units = min(demand, upper[index])
+            values[index] = units
+            demand -= units
+        if demand:
+            raise ValueError("route optimizer exceeded exact item stock")
+    if np.any(values < 0) or np.any(values > upper):
+        raise ValueError("route optimizer violated an action or stock bound")
     actual = matrix @ values
     if np.any(actual < low - 1e-5) or np.any(actual > high + 1e-5):
         raise ValueError("route optimizer violated stock or progress constraints")

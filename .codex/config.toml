@@ -1,7 +1,0 @@
-# Per-project limits. Keep the selected model/reasoning level and its capabilities.
-tool_output_token_limit = 2000
-model_auto_compact_token_limit = 64000
-
-[agents]
-max_threads = 2 # Compatible with the pinned Codex 0.162.1 and current clients.
-max_depth = 1

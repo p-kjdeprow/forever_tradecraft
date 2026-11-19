@@ -1,6 +1,6 @@
 # Current handoff
 
-Updated 2026-11-19. Read only linked documents needed for the current task.
+Updated 2026-11-19.
 
 ## Operator hold
 
@@ -48,13 +48,13 @@ crafting automation are outside scope. Steam Deck deployment was cancelled.
 The compatible host install now adds only ops CLI, `watch.py` and `usage.py`;
 the remaining files in the 27-file package stay on the installed baseline. `doctor`
 passes and the stopped-services watch returns exit 3 without restarting anything.
-Project Codex settings retain 2K tool-output tokens, compact growing context at 64K,
-and cap workers at 2, depth 1; selected models and reasoning levels are unchanged.
+The user requested reversal of Codex session changes. The added project config
+and general session/review restrictions have been removed. Improvements are
+limited to Crowley operations; existing user Codex settings remain in control.
 
-Use [the bounded agent workflow](AGENT_WORKFLOW.md). `uv run crowley-ops usage`
+See [local Crowley operations](LOCAL_OPERATIONS.md). `uv run crowley-ops usage`
 reports local token increments; `uv run crowley-ops watch --after-sweep ID --count 2`
-is a local read-only wait. Do not keep a model polling unchanged status. Keep full
-logs in private artifacts and return compact outcomes.
+is a local read-only wait that reports evidence changes and writes a final receipt.
 
 ## Read only when relevant
 

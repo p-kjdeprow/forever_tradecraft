@@ -93,4 +93,4 @@ sale; listing depletion is not confirmed revenue. See the [agent operation guide
 [ARCHITECTURE](docs/ARCHITECTURE.md), [HANDOFF](docs/HANDOFF.md) and
 [MARKET_RECOVERY](docs/MARKET_RECOVERY.md).
 
-Agent efficiency and local monitoring commands: [bounded agent workflow](docs/AGENT_WORKFLOW.md).
+Local monitoring and usage commands: [Crowley operations](docs/LOCAL_OPERATIONS.md).

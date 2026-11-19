@@ -3,16 +3,8 @@
 Read [CLAUDE.md](CLAUDE.md) for project rules and [docs/HANDOFF.md](docs/HANDOFF.md)
 for current state. Follow the user's current instructions and authorization.
 
-Keep model work bounded: use [docs/AGENT_WORKFLOW.md](docs/AGENT_WORKFLOW.md).
-Routine collection, health checks, scan waiting and usage accounting run locally.
-Start one local watcher and consume its completion; do not keep a model polling.
-Read only task-relevant handoff links, keep full logs in artifacts, and pass concise
-requirements/file paths to fresh workers. Review again only for new changes or
-unresolved findings. Do not carry this full conversation into routine follow-ups.
-
 Scan operations handoff (monitoring, incidents, deploy recipes, Codex/Luna setup):
-`.archive/handoff-scan-ops-20261112.md` (historical, local, untracked; read only for
-a relevant incident). Run Codex here with the pinned binary
+`.archive/handoff-scan-ops-20261112.md` (local, untracked). Run Codex here with the pinned binary
 (`CROWLEY_CODEX_PATH` in `~/.config/crowley/secrets.env`) and `-p crowley` (model `gpt-6-luna`).
 
 `crowley-host` owns the game (older deployed versions use `crowley-scan`) (relaunch, enter world, open the AH, reload). Operator guide:

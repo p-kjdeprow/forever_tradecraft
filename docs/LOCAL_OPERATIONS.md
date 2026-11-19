@@ -37,4 +37,3 @@ pass `--project /absolute/repo`. Counters come from local active Codex sessions,
 with duplicate snapshots and inherited lifetime totals excluded. Cached input
 is included in input; reasoning is included in output. These are **not exact
 quota charges** or a cloud/other-machine audit. No prompt or credential is printed.
-
